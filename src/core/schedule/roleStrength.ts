@@ -153,7 +153,7 @@ export function roleScheduleOutlook(opts: {
   }
   // A role read and a position read are different claims; say which this is.
   if (rated.length > 0 && rated.every((w) => w.resolvedKey?.endsWith(':any'))) {
-    notes.push('rated at position level — no defence in the window has faced enough of his specific role');
+    notes.push('rated at position level — no defense in the window has faced enough of his specific role');
   }
 
   return {

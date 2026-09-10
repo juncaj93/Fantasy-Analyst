@@ -463,7 +463,7 @@ describe('the defence boundary', () => {
     expect(plan.claims.length).toBeGreaterThan(0);
     expect(plan.claims.every((c) => c.addPosition !== DEFENCE_POSITION)).toBe(true);
     expect(plan.claims.every((c) => c.dropPlayerId !== 'def1')).toBe(true);
-    expect(plan.protectedPlayers.join(' ')).toContain('belongs to the defence plan');
+    expect(plan.protectedPlayers.join(' ')).toContain('belongs to the defense plan');
     expect(plan.protectedPlayers.join(' ')).toContain('Held Defence');
   });
 });

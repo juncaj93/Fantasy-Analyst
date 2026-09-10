@@ -34,7 +34,6 @@ import { captureWaiverSnapshot } from '../../core/support/waiverSnapshot.ts';
 import { captureDstSnapshot } from '../../core/support/dstSnapshot.ts';
 import { captureTradeSnapshot } from '../../core/support/tradeSnapshot.ts';
 import { SnapshotUnavailable } from '../../core/support/emit.ts';
-import { normalizeMode } from '../../core/startsit/mode.ts';
 import { waiverLineup } from '../../core/waivers/assemble.ts';
 import { DEFENCE_POSITION } from '../../core/startsit/engine.ts';
 /*
@@ -56,7 +55,15 @@ export interface SupportCaptureOptions {
   context: InSeasonKind;
   /** The deployed revision, from the same plumbing `/api/health` reports. */
   gitSha: string;
-  /** Floor / Balanced / Ceiling, when the reader was asking a Team question. */
+  /**
+   * Accepted and ignored, kept so an older client's URL is not a 400.
+   *
+   * The Team screen no longer has a posture control to be in any particular
+   * state, so there is nothing here for the reader to have been looking at:
+   * the lineup route resolves Floor / Balanced / Ceiling itself and the
+   * snapshot records whichever it resolved, which is the state that actually
+   * produced the screen.
+   */
   mode?: string | null;
   /** A named week, when the reader was looking at one. */
   week?: number | null;
@@ -82,7 +89,7 @@ export async function captureSupportSnapshot(
 
   switch (options.context) {
     case 'lineup': {
-      const gathered = await gatherLineupInputs(db, sleeper, leagueId, normalizeMode(options.mode ?? null));
+      const gathered = await gatherLineupInputs(db, sleeper, leagueId);
       return captureLineupSnapshot({
         gitSha,
         dataHealth,
@@ -152,7 +159,7 @@ export async function captureSupportSnapshot(
       const { request } = gathered;
       if (request.dstSources == null) {
         throw new SnapshotUnavailable(
-          `This league starts no ${DEFENCE_POSITION}, so there is no defence decision to capture.`,
+          `This league starts no ${DEFENCE_POSITION}, so there is no defense decision to capture.`,
         );
       }
       /*

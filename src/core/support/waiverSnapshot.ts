@@ -276,6 +276,15 @@ export async function captureWaiverSnapshot(
                 week: history.week,
                 finalWeek: history.finalWeek,
               },
+        /*
+         * The season market, entry by entry.
+         *
+         * It reaches the rest-of-season column on every board row, so a file
+         * captured without it replays a board with that column missing — which
+         * is exactly the divergence this module exists to make impossible, and
+         * is how it was caught. A Map does not survive JSON, hence the pairs.
+         */
+        seasonMarkets: input.request.seasonMarkets == null ? null : [...input.request.seasonMarkets.entries()],
         dst: recorder?.seen() ?? null,
         bestBall: input.request.bestBall,
         draftComplete: input.request.draftComplete,
@@ -351,6 +360,8 @@ export async function replayWaiverSnapshot(
      * back into both places it is needed.
      */
     trending: inputs.strategy == null ? undefined : new Map(inputs.strategy.trending),
+    /* The season market, back into the Map the request takes. */
+    ...(inputs.seasonMarkets == null ? {} : { seasonMarkets: new Map(inputs.seasonMarkets) }),
     budgets: inputs.budgets,
     prices: inputs.prices,
     observations: inputs.observations,
@@ -396,7 +407,7 @@ export async function replayWaiverSnapshot(
   exact('claimPlan.claims', 'the plan', claimLines(output), claimLines(replayed), differences);
   exact(
     'dst.decision',
-    'the defence',
+    'the defense',
     output.dst?.decision ?? null,
     replayed.dst?.decision ?? null,
     differences,

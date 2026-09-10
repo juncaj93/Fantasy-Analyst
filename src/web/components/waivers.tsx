@@ -17,6 +17,7 @@
  */
 
 import { useState } from 'react';
+import type { FaabAdvice } from '../api.ts';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
 import type { WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
 import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
@@ -324,6 +325,26 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
           {row.fit.label}
         </span>
         {row.multiWeek ? <span className="tag">{row.multiWeek.label}</span> : null}
+        {/*
+          The season, marked as a different kind of claim from the ones beside it.
+
+          Every other chip on this row is about this week and comes from this
+          app's own engine. This one is the market's season-long line divided by
+          the games left, so it is a different horizon *and* a different source,
+          and a reader who took it for a weekly figure would be reading it as
+          twenty times what it says. Hence its own tone rather than the shared
+          `.tag` — see `.tag-season` — and a title carrying both numbers.
+        */}
+        {row.seasonOutlook ? (
+          <span
+            className="tag tag-season"
+            data-testid="waiver-season"
+            data-level={row.seasonOutlook.level}
+            title={row.seasonOutlook.detail ?? undefined}
+          >
+            {row.seasonOutlook.label}
+          </span>
+        ) : null}
         {row.competition ? (
           <span className="tag" data-testid="waiver-competition">
             {row.competition.label}
@@ -453,6 +474,19 @@ export function WaiverDetailSheet({
                 </>
               ) : (
                 <UnknownField what="Multi-week value" />
+              )}
+            </dd>
+          </div>
+          <div className="weekly-line">
+            <dt>Rest of season</dt>
+            <dd data-testid="waiver-season-line">
+              {row.seasonOutlook ? (
+                <>
+                  {row.seasonOutlook.label}
+                  {row.seasonOutlook.detail ? <span className="faint"> · {row.seasonOutlook.detail}</span> : null}
+                </>
+              ) : (
+                <UnknownField what="Season outlook" />
               )}
             </dd>
           </div>
@@ -605,5 +639,42 @@ export function WaiverDetailSheet({
         ) : null}
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * The budget the board above was priced against, said out loud.
+ *
+ * A recommendation of $19 means nothing without the wallet it came from, and
+ * the two numbers that make it legible — what is left, and what winning has
+ * cost in this league — are exactly the two a reader would otherwise have to go
+ * to Sleeper to find.
+ *
+ * It closes the Waivers page rather than the Team page, which is a move rather
+ * than a new component. Team carries a two-row teaser of the same board; a
+ * wallet under two rows is a frame around almost none of the spending it
+ * describes, and it was the last thing on a screen that is about a lineup. Here
+ * it sits under the full board, beneath the bids it qualifies.
+ */
+export function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
+  if (!faab) return null;
+  if (!faab.rule.usesFaab) {
+    return (
+      <div className="faint" style={{ margin: '6px 4px 8px' }} data-testid="faab-budget">
+        {faab.rule.provenance}.
+      </div>
+    );
+  }
+  const mine = faab.mine;
+  return (
+    <div className="faint" style={{ margin: '6px 4px 8px' }} data-testid="faab-budget">
+      {mine?.remaining == null
+        ? 'Your remaining budget is unknown.'
+        : `$${mine.remaining} of $${faab.rule.total} left.`}
+      {faab.prices.sample > 0
+        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
+        : ' No winning bids recorded in this league yet.'}
+      <div>{faab.losingBids}</div>
+    </div>
   );
 }

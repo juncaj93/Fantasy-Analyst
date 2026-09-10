@@ -407,7 +407,24 @@ describe('the weekly card quotes it and names it', () => {
  * whole forecasts is the strongest available statement that the fallback
  * reaches none of it.
  */
-describe('the matchup forecast is simulated without it', () => {
+/**
+ * The one feature that *does* simulate on it, and everything that still does not.
+ *
+ * This block asserted the opposite until 10 September 2026: the matchup
+ * forecast ran on `marketProjection` alone and the published feed reached only
+ * the cards. The owner reversed it for this feature, and the reason is what a
+ * null actually did — `buildDistribution` settles an unprojected starter as
+ * truth-only, so he contributed *zero* to his side's total. This app prices the
+ * reader's roster and no other, so that fell on the opponent, and an opponent
+ * priced 4 of 7 came back as a 93.8% loss on a fixture that is a coin flip when
+ * everybody is priced. A lower-confidence estimate beats a confident zero.
+ *
+ * So what this block now defends is the shape of the exception rather than its
+ * absence: the forecast may borrow, it says so on every player that did, and
+ * the lineup, the draft board and the trade engine still may not — which the
+ * import-graph tests at the bottom of this file hold.
+ */
+describe('the matchup forecast may borrow, and says which players it borrowed for', () => {
   const LEAGUE: LeagueRecord = {
     id: 'l1',
     sleeperLeagueId: 's1',
@@ -463,20 +480,76 @@ describe('the matchup forecast is simulated without it', () => {
   /** Large enough that a forecast built on them could not be mistaken for one that was not. */
   const PUBLISHED = new Map([...MINE, ...THEIRS].map((id, i) => [id, 15 + i]));
 
-  it('produces an identical forecast with and without the published feed', async () => {
+  /**
+   * Everything the simulator produces, and one field that is not simulated.
+   *
+   * The feed changes the forecast now, and that is the point of it.
+   *
+   * Asserted as a difference rather than an equality, because an exception
+   * nobody exercises is an exception that quietly becomes a hole: without the
+   * feed this fixture prices nobody and the forecast degrades; with it, every
+   * starter carries a number and there is a real answer.
+   */
+  it('turns a forecast it could not make into one it can', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
     expect(withIt.found).toBe(true);
-    expect(withIt.forecast).toEqual(without.forecast);
+
+    // Nobody priced, nothing to simulate: the degraded path §33 describes.
+    expect(without.forecast!.degraded).toBe(true);
+    expect(without.forecast!.teams.mine.winProbability).toBeNull();
+
+    // Borrowed throughout, and now a forecast rather than a scoreboard.
+    expect(withIt.forecast!.degraded).toBe(false);
+    expect(withIt.forecast!.teams.mine.winProbability).not.toBeNull();
+    expect(withIt.forecast!.teams.mine.projectedFinal).not.toBeNull();
   });
 
-  it('leaves the projected final and the win probability unknown, as a market-less week is', () => {
-    // The degraded path §33 describes: a scoreboard, and no forecast on top of
-    // it. The published numbers must not turn it into a confident afternoon.
-    return buildMatchupResponse(sources(PUBLISHED), 'l1').then((response) => {
-      expect(response.forecast!.teams.mine.projectedFinal).toBeNull();
-      expect(response.forecast!.teams.mine.winProbability).toBeNull();
-    });
+  it('marks every player whose projection it borrowed', async () => {
+    const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
+    const players = [
+      ...withIt.forecast!.slots.flatMap((row) => [row.mine, row.theirs]),
+      ...withIt.forecast!.bench.mine,
+      ...withIt.forecast!.bench.theirs,
+    ].filter((p): p is NonNullable<typeof p> => p != null);
+
+    expect(players.length).toBeGreaterThan(0);
+    for (const player of players) {
+      // This fixture has no market at all, so every figure is borrowed and
+      // every one of them has to say so — the flag is what the screen draws
+      // the lighter, italic treatment from.
+      expect(player.projectedFinal, `${player.playerId} should carry a figure`).not.toBeNull();
+      expect(player.projectionBorrowed, `${player.playerId} must be marked borrowed`).toBe(true);
+    }
+  });
+
+  it('does not mark a player it priced itself', async () => {
+    // The other direction, so the flag means something. Same fixture, real
+    // markets: the figures are this app's and nothing is marked.
+    const priced: MatchupSources = {
+      ...sources(PUBLISHED),
+      startSitInputs: async (ids) =>
+        ids.map((id, i) =>
+          candidate(id, `Player ${id}`, id.slice(0, 2).toUpperCase(), 15 + i, { signal: signalWithNet(2) }),
+        ),
+    };
+    const response = await buildMatchupResponse(priced, 'l1');
+    const starters = response.forecast!.slots.flatMap((row) => [row.mine, row.theirs]).filter(Boolean);
+
+    expect(starters.length).toBeGreaterThan(0);
+    for (const player of starters) expect(player!.projectionBorrowed ?? false).toBe(false);
+  });
+
+  it('lets the published week reach the posture too', async () => {
+    const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
+    const without = await buildMatchupResponse(sources(null), 'l1');
+
+    // Without the feed nothing is priced on either side, so there is nothing to
+    // read and Balanced is a default rather than a choice.
+    expect(without.forecast!.suggestedMode.auto).toBe(false);
+    // With it, both sides carry a number and the matchup can be called.
+    expect(withIt.forecast!.suggestedMode.auto).toBe(true);
+    expect(withIt.forecast!.suggestedMode.reasons.join(' ')).toMatch(/Rotowire/);
   });
 
   /**
@@ -681,5 +754,114 @@ describe('no recommendation engine can reach the fallback', () => {
       return /from '[^']*(weeklyProjections|sleeperProjection[sS]?ervice|repos\/sleeperProjections)[^']*'/.test(text);
     });
     expect(offenders.map((f) => path.relative(ROOT, f))).toEqual([]);
+  });
+});
+
+
+/**
+ * A defence nobody quoted, which is now a number rather than a dash.
+ *
+ * The Week 1 gap left open by the market-anchored DST work: `projectDst` needs
+ * either this defence's own game line or a priced opponent to anchor on, and
+ * Jacksonville had neither. The row said nothing, correctly, and "nothing" is a
+ * poor answer for the one slot the reader has least else to go on.
+ *
+ * What blocked the fallback was not the DST model. It was `sleeperScoringKey`:
+ * `DEF` had no entry in RELEVANT, so a defence fell through to EVERYTHING and
+ * was checked against eight *offensive* settings, none of which can move
+ * Rotowire's number for a defence. In a six-point-passing-touchdown league,
+ * every defence was refused a published total because of a rule about
+ * quarterbacks.
+ *
+ * The fallback itself is the one that already existed, unchanged: quoted
+ * exactly as published, labelled `sleeper`, never ranked on. That is what makes
+ * this a routing fix rather than a new source.
+ */
+describe('a defence with no line at all', () => {
+  /**
+   * Sleeper's defaults for the categories a published DST total is built from.
+   *
+   * `def_2pt` is here and `ff` deliberately is not: the owner's correction of
+   * 10 September 2026 is that the feed pays two for a returned two-point
+   * conversion and nothing at all for a forced fumble. A league that pays one
+   * is a league that differs, and is refused — see the test below.
+   */
+  const DEFAULT_DST = {
+    rec: 0.5,
+    sack: 1,
+    int: 2,
+    fum_rec: 2,
+    def_td: 6,
+    def_st_td: 6,
+    safe: 2,
+    blk_kick: 2,
+    def_2pt: 2,
+    pts_allow_0: 10,
+    pts_allow_1_6: 7,
+    pts_allow_7_13: 4,
+    pts_allow_14_20: 1,
+    pts_allow_21_27: 0,
+    pts_allow_28_34: -1,
+    pts_allow_35p: -4,
+  };
+
+  it('may read the published total in a league scored the way the feed assumes', () => {
+    expect(sleeperScoringKey(buildScoringProfile(DEFAULT_DST, []), 'DEF')).toBe('pts_half_ppr');
+  });
+
+  it('is no longer refused over a rule about quarterbacks', () => {
+    // The exact defect. Six-point passing touchdowns cannot move a defence.
+    const passing = buildScoringProfile({ ...DEFAULT_DST, pass_td: 6 }, []);
+    expect(sleeperScoringKey(passing, 'QB'), 'the quarterback is still refused').toBeNull();
+    expect(sleeperScoringKey(passing, 'DEF'), 'the defence never threw a pass').toBe('pts_half_ppr');
+  });
+
+  it('is refused when the league pays a defence differently', () => {
+    // Two points a sack against the feed's one is a real difference on a real
+    // category, and it is refused for the same reason the quarterback is.
+    const rich = buildScoringProfile({ ...DEFAULT_DST, sack: 2 }, []);
+    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
+    expect(publishedRefusal(rich, 'DEF')).toMatch(/pays a defense differently/);
+  });
+
+  it('is refused when the league pays for a forced fumble, which the feed does not', () => {
+    // The owner's correction, as a behaviour: only the recovery counts, so a
+    // league paying the forced fumble too is scoring a category the published
+    // total does not carry.
+    const paysFf = buildScoringProfile({ ...DEFAULT_DST, ff: 1 }, []);
+    expect(sleeperScoringKey(paysFf, 'DEF')).toBeNull();
+    expect(publishedRefusal(paysFf, 'DEF')).toMatch(/pays a defense differently/);
+  });
+
+  it('is refused when a two-point return is worth something other than two', () => {
+    const rich = buildScoringProfile({ ...DEFAULT_DST, def_2pt: 6 }, []);
+    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
+  });
+
+  it('is refused when the points-allowed bands have been retuned', () => {
+    // The largest single term in a defence's projection.
+    const retuned = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 15 }, []);
+    expect(sleeperScoringKey(retuned, 'DEF')).toBeNull();
+    expect(publishedRefusal(retuned, 'DEF')).toMatch(/points-allowed bands/);
+  });
+
+  it('is refused when the league scores yards allowed, which the feed does not', () => {
+    const yards = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 10, yds_allow_0_100: 5 }, []);
+    expect(sleeperScoringKey(yards, 'DEF')).toBeNull();
+  });
+
+  it('quotes the published figure and says whose it is', () => {
+    /*
+     * The end of the path. An unscorable defence — no market expectation, so no
+     * score — carrying a published number comes back labelled `sleeper`, which
+     * is what every surface keys its provenance off.
+     */
+    const unscorable = { score: null, expectation: { points: null }, components: [] };
+    const quoted = weeklyProjection(unscorable, 6.4);
+
+    expect(quoted.points).toBe(6.4);
+    expect(quoted.source).toBe('sleeper');
+    // And it still cannot be mistaken for this app's own number.
+    expect(marketProjection(unscorable)).toBeNull();
   });
 });

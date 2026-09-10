@@ -733,9 +733,40 @@ function PlayerHalf({
       <span className="matchup-actual" data-testid="matchup-player-actual">
         {player.actual.toFixed(1)}
       </span>
-      <span className="matchup-player-proj" data-testid="matchup-player-proj">
-        {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
-      </span>
+      {/*
+        This app's number, or a borrowed one drawn so it cannot be mistaken for it.
+
+        The opponent's column used to be a run of dashes on the one screen whose
+        subject is the opponent: this app buys market lines for the reader's own
+        roster and nobody else's, so his opponent's starters are unpriced except
+        by coincidence. Rotowire's published week is already stored for every
+        player in the NFL, so the number exists and is free.
+
+        Lighter, in italic, and titled with whose it is — the same treatment a
+        borrowed figure gets on the Team screen. Unlike there, this one *does*
+        reach the forecast: on the owner's decision of 10 September 2026 an
+        unpriced starter is simulated on Rotowire's number rather than
+        contributing zero, because a confident zero is the worse estimate. It
+        still never reaches the lineup. See `MatchupPlayerInput.projection`.
+      */}
+      {player.projectionBorrowed && player.projectedFinal != null ? (
+        <span
+          className="matchup-player-proj matchup-player-proj-borrowed"
+          data-testid="matchup-player-proj"
+          data-projection-source="sleeper"
+          title="Built on Rotowire's published projection, via Sleeper — no betting market has priced him."
+        >
+          {player.projectedFinal.toFixed(1)}
+        </span>
+      ) : (
+        <span
+          className="matchup-player-proj"
+          data-testid="matchup-player-proj"
+          data-projection-source={player.projectedFinal == null ? 'none' : 'market'}
+        >
+          {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
+        </span>
+      )}
     </span>
   );
 

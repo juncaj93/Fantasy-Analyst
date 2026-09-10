@@ -227,6 +227,39 @@ export function buildLineupVerdicts(input: {
   });
 }
 
+/**
+ * Whose row this is — the one name on it, and the only card its tap may open.
+ *
+ * The incumbent on every verdict but `fill`, where there is no incumbent and
+ * the recommendation is the only person in the story. That is the same rule the
+ * row's headline is drawn with, and it lives here rather than in the screen
+ * because the screen had two copies of it that disagreed:
+ *
+ *   displayed = current ?? recommended        // the name the reader taps
+ *   opened    = recommended ?? current        // the card that came up
+ *
+ * Those two agree on almost every row, which is why the defect hid. They part
+ * company on a row whose verdict is `keep` while the two ids differ, and the
+ * lineup produces exactly that shape whenever the league has two interchangeable
+ * FLEX slots: Sleeper's order and the optimiser's order put the same two players
+ * in the opposite flexes, neither is a swap (both are already starting, so
+ * `buildSwaps` never proposes one), so both rows read `keep` carrying each
+ * other's man. Tapping Ladd McConkey opened Kenneth Walker, and tapping Walker
+ * opened McConkey — reported from a live Week 1 lineup, reproduced in
+ * `lineup.verdicts.test.ts`.
+ *
+ * One exported function, used by the headline and by the tap, so the two cannot
+ * drift apart again.
+ */
+export function verdictSubjectId(row: {
+  verdict: SlotVerdict;
+  currentPlayerId: string | null;
+  recommendedPlayerId: string | null;
+}): string | null {
+  if (row.verdict === 'fill') return row.recommendedPlayerId ?? row.currentPlayerId;
+  return row.currentPlayerId ?? row.recommendedPlayerId;
+}
+
 function verdictFor(
   currentPlayerId: string | null,
   recommendedPlayerId: string | null,

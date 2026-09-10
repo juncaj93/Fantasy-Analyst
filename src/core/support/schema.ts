@@ -112,7 +112,7 @@ export const DECISION_LABELS: Record<DecisionKind, string> = {
   lineup: 'Team',
   matchup: 'Matchup',
   'waiver-plan': 'Waivers',
-  'dst-plan': 'Defence',
+  'dst-plan': 'Defense',
   'trade-offer': 'Trades',
 };
 

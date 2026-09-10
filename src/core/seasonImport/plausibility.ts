@@ -150,7 +150,7 @@ export function assessSnapshot(input: PlausibilityInput): PlausibilityReport {
     detail:
       nonMarketPositions.size > 0
         ? `includes positions books do not price season-long yardage for: ${[...nonMarketPositions].join(', ')}`
-        : 'no kicker or defence rows',
+        : 'no kicker or defense rows',
   });
 
   const haystack = [...input.columns, ...rows.map((r) => r.market)]

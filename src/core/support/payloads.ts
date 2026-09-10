@@ -39,6 +39,7 @@
  */
 
 import type { LineupAssembly } from '../startsit/assemble.ts';
+import type { SeasonMarketKey } from '../vegas/types.ts';
 import type { WaiverAssembly } from '../waivers/assemble.ts';
 import type { TradeAssembly } from '../trades/assemble.ts';
 import type { MatchupResponse } from '../matchup/build.ts';
@@ -251,6 +252,15 @@ export interface WaiverPlanInputs {
    * about a price is complaining about.
    */
   strategy: (Omit<WaiverPricingContext, 'trending'> & { trending: [string, TrendingVelocity][] }) | null;
+  /**
+   * Each candidate's season-long market lines, with the `Map` hoisted.
+   *
+   * It reaches the rest-of-season column on every board row, so a file captured
+   * without it replays a board with a column missing — which the in-season
+   * replay test catches, and did. Null for a snapshot taken before the column
+   * existed, or on a deployment with no season snapshot of its own.
+   */
+  seasonMarkets: [string, { market: SeasonMarketKey; line: number | null }[]][] | null;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];

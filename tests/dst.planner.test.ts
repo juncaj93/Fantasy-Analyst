@@ -335,7 +335,7 @@ describe('a bye is a missing week, not a bad defence', () => {
     const plan = planDst(input({ rostered: [current], available: [option('NYJ', 7)] }));
 
     expect(plan.why.join(' ')).toMatch(/one-week fill/i);
-    expect(plan.notes.join(' ')).toMatch(/still the rostered defence/);
+    expect(plan.notes.join(' ')).toMatch(/still the rostered defense/);
   });
 
   it('goes quiet once the rostered defence has kicked off', () => {
@@ -446,7 +446,7 @@ describe('a league that starts two defences is a different game', () => {
 
     expect(plan.decision).toBe('add');
     expect(plan.headline).toMatch(/1 DEF slot unfilled/);
-    expect(plan.notes.join(' ')).toMatch(/starts 2 defences/);
+    expect(plan.notes.join(' ')).toMatch(/starts 2 defenses/);
   });
 
   it('holds quietly once both slots are filled, and never streams one', () => {

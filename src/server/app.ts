@@ -856,14 +856,15 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    */
   router.get('/api/leagues/:id/lineup', async (ctx) => {
     /*
-     * Floor, Balanced or Ceiling, from the query string.
+     * There is no mode in the query string any more.
      *
-     * A query parameter rather than stored state: the mode is a question the
-     * user is asking right now, the answer is cheap to recompute, and a stored
-     * preference would mean a lineup screen that silently answers a different
-     * question from the one the control shows.
+     * Floor, Balanced and Ceiling used to be a control on the Team screen, sent
+     * as `?mode=`. The reader is not the right person to answer it: which
+     * posture a week calls for is a fact about the margin against his opponent,
+     * not a preference, and the app can read that margin. `gatherLineupInputs`
+     * resolves it and reports back which one it chose and why — see
+     * `suggestLineupMode` there, and `core/startsit/modeSuggest.ts`.
      */
-    const mode = normalizeMode(ctx.url.searchParams.get('mode'));
 
     /*
      * The reads, from the one place that does them.
@@ -874,7 +875,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     let gathered;
     try {
-      gathered = await gatherLineupInputs(ctx.env.db, ctx.env.sleeper, ctx.params['id']!, mode);
+      gathered = await gatherLineupInputs(ctx.env.db, ctx.env.sleeper, ctx.params['id']!);
     } catch (err) {
       if (err instanceof NoDecision) {
         return err.status === 404
@@ -883,7 +884,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
       throw err;
     }
-    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props } = gathered;
+    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props, mode, modeSuggestion } = gathered;
 
     /*
      * The whole decision, in one call.
@@ -915,6 +916,15 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       found: true,
       dataFreshness: props,
       ...decision,
+      /*
+       * Which posture this answer was computed under, and why.
+       *
+       * Carried because the control that used to say it is gone. A screen that
+       * silently swapped between Floor and Ceiling would be a screen whose
+       * advice changed for reasons the reader could not see — so the sentence
+       * travels with the lineup and is printed beside it.
+       */
+      modeSuggestion,
     });
   });
 

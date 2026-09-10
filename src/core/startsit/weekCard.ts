@@ -36,6 +36,7 @@
  */
 
 import { weeklyProjection, type ProjectionSource } from './projection.ts';
+import { marketLabel } from '../vegas/marketLabel.ts';
 
 /** A labelled line of the card. The value is already formatted for reading. */
 export interface WeeklyLine {
@@ -263,7 +264,7 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
     .slice()
     .sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
     .slice(0, MAX_WEEKLY_PROPS)
-    .map((c) => ({ key: `prop-${c.market}`, label: c.market, value: formatLine(c.line), detail: c.detail }));
+    .map((c) => ({ key: `prop-${c.market}`, label: marketLabel(c.market), value: formatLine(c.line), detail: c.detail }));
 
   const conflicts = [...(evaluation.conflicts ?? [])];
   if (evaluation.injury?.conflictNote) conflicts.push(`Sources disagree — ${evaluation.injury.conflictNote}`);

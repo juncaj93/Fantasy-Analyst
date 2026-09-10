@@ -110,6 +110,41 @@ export function TradeIcon({ size = 24, className }: IconProps) {
   );
 }
 
+/**
+ * Compare: two people, side by side, at equal weight.
+ *
+ * Deliberately not `RosterIcon`, which is this app's Team tab and draws one
+ * person with a second half-behind them — a group, with a subject. A comparison
+ * has no subject: it is two men being weighed against each other, so they are
+ * the same size, the same distance from the centre, and the divider between
+ * them is what makes it a question rather than a crowd.
+ */
+export function CompareIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="7.5" cy="8" r="2.75" />
+      <path d="M3 19c0-2.6 2-4.25 4.5-4.25S12 16.4 12 19" />
+      <circle cx="16.5" cy="8" r="2.75" />
+      <path d="M12 19c0-2.6 2-4.25 4.5-4.25S21 16.4 21 19" />
+    </svg>
+  );
+}
+
+/**
+ * Refresh: one turn of a circle, with the arrowhead that says which way.
+ *
+ * An open arc rather than a closed ring, because a closed ring is a loading
+ * spinner and this is a control somebody presses once.
+ */
+export function RefreshIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M20 12a8 8 0 1 1-2.4-5.7" />
+      <path d="M20.25 4v4.5h-4.5" />
+    </svg>
+  );
+}
+
 /** Players: search. */
 export function SearchIcon({ size = 24, className }: IconProps) {
   return (

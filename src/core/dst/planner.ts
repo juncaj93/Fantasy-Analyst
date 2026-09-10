@@ -286,7 +286,7 @@ export function planDst(input: DstPlanInput): DstPlan {
 
   /* Nothing about a defence belongs anywhere in a league that starts none. */
   if (slots === 0) {
-    return silent('no_def_slot', playoffWeeks, ['this league does not start a defence']);
+    return silent('no_def_slot', playoffWeeks, ['this league does not start a defense']);
   }
   /*
    * Best ball has no weekly decision, so it gets no weekly advice.
@@ -346,8 +346,8 @@ export function planDst(input: DstPlanInput): DstPlan {
         why: [
           window.reason,
           cost.needsDrop
-            ? `Filling it would cost ${cost.label}, and a defence is a two-dollar add in the week it is needed.`
-            : 'A defence is a two-dollar add in the week it is needed.',
+            ? `Filling it would cost ${cost.label}, and a defense is a two-dollar add in the week it is needed.`
+            : 'A defense is a two-dollar add in the week it is needed.',
         ],
         cost,
       };
@@ -365,7 +365,7 @@ export function planDst(input: DstPlanInput): DstPlan {
       return unavailablePlan(
         playoffWeeks,
         cost,
-        'nothing is in your DEF slot, and no available defence can be scored this week',
+        'nothing is in your DEF slot, and no available defense can be scored this week',
       );
     }
 
@@ -387,7 +387,7 @@ export function planDst(input: DstPlanInput): DstPlan {
         surface: true,
         headline: 'Wait — no DST worth the bench spot',
         why: [
-          `The best available defence projects ${gain.toFixed(1)} pts, and filling the slot would cost ${cost.label}.`,
+          `The best available defense projects ${gain.toFixed(1)} pts, and filling the slot would cost ${cost.label}.`,
         ],
         evidence: evidenceFor({ target: best, current: null, cost, gain, bar }),
         target: best,
@@ -408,7 +408,7 @@ export function planDst(input: DstPlanInput): DstPlan {
         ? `Add ${best.team} now · stash ${stash.option.team} for playoffs`
         : `Week ${input.currentWeek} · Add ${best.team}`,
       why: [
-        `Nothing is in the DEF slot, and ${best.name} is the best defence available at ${gain.toFixed(1)} pts.`,
+        `Nothing is in the DEF slot, and ${best.name} is the best defense available at ${gain.toFixed(1)} pts.`,
         ...(cost.needsDrop ? [`It costs ${cost.label}.`] : ['There is room for him without dropping anybody.']),
         ...(stash ? [stash.why] : []),
       ],
@@ -463,7 +463,7 @@ export function planDst(input: DstPlanInput): DstPlan {
       current,
       cost,
       confidence: current.confidence,
-      notes: ['the defence in the lineup has played — this week\u2019s DEF decision is closed'],
+      notes: ['the defense in the lineup has played — this week\u2019s DEF decision is closed'],
     };
   }
 
@@ -496,7 +496,7 @@ export function planDst(input: DstPlanInput): DstPlan {
       cost,
       temporary: true,
       confidence: best.confidence,
-      notes: [`${current.name} returns after the bye and is still the rostered defence`],
+      notes: [`${current.name} returns after the bye and is still the rostered defense`],
     };
   }
 
@@ -682,7 +682,7 @@ function activationWindow(
     return {
       active: false,
       activation: 'outside_window',
-      reason: `the next kickoff is ${Math.round(hours)} hours away, which is too early to spend a move on a defence`,
+      reason: `the next kickoff is ${Math.round(hours)} hours away, which is too early to spend a move on a defense`,
     };
   }
 
@@ -885,7 +885,7 @@ function multiDefence(args: {
   const { slots, rostered, available, cost, playoffWeeks } = args;
   const startable = rostered.filter((o) => o.thisWeek != null).length;
   const best = available.find((o) => o.thisWeek != null && !o.unavailable) ?? null;
-  const notes = [`this league starts ${slots} defences, so streaming one slot is not the question`];
+  const notes = [`this league starts ${slots} defenses, so streaming one slot is not the question`];
 
   if (startable >= slots) {
     return {
@@ -894,13 +894,13 @@ function multiDefence(args: {
       activation: 'active',
       surface: false,
       headline: '',
-      why: [`Both DEF slots are filled, which is what a ${slots}-defence league asks for.`],
+      why: [`Both DEF slots are filled, which is what a ${slots}-defense league asks for.`],
       current: rostered[0] ?? null,
       cost,
       notes,
     };
   }
-  if (!best) return { ...unavailablePlan(playoffWeeks, cost, 'no available defence can be scored'), notes };
+  if (!best) return { ...unavailablePlan(playoffWeeks, cost, 'no available defense can be scored'), notes };
 
   return {
     ...base(playoffWeeks),
@@ -908,7 +908,7 @@ function multiDefence(args: {
     activation: 'active',
     surface: true,
     headline: `Add ${best.team} — ${slots - startable} DEF slot${slots - startable === 1 ? '' : 's'} unfilled`,
-    why: [`This league starts ${slots} defences and ${startable} of those slots can be filled from the roster.`],
+    why: [`This league starts ${slots} defenses and ${startable} of those slots can be filled from the roster.`],
     evidence: evidenceFor({ target: best, current: null, cost, gain: round2(best.thisWeek ?? 0), bar: 0 }),
     target: best,
     gain: round2(best.thisWeek ?? 0),

@@ -397,7 +397,7 @@ describe('the history block tells the truth about itself', () => {
     expect((await new SmartTradeService(db).build()).history.measured).toBe(true);
   });
 
-  it('still produces offers with no history at all, contributing exactly zero', async () => {
+  it('still produces offers with no history at all, read as active managers', async () => {
     const sleeper = scriptedSleeper({ drafted: true });
     await new SleeperSyncService(db, sleeper.client).syncLeague(LEAGUE);
     await new LeagueRepo(db).selectLeague(LEAGUE);
@@ -406,8 +406,18 @@ describe('the history block tells the truth about itself', () => {
     expect(board.history.profiles).toBe(0);
     expect(board.offers.length).toBeGreaterThan(0);
     for (const offer of board.offers) {
+      /*
+       * A league nobody has backfilled. Every partner reads `unknown`, and
+       * since 10 September 2026 that is read as an active trader rather than as
+       * neutral — the app cannot tell a new manager from a quiet one, and
+       * ranking the unmeasured below everybody who has ever traded penalises
+       * the gap rather than the person.
+       *
+       * Uniformity is what this test is really about: with no history at all,
+       * no partner may be advantaged over another by the ingestion.
+       */
       expect(offer.managerFit.activity).toBe('unknown');
-      expect(offer.managerFit.contribution).toBe(0);
+      expect(offer.managerFit.contribution).toBe(board.offers[0]!.managerFit.contribution);
     }
   });
 });

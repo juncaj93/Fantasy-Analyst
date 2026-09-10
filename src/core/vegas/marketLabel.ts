@@ -27,7 +27,7 @@
  * "receiving yards" in this repository, in one place, read by both.
  */
 
-import type { SeasonMarketKey } from './types.ts';
+import type { MarketKey, SeasonMarketKey } from './types.ts';
 
 /**
  * One market's name in words, shared by everything that prints one.
@@ -49,4 +49,37 @@ export const MARKET_LABEL: Record<SeasonMarketKey, string> = {
   season_receptions: 'receptions',
   season_receiving_yards: 'receiving yards',
   season_receiving_tds: 'receiving TDs',
+};
+
+/**
+ * One week's market, in words a person would use.
+ *
+ * The weekly vocabulary had no table at all, so three screens printed the
+ * storage key: the weekly card's prop chips (`weekCard.ts` set `label` to
+ * `c.market`), the comparison sheet's contribution list, and the market table
+ * on a player's page. A reader looking at his own receiver saw
+ * `receiving_yards`, which is a column name from a database that happens to be
+ * in a sentence.
+ *
+ * Title case rather than the lower case the season table uses, and that
+ * difference is the two tables' whole reason for being separate: a season label
+ * is written *into* a sentence ("…the market's receiving yards for him"), and
+ * these are chips, cells and list labels that begin their own line.
+ *
+ * Unknown keys fall through to the key itself. A market this app has not named
+ * is a market it has just started reading, and printing the key is a legible
+ * failure — a blank cell would hide it, and inventing a prettified spelling
+ * from the key would print a name nobody chose.
+ */
+export function marketLabel(market: string): string {
+  return WEEKLY_MARKET_LABEL[market as MarketKey] ?? market;
+}
+
+export const WEEKLY_MARKET_LABEL: Record<MarketKey, string> = {
+  pass_yards: 'Pass yards',
+  pass_tds: 'Pass TDs',
+  rush_yards: 'Rush yards',
+  receptions: 'Receptions',
+  receiving_yards: 'Rec yards',
+  anytime_td: 'Anytime TD',
 };

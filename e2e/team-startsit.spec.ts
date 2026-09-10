@@ -573,15 +573,15 @@ test.describe('waiver upgrades', () => {
     expect(await bid.getByRole('button').count(), 'a bid must carry no control at all').toBe(0);
   });
 
-  /**
-   * The budget quoted is the league's own, and it is never invented.
-   *
-   * The demo league publishes a $100 budget and $35 spent, so the footer has to
-   * read $65 — a card that assumed Sleeper's $100 default would say $100 here
-   * and be wrong in exactly the way this whole layer exists to avoid.
+  /*
+   * The budget footer is not on this screen any more, and its test went with
+   * it — see `waivers.spec.ts`. Team carries two rows of the board as a teaser
+   * and a wallet under two rows frames almost none of the spending it
+   * describes. This asserts the absence, so the move cannot silently undo
+   * itself.
    */
-  test('states the budget it priced against, from the league settings', async ({ page }) => {
-    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
+  test('does not close the roster with the league wallet', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toHaveCount(0);
   });
 
   /**
@@ -842,35 +842,69 @@ async function pullToRefresh(page: Page) {
 }
 
 /**
- * The two controls the intelligence pass adds, drawn.
+ * The controls on the Team row, and what refreshing says.
  *
- * Both are about a real screen rather than about the engine underneath: the
- * mode chips have to be reachable and exclusive, and the refresh has to say
- * what it did instead of blinking. The demo deployment has no odds key, so this
- * also covers the honest-partial case — some sources skipped, and the page
- * saying so rather than claiming everything is current.
+ * The mode chips are gone. Balanced / Floor / Ceiling was a question put to the
+ * reader that the app is better placed to answer — the posture follows from the
+ * margin against his opponent, which is a fact rather than a preference — so
+ * the row now carries Compare and Refresh, and the chosen posture is stated on
+ * the lineup card instead of being asked for. See `modeSuggest.ts`.
+ *
+ * The refresh still has to say what it did instead of blinking. The demo
+ * deployment has no odds key, so this also covers the honest-partial case —
+ * some sources skipped, and the page saying so rather than claiming everything
+ * is current.
  */
-test.describe('mode and refresh', () => {
-  // The mode chips are post-draft controls — see `inSeason`.
+test.describe('the control row, and refresh', () => {
+  // These are post-draft controls — see `inSeason`.
   test.beforeEach(async ({ page }) => {
     await openTeam(page);
   });
 
-  test('offers Balanced, Floor and Ceiling, with exactly one chosen', async ({ page }) => {
-    const row = page.getByTestId('mode-row');
-    await expect(row).toBeVisible();
-    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('mode-floor')).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByTestId('mode-ceiling')).toHaveAttribute('aria-pressed', 'false');
+  test('asks the reader nothing about risk posture', async ({ page }) => {
+    // The absence is the assertion. A chip row that came back would be the app
+    // asking a question it has already answered on the card below.
+    await expect(page.getByTestId('mode-row')).toHaveCount(0);
+    await expect(page.getByTestId('mode-balanced')).toHaveCount(0);
+    await expect(page.getByTestId('mode-floor')).toHaveCount(0);
+    await expect(page.getByTestId('mode-ceiling')).toHaveCount(0);
   });
 
-  test('recomputes when the mode changes, without losing the lineup', async ({ page }) => {
-    await page.getByTestId('mode-floor').click();
-    await expect(page.getByTestId('mode-floor')).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'false');
-    // The recommendation is still there, drawn from the new answer.
+  test('carries Compare and Refresh, as icons, at a full tap target', async ({ page }) => {
+    for (const id of ['compare-open', 'team-refresh']) {
+      const button = page.getByTestId(id);
+      await expect(button).toBeVisible();
+      // Icon-only, so the name has to come from somewhere a screen reader reads.
+      await expect(button).toHaveAttribute('aria-label', /.+/);
+      const box = await button.boundingBox();
+      expect(box!.height, `${id} must stay thumb-sized`).toBeGreaterThanOrEqual(44);
+      expect(box!.width, `${id} must stay thumb-sized`).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test('refreshes from the button, not only from the pull', async ({ page }) => {
+    let calls = 0;
+    await page.route('**/api/startsit/refresh', async (route) => {
+      calls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          deduped: false,
+          sources: [{ source: 'sleeper', outcome: 'updated', detail: '1 roster re-read', freshAt: null }],
+          headline: 'Updated',
+          complete: true,
+        }),
+      });
+    });
+
+    await page.getByTestId('team-refresh').click();
+    await expect(page.getByTestId('refresh-status')).toContainText('Updated', { timeout: 20_000 });
+    expect(calls, 'the button runs the same all-source refresh the pull does').toBe(1);
+    // And the screen it just refreshed is still readable.
     await expect(page.getByTestId('starters-title')).toBeVisible();
-    await expect(page.locator('[data-testid="starter-row"]').first()).toBeVisible();
   });
 
   /**
@@ -980,15 +1014,24 @@ test.describe('mode and refresh', () => {
   });
 
   /**
-   * The controls this screen used to have, and no longer does.
+   * One refresh, reachable two ways, and still only one word for it.
    *
-   * Asserted as an absence because that is the whole change: a reader looking
-   * for a refresh button must find the gesture instead, and a bar control that
-   * crept back would be the third way of asking the same question.
+   * This used to assert that no refresh control existed at all — the gesture
+   * was the only way, on the argument that a bar control plus a button plus a
+   * pull was three ways of asking one question. Two of those three are still
+   * gone. What came back is a single icon on the control row, because a gesture
+   * nobody is told about is not discoverable, and this is the screen a reader
+   * returns to when he thinks something has changed.
+   *
+   * The claim that survives is the one that mattered: there is exactly one
+   * refresh control, it is the icon, and it runs the same orchestrator the pull
+   * does — which the button test above counts at the network.
    */
-  test('offers no refresh button anywhere on the screen', async ({ page }) => {
+  test('carries exactly one refresh control, and it is the icon', async ({ page }) => {
     const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
-    expect(labels).not.toContain('refresh');
+    expect(labels, 'no second, labelled refresh button').not.toContain('refresh');
+    await expect(page.getByTestId('team-refresh')).toHaveCount(1);
+
     // The keyboard fallback exists and is deliberately not part of the UI.
     const fallback = page.getByTestId('pull-refresh-fallback');
     await expect(fallback).toHaveCount(1);
@@ -996,16 +1039,18 @@ test.describe('mode and refresh', () => {
   });
 
   /**
-   * Four controls, one row.
+   * Two controls, one row, on the trailing edge.
    *
-   * Measured rather than eyeballed: the three mode chips and Compare share a
-   * single line at every width this suite runs at, and every one of them is
-   * still a full tap target.
+   * Measured rather than eyeballed. This used to check three mode chips and a
+   * labelled Compare button sharing a line at 360px; with the chips gone the
+   * row holds two icons, and the property worth keeping is the same one — they
+   * are on the row, they do not wrap below it, and neither has shrunk below a
+   * thumb.
    */
-  test('fits the mode chips and Compare on one row, at a thumb size', async ({ page }) => {
+  test('keeps both icons on the control row, at a thumb size', async ({ page }) => {
     const controls = page.getByTestId('team-controls');
     const rowBox = (await controls.boundingBox())!;
-    for (const id of ['mode-balanced', 'mode-floor', 'mode-ceiling', 'compare-open']) {
+    for (const id of ['compare-open', 'team-refresh']) {
       const box = (await page.getByTestId(id).boundingBox())!;
       expect(box.height, `${id} must stay a tap target`).toBeGreaterThanOrEqual(43);
       expect(box.y, `${id} must be on the control row`).toBeGreaterThanOrEqual(rowBox.y - 1);
@@ -1122,5 +1167,75 @@ test.describe('a borrowed projection says whose it is', () => {
     await details.locator('summary').click();
     await expect(details).toContainText(/rotowire/i);
     await expect(details).toContainText(/not used to rank/i);
+  });
+});
+
+
+/**
+ * Tapping a name opens that name's card.
+ *
+ * The one-line claim behind a defect reported from a live Week 1 lineup: two
+ * players in the two FLEX slots, and tapping either brought up the other's
+ * card. The mechanism is in `lineup.verdicts.test.ts`, which owns the crossed
+ * flex — the screen decided "whose row is this?" once for the headline and
+ * again, in the opposite order, for the tap.
+ *
+ * This file owns the browser half, and states it as correspondence rather than
+ * as the specific pair: whatever `data-player-id` a row carries, the card that
+ * comes up carries the same one. That holds for every row in every lineup,
+ * which is the property that was actually broken — a test pinned to McConkey
+ * and Walker would pass again the moment the demo roster changed.
+ */
+test.describe('the row and the card are about the same player', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('opens the card of the man printed on the row', async ({ page }) => {
+    /*
+     * `keep` rows only, and deliberately. A `swap` row is about two people and
+     * opens the comparison instead — that is the row's whole point — so it is a
+     * different assertion, made below.
+     */
+    const rows = page.locator('[data-testid="starter-row"][data-starter="true"][data-verdict="keep"]');
+    const count = await rows.count();
+    expect(count, 'the demo lineup has a settled row to tap').toBeGreaterThan(0);
+
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i);
+      const expected = await row.getAttribute('data-player-id');
+      await row.click();
+
+      /*
+       * Either surface is a legitimate answer to the tap — a player this app
+       * has no evaluation for opens the comparison seeded with him rather than
+       * a card about nothing. What is not legitimate is either one coming up
+       * about somebody else, so both are checked against the same id.
+       */
+      const card = page.getByTestId('weekly-card');
+      const compare = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+      await expect(card.or(compare.first())).toBeVisible();
+
+      if (await card.isVisible()) {
+        await expect(card).toHaveAttribute('data-player-id', expected!);
+        await page.getByTestId('sheet-close').click();
+      } else {
+        await expect(compare.first()).toHaveAttribute('data-player-id', expected!);
+        await page.getByTestId('sheet-close').click();
+      }
+      await expect(row).toBeVisible();
+    }
+  });
+
+  test('opens the comparison, holding both men, from a row that names two', async ({ page }) => {
+    const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
+    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+
+    const incumbent = await swap.getAttribute('data-player-id');
+    const challenger = await swap.getAttribute('data-recommended-player-id');
+    await swap.click();
+
+    const chosen = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+    await expect(chosen).toHaveCount(2);
+    const ids = await chosen.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+    expect(new Set(ids)).toEqual(new Set([incumbent, challenger]));
   });
 });

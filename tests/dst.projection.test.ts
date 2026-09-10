@@ -269,11 +269,11 @@ describe('unknown stays unknown', () => {
     expect(projection.reasons.join(' ')).toContain('cannot map');
   });
 
-  it('has no number in a league that does not score defences', () => {
+  it('has no number in a league that does not score defenses', () => {
     const projection = projectDst({ game: { spread: -9, total: 41 }, scoring: buildDstScoring({ rec: 1 }) });
 
     expect(projection.points).toBeNull();
-    expect(projection.reasons.join(' ')).toContain('does not score defences');
+    expect(projection.reasons.join(' ')).toContain('does not score defenses');
   });
 });
 

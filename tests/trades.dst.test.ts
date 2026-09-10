@@ -257,7 +257,10 @@ describe('no offer ever contains a defence', () => {
       // could reach either would name itself in the sentence beside it.
       const sentences = [...offer.reasons, ...offer.user.rationales, ...offer.counterparty.rationales].join(' ');
       expect(sentences).not.toContain('DEF');
+      // Both spellings. The UI copy is American now, and a negative assertion
+      // pinned to the spelling that left would pass by saying nothing.
       expect(sentences).not.toContain('defence');
+      expect(sentences).not.toContain('defense');
 
       const holeFillers = [...offer.user.rationales, ...offer.counterparty.rationales].filter(
         (r) => r === 'fills_hole' || r === 'surplus_for_need',

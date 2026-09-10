@@ -364,6 +364,55 @@ describe('the degraded state', () => {
     expect(result.freshness.missingProjection).toBe(1);
     expect(result.freshness.level).not.toBe('high');
   });
+
+  /**
+   * Two sides that are each scorable, and are not comparable with each other.
+   *
+   * The reported defect: 98%/2% on a week that had barely been played. Nothing
+   * is wrong with either side's own number. What is wrong is that an
+   * unprojected starter contributes zero — `buildDistribution` settles him as
+   * truth-only — so the side with less of it priced has quietly been given a
+   * smaller team, and the subtraction between the two is meaningless.
+   *
+   * The share test cannot catch it, because both sides pass. That is the whole
+   * reason `MAX_COVERAGE_GAP` exists beside it.
+   */
+  it('refuses to compare a full team with a partly priced one', () => {
+    // Three of the opponent's seven starters unpriced: 4/7 ≈ 0.57, comfortably
+    // over the share threshold, and 0.43 adrift of the reader's own 7/7.
+    const players = lineups().map((p) =>
+      ['theirs-4', 'theirs-5', 'theirs-6'].includes(p.playerId) ? { ...p, projection: null } : p,
+    );
+    const result = forecast(players, BEFORE);
+
+    expect(result.degraded, 'the comparison is void even though both sides are scorable').toBe(true);
+    expect(result.teams.mine.winProbability).toBeNull();
+  });
+
+  it('names the confident wrong answer it is refusing to give', () => {
+    /*
+     * What the old rule produced, asserted so the fix cannot be undone quietly.
+     * Run with the gap guard's own inputs but every starter priced, the same
+     * fixture is an ordinary coin flip — so the extreme number was manufactured
+     * entirely by the three missing men.
+     */
+    const priced = forecast(lineups(), BEFORE);
+    expect(priced.degraded).toBe(false);
+    expect(priced.teams.mine.winProbability).toBeGreaterThan(0.35);
+    expect(priced.teams.mine.winProbability).toBeLessThan(0.65);
+  });
+
+  it('tolerates a gap of one slot, which is ordinary', () => {
+    // One of seven is 0.14 — inside the tolerance, and a forecast worth having.
+    const players = lineups().map((p) => (p.playerId === 'theirs-6' ? { ...p, projection: null } : p));
+    const result = forecast(players, BEFORE);
+
+    expect(result.degraded).toBe(false);
+    expect(result.teams.mine.winProbability).not.toBeNull();
+    // …and the gap is still reported rather than hidden.
+    expect(result.freshness.missingProjection).toBe(1);
+    expect(result.freshness.level).not.toBe('high');
+  });
 });
 
 function distributionsFor(players: MatchupPlayerInput[], now: Date) {

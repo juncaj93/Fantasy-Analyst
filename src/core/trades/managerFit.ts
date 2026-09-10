@@ -34,17 +34,31 @@ import type { ManagerTradeTendencies, OfferShape } from '../managers/tradeTenden
 /**
  * The most a manager's history may move a composite score, in either direction.
  *
- * Eight hundredths against a composite that runs 0–1, chosen so that history is
- * worth roughly one band of any single objective gate and never two. An offer
- * that is behind on user benefit *and* on counterparty logic cannot be pulled
- * level by a manager who trades a lot; an offer level on both can be settled by
- * one. That is the whole permitted role.
+ * Eighteen hundredths against a composite that runs 0–1. It was eight, chosen
+ * so that history was worth roughly one band of any single objective gate and
+ * never two, and it was raised on the owner's instruction of 10 September 2026:
+ * *weight trade frequency much more heavily — even a somewhat lopsided offer is
+ * worth surfacing to a manager who trades often, since they are more likely to
+ * engage with it at all.*
+ *
+ * That is a statement about **ordering**, and it is worth being exact about
+ * what it does not touch. §5's rule stands unchanged: behaviour may rank and
+ * tiebreak plausible offers, and it may never cause the app to call an
+ * objectively lopsided trade fair. It still cannot, and not because this number
+ * is small — because rejection happens on the objective gates *before* this is
+ * ever read, and because the two truths stay two sentences. "Objective value:
+ * slight edge to them" and "manager fit: trades often" are still printed
+ * separately, and no value of this constant merges them.
+ *
+ * What it now buys is that a plausible-but-unequal offer to somebody who
+ * actually trades can outrank a tidier one to somebody who never replies. That
+ * is the ranking Alex asked for, and it was not reachable at 0.08.
  *
  * Symmetric by construction: the same bound applies to the penalty, so a
  * measured non-trader lowers rank by exactly as much as an active trader raises
  * it, and the feature cannot only ever promote.
  */
-export const MANAGER_FIT_CAP = 0.08;
+export const MANAGER_FIT_CAP = 0.18;
 
 /**
  * The sample at which a rate is trusted half way from the prior to the observed.
@@ -206,34 +220,71 @@ export function managerFitFor(input: ManagerFitInput): ManagerFit {
     uncertain: activity === 'unknown',
   };
 
+  const cap = MANAGER_FIT_CAP;
+
   /*
-   * Unknown contributes nothing. Not a small penalty, not a small bonus.
+   * Unknown is read as active, and this is a deliberate reversal.
    *
-   * This is the single most important line in the module. A new manager, a
-   * failed ingestion and an identity the ledger could not resolve all land here,
-   * and every one of them must leave the ordering exactly as the objective gates
-   * left it. §18 requires the same of the sentence: neutral, and about the
-   * evidence rather than about the person.
+   * It contributed exactly nothing before — not a penalty, not a bonus — on the
+   * argument that a new manager, a failed ingestion and an unresolved identity
+   * all land here, and none of them has been measured, so none of them should
+   * move the ordering. That reasoning is sound and its conclusion was still
+   * wrong in practice, because "leave the ordering alone" is not neutral when
+   * the alternative is a measured non-trader carrying a penalty: an unmeasured
+   * manager silently ranked above him and below everybody else, which is a
+   * position nobody chose.
+   *
+   * The owner's instruction of 10 September 2026: *for managers with little or
+   * no trade history — can't tell if they're inactive or just new — treat them
+   * similarly to active traders rather than assuming inactivity; the app can't
+   * yet tell the difference, so don't penalise them for a data gap.*
+   *
+   * So the assumption is named rather than defaulted into. Three things keep
+   * §10 intact, which is the rule that unknown must never be indistinguishable
+   * from a measured non-trader:
+   *
+   *   - the class stays `unknown` and the label stays `Limited history`, so no
+   *     screen prints a claim about how this manager behaves;
+   *   - `uncertain` stays true, so a screen that hedges still hedges;
+   *   - the term says it is an assumption, in the evidence list, where a reader
+   *     opening the reasoning sees it beside the measured terms.
+   *
+   * And it is deliberately *not* scaled by `evidence.confidence` like the terms
+   * below. Scaling an assumption by the strength of the evidence for it would
+   * multiply it by nearly zero — which is the old behaviour with extra steps.
+   * The whole point is that there is no evidence and a choice is being made
+   * anyway.
    */
   if (activity === 'unknown') {
-    base.notes.push('Limited trade history; manager fit is uncertain.');
+    base.terms = [
+      {
+        key: 'activity_assumed',
+        detail: 'too little history to tell; read as an active trader rather than an inactive one',
+        value: round3(cap * 0.7),
+      },
+    ];
+    base.contribution = round3(cap * 0.7);
+    base.notes.push(
+      'Limited trade history, so this is read as an active manager rather than an inactive one — the app cannot yet tell a new manager from a quiet one.',
+    );
     return base;
   }
 
   const terms: ManagerFit['terms'] = [];
-  const cap = MANAGER_FIT_CAP;
 
   /*
    * How much this manager trades at all, relative to his own league.
    *
    * Measured against the room rather than an absolute, because a league where
    * nobody trades and a league where everybody does should not produce the same
-   * reading of the same two trades. Worth up to half the cap in either
-   * direction, which makes activity the largest single term and still leaves it
-   * unable to carry an offer on its own.
+   * reading of the same two trades. Worth up to seven tenths of the cap, which
+   * makes how much a manager trades comfortably the largest term here — the
+   * others are shape and position agreement, which are weak signals and are
+   * weighted like it. It still cannot carry an offer on its own, because the
+   * objective gates have already decided what is eligible to be ranked.
    */
   if (activity === 'active') {
-    terms.push({ key: 'activity', detail: 'trades more often than this league does', value: cap * 0.5 });
+    terms.push({ key: 'activity', detail: 'trades more often than this league does', value: cap * 0.7 });
   } else if (activity === 'selective') {
     terms.push({ key: 'activity', detail: 'trades from time to time', value: cap * 0.2 });
   } else if (activity === 'low_activity') {

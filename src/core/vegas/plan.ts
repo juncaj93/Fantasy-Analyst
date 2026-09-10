@@ -39,7 +39,27 @@ export interface PlannedPlayer {
   contested: boolean;
   /** Minutes since this player's lines were last fetched; null if never. */
   ageMinutes: number | null;
+  /**
+   * Whose question this player is here to answer.
+   *
+   * The allowance is spent on the reader's own roster first, always, and this
+   * is what makes "first" structural rather than a matter of ordering luck: an
+   * event whose only reason to be fetched is somebody else's player can never
+   * rise above {@link FetchPriority} `low`, whatever its score. The budget takes
+   * the plan in band order, so the other two tiers spend what is left over and
+   * nothing else.
+   *
+   * The three are Alex's own priority order, in his words: his team, his
+   * current opponent's team, and the top few waiver adds. Everything outside
+   * them is not planned at all.
+   *
+   * Absent means `mine`, so a caller that predates the tiers is unchanged.
+   */
+  tier?: PlanTier;
 }
+
+/** See {@link PlannedPlayer.tier}. */
+export type PlanTier = 'mine' | 'opponent' | 'waiver';
 
 export interface PlanOptions {
   now: number;
@@ -130,16 +150,31 @@ export function buildFetchPlan(players: PlannedPlayer[], opts: PlanOptions): Fet
     const hoursToKickoff = hoursUntil(bucket.kickoff, opts.now);
     const scored = bucket.players.map((p) => scorePlayer(p, hoursToKickoff, { staleAfter, nearKickoff }));
     const best = scored.reduce((a, b) => (b.score > a.score ? b : a));
+    /*
+     * A game nobody on the reader's roster is playing in can never be urgent.
+     *
+     * The score still ranks it against its peers — a contested waiver add near
+     * kickoff is worth more than a quiet one — but the band is capped, so every
+     * one of the reader's own games is offered to the budget before any of
+     * these. That is what keeps "his team first" true when the allowance is
+     * short, rather than true only when it is not.
+     *
+     * An event with one of his players *and* one of somebody else's is his
+     * game: `mine` is present, so nothing is capped.
+     */
+    const ours = bucket.players.some((p) => (p.tier ?? 'mine') === 'mine');
+    const priority = ours ? best.priority : 'low';
+    const tiers = new Set(bucket.players.map((p) => p.tier ?? 'mine'));
     events.push({
       eventId,
       kickoff: bucket.kickoff,
       playerIds: bucket.players.map((p) => p.playerId),
-      priority: best.priority,
+      priority,
       score: round3(best.score),
       // One request, one event, one entity. Deduplicated by construction: two
       // rostered players in the same game are one fetch, not two.
       cost: 1,
-      reason: `${bucket.players.length} roster player${bucket.players.length === 1 ? '' : 's'} — ${best.reason}`,
+      reason: `${bucket.players.length} ${describeTiers(tiers)} — ${best.reason}`,
     });
   }
 
@@ -157,6 +192,20 @@ export function buildFetchPlan(players: PlannedPlayer[], opts: PlanOptions): Fet
     estimatedEntities: kept.reduce((sum, e) => sum + e.cost, 0),
     skipped,
   };
+}
+
+
+/**
+ * What kind of players put an event in the plan, for the diagnostics line.
+ *
+ * The reader is reading this to understand where his allowance went, so the
+ * distinction that matters is whose question the fetch was answering — not how
+ * many of them there were.
+ */
+function describeTiers(tiers: ReadonlySet<PlanTier>): string {
+  if (tiers.has('mine')) return tiers.size === 1 ? 'roster player(s)' : 'player(s), yours among them';
+  if (tiers.has('opponent')) return tiers.size === 1 ? "opponent's player(s)" : "opponent's and waiver player(s)";
+  return 'waiver candidate(s)';
 }
 
 const PRIORITY_ORDER: Record<FetchPriority, number> = { critical: 0, normal: 1, low: 2 };

@@ -70,6 +70,19 @@ export interface MatchupPlayerView {
   actual: number;
   /** Fantasy Analyst's projected final total. Null when he could not be scored. */
   projectedFinal: number | null;
+  /**
+   * True when {@link projectedFinal} was built on Rotowire's number, not ours.
+   *
+   * Carried through from {@link MatchupPlayerInput.projectionBorrowed} so the
+   * screen can draw the figure as borrowed — lighter, italic and marked. There
+   * is deliberately one projection rather than two fields, so no caller can
+   * simulate one number and print the other; which model it came from is a flag
+   * beside it.
+   *
+   * Mostly the opponent's, because this app prices the reader's roster and no
+   * other. Optional, so a forecast cached by an older build still reads.
+   */
+  projectionBorrowed?: boolean;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
   phase: PlayerDistribution['phase'];
@@ -165,6 +178,38 @@ export interface ForecastInput {
  * answer and is the only one that does not mislead.
  */
 export const MIN_PROJECTED_SHARE = 0.5;
+
+/**
+ * How differently the two sides may be covered before the comparison is void.
+ *
+ * {@link MIN_PROJECTED_SHARE} asks whether each side is *scorable*. This asks
+ * the question it does not: whether the two are being measured on the same
+ * basis. They are different tests, and only the second catches the case that
+ * was actually reported.
+ *
+ * An unprojected starter contributes zero — see `buildDistribution`, which
+ * settles him as truth-only — so a side's projected total is understated in
+ * direct proportion to how much of it could not be priced. Both sides can clear
+ * the share test, both numbers can be individually defensible, and the
+ * subtraction between them can still be nonsense.
+ *
+ * Measured on this module's own seven-a-side fixture, with the reader's roster
+ * fully priced and the opponent's thinned one starter at a time:
+ *
+ *     opponent 7/7  →  50.4%   (the fixture is a coin flip)
+ *     opponent 6/7  →  69.0%
+ *     opponent 5/7  →  81.6%
+ *     opponent 4/7  →  93.8%   — and 4/7 is 0.57, over the share threshold
+ *
+ * Nothing is wrong with the reader's side in any of those rows. The opponent
+ * has simply been given a smaller team. Reported on 10 September 2026 as a
+ * 98%/2% split on a week that had barely been played.
+ *
+ * 0.2 rather than something tighter because a gap of a slot on a nine-slot
+ * lineup is ordinary noise and worth tolerating; a gap of a fifth is two whole
+ * starters' worth of points missing from one side of a subtraction.
+ */
+export const MAX_COVERAGE_GAP = 0.2;
 
 /** The share of one side's starting slots the engine could actually score. */
 function coverage(starters: PlayerDistribution[], side: MatchupSide): number {
@@ -265,9 +310,20 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * Do not "fix" it by lowering the threshold: the share is what stops a
    * confident wrong forecast, and the coverage is what is actually missing.
    */
+  const mineCoverage = coverage(startingDistributions, 'mine');
+  const theirsCoverage = coverage(startingDistributions, 'theirs');
+  /*
+   * …and the second test, which is about the comparison rather than the sides.
+   *
+   * Passing the share test twice does not make two totals comparable. See
+   * `MAX_COVERAGE_GAP` for the measured ladder: an opponent priced 4 of 7 —
+   * over the share threshold — reported the reader as a 93.8% favourite on a
+   * fixture that is a coin flip when everybody is priced.
+   */
   const degraded =
-    coverage(startingDistributions, 'mine') < MIN_PROJECTED_SHARE ||
-    coverage(startingDistributions, 'theirs') < MIN_PROJECTED_SHARE;
+    mineCoverage < MIN_PROJECTED_SHARE ||
+    theirsCoverage < MIN_PROJECTED_SHARE ||
+    Math.abs(mineCoverage - theirsCoverage) > MAX_COVERAGE_GAP;
 
   /*
    * The seed actually drawn with, reported as well as used.
@@ -325,6 +381,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       actual: distribution.settled,
       projectedFinal: distribution.projectionUnknown ? null : projectedFinal(distribution),
       remaining: distribution.projectionUnknown ? null : effectiveRemaining(distribution),
+      ...(player.projectionBorrowed ? { projectionBorrowed: true } : {}),
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),

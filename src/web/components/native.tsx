@@ -564,6 +564,14 @@ export function Sheet({
    * grow. Measured rather than assumed; see the note on `resist`.
    */
   const detent = useRef<HTMLDivElement | null>(null);
+  /**
+   * Whether the gesture in progress began on the card.
+   *
+   * Read by the tap-outside rule below, which must not fire for a push that
+   * started on the card and lifted off it. A ref rather than state because it
+   * is read inside the very event that would render.
+   */
+  const startedOnCard = useRef(false);
   const { lift } = useOverlay({ container: surface, onDismiss: onClose });
   /*
    * The latest `onClose`, for an observer that is attached once.
@@ -1244,15 +1252,66 @@ export function Sheet({
           ['--overlay-lift' as string]: String(lift),
           ['--sheet-keyboard' as string]: `${keyboard}px`,
         }}
+        /*
+         * A tap anywhere off the card closes it.
+         *
+         * This used to be an `onClick` on `.sheet-dismiss` alone — the
+         * screen-tall zone above the card — on the reasoning that the zone *is*
+         * the part of the scroller you can see through. It is not, once the
+         * layer has scrolled to the card's detent. Measured at 390×844 with a
+         * player card open: the card's top edge is at y≈733, and the dismiss
+         * zone ends at y≈101. The 630 pixels between them — three quarters of
+         * the screen, and the whole of what a reader would point at — are
+         * `.sheet-snap`, which answered nothing. Reported as cards that could
+         * only be dismissed by swiping, and that is why.
+         *
+         * Delegated to the scroller rather than fixed by adding a second
+         * handler to `.sheet-snap`, because the bug is the shape of the rule:
+         * "which elements are outside the card" is a list that goes stale every
+         * time this layer's structure changes, and it has changed three times.
+         * "Not inside the card" cannot.
+         *
+         * It costs the drag nothing. A scroll does not end in a `click`, which
+         * is the same assumption the zone's own handler has always run on — so
+         * this widens where the tap is heard without touching how the gesture
+         * is read.
+         */
+        onPointerDown={(event) => {
+          const target = event.target;
+          startedOnCard.current = target instanceof Node && surface.current?.contains(target) === true;
+        }}
+        onClick={(event) => {
+          /*
+           * Both ends of the gesture, not just where it finished.
+           *
+           * A press that begins on the card and lifts off it still produces a
+           * `click`, and the browser reports that click against the common
+           * ancestor of the two — which is this scroller, outside the card, so
+           * a rule reading only the target would dismiss on it. That is not a
+           * hypothetical: it is a push of the card that did not travel far
+           * enough to commit, which is the gesture the whole settle exists to
+           * spring back from. `sheet-interaction.spec.ts` catches it.
+           *
+           * So a tap closes the card only when it neither started nor ended on
+           * it. Nothing here reads distance or velocity — the drag is still the
+           * engine's, exactly as it was.
+           */
+          if (startedOnCard.current) return;
+          const target = event.target;
+          if (target instanceof Node && surface.current?.contains(target)) return;
+          onClose();
+        }}
       >
         {/*
-          The screen-tall transparent zone above the card, and the tap that
-          closes from outside it. This is what the backdrop's click handler used
-          to be: the backdrop is underneath the scroller now and cannot be
-          reached, so the part of the scroller you can see through is the part
-          that answers a tap. Same gesture for the reader, same outcome.
+          The screen-tall transparent zone above the card.
+
+          It carries no handler of its own any more — the scroller above hears
+          taps for the whole layer — but the zone still exists and still has to
+          be exactly this tall: it is the *scrollable* content that makes
+          dragging the card down a scroll, which is the whole dismissal gesture.
+          See `.sheet-dismiss` in the stylesheet, and the WebKit note beside it.
         */}
-        <div className="sheet-dismiss" data-testid="sheet-dismiss" onClick={onClose} />
+        <div className="sheet-dismiss" data-testid="sheet-dismiss" />
         <div className="sheet-snap" ref={detent}>
           <div
             className="sheet"

@@ -10,7 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildLineupVerdicts, startingSlotLabels, assignByEligibility } from '../src/core/startsit/sleeperLineup.ts';
+import {
+  buildLineupVerdicts,
+  startingSlotLabels,
+  assignByEligibility,
+  verdictSubjectId,
+} from '../src/core/startsit/sleeperLineup.ts';
 import { recommendLineup, type LineupSlot } from '../src/core/startsit/lineup.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { candidate, defence } from './helpers/startsit.ts';
@@ -138,7 +143,7 @@ describe('the verdict on one slot', () => {
     expect(def.verdict).toBe('empty');
     expect(def.currentPlayerId).toBeNull();
     expect(def.vacancy[0]?.name).toBe('Jacksonville');
-    expect(def.vacancy[0]?.detail).toBe('no game line for this defence');
+    expect(def.vacancy[0]?.detail).toBe('no game line for this defense');
   });
 
   it('says empty when there is nobody in it and nobody for it', () => {
@@ -263,5 +268,70 @@ describe('placing a lineup by eligibility', () => {
     const placed = assignByEligibility(['QB', 'RB', 'RB', 'FLEX'], ['qbA'], slots, () => 'QB');
 
     expect(placed).toEqual(['qbA', null, null, null]);
+  });
+});
+
+
+/**
+ * The row is about one man, and the tap opens his card and not another's.
+ *
+ * Reported from a live Week 1 lineup: two receivers-and-backs in the two FLEX
+ * slots, and tapping either one brought up the other's card. It is not an index
+ * or a key — the rows are keyed by slot and drawn in order — it is that the
+ * screen decided "whose row is this?" twice, in two places, in two different
+ * orders:
+ *
+ *   the headline read  `current ?? recommended`
+ *   the tap read       `recommended ?? current`
+ *
+ * Those agree on every row where the two ids are the same or one is missing,
+ * which is nearly all of them. The lineup manufactures the row where they
+ * differ: two interchangeable FLEX slots hold the same two players in Sleeper's
+ * order and in the optimiser's order, crossed — and because both men are
+ * already starting, `buildSwaps` proposes nothing, so both rows read `keep`
+ * while carrying each other's id.
+ *
+ * So the property is stated about the crossed row itself: the verdict is `keep`,
+ * the two ids genuinely differ, and the subject is still the man Sleeper has in
+ * the slot — the one whose name is printed and whose card must open.
+ */
+describe('whose row it is', () => {
+  /** Two flex men, in the opposite flexes from the way the optimiser ranks them. */
+  const CROSSED = ['qb1', 'rb1', 'rb2', 'wr1', 'wr2', 'wr3', 'fx2', 'fx1', 'def1'];
+
+  it('crosses the two flex slots without calling either one a swap', () => {
+    const flexes = verdictsFor({ starterSlotIds: CROSSED }).filter((r) => r.slot === 'FLEX');
+
+    // The precondition for the defect, asserted so the test cannot quietly stop
+    // exercising it: two `keep` rows whose two ids are not the same player.
+    expect(flexes.map((r) => r.verdict)).toEqual(['keep', 'keep']);
+    expect(flexes.map((r) => r.currentPlayerId)).toEqual(['fx2', 'fx1']);
+    expect(flexes.map((r) => r.recommendedPlayerId)).toEqual(['fx1', 'fx2']);
+  });
+
+  it('names Sleeper’s own man as the subject of each crossed row', () => {
+    const flexes = verdictsFor({ starterSlotIds: CROSSED }).filter((r) => r.slot === 'FLEX');
+
+    // Before the fix the tap read `recommendedPlayerId ?? currentPlayerId` and
+    // this came back ['fx1', 'fx2'] — each row opening the other row's player.
+    expect(flexes.map(verdictSubjectId)).toEqual(['fx2', 'fx1']);
+  });
+
+  it('leads a fill with the recommendation, because there is no incumbent', () => {
+    expect(
+      verdictSubjectId({ verdict: 'fill', currentPlayerId: null, recommendedPlayerId: 'fx1' }),
+    ).toBe('fx1');
+  });
+
+  it('leads a no_pick with the incumbent, because there is no recommendation', () => {
+    expect(
+      verdictSubjectId({ verdict: 'no_pick', currentPlayerId: 'def1', recommendedPlayerId: null }),
+    ).toBe('def1');
+  });
+
+  it('has nobody to name on an empty slot', () => {
+    expect(
+      verdictSubjectId({ verdict: 'empty', currentPlayerId: null, recommendedPlayerId: null }),
+    ).toBeNull();
   });
 });

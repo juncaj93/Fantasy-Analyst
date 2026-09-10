@@ -267,7 +267,7 @@ function countAnchors(plan: Awaited<ReturnType<typeof assembleDstPlan>>): Record
 }
 
 function warningsFor(plan: Awaited<ReturnType<typeof assembleDstPlan>>): string[] {
-  if (plan == null) return ['No defence plan was produced for this league.'];
+  if (plan == null) return ['No defense plan was produced for this league.'];
   const anchors = countAnchors(plan);
   const fromForm = anchors['form'] ?? 0;
   const unrated = anchors['unknown'] ?? 0;
@@ -308,9 +308,9 @@ export async function replayDstSnapshot(snapshot: SupportSnapshot<DstPlanPayload
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
   compareFreshness(snapshot.decision.freshness, [roster, candidates], differences);
-  exact('decision', 'the defence', output?.decision ?? null, replayed?.decision ?? null, differences);
-  exact('target', 'the defence', output?.target?.team ?? null, replayed?.target?.team ?? null, differences);
-  exact('surface', 'the defence', output?.surface ?? null, replayed?.surface ?? null, differences);
+  exact('decision', 'the defense', output?.decision ?? null, replayed?.decision ?? null, differences);
+  exact('target', 'the defense', output?.target?.team ?? null, replayed?.target?.team ?? null, differences);
+  exact('surface', 'the defense', output?.surface ?? null, replayed?.surface ?? null, differences);
 
   const engineMatches = snapshot.release.engineVersion === DST_ENGINE_VERSION;
   /*
@@ -354,13 +354,13 @@ function summarise(
   switch (outcome) {
     case 'reproduced':
       return output == null
-        ? `Reproduced: no defence plan, which is the right answer for this league — week ${context.week}, ${context.defenceSlots} DEF slot(s), best ball ${context.bestBall}.`
+        ? `Reproduced: no defense plan, which is the right answer for this league — week ${context.week}, ${context.defenceSlots} DEF slot(s), best ball ${context.bestBall}.`
         : `Reproduced: the same decision (${output.decision}${output.target ? ` ${output.target.team}` : ''}) from the same anchors — week ${context.week}.`;
     case 'engine_version_mismatch':
-      return describeMoved('defence engine', 'plan', { ...moved, differences });
+      return describeMoved('defense engine', 'plan', { ...moved, differences });
     case 'freshness_difference':
       return `Every planning term matched; only the age of the data behind it read differently (${differences.length} field${differences.length === 1 ? '' : 's'}). Check that the replay clock was pinned to ${snapshot.capturedAt}.`;
     default:
-      return `The defence plan reproduced differently in ${differences.length} place${differences.length === 1 ? '' : 's'}, on the same engine version. The first is: ${describeDifference(differences[0]!)}.`;
+      return `The defense plan reproduced differently in ${differences.length} place${differences.length === 1 ? '' : 's'}, on the same engine version. The first is: ${describeDifference(differences[0]!)}.`;
   }
 }

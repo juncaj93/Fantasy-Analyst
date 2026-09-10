@@ -744,7 +744,7 @@ function protectedLines(plan: WaiverPlan): string[] {
       take: (p) => p.reason === 'core_value' && !isDefence(p.playerId),
     },
     {
-      lead: 'A defence, which belongs to the defence plan rather than to a generic claim',
+      lead: 'A defense, which belongs to the defense plan rather than to a generic claim',
       take: (p) => p.reason === 'core_value' && isDefence(p.playerId),
     },
     { lead: 'Not scorable yet, so never named as a cut', take: (p) => p.reason === 'unscorable' },

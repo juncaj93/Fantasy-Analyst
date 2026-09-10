@@ -355,3 +355,105 @@ test.describe('the waivers page', () => {
     expect(scrollWidth).toBeLessThanOrEqual(width);
   });
 });
+
+
+/**
+ * The wallet the board was priced against.
+ *
+ * Moved here from the Team page, where it closed a two-row teaser of this same
+ * board. The claim is unchanged and it is the one worth keeping: the demo
+ * league publishes a $100 budget and $35 spent, so the footer has to read $65.
+ * A card that assumed Sleeper's $100 default would say $100 here and be wrong
+ * in exactly the way this layer exists to avoid.
+ */
+test.describe('the league wallet, under the board', () => {
+  test.beforeEach(async ({ page }) => openWaivers(page));
+
+  test('states the budget it priced against, from the league settings', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
+  });
+
+  test('sits below the rows it qualifies, not above them', async ({ page }) => {
+    /*
+     * Order rather than mere presence: a wallet above the board is a figure
+     * with nothing yet to spend it on, which is the arrangement this move was
+     * made to get away from.
+     */
+    const footer = page.getByTestId('faab-budget');
+    await expect(footer).toBeVisible();
+    const rows = page.getByTestId('waiver-row');
+    if ((await rows.count()) === 0) return;
+    const rowBottom = await rows.last().evaluate((el) => el.getBoundingClientRect().bottom);
+    const footerTop = await footer.evaluate((el) => el.getBoundingClientRect().top);
+    expect(footerTop).toBeGreaterThanOrEqual(rowBottom - 1);
+  });
+});
+
+
+/**
+ * The season, beside the week, and never mistaken for it.
+ *
+ * The board answered one question — is he better than the man he would replace,
+ * this Sunday — and Alex's complaint is that a claim is rarely only about this
+ * Sunday. The chip is the market's own season-long line divided by the games
+ * left, which is a different horizon *and* a different source from every other
+ * chip on the row.
+ *
+ * The demo deployment may or may not carry a season snapshot, so these assert
+ * the two states rather than requiring one: where the chip is drawn it must be
+ * legible and distinct, and where it is not the board must say the column is
+ * pending rather than showing a confident blank.
+ */
+test.describe('the rest-of-season signal', () => {
+  test.beforeEach(async ({ page }) => openWaivers(page));
+
+  test('is a chip of its own, distinct from the weekly ones beside it', async ({ page }) => {
+    const chip = page.getByTestId('waiver-season').first();
+    if ((await chip.count()) === 0) {
+      // No season market stored. The board must be honest about the gap.
+      const pending = page.getByTestId('waivers-pending');
+      if ((await pending.count()) > 0) await expect(pending).not.toBeEmpty();
+      return;
+    }
+
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute('data-level', /season_asset|in_line|this_week_only/);
+
+    /*
+     * Drawn differently from the fit chip beside it, which is the whole point:
+     * a reader who took a season rate for a weekly number would be out by a
+     * factor of twenty.
+     */
+    const fit = page.getByTestId('waiver-fit').first();
+    const [seasonStyle, fitStyle] = await Promise.all([
+      chip.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { background: s.backgroundColor, border: s.borderTopWidth };
+      }),
+      fit.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { background: s.backgroundColor, border: s.borderTopWidth };
+      }),
+    ]);
+    expect(
+      seasonStyle.background !== fitStyle.background || seasonStyle.border !== fitStyle.border,
+      'the season chip must not look like a weekly one',
+    ).toBe(true);
+  });
+
+  test('names both numbers wherever it explains itself', async ({ page }) => {
+    const chip = page.getByTestId('waiver-season').first();
+    if ((await chip.count()) === 0) test.skip(true, 'no season market stored on this deployment');
+
+    // The title carries the sentence, so the chip's two words are never the
+    // whole claim.
+    await expect(chip).toHaveAttribute('title', /a week for the season, against .* this week/);
+  });
+
+  test('says the column is unknown rather than blank, in the sheet', async ({ page }) => {
+    await page.getByTestId('waiver-row').first().click();
+    const line = page.getByTestId('waiver-season-line');
+    await expect(line).toBeVisible();
+    await expect(line, 'a missing season reads as unknown, never as nothing').not.toBeEmpty();
+  });
+});

@@ -23,7 +23,7 @@
  * every one of these is a sentence the user acts on in Sleeper, by hand.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -31,12 +31,9 @@ import {
   type RosterPlayer,
   type StartSitComparison,
   type StartSitEvaluation,
-  type StartSitMode,
   type StartSitRefreshReport,
-  type FaabAdvice,
   type WaiverAdvice,
 } from '../api.ts';
-import { MODE_DESCRIPTION, MODE_LABEL, START_SIT_MODES } from '../../core/startsit/mode.ts';
 import {
   Badge,
   Confidence,
@@ -51,7 +48,7 @@ import {
   positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
-import { DisclosureChevronIcon } from '../components/icons.tsx';
+import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
@@ -62,8 +59,10 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
-import { buildLineupVerdicts, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
+import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
@@ -136,17 +135,16 @@ export function TeamScreen({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
   const [waivers, setWaivers] = useState<WaiverAdvice | null>(null);
-  /*
-   * Which question the lineup is answering.
-   *
-   * Component state rather than a stored preference: it is a question asked
-   * now, it recomputes in one request, and a remembered mode would mean the
-   * screen quietly answering something other than what the control shows on the
-   * next visit. Changing it reloads the lineup immediately — see `loadLineup`.
-   */
-  const [mode, setMode] = useState<StartSitMode>('balanced');
   /** What the last all-source refresh did, per source. */
   const [refresh, setRefresh] = useState<StartSitRefreshReport | null>(null);
+  /**
+   * Whether a refresh is in flight, so the button can say so.
+   *
+   * The pull gesture has the rubber band to show its work; a button has
+   * nothing, and a control that looks identical while a two-second round trip
+   * happens is one a reader presses again.
+   */
+  const [refreshing, setRefreshing] = useState(false);
   /** Open with the slot it was launched from, and whoever it was launched on. */
   const [compare, setCompare] = useState<{ slot: string | null; seed: string[] } | null>(null);
   /** Which of your players the weekly card is open on. */
@@ -161,9 +159,6 @@ export function TeamScreen({
    * the comparison, a player's week, a waiver row's detail. None of it is a
    * decision the reader made about their roster, so unwinding it costs them
    * nothing and gets them back to the lineup, which is what the tab is for.
-   *
-   * The mode is deliberately left alone. Balanced, Floor and Ceiling is a
-   * question the reader asked, and a tab tap is not an answer to it.
    */
   useEffect(() => {
     if (resetNonce === 0) return;
@@ -185,31 +180,24 @@ export function TeamScreen({
   }, [selected]);
 
   /**
-   * The mode the screen is on *now*, readable from a callback that was created
-   * under an earlier one.
+   * The lineup, under whichever posture the week actually calls for.
    *
-   * A background confirmation takes a round trip and switching Balanced to
-   * Aggressive is faster than that, so without this the older mode's lineup can
-   * land on top of the newer one and the recommendation stops matching the
-   * control above it.
+   * There is no `mode` in this request any more. The screen used to send
+   * whichever of Balanced, Floor and Ceiling the reader had tapped, along with
+   * a ref to guard against an older mode's answer landing on top of a newer
+   * one — machinery that existed entirely to keep a control and a response in
+   * step. The server resolves the posture itself now, from the week's margin
+   * and the live scoreline, and reports back which one it chose and why; see
+   * `LineupRecommendation.mode` and `core/startsit/modeSuggest.ts`.
    */
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-
   const loadLineup = useCallback(async () => {
     if (!selected) return;
     try {
-      setLineup(
-        await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup?mode=${mode}`, {
-          onFresh: (fresh) => {
-            if (modeRef.current === mode) setLineup(fresh);
-          },
-        }),
-      );
+      setLineup(await api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup`, { onFresh: setLineup }));
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
     }
-  }, [selected, mode]);
+  }, [selected]);
 
   /*
    * The free-agent scan arrives on its own, after the roster.
@@ -260,6 +248,23 @@ export function TeamScreen({
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
     }
   }, [loadRoster, loadLineup, loadWaivers, onLeaguesChanged]);
+
+  /**
+   * The same refresh, from a control rather than from a gesture.
+   *
+   * It wraps `refreshAll` rather than repeating it: one refresh on this screen,
+   * one scope, one report line under the row. All this adds is the in-flight
+   * flag, which the pull does not need because the rubber band already says it.
+   */
+  const runRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshAll();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshAll, refreshing]);
 
   /** Every player on the roster, however Sleeper currently has them arranged. */
   const byId = useMemo(() => {
@@ -448,58 +453,66 @@ export function TeamScreen({
       ) : (
         <>
           {/*
-            Four controls on one row of a phone.
+            Two controls, on the trailing edge, and no question for the reader.
 
-            Three of them are the question being asked — same players, same
-            evidence, a different definition of "best" — and they reuse the
-            filter row the Draft board already uses, because it is a
-            filter-shaped decision and a second control vocabulary for it would
-            be a new thing to learn for no gain. The fourth opens the comparison
-            over the page, because a comparison is a question asked *about* this
-            roster and answered back to it.
+            This row used to open with Balanced / Floor / Ceiling — three
+            definitions of "best lineup" for the reader to choose between. The
+            app is in a better position to choose than he is, and it already
+            was: `suggestMode` has read the week's margin since it was written,
+            and now reads the live scoreline too, so the posture adapts to an
+            opponent bombing or blowing up on Sunday rather than waiting to be
+            told. A control the app can answer better than the person holding
+            the phone is a control that should not be on the phone. What it
+            said is not lost — the lineup card states the posture it answered
+            under and why.
 
-            They share a row rather than taking two, which is worth an entire
-            player card at 375px. `compact` gives up horizontal padding and a
-            step of type size to do it and gives up no tap target at all — the
-            chips are still 44px tall, and so is the button beside them.
+            The space that bought goes to the two things this screen had no
+            room for. Both are icon-only, on the trailing edge, at 44px: at
+            360px a labelled pair would take the row that was just saved.
           */}
           {/*
-            …and none of them during a draft.
+            …and neither of them during a draft.
 
-            Balanced, Floor and Ceiling are three definitions of the best
-            *lineup*, and Compare asks which of two players to start. Neither
-            question exists while the roster is still being assembled: there is
-            no week to optimise for and half the team has not been picked. The
-            controls used to sit at the top of the screen through the whole
-            draft, which put the four least useful things on the page above the
-            players who had actually been taken.
-
-            They come back the moment the draft is over — the flag is the
-            roster's own `live`, the same one that decides whether the live view
-            is drawn at all, so there is one answer to "is a draft happening"
-            and this reads it rather than forming a second opinion.
+            Compare asks which of two players to start and Refresh re-reads a
+            week. Neither question exists while the roster is still being
+            assembled. The flag is the roster's own `live`, the same one that
+            decides whether the live view is drawn at all, so there is one
+            answer on this screen to "is a draft happening".
           */}
           {roster?.live ? null : (
-          <div className="control-row" data-testid="team-controls">
-            <SegmentedControl
-              label="Recommendation mode"
-              testId="mode-row"
-              compact
-              value={mode}
-              onChange={setMode}
-              segments={START_SIT_MODES.map((option) => ({
-                id: option,
-                label: MODE_LABEL[option],
-                ariaLabel: `${MODE_LABEL[option]} — ${MODE_DESCRIPTION[option]}`,
-                testId: `mode-${option}`,
-              }))}
-            />
+          <div className="control-row control-row-trailing" data-testid="team-controls">
             <button
-              className="btn btn-compact"
+              className="btn btn-icon"
               data-testid="compare-open"
+              aria-label="Compare players"
+              title="Compare players"
               onClick={() => setCompare({ slot: null, seed: [] })}
             >
-              Compare
+              <CompareIcon />
+            </button>
+            {/*
+              The same refresh the pull gesture runs, and deliberately the same.
+
+              `refreshAll` posts to the all-source orchestrator — the one the
+              Data Health "Refresh now" button calls — and then re-reads the
+              roster, the lineup and the waiver scan. That is exactly the scope
+              this button should have: re-sync the roster and recompute the
+              week from whatever landed. It is single-flight, so a tap while a
+              pull is already running costs nothing.
+
+              It exists beside the gesture rather than instead of it because a
+              gesture is undiscoverable, and this is the screen a reader comes
+              back to when he thinks something has changed.
+            */}
+            <button
+              className="btn btn-icon"
+              data-testid="team-refresh"
+              aria-label="Refresh roster and this week's data"
+              title="Refresh"
+              disabled={refreshing}
+              onClick={() => void runRefresh()}
+            >
+              <RefreshIcon className={refreshing ? 'spin' : undefined} />
             </button>
           </div>
           )}
@@ -609,7 +622,15 @@ export function TeamScreen({
                           setCompare({ slot: row.slot, seed: [row.currentPlayerId, row.recommendedPlayerId] });
                           return;
                         }
-                        const subject = row.recommendedPlayerId ?? row.currentPlayerId;
+                        /*
+                         * The card belongs to whoever the row is *about*, which
+                         * is not always who this app would start there — see
+                         * `verdictSubjectId`, which both this and the row's own
+                         * headline are now drawn from. Reading the two ids in
+                         * the opposite order here is what opened Kenneth
+                         * Walker's card from Ladd McConkey's row.
+                         */
+                        const subject = verdictSubjectId(row);
                         if (subject) {
                           openPlayer(subject, {
                             starting: true,
@@ -673,26 +694,7 @@ export function TeamScreen({
                 this screen to "is a draft happening".
               */}
               {roster.live ? null : (
-                <>
-                  {/*
-                    One quiet line about the defence, and only when there is one
-                    to draw.
-
-                    It sits between the roster and the waiver wire because that
-                    is what it is: a slot decision that happens to be made on
-                    the wire. It renders nothing for a best-ball
-                    league, a league with no DEF slot, a season that has not
-                    drafted, or — most weeks — a reader holding a defence with
-                    no decision to make. There is deliberately no defence
-                    dashboard behind it; the whole model is one tap away on this
-                    row and nowhere else.
-                  */}
-                  <DstLine plan={waivers?.dst ?? null} />
-
-                  {waiverBoard ? (
-                    <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
-                  ) : null}
-                </>
+                <WaiverSection board={waiverBoard} dst={waivers?.dst ?? null} onOpen={setWaiverDetail} />
               )}
             </>
           )}
@@ -850,8 +852,13 @@ function VerdictCard({
    * leads with the man currently starting — the reader is looking for his own
    * lineup, and finding a stranger's name in the slot is how a screen loses him
    * — and the change is stated underneath, in the order he would act on it.
+   *
+   * The rule itself is `verdictSubjectId`, shared with the tap handler that
+   * opens this row, because a headline and a tap that each decided this for
+   * themselves is precisely how the row came to open the wrong man's card.
    */
-  const subject = row.verdict === 'fill' ? recommended : (current ?? recommended);
+  const subjectId = verdictSubjectId(row);
+  const subject = (subjectId != null && subjectId === recommended?.playerId ? recommended : current) ?? current ?? recommended;
   const position = subject?.position ?? '';
   const blocked = row.vacancy[0] ?? null;
   /* The figure belonging to whoever leads the row — see the trailing field. */
@@ -1197,30 +1204,60 @@ function BenchSection({
  */
 function WaiverSection({
   board,
-  faab,
+  dst,
   onOpen,
 }: {
-  board: WaiverBoard;
-  /** The league's wallet, which belongs under the rows rather than on one. */
-  faab: FaabAdvice | null;
+  board: WaiverBoard | null;
+  /**
+   * The defense plan, which is a different question with the same answer shape.
+   *
+   * Drawn *inside* this section rather than as a card floating above it, and
+   * that is a grouping change and only a grouping change. The two are still
+   * computed by different modules against different bars — the planner reasons
+   * over byes, the weeks ahead and a bench spot; the board over this week's
+   * gain on the man it would replace — and merging those would be merging two
+   * answers to two different questions.
+   *
+   * But "add somebody from the wire" is one heading to a reader, and a defense
+   * arriving as a lone Stream card above the section it belongs beside read as
+   * an orphan — reported as a defense "showing in the wrong place". One
+   * heading, two kinds of row under it, each still saying which it is.
+   */
+  dst: DstPlan | null;
   onOpen: (row: WaiverBoardRow) => void;
 }) {
   /*
-   * The defence is not one of these rows on this screen.
+   * The defense is not one of these rows on this screen.
    *
-   * It has its own line immediately above — `DstLine` — and a teaser that
-   * repeated it would put the same recommendation on the same screen twice, in
-   * two different shapes, one of them ranked by a gain that was measured
-   * against a different bar. The Waivers board draws it as a row, because that
-   * is the page where "which defence should I add" is a list question.
+   * `DstLine` carries it, and a teaser row that repeated it would put the same
+   * recommendation on the same screen twice, in two different shapes, one of
+   * them ranked by a gain measured against a different bar. The Waivers board
+   * draws it as a row instead, because that is the page where "which defense
+   * should I add" is a list question.
    */
-  const rows = board.rows.filter((row) => row.dst == null);
+  const rows = (board?.rows ?? []).filter((row) => row.dst == null);
+  const line = <DstLine plan={dst} />;
+  const hasDefenseLine = dst != null && dst.surface && dst.headline.length > 0;
 
   if (rows.length === 0) {
+    /*
+     * A defense line with no upgrades beside it still belongs under the
+     * heading — otherwise it is the same orphan card, one section lower.
+     */
+    if (hasDefenseLine) {
+      return (
+        <div data-testid="waiver-card">
+          <div className="section-title" data-testid="waiver-title">
+            Waiver upgrades
+          </div>
+          {line}
+        </div>
+      );
+    }
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
-          {board.headline ?? 'No waiver comparison available yet.'}
+          {board?.headline ?? 'No waiver comparison available yet.'}
         </div>
       </div>
     );
@@ -1231,16 +1268,25 @@ function WaiverSection({
       <div className="section-title" data-testid="waiver-title">
         Waiver upgrades
       </div>
+      {/*
+        The defense first, because it is a slot decision rather than a value
+        add: "is my DEF spot right this week" is a smaller and more urgent
+        question than "is there somebody better on the wire".
+      */}
+      {line}
       {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
       {/*
-        The wallet the prices above were quoted from. It belongs to the league
-        rather than to any one row, so it sits under them once — see the note on
-        `BudgetFooter`, which is the league-intelligence pass's own component and
-        is used here unchanged.
+        The wallet is not on this screen, and the reason is what this section is.
+
+        Team shows the strongest two upgrades as a *teaser* — see
+        `TEAM_WAIVER_ROWS`. A wallet is the frame you read a bid against, and
+        there are no bids here to read: the rows below the fold, the ones the
+        budget would actually be spent on, are on Waivers. So `BudgetFooter`
+        moved to the bottom of that page, under the board it prices, where it is
+        beside the numbers it qualifies rather than under two of them.
       */}
-      <BudgetFooter faab={faab} />
       {/*
         Only the part that changes a reading.
 
@@ -1251,7 +1297,7 @@ function WaiverSection({
         numbers above it — a field that is not known yet, said so a blank is not
         read as a zero.
       */}
-      {board.pending.length > 0 ? (
+      {board && board.pending.length > 0 ? (
         <div className="faint" style={{ margin: '2px 4px 12px' }}>
           {capitalise(board.pending.join(', '))} is not known yet.
         </div>
@@ -1274,37 +1320,6 @@ const TEAM_WAIVER_ROWS = 2;
 
 function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * The budget the advice above was priced against, said out loud.
- *
- * A recommendation of $19 means nothing without the wallet it came from, and
- * the two numbers that make it legible — what is left, and what winning has
- * cost in this league — are exactly the two a reader would otherwise have to go
- * to Sleeper to find.
- */
-function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
-  if (!faab) return null;
-  if (!faab.rule.usesFaab) {
-    return (
-      <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
-        {faab.rule.provenance}.
-      </div>
-    );
-  }
-  const mine = faab.mine;
-  return (
-    <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
-      {mine?.remaining == null
-        ? 'Your remaining budget is unknown.'
-        : `$${mine.remaining} of $${faab.rule.total} left.`}
-      {faab.prices.sample > 0
-        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
-        : ' No winning bids recorded in this league yet.'}
-      <div>{faab.losingBids}</div>
-    </div>
-  );
 }
 
 /**
@@ -1574,6 +1589,27 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         <strong>Changes to consider</strong>
         <Confidence level={lineup.confidence} />
       </div>
+
+      {/*
+        The posture this answer was computed under, and why.
+
+        This line is what replaced the Balanced / Floor / Ceiling control. The
+        control was at least honest about which question was being answered, and
+        an app that quietly switched between protecting a lead and chasing one
+        would be changing its advice for reasons the reader cannot see. So the
+        choice is stated, in the suggestion's own sentence, at the top of the
+        card whose recommendation it governs.
+
+        Nothing is drawn when the app defaulted rather than chose: `auto` is
+        false when there was no opponent to read or too little priced to call
+        the matchup, and "Balanced, because we could not tell" is a sentence
+        about the app rather than about the week.
+      */}
+      {lineup.modeSuggestion?.auto ? (
+        <div className="faint" data-testid="lineup-mode" data-mode={lineup.modeSuggestion.mode}>
+          {lineup.modeSuggestion.detail}
+        </div>
+      ) : null}
 
       {best == null ? (
         <div className="faint" data-testid="lineup-verdict">
@@ -1865,7 +1901,7 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
             <div className="components">
               {e.expectation.contributions.map((c) => (
                 <div className="component" key={c.market}>
-                  <span className="component-label">{c.market}</span>
+                  <span className="component-label">{marketLabel(c.market)}</span>
                   <span className="component-value">{c.points.toFixed(2)}</span>
                   <span className="component-detail">{c.detail}</span>
                 </div>

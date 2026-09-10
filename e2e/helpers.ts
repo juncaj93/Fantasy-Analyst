@@ -127,7 +127,51 @@ export async function openReview(page: Page): Promise<void> {
  * "nothing happened" that has to wait to be sure.
  */
 export async function pastTheSettle(page: Page): Promise<void> {
+  /*
+   * The fixed floor this has always had, and then patience for a slow runner.
+   *
+   * 700ms is comfortably past the settle on any machine a person develops on,
+   * and it is not always past it on a loaded CI runner. Measured on
+   * `webkit-small-360`, which shares three shards with eleven other jobs: the
+   * card was back and visible, the assertion that the scrim had come back with
+   * it read 0.699 against a floor of 0.9, and the same commit's gesture code
+   * had been green on the shard before. The animation was still running.
+   *
+   * So the wait is now "700ms, and then until the layer is actually still".
+   * Additive on purpose: nothing gets *faster* than it was, because a shorter
+   * wait is a new race in every test that calls this, and a slow runner simply
+   * gets the time it needs. The layer being gone counts as still — a dismissal
+   * unmounts it, which is the other outcome these callers are checking for.
+   *
+   * Three consecutive frames of an unchanged `scrollTop`, because the scrim is
+   * painted from React state fed by the scroll handler, so the last frame of
+   * movement and the last paint are not the same frame.
+   */
   await page.waitForTimeout(700);
+
+  await page
+    .waitForFunction(
+      () => {
+        const layer = document.querySelector('.sheet-scroller') as HTMLElement | null;
+        const state = window as unknown as { __settleAt?: number; __settleFor?: number };
+        if (!layer) return true;
+        const top = Math.round(layer.scrollTop);
+        if (state.__settleAt === top) state.__settleFor = (state.__settleFor ?? 0) + 1;
+        else {
+          state.__settleAt = top;
+          state.__settleFor = 0;
+        }
+        return (state.__settleFor ?? 0) >= 3;
+      },
+      undefined,
+      { timeout: 4_000, polling: 'raf' },
+    )
+    /*
+     * A layer that never comes to rest is a real failure, and it is not this
+     * helper's to report: the assertion the caller is about to make says what
+     * was wrong far better than a timeout here would.
+     */
+    .catch(() => {});
 }
 
 /**
@@ -303,8 +347,22 @@ export async function sheetBodyScroll(page: Page): Promise<{ top: number; max: n
  * of the screen is both inside it and the honest description of the gesture.
  */
 export async function tapAboveCard(page: Page): Promise<void> {
+  /*
+   * Halfway between the top of the screen and the top of the card.
+   *
+   * This used to tap twenty pixels down, and twenty pixels was the problem: the
+   * `.sheet-dismiss` zone ends about a hundred pixels from the top once the
+   * layer has scrolled to the card's detent, so the old point was inside the
+   * one strip that worked while the six hundred pixels below it — the whole of
+   * what a reader would actually point at — answered nothing. Every caller of
+   * this helper passed, and cards could still only be dismissed by swiping.
+   *
+   * Measured against the card rather than the viewport so it stays honest for a
+   * tall sheet and a short one alike.
+   */
   const port = (await page.locator('.sheet-scroller').boundingBox())!;
-  await page.mouse.click(port.x + port.width / 2, port.y + 20);
+  const card = (await page.locator('.sheet').boundingBox())!;
+  await page.mouse.click(port.x + port.width / 2, (port.y + card.y) / 2);
 }
 
 /**
