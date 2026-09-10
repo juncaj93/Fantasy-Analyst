@@ -861,15 +861,49 @@ function VerdictCard({
       : currentProjection;
 
   if (!subject) {
+    /*
+     * Empty in Sleeper and empty here, which is still two different sentences.
+     *
+     * `Nobody eligible yet` is true of a half-drafted roster and false of one
+     * that holds a player for the slot this app cannot put a number on — the
+     * defence nobody has quoted, sitting on the bench rather than in the
+     * lineup. That distinction is the whole of the earlier fix and it has to
+     * survive the row being rebuilt around Sleeper's lineup, because this is
+     * exactly the slot where the reader has nothing else to go on.
+     */
+    const accepts = row.accepts.length > 1 ? row.accepts.join(', ') : null;
     return (
-      <div className="player-row" data-testid="starter-row" data-slot={row.slot} data-starter="empty" data-verdict={row.verdict}>
+      <div
+        className="player-row"
+        data-testid="starter-row"
+        data-slot={row.slot}
+        data-starter="empty"
+        data-verdict={row.verdict}
+        data-vacancy={blocked ? 'explained' : 'none'}
+        aria-label={
+          blocked
+            ? `${row.slot}: ${blocked.name} ${blocked.reason}` + (blocked.detail ? `, ${blocked.detail}` : '')
+            : `${row.slot}: nobody eligible yet`
+        }
+      >
         <div className="player-row-top">
           <span className="slot-label">{row.slot}</span>
-          <span className="empty-slot-line">
-            Nobody eligible yet
-            {row.accepts.length > 1 ? <span className="faint"> · {row.accepts.join(', ')}</span> : null}
-          </span>
+          {blocked ? (
+            <span className="empty-slot-line" data-testid="vacancy-line">
+              <span className="vacancy-name">{blocked.name}</span> {blocked.reason}
+            </span>
+          ) : (
+            <span className="empty-slot-line">
+              Nobody eligible yet
+              {accepts ? <span className="faint"> · {accepts}</span> : null}
+            </span>
+          )}
         </div>
+        {blocked && (blocked.detail || accepts) ? (
+          <div className="faint vacancy-detail">
+            {[blocked.detail, accepts ? `takes ${accepts}` : null].filter(Boolean).join(' · ')}
+          </div>
+        ) : null}
       </div>
     );
   }

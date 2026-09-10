@@ -120,6 +120,27 @@ describe('the verdict on one slot', () => {
     expect(def.vacancy[0]?.name).toBe('Jacksonville');
   });
 
+  it('carries the reason on an empty slot a rostered player could have filled', () => {
+    /*
+     * The defence nobody has quoted, sitting on the bench rather than in the
+     * lineup: Sleeper has the slot empty and this app will not fill it either.
+     * `Nobody eligible yet` is true of a half-drafted roster and false of this
+     * one, and the row has to be able to tell them apart — this is precisely
+     * the slot where the reader has nothing else to go on.
+     */
+    const inputs = roster();
+    inputs[8] = defence('def1', 'Jacksonville', { spread: null, total: null, opponent: 'CAR' }, { team: 'JAX' });
+    /* Sleeper is not starting the defence at all. */
+    const starters = SLEEPER_LINEUP.filter((id) => id !== 'def1');
+    const rows = verdictsFor({ inputs, starterIds: starters, starterSlotIds: [...starters, null] });
+    const def = rows.find((r) => r.slot === 'DEF')!;
+
+    expect(def.verdict).toBe('empty');
+    expect(def.currentPlayerId).toBeNull();
+    expect(def.vacancy[0]?.name).toBe('Jacksonville');
+    expect(def.vacancy[0]?.detail).toBe('no game line for this defence');
+  });
+
   it('says empty when there is nobody in it and nobody for it', () => {
     const thin = [candidate('qb1', 'Passer One', 'QB', 21)];
     const lineup = recommendLineup(thin, SHAPE, PROFILE, { currentStarterIds: ['qb1'] });
