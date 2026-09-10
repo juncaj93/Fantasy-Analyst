@@ -240,3 +240,50 @@ test.describe('the defence on the Waivers board', () => {
     await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
   });
 });
+
+
+/**
+ * The defense sits under the wire's own heading, not above it.
+ *
+ * Reported as a defense "showing in the wrong place": a lone Stream card
+ * floating above the `Waiver upgrades` section it plainly belonged beside.
+ *
+ * The two are still computed by different modules against different bars — the
+ * planner reasons over byes, the weeks ahead and a bench spot, the board over
+ * this week's gain on the man it would replace — and this changed none of that.
+ * What changed is the grouping: "add somebody from the wire" is one heading to
+ * a reader.
+ */
+test.describe('where the defense line sits on Team', () => {
+  /*
+   * The plan is injected, as everywhere else in this file. The deployment's own
+   * league has not drafted and the planner is correctly silent on it — a test
+   * that skipped on that would assert nothing and say it had passed.
+   */
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await settledRoster(page);
+    await withPlan(page, plan());
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-title')).toBeVisible();
+  });
+
+  test('is drawn below the Waiver upgrades heading', async ({ page }) => {
+    const line = page.getByTestId('dst-line');
+    await expect(line).toBeVisible();
+
+    const title = page.getByTestId('waiver-title');
+    await expect(title).toBeVisible();
+
+    const titleBox = (await title.boundingBox())!;
+    const lineBox = (await line.boundingBox())!;
+    expect(lineBox.y, 'the defense belongs under the heading, not above it').toBeGreaterThan(titleBox.y);
+  });
+
+  test('is inside the waiver section rather than a card of its own', async ({ page }) => {
+    // Containment rather than position, so a later reordering inside the
+    // section does not read as a regression.
+    await expect(page.getByTestId('waiver-card').getByTestId('dst-line')).toHaveCount(1);
+  });
+});

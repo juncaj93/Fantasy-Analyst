@@ -62,6 +62,7 @@ import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCar
 import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
+import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
@@ -693,26 +694,7 @@ export function TeamScreen({
                 this screen to "is a draft happening".
               */}
               {roster.live ? null : (
-                <>
-                  {/*
-                    One quiet line about the defence, and only when there is one
-                    to draw.
-
-                    It sits between the roster and the waiver wire because that
-                    is what it is: a slot decision that happens to be made on
-                    the wire. It renders nothing for a best-ball
-                    league, a league with no DEF slot, a season that has not
-                    drafted, or — most weeks — a reader holding a defence with
-                    no decision to make. There is deliberately no defence
-                    dashboard behind it; the whole model is one tap away on this
-                    row and nowhere else.
-                  */}
-                  <DstLine plan={waivers?.dst ?? null} />
-
-                  {waiverBoard ? (
-                    <WaiverSection board={waiverBoard} onOpen={setWaiverDetail} />
-                  ) : null}
-                </>
+                <WaiverSection board={waiverBoard} dst={waivers?.dst ?? null} onOpen={setWaiverDetail} />
               )}
             </>
           )}
@@ -1222,27 +1204,60 @@ function BenchSection({
  */
 function WaiverSection({
   board,
+  dst,
   onOpen,
 }: {
-  board: WaiverBoard;
+  board: WaiverBoard | null;
+  /**
+   * The defense plan, which is a different question with the same answer shape.
+   *
+   * Drawn *inside* this section rather than as a card floating above it, and
+   * that is a grouping change and only a grouping change. The two are still
+   * computed by different modules against different bars — the planner reasons
+   * over byes, the weeks ahead and a bench spot; the board over this week's
+   * gain on the man it would replace — and merging those would be merging two
+   * answers to two different questions.
+   *
+   * But "add somebody from the wire" is one heading to a reader, and a defense
+   * arriving as a lone Stream card above the section it belongs beside read as
+   * an orphan — reported as a defense "showing in the wrong place". One
+   * heading, two kinds of row under it, each still saying which it is.
+   */
+  dst: DstPlan | null;
   onOpen: (row: WaiverBoardRow) => void;
 }) {
   /*
-   * The defence is not one of these rows on this screen.
+   * The defense is not one of these rows on this screen.
    *
-   * It has its own line immediately above — `DstLine` — and a teaser that
-   * repeated it would put the same recommendation on the same screen twice, in
-   * two different shapes, one of them ranked by a gain that was measured
-   * against a different bar. The Waivers board draws it as a row, because that
-   * is the page where "which defence should I add" is a list question.
+   * `DstLine` carries it, and a teaser row that repeated it would put the same
+   * recommendation on the same screen twice, in two different shapes, one of
+   * them ranked by a gain measured against a different bar. The Waivers board
+   * draws it as a row instead, because that is the page where "which defense
+   * should I add" is a list question.
    */
-  const rows = board.rows.filter((row) => row.dst == null);
+  const rows = (board?.rows ?? []).filter((row) => row.dst == null);
+  const line = <DstLine plan={dst} />;
+  const hasDefenseLine = dst != null && dst.surface && dst.headline.length > 0;
 
   if (rows.length === 0) {
+    /*
+     * A defense line with no upgrades beside it still belongs under the
+     * heading — otherwise it is the same orphan card, one section lower.
+     */
+    if (hasDefenseLine) {
+      return (
+        <div data-testid="waiver-card">
+          <div className="section-title" data-testid="waiver-title">
+            Waiver upgrades
+          </div>
+          {line}
+        </div>
+      );
+    }
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
-          {board.headline ?? 'No waiver comparison available yet.'}
+          {board?.headline ?? 'No waiver comparison available yet.'}
         </div>
       </div>
     );
@@ -1253,6 +1268,12 @@ function WaiverSection({
       <div className="section-title" data-testid="waiver-title">
         Waiver upgrades
       </div>
+      {/*
+        The defense first, because it is a slot decision rather than a value
+        add: "is my DEF spot right this week" is a smaller and more urgent
+        question than "is there somebody better on the wire".
+      */}
+      {line}
       {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
@@ -1276,7 +1297,7 @@ function WaiverSection({
         numbers above it — a field that is not known yet, said so a blank is not
         read as a zero.
       */}
-      {board.pending.length > 0 ? (
+      {board && board.pending.length > 0 ? (
         <div className="faint" style={{ margin: '2px 4px 12px' }}>
           {capitalise(board.pending.join(', '))} is not known yet.
         </div>
