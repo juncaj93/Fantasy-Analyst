@@ -162,13 +162,39 @@ describe('activity classes: unknown is never inactivity', () => {
 });
 
 describe('the contribution', () => {
-  it('gives an unknown manager exactly zero, and says why', () => {
+  /**
+   * An unmeasured manager is read as an active trader, and says so.
+   *
+   * This asserted exactly zero until 10 September 2026, on the argument that a
+   * manager nobody has measured must leave the ordering where the objective
+   * gates left it. The owner reversed it: zero is not neutral when a measured
+   * non-trader carries a penalty — it silently ranks the unmeasured above him
+   * and below everyone else, a position nobody chose — and the app cannot tell
+   * a new manager from a quiet one.
+   *
+   * §10 is untouched and is the rest of this test: the class, the label and the
+   * hedge all still say the evidence is thin, so no screen can print a claim
+   * about how this manager behaves.
+   */
+  it('reads an unknown manager as an active trader, and says it is assuming', () => {
     const fit = managerFitFor({ tendencies: null, seasonsObserved: 0, historyComplete: false, offer: ONE_FOR_ONE });
 
     expect(fit.activity).toBe('unknown');
-    expect(fit.contribution).toBe(0);
+    expect(fit.contribution).toBeGreaterThan(0);
+    expect(fit.contribution).toBeLessThanOrEqual(MANAGER_FIT_CAP);
     expect(fit.uncertain).toBe(true);
+    expect(fit.label).toBe('Limited history');
     expect(fit.notes.join(' ')).toMatch(/limited trade history/i);
+    expect(fit.notes.join(' ')).toMatch(/cannot yet tell/i);
+    expect(fit.terms.map((t) => t.key)).toEqual(['activity_assumed']);
+  });
+
+  it('still ranks an unmeasured manager above a measured non-trader', () => {
+    const unmeasured = managerFitFor({ tendencies: null, seasonsObserved: 0, historyComplete: false });
+    const measured = managerFitFor({ tendencies: null, seasonsObserved: 3, historyComplete: true, leagueRate: 1 });
+
+    expect(measured.activity).toBe('effectively_inactive');
+    expect(unmeasured.contribution).toBeGreaterThan(measured.contribution);
   });
 
   it('gives an active trader a modest lift and a measured non-trader a penalty', () => {

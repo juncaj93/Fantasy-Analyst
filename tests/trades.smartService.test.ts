@@ -267,14 +267,22 @@ describe('the board it returns', () => {
     }
   });
 
-  it('keeps behaviour out of the answer when no history has been derived', async () => {
+  it('reads every manager the same way when no history has been derived', async () => {
     const board = await new SmartTradeService(db).build();
 
     expect(board.history.profiles).toBe(0);
     expect(board.offers.length).toBeGreaterThan(0);
     for (const offer of board.offers) {
+      /*
+       * Uniformity rather than zero. An unmeasured manager has been read as an
+       * active trader since 10 September 2026 — the app cannot tell a new
+       * manager from a quiet one — so what matters with no history at all is
+       * that nobody is advantaged over anybody else, and that the board still
+       * says out loud that it has no history.
+       */
       expect(offer.managerFit.activity).toBe('unknown');
-      expect(offer.managerFit.contribution).toBe(0);
+      expect(offer.managerFit.contribution).toBe(board.offers[0]!.managerFit.contribution);
+      expect(offer.managerFit.uncertain).toBe(true);
     }
     expect(board.warnings.join(' ')).toMatch(/no manager trade history/i);
   });
@@ -423,9 +431,16 @@ describe('reading the stored history', () => {
     const board = await new SmartTradeService(db).build();
     expect(board.offers.length).toBeGreaterThan(0);
     for (const offer of board.offers) {
+      /*
+       * One settled season is not enough to call anybody a non-trader, which is
+       * the claim this test has always made and still makes. What changed is
+       * what `unknown` is worth: it is read as an active trader rather than as
+       * neutral, so the assertion is that he is not penalised — not that he is
+       * ignored.
+       */
       expect(offer.managerFit.evidence.seasonsObserved).toBe(1);
       expect(offer.managerFit.activity).toBe('unknown');
-      expect(offer.managerFit.contribution).toBe(0);
+      expect(offer.managerFit.contribution).toBeGreaterThan(0);
     }
   });
 });
