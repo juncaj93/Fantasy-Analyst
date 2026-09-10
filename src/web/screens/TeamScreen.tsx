@@ -323,6 +323,12 @@ export function TeamScreen({
       starterIds: (roster.starters ?? []).map((p) => p.playerId),
       ...(roster.starterSlotIds ? { starterSlotIds: roster.starterSlotIds } : {}),
       slots: lineup.slots,
+      /*
+       * The changes the optimiser would actually stand behind, and only those.
+       * Without this the rows would propose swaps the card above them declines
+       * to make — one screen answering to two rules.
+       */
+      suggestedSwapIns: new Set((lineup.swaps ?? []).map((s) => s.inPlayerId)),
       positionOf: (id) => byId.get(id)?.position ?? null,
     });
   }, [roster, lineup, byId]);

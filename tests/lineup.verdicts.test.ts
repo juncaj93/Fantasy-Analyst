@@ -53,6 +53,7 @@ function verdictsFor(over: { starterIds?: string[]; starterSlotIds?: (string | n
     starterIds,
     ...(over.starterSlotIds ? { starterSlotIds: over.starterSlotIds } : {}),
     slots: lineup.slots,
+    suggestedSwapIns: new Set(lineup.swaps.map((s) => s.inPlayerId)),
     positionOf,
   });
 }
@@ -132,6 +133,52 @@ describe('the verdict on one slot', () => {
 
     expect(rows.find((r) => r.slot === 'DEF')?.verdict).toBe('empty');
     expect(rows.find((r) => r.slot === 'QB')?.verdict).toBe('keep');
+  });
+});
+
+describe('a difference the optimiser would not suggest', () => {
+  /*
+   * The screen must not propose a change the app itself declined to make.
+   *
+   * `recommendLineup` computes the best lineup and, separately, the swaps worth
+   * suggesting — a gain under `MIN_SWAP_GAIN` is left alone, and an incumbent is
+   * protected from an unpriced challenger. A verdict list reading only the first
+   * of those would put `Start X instead` on a row while the card above it said
+   * hold, which is one screen answering to two rules and is the defect
+   * `lineup.ts` was rewritten to stop.
+   */
+  it('reads keep, not swap, when no swap was suggested for it', () => {
+    const starters = ['qb1', 'rb1', 'rb2', 'wr1', 'wr2', 'bn1', 'fx1', 'fx2', 'def1'];
+    const inputs = roster();
+    const lineup = recommendLineup(inputs, SHAPE, PROFILE, { currentStarterIds: starters });
+
+    /* The same lineup, with the optimiser's own suggestions withheld. */
+    const withheld = buildLineupVerdicts({
+      rosterPositions: POSITIONS,
+      starterIds: starters,
+      slots: lineup.slots,
+      suggestedSwapIns: new Set<string>(),
+      positionOf,
+    });
+
+    expect(withheld.some((r) => r.verdict === 'swap')).toBe(false);
+    /* And the row still knows who it would have named, for the card behind it. */
+    const slot = withheld.find((r) => r.currentPlayerId === 'bn1')!;
+    expect(slot.verdict).toBe('keep');
+    expect(slot.recommendedPlayerId).toBe('wr3');
+  });
+
+  it('reports every difference when no swap list is passed at all', () => {
+    const starters = ['qb1', 'rb1', 'rb2', 'wr1', 'wr2', 'bn1', 'fx1', 'fx2', 'def1'];
+    const lineup = recommendLineup(roster(), SHAPE, PROFILE, { currentStarterIds: starters });
+    const rows = buildLineupVerdicts({
+      rosterPositions: POSITIONS,
+      starterIds: starters,
+      slots: lineup.slots,
+      positionOf,
+    });
+
+    expect(rows.some((r) => r.verdict === 'swap')).toBe(true);
   });
 });
 

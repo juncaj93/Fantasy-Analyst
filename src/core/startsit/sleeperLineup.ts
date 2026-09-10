@@ -79,8 +79,11 @@ export interface RecommendedSlot {
  *  - `keep` — Sleeper has the right player here. Most slots, most weeks, and
  *    the reason the screen shows them at all: silence about a slot is
  *    indistinguishable from having not looked at it.
- *  - `swap` — Sleeper has one player here and this app would start another.
- *    The only verdict that names two people, and the one worth points.
+ *  - `swap` — Sleeper has one player here and this app would start another,
+ *    *and* the optimiser was prepared to suggest the change. The only verdict
+ *    that names two people, and the one worth points. A difference it withheld
+ *    — too small to be worth the churn — reads `keep`, because leaving your own
+ *    player alone is what the app is recommending.
  *  - `fill` — Sleeper has left the slot empty and there is somebody for it.
  *  - `no_pick` — Sleeper has a player here and this app will not name anybody
  *    for the slot, so it is declining to have an opinion rather than benching
@@ -157,6 +160,24 @@ export function buildLineupVerdicts(input: {
   starterIds: readonly string[];
   /** What `recommendLineup` decided, in its own order. */
   slots: readonly RecommendedSlot[];
+  /**
+   * The changes the optimiser was actually prepared to suggest, by incoming id.
+   *
+   * Load-bearing, and the reason is written out in `lineup.ts`'s own docblock:
+   * the recommended lineup and the swap list are computed under *different*
+   * rules, and a screen that reads only the first will show a reordering the
+   * app deliberately refused to explain. That is the defect of 8 September in a
+   * new costume.
+   *
+   * `recommendLineup` withholds a swap whose gain is under
+   * {@link MIN_SWAP_GAIN}, and its assignment separately protects an incumbent
+   * from an unpriced challenger. Where it withheld one, the honest row is
+   * `keep`: the reader's own lineup stands, which is exactly what the guard is
+   * for. Absent means "no swap list was passed", and every difference is then
+   * reported — the older behaviour, kept only so a caller without one is not
+   * silently given a lineup with no advice in it.
+   */
+  suggestedSwapIns?: ReadonlySet<string> | undefined;
   /** A player's position, for the eligibility fallback. */
   positionOf: (playerId: string) => string | null;
 }): LineupVerdictRow[] {
@@ -197,7 +218,7 @@ export function buildLineupVerdicts(input: {
       recommendedName: recommended?.name ?? null,
       projection: recommended?.projection ?? null,
       projectionSource: recommended?.projectionSource ?? null,
-      verdict: verdictFor(currentPlayerId, recommended?.playerId ?? null),
+      verdict: verdictFor(currentPlayerId, recommended?.playerId ?? null, input.suggestedSwapIns),
       locked: recommended?.locked ?? false,
       vacancy: recommended?.vacancy ?? [],
       drivers: recommended?.drivers ?? [],
@@ -206,7 +227,11 @@ export function buildLineupVerdicts(input: {
   });
 }
 
-function verdictFor(currentPlayerId: string | null, recommendedPlayerId: string | null): SlotVerdict {
+function verdictFor(
+  currentPlayerId: string | null,
+  recommendedPlayerId: string | null,
+  suggested: ReadonlySet<string> | undefined,
+): SlotVerdict {
   if (currentPlayerId == null && recommendedPlayerId == null) return 'empty';
   if (currentPlayerId == null) return 'fill';
   /*
@@ -217,7 +242,17 @@ function verdictFor(currentPlayerId: string | null, recommendedPlayerId: string 
    * and carries the reason; see `LineupSlot.vacancy`.
    */
   if (recommendedPlayerId == null) return 'no_pick';
-  return currentPlayerId === recommendedPlayerId ? 'keep' : 'swap';
+  if (currentPlayerId === recommendedPlayerId) return 'keep';
+  /*
+   * A difference the optimiser would not suggest is not a change to make.
+   *
+   * It reads `keep` because that is what the app is actually saying: leave your
+   * own player where he is. Saying `swap` here would put a `→ Start X instead`
+   * on the row while the card above it says hold — one screen, two rules, which
+   * is the thing `lineup.ts` was rewritten to stop.
+   */
+  if (suggested && !suggested.has(recommendedPlayerId)) return 'keep';
+  return 'swap';
 }
 
 /** Sleeper's player for each slot, from the stored order or from eligibility. */
