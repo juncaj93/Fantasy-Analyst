@@ -402,6 +402,44 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     expect((await buildStartSitContext(db)).indoor.has('DAL')).toBe(false);
   });
 
+  /*
+   * The fallback anchor, assembled once and bought only when it can be used.
+   */
+  it('measures the opposing offence from the games the market did price', async () => {
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+    await new VegasEventsRepo(db).upsertMany([
+      /* This week's fixture: discovered, never quoted. */
+      { eventId: 'jax-w3', provider: 'mock', kickoff: '2026-09-20T17:00:00.000Z', homeTeam: 'JAX', awayTeam: 'CAR', total: null, spread: null, spreadTeam: null },
+      /* Carolina's own priced games — a weak offence, in the market's words. */
+      { eventId: 'car-w1', provider: 'mock', kickoff: '2026-09-06T17:00:00.000Z', homeTeam: 'CAR', awayTeam: 'ATL', total: 38, spread: 6, spreadTeam: 'CAR' },
+      { eventId: 'car-w2', provider: 'mock', kickoff: '2026-09-13T17:00:00.000Z', homeTeam: 'CAR', awayTeam: 'NO', total: 40, spread: 7, spreadTeam: 'CAR' },
+    ]);
+
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-16T12:00:00.000Z'));
+
+    /* 38/2 - 6/2 = 16, and 40/2 - 7/2 = 16.5. */
+    expect(context.opponentForm.get('CAR')).toEqual({ impliedTotal: 16.25, games: 2 });
+    /* And this week's fixture is still the unpriced one it actually is. */
+    expect(context.schedule.get('JAX')?.total).toBeNull();
+  });
+
+  it('does not buy the aggregate at all when every fixture is priced', async () => {
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+    await new VegasEventsRepo(db).upsertMany([
+      { eventId: 'jax-w3', provider: 'mock', kickoff: '2026-09-20T17:00:00.000Z', homeTeam: 'JAX', awayTeam: 'CAR', total: 44, spread: -3, spreadTeam: 'JAX' },
+    ]);
+
+    /*
+     * No defence can reach the fallback in a fully-priced week, so the read is
+     * skipped rather than made and discarded. Asserted because the alternative
+     * is a season-wide scan bought for nothing on every Team, Matchup and
+     * Waivers load, on a database this app has twice run to the edge of.
+     */
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-16T12:00:00.000Z'));
+
+    expect(context.opponentForm.size).toBe(0);
+  });
+
   it('says nothing, and reads nothing, in a league that starts no defence', async () => {
     const noDef = buildRosterShape(DST_ROSTER_POSITIONS.filter((p) => p !== 'DEF'));
     const plan = await buildDstPlan(db, {

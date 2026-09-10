@@ -398,3 +398,90 @@ describe('the home-field residual, now that there is a schedule to read it from'
     expect(softRoad).toBeGreaterThan(hardHome);
   });
 });
+
+/**
+ * The fallback anchor, and the line it is not allowed to cross.
+ *
+ * A defence whose own fixture nobody has quoted used to score null and leave
+ * its slot open. That is the right answer for a receiver and the wrong one for
+ * a defence, and the difference is this module's own thesis: a defensive
+ * fantasy week is dominated by how many points the offence across the field
+ * scores, and *that offence has been priced* — in its own games, by the same
+ * market, a week or two earlier.
+ *
+ * So the fallback is not a projection from another publisher and not a league
+ * average. It is the same betting market answering the same question late, and
+ * it says so on the card.
+ */
+describe('a defence whose own game nobody has priced', () => {
+  const scoring = SCORING;
+
+  it('is scored from what the market paid the opposing offence', () => {
+    const projection = projectDst({
+      game: { spread: null, total: null, opponent: 'CAR' },
+      scoring,
+      opponentForm: { impliedTotal: 16.3, games: 4 },
+    });
+
+    expect(projection.points).not.toBeNull();
+    expect(projection.opponentImpliedTotal).toBe(16.3);
+    expect(projection.reasons.join(' ')).toContain('what the market has paid this opponent');
+  });
+
+  it('pays a defence more for a worse offence, which is the whole model', () => {
+    const weak = projectDst({ game: { spread: null, total: null, opponent: 'X' }, scoring, opponentForm: { impliedTotal: 15, games: 4 } });
+    const strong = projectDst({ game: { spread: null, total: null, opponent: 'Y' }, scoring, opponentForm: { impliedTotal: 28, games: 4 } });
+
+    expect(weak.points!).toBeGreaterThan(strong.points!);
+  });
+
+  it('never claims high confidence on an average of other weeks', () => {
+    const projection = projectDst({
+      game: { spread: null, total: null, opponent: 'CAR' },
+      scoring,
+      opponentForm: { impliedTotal: 16.3, games: 10 },
+    });
+
+    expect(projection.confidence).not.toBe('high');
+  });
+
+  it('drops to low on a single priced game, and says how many', () => {
+    const projection = projectDst({
+      game: { spread: null, total: null, opponent: 'CAR' },
+      scoring,
+      opponentForm: { impliedTotal: 16.3, games: 1 },
+    });
+
+    expect(projection.confidence).toBe('low');
+    expect(projection.reasons.join(' ')).toContain('1 priced game');
+  });
+
+  it('prefers this week’s real line over the fallback, whenever there is one', () => {
+    const withLine = projectDst({
+      game: { spread: -7.5, total: 42.5, opponent: 'CAR' },
+      scoring,
+      opponentForm: { impliedTotal: 30, games: 6 },
+    });
+
+    // total/2 + spread/2 — the fixture's own number, not the form line's.
+    expect(withLine.opponentImpliedTotal).toBe(17.5);
+  });
+
+  it('still refuses when even the fallback has nothing', () => {
+    const none = projectDst({ game: null, scoring });
+    const empty = projectDst({ game: null, scoring, opponentForm: { impliedTotal: 20, games: 0 } });
+
+    expect(none.points).toBeNull();
+    expect(empty.points).toBeNull();
+  });
+
+  it('will not invent one for a league whose defence rules cannot be read', () => {
+    const projection = projectDst({
+      game: { spread: null, total: null, opponent: 'CAR' },
+      scoring: { supported: false, unsupported: ['pts_allow_custom'] } as never,
+      opponentForm: { impliedTotal: 16.3, games: 5 },
+    });
+
+    expect(projection.points).toBeNull();
+  });
+});

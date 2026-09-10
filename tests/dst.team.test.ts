@@ -400,3 +400,14 @@ describe('an empty slot says who it could not use, and why', () => {
     expect(lineup.slots.every((s) => (s.playerId ? s.vacancy.length === 0 : true))).toBe(true);
   });
 });
+
+describe('the fallback anchor belongs to the defence lane alone', () => {
+  it('leaves a receiver’s score untouched whether or not it is present', () => {
+    const base = candidate('wr1', 'Receiver One', 'WR', 16);
+    const withForm = { ...base, opponentForm: { impliedTotal: 15, games: 6 } };
+
+    // Whole-object comparison: a component, a driver or a confidence reason
+    // moving would be the same regression wearing a different hat.
+    expect(evaluatePlayer(withForm as never, PROFILE)).toEqual(evaluatePlayer(base, PROFILE));
+  });
+});
