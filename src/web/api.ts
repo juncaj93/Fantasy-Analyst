@@ -1328,6 +1328,24 @@ export interface LineupSlot {
   drivers?: string[];
   /** Where the evidence points different ways. */
   conflicts?: string[];
+  /**
+   * On an empty slot: who could have filled it, and why he is not in it.
+   *
+   * Optional and absent on an older server, which the row reads as "no reason
+   * was sent" and falls back to its old three words for — never as "there is
+   * nobody", which is the claim that made this field necessary.
+   */
+  vacancy?: SlotVacancy[];
+}
+
+/** One rostered player an empty slot could not use, and the reason. */
+export interface SlotVacancy {
+  playerId: string;
+  name: string;
+  position: string;
+  reason: string;
+  detail: string | null;
+  alreadyStarting: boolean;
 }
 
 export interface LineupSwap {

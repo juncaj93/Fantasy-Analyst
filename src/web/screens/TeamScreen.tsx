@@ -28,7 +28,6 @@ import {
   api,
   type LeagueSummary,
   type LineupRecommendation,
-  type LineupSlot,
   type RosterPlayer,
   type StartSitComparison,
   type StartSitEvaluation,
@@ -63,6 +62,7 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
+import { buildLineupVerdicts, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -75,6 +75,21 @@ interface OpenSlot {
 
 interface RosterResponse {
   league: { id: string; name: string; scoringLabel: string; notes: string[] };
+  /**
+   * The league's starting slots in Sleeper's own order, and who is in each.
+   *
+   * `starters` below is the same lineup as a set and is what the older parts of
+   * this screen read. These two are what let the lineup be drawn as slots with
+   * a verdict on each — the order the reader sees in Sleeper, and the player
+   * he has in each one.
+   *
+   * `starterSlotIds` is absent on a roster synced before migration 0039, which
+   * is read as "the order is not known" rather than as an empty lineup: the
+   * same starters are then placed by eligibility. Both are optional so an older
+   * server degrades to the set-based view instead of drawing a blank lineup.
+   */
+  rosterPositions?: string[];
+  starterSlotIds?: (string | null)[];
   starters: RosterPlayer[];
   bench: RosterPlayer[];
   /** True while the draft is running: `drafted` is the current truth, not `starters`. */
@@ -260,23 +275,67 @@ export function TeamScreen({
   );
 
   /*
-   * The bench, in the order the recommendation puts it.
+   * The lineup as slots, against the one Sleeper actually holds.
    *
-   * Best replacement first, then the players it could not score at all, then
-   * anybody the lineup never saw. Never a cross-position ranking against the
-   * starters: a backup quarterback above a starting flex answers no question.
+   * This is the screen's spine now. It is derived rather than fetched — both
+   * halves already arrived, one on the roster and one on the recommendation —
+   * so it cannot disagree with either, and it costs a request from neither.
+   */
+  const verdicts = useMemo<LineupVerdictRow[]>(() => {
+    if (!roster || !lineup?.slots?.length) return [];
+    return buildLineupVerdicts({
+      rosterPositions: roster.rosterPositions ?? [],
+      starterIds: (roster.starters ?? []).map((p) => p.playerId),
+      ...(roster.starterSlotIds ? { starterSlotIds: roster.starterSlotIds } : {}),
+      slots: lineup.slots,
+      /*
+       * The changes the optimiser would actually stand behind, and only those.
+       * Without this the rows would propose swaps the card above them declines
+       * to make — one screen answering to two rules.
+       */
+      suggestedSwapIns: new Set((lineup.swaps ?? []).map((s) => s.inPlayerId)),
+      positionOf: (id) => byId.get(id)?.position ?? null,
+    });
+  }, [roster, lineup, byId]);
+
+  /*
+   * The bench: who Sleeper is not starting.
+   *
+   * "Not in the *recommended* lineup" is what this used to mean, and it stopped
+   * being right when the list above became Sleeper's lineup rather than this
+   * app's. A player Sleeper starts appears in a slot row up there — as the man
+   * to keep, or the man a swap would replace — and listing him here as well put
+   * him in two places at once, in one case saying keep him above and showing
+   * him benched below.
+   *
+   * So the two lists now split on the same fact the reader's own app splits on:
+   * a slot row holds whoever Sleeper has in that slot, and the bench holds
+   * everybody else. A player the app wants *started* stays here, because here
+   * is where he actually is — the row above names him in its verdict line, and
+   * the two together say "he is on your bench, and he should not be". Claiming
+   * him for the lineup would leave the bench describing a roster the reader
+   * does not have.
+   *
+   * Order is unchanged: best replacement first, then the ones that could not be
+   * scored, then anybody the lineup never saw.
    */
   const bench = useMemo(() => {
     if (!roster) return [];
+    const inSleeperLineup = new Set(
+      verdicts.map((r) => r.currentPlayerId).filter((id): id is string => id != null),
+    );
+    /* Before the lineup exists there are no rows, so fall back to the app's own. */
+    const spokenFor = inSleeperLineup.size > 0 ? inSleeperLineup : startingIds;
     const order = [
       ...(lineup?.bench ?? []).map((e) => e.playerId),
       ...(lineup?.undecidable ?? []).map((e) => e.playerId),
     ];
-    const ranked = order.map((id) => byId.get(id)).filter((p): p is RosterPlayer => p != null && !startingIds.has(p.playerId));
+    const ranked = order.map((id) => byId.get(id)).filter((p): p is RosterPlayer => p != null && !spokenFor.has(p.playerId));
     const seen = new Set(ranked.map((p) => p.playerId));
-    const rest = [...byId.values()].filter((p) => !seen.has(p.playerId) && !startingIds.has(p.playerId));
+    const rest = [...byId.values()].filter((p) => !seen.has(p.playerId) && !spokenFor.has(p.playerId));
     return [...ranked, ...rest];
-  }, [roster, lineup, byId, startingIds]);
+  }, [roster, lineup, byId, startingIds, verdicts]);
+
 
   const hasRecommendation = Boolean(lineup?.found && (lineup?.slots.length ?? 0) > 0);
 
@@ -500,8 +559,18 @@ export function TeamScreen({
 
               {hasRecommendation && !roster.live ? (
                 <>
+                  {/*
+                    "Your lineup", because that is whose it is.
+                    
+                    It used to read `Recommended starters`, which named a list
+                    this app had made up rather than the one the reader owns.
+                    The rows below are his own Sleeper lineup, slot by slot, in
+                    Sleeper's order, annotated — so the heading names the thing
+                    on the screen and the annotations are the opinion.
+                  */}
                   <div className="section-title" data-testid="starters-title">
-                    Recommended starters
+                    Your lineup
+                    <span className="faint section-title-note">{lineupSummary(verdicts)}</span>
                   </div>
                   {/*
                     One inset group, not eight floating cards.
@@ -516,21 +585,42 @@ export function TeamScreen({
                     week rather than decorating a list.
                   */}
                   <div className="slot-group" data-testid="starters-group">
-                  {lineup!.slots.map((slot, i) => (
-                    <StarterCard
-                      key={`${slot.slot}-${i}`}
-                      slot={slot}
-                      player={slot.playerId ? (byId.get(slot.playerId) ?? null) : null}
-                      onOpen={() =>
-                        slot.playerId
-                          ? openPlayer(slot.playerId, {
-                              starting: true,
-                              slot: slot.slot,
-                              alreadyStarting: slot.alreadyStarting,
-                              locked: slot.locked,
-                            })
-                          : setCompare({ slot: slot.slot, seed: [] })
-                      }
+                  {verdicts.map((row, i) => (
+                    <VerdictCard
+                      key={`${row.slot}-${i}`}
+                      row={row}
+                      current={row.currentPlayerId ? (byId.get(row.currentPlayerId) ?? null) : null}
+                      recommended={row.recommendedPlayerId ? (byId.get(row.recommendedPlayerId) ?? null) : null}
+                      currentProjection={{
+                        points: row.currentPlayerId ? (evaluations.get(row.currentPlayerId)?.projection ?? null) : null,
+                        source: row.currentPlayerId
+                          ? (evaluations.get(row.currentPlayerId)?.projectionSource ?? null)
+                          : null,
+                      }}
+                      /*
+                       * A swap opens the comparison, seeded with both men.
+                       *
+                       * That is the decision the row is actually about, and the
+                       * tool for it already exists — sending the reader to one
+                       * player's card would make them go and find the other.
+                       */
+                      onOpen={() => {
+                        if (row.verdict === 'swap' && row.currentPlayerId && row.recommendedPlayerId) {
+                          setCompare({ slot: row.slot, seed: [row.currentPlayerId, row.recommendedPlayerId] });
+                          return;
+                        }
+                        const subject = row.recommendedPlayerId ?? row.currentPlayerId;
+                        if (subject) {
+                          openPlayer(subject, {
+                            starting: true,
+                            slot: row.slot,
+                            alreadyStarting: subject === row.currentPlayerId,
+                            locked: row.locked,
+                          });
+                          return;
+                        }
+                        setCompare({ slot: row.slot, seed: [] });
+                      }}
                     />
                   ))}
                   </div>
@@ -700,216 +790,236 @@ function spokenProjection(projection: number | null | undefined, source: RowProj
 }
 
 /**
- * One recommended starter, in the slot the league actually starts.
+ * What the nine rows add up to, in one clause beside the heading.
  *
- * The row is **neutral**, and that is deliberate: the wash belongs to the draft
- * board and to nothing else, so that a tinted row anywhere in this app means
- * "you are on Draft". Position colour still reaches this row — through the pill
- * on the leading edge. See `positionAccentClass`, which hands over the hue and
- * not the fill.
- *
- * Left to right the row is a sentence: who he is, whether he is fit, anything
- * about the *slot* that his position has not already said, and then what he is
- * worth. The availability tag sits against the name because it qualifies the
- * *player* — a `Q` at the far edge of a row reads as a fact about the number
- * beside it — and the trailing field holds that number alone, on the column the
- * bench below quotes its own in.
+ * The heading names a lineup; this says whether anything is wrong with it,
+ * which is the question the reader opened the screen with. Silence would be
+ * ambiguous — a screen showing nine quiet rows could equally mean "all good" or
+ * "nothing was checked" — so the settled case says so out loud.
  */
-function StarterCard({
-  slot,
-  player,
+function lineupSummary(rows: LineupVerdictRow[]): string {
+  if (rows.length === 0) return '';
+  const changes = rows.filter((r) => (r.verdict === 'swap' || r.verdict === 'fill') && !r.locked).length;
+  if (changes > 0) return `${changes} change${changes === 1 ? '' : 's'} to make`;
+  const unscored = rows.filter((r) => r.verdict === 'no_pick').length;
+  if (unscored > 0) return `nothing to change${unscored === 1 ? ', one slot unscored' : `, ${unscored} slots unscored`}`;
+  return 'nothing to change';
+}
+
+/**
+ * One slot of the reader's own lineup, and what this app would do with it.
+ *
+ * The row that replaced `Recommended starters`. The difference is whose lineup
+ * it draws: this one starts from what Sleeper holds and annotates it, so a slot
+ * the app agrees with is still a row. That is deliberate and it is most of the
+ * point — nine rows where five are quiet says "I looked at nine and five are
+ * fine", and a screen that printed only the two problems would leave the reader
+ * wondering what it had not examined.
+ *
+ * Left to right it is the same sentence every other list in this app opens
+ * with — who, then what about him, then what he is worth — and the verdict
+ * takes a second line only when it has two names to fit on it.
+ */
+function VerdictCard({
+  row,
+  current,
+  recommended,
+  currentProjection,
   onOpen,
 }: {
-  slot: LineupSlot;
-  player: RosterPlayer | null;
-  /** Tapping a player opens his week — see `openPlayer`. */
+  row: LineupVerdictRow;
+  /** Who Sleeper has in the slot, hydrated. Null when Sleeper left it empty. */
+  current: RosterPlayer | null;
+  /** Who this app would start, hydrated. Null when it will not fill the slot. */
+  recommended: RosterPlayer | null;
+  /**
+   * The incumbent's own projection and whose it is, for the rows he leads.
+   *
+   * One object rather than two props for the reason stated all over this
+   * codebase: a row that could be handed a number without its provenance is a
+   * row that could print Rotowire's model as this app's.
+   */
+  currentProjection: { points: number | null; source: RowProjectionSource };
   onOpen: () => void;
 }) {
-  if (!slot.playerId || !slot.name) {
+  /*
+   * Whose row it is.
+   *
+   * The incumbent on every verdict except `fill`, where there is no incumbent
+   * and the recommendation is the only person in the story. A `swap` therefore
+   * leads with the man currently starting — the reader is looking for his own
+   * lineup, and finding a stranger's name in the slot is how a screen loses him
+   * — and the change is stated underneath, in the order he would act on it.
+   */
+  const subject = row.verdict === 'fill' ? recommended : (current ?? recommended);
+  const position = subject?.position ?? '';
+  const blocked = row.vacancy[0] ?? null;
+  /* The figure belonging to whoever leads the row — see the trailing field. */
+  const shown =
+    row.verdict === 'fill'
+      ? { points: row.projection, source: row.projectionSource }
+      : currentProjection;
+
+  if (!subject) {
+    /*
+     * Empty in Sleeper and empty here, which is still two different sentences.
+     *
+     * `Nobody eligible yet` is true of a half-drafted roster and false of one
+     * that holds a player for the slot this app cannot put a number on — the
+     * defence nobody has quoted, sitting on the bench rather than in the
+     * lineup. That distinction is the whole of the earlier fix and it has to
+     * survive the row being rebuilt around Sleeper's lineup, because this is
+     * exactly the slot where the reader has nothing else to go on.
+     */
+    const accepts = row.accepts.length > 1 ? row.accepts.join(', ') : null;
     return (
-      <div className="player-row" data-testid="starter-row" data-slot={slot.slot} data-starter="empty">
-        {/*
-          Three words, on a row half the height of a player's.
-
-          This has been cut twice. It used to be two lines — "Nobody eligible to
-          start here" at the weight and size of a player's name, with "Takes QB"
-          under it — and then one. One line was still too much: a roster four
-          players deep mid-draft has four or five of these, and five copies of
-          the same nine-word sentence, each on a row as tall as a real player's,
-          is a list shouting about what it does not have above the answer it
-          does. They read as repetition rather than as information, which is
-          exactly what they are.
-
-          So the sentence is now as short as it can be while still being a
-          sentence, and the row is sized for it. The slot chip beside it already
-          says which spot is open, which is why "takes QB" went: it repeated the
-          chip. What it does not repeat is kept — a FLEX takes three positions
-          and its chip cannot say which, so that one still lists them.
-        */}
+      <div
+        className="player-row"
+        data-testid="starter-row"
+        data-slot={row.slot}
+        data-starter="empty"
+        data-verdict={row.verdict}
+        data-vacancy={blocked ? 'explained' : 'none'}
+        aria-label={
+          blocked
+            ? `${row.slot}: ${blocked.name} ${blocked.reason}` + (blocked.detail ? `, ${blocked.detail}` : '')
+            : `${row.slot}: nobody eligible yet`
+        }
+      >
         <div className="player-row-top">
-          <span className="slot-label">{slot.slot}</span>
-          <span className="empty-slot-line">
-            Nobody eligible yet
-            {slot.accepts.length > 1 ? <span className="faint"> · {slot.accepts.join(', ')}</span> : null}
-          </span>
+          <span className="slot-label">{row.slot}</span>
+          {blocked ? (
+            <span className="empty-slot-line" data-testid="vacancy-line">
+              <span className="vacancy-name">{blocked.name}</span> {blocked.reason}
+            </span>
+          ) : (
+            <span className="empty-slot-line">
+              Nobody eligible yet
+              {accepts ? <span className="faint"> · {accepts}</span> : null}
+            </span>
+          )}
         </div>
+        {blocked && (blocked.detail || accepts) ? (
+          <div className="faint vacancy-detail">
+            {[blocked.detail, accepts ? `takes ${accepts}` : null].filter(Boolean).join(' · ')}
+          </div>
+        ) : null}
       </div>
     );
   }
-
-  const position = player?.position ?? slot.position ?? '';
-  /*
-   * The one line under the row, and usually there is none.
-   *
-   * A conflict is the only thing a collapsed card still says in a sentence,
-   * because it is the only one that changes what the reader does with the card:
-   * it says this call is close and the evidence disagrees with itself. The
-   * drivers — *why* he is the pick — moved into the sheet the card opens, where
-   * they sit beside the numbers they came from instead of costing a line on
-   * every one of eight rows.
-   */
-  const consequence = (slot.conflicts ?? [])[0] ?? null;
 
   return (
     <button
       className={positionAccentClass(position, 'player-row starter-row')}
       data-testid="starter-row"
-      data-slot={slot.slot}
+      data-slot={row.slot}
       data-starter="true"
+      data-verdict={row.verdict}
       data-position={position.toUpperCase()}
-      data-player-id={slot.playerId}
       /*
-       * The whole state of the row, in the accessible name.
+       * Two ids, because the row is now about two people.
        *
-       * This is where "starter" survives now that the word has left the face of
-       * the card: the section heading above says it once, the slot chip says
-       * which spot, and anything reading the row aloud gets the sentence.
+       * `data-player-id` is whoever leads the row — the incumbent on every
+       * verdict but `fill` — and `data-recommended-player-id` is who this app
+       * would actually start. They differ on exactly the rows that matter, and
+       * keeping them apart is what lets "is an unplayable player being
+       * recommended" stay a question the DOM can answer. It is not the same
+       * question as "does an unplayable player appear on the screen", which he
+       * now does on purpose: his slot is the one you have to fix.
+       */
+      data-player-id={subject.playerId}
+      data-recommended-player-id={row.recommendedPlayerId ?? ''}
+      /*
+       * The whole row in one sentence: the slot, who is in it, and the verdict.
+       * A reader hearing this should not need the visible layout to act.
        */
       aria-label={
-        `${slot.name}, recommended starter at ${slot.slot}` +
-        spokenProjection(slot.projection, slot.projectionSource) +
-        `${slot.locked ? ', locked' : ''}` +
-        `${!slot.alreadyStarting && !slot.locked ? ', not in your Sleeper lineup' : ''}` +
-        `${player?.status ? `, ${player.status}` : ''}`
+        `${row.slot}: ${subject.name}` +
+        (row.verdict === 'keep' ? ', keep him' : '') +
+        (row.verdict === 'swap' ? `, start ${row.recommendedName} instead` : '') +
+        (row.verdict === 'fill' ? ', this slot is empty in Sleeper' : '') +
+        (row.verdict === 'no_pick' ? `, ${blocked?.reason ?? 'cannot be scored this week'}` : '') +
+        spokenProjection(shown.points, shown.source) +
+        (row.locked ? ', locked' : '') +
+        (subject.status ? `, ${subject.status}` : '')
       }
       onClick={onOpen}
     >
       <div className="player-row-top">
         {/*
-          Who he is, in the order every other list in this app opens with.
+          Position, club, name — the leading edge every list in this app shares.
 
-          Position, club, name — the rule `PlayerIdentity` settles and that
-          `e2e/row-alignment.spec.ts` already holds Draft, Players, Trades and
-          Waivers to. Team was the one list that did not follow it: it led with
-          the lineup *slot* and put the club at the far trailing edge beside the
-          number, so a reader assembling "who is this" took the position from one
-          end of the row and the club from the other — and the bench below it led
-          with `BN`, which is not a position at all and lined up with nothing.
-
-          The cluster is `flex: none` with a fixed-width pill, so every name on
-          the screen starts on the same x whether it is a starter or a bench
-          player, and the bench opening underneath cannot shift the column.
+          The slot does *not* go here, and that is load-bearing rather than a
+          preference: the identity cluster is a fixed-width pill so that every
+          name on the screen starts on the same x, starter or bench, and a slot
+          chip in front of it shifts the whole row by however many letters the
+          slot happens to have. `FLEX` and `QB` are different widths, so it does
+          not even shift them by the same amount — the column goes ragged, which
+          is what `e2e/row-alignment.spec.ts` exists to catch and did.
         */}
-        <PlayerIdentity position={position} team={player?.team ?? ''} />
-        <span className="player-name">{slot.name}</span>
+        <PlayerIdentity position={position} team={subject.team ?? ''} />
+        <span className="player-name">{subject.name}</span>
+        <InjuryTag status={subject.status} />
         {/*
-          Availability against the name, because it is about him.
+          The tags about the *slot*, after the name, for the reason above.
 
-          `Q` is the one fact that can change a decision before any of the
-          numbers do, and where it sits decides what it appears to qualify. At
-          the right-hand end of the row it sat next to the projection and read
-          as a note about that number; here it reads as part of the player, which
-          is what it is.
-        */}
-        <InjuryTag status={player?.status} />
-        {/*
-          The tags that are about the *slot* rather than the player.
-
-          The slot is named only when it is not already the position on the
-          leading edge. A back in an RB spot would be the row saying `RB` twice;
-          a back in a FLEX spot is the one case where the slot carries something
-          the pill cannot, and it is the row where a reader most needs it. So the
-          chip appears on exactly the rows that need it and nowhere else, which
-          also keeps it off the bench — where there is no slot to name.
-
-          These sit after the name rather than on the leading edge precisely so
-          the identity columns stay identical between a starter and a bench row.
+          The slot is named only where the pill has not already said it: a back
+          in an RB spot would be the row saying `RB` twice, and a back in a FLEX
+          spot is the one case where the slot carries something the pill cannot.
         */}
         <span className="row-tags">
-          {position && position.toUpperCase() !== slot.slot.toUpperCase() ? (
-            <span className="tag tag-calm tag-mini" data-testid="slot-tag" title={`Starting at ${slot.slot}`}>
-              {slot.slot}
+          {position && position.toUpperCase() !== row.slot.toUpperCase() ? (
+            <span className="tag tag-calm tag-mini" data-testid="slot-tag" title={`Starting at ${row.slot}`}>
+              {row.slot}
             </span>
           ) : null}
-          {slot.locked ? (
+          {row.locked ? (
             <span className="tag tag-calm tag-mini" data-testid="locked-tag">
               Locked
             </span>
           ) : null}
-          {/*
-            `Not in Sleeper` was the words here, and they were read as the app
-            recommending somebody the reader does not own.
-
-            Reported post-draft against a real league: three players named as
-            "tagged Not in Sleeper elsewhere on the same screen — meaning he
-            isn't on my roster". Every one of them was on the roster; this
-            endpoint reads nothing else. The tag has only ever meant the
-            narrower thing the row's own accessible name has always said — that
-            the *lineup* Sleeper holds does not have him in this slot — and on a
-            screen whose whole subject is a Sleeper roster, "not in Sleeper" is
-            a sentence about the roster.
-
-            `On your bench` says the same fact from the reader's side and cannot
-            be read as a claim about who they own. The `data-testid` is
-            unchanged: it names the condition, which has not moved.
-          */}
-          {!slot.alreadyStarting && !slot.locked ? (
-            <span
-              className="tag tag-warn tag-mini"
-              data-testid="not-in-lineup-tag"
-              title="On your bench in Sleeper — this is a change to make there"
-            >
-              On your bench
-            </span>
-          ) : null}
         </span>
-        {/*
-          The trailing edge is the number and nothing else.
-
-          The club's mark used to share this field. It has gone to the leading
-          edge with the rest of his identity, which is where a reader assembles
-          "who is this" — so what is left here is one value in one fixed field,
-          and it is the same field the bench below quotes its own number in. It
-          was not: a bench row put its number in the open with a position badge
-          after it, and a badge is as wide as the letters in it, so the two
-          halves of one roster ran their values down two different columns.
-
-          It is `projection` and never `score`. The score is the comparable
-          number this slot was won with — with no market published it is a
-          handful of adjustments, and printing it here put Jalen Hurts at 3.15
-          points against a published week-one figure of 20.98. A dash is the
-          honest answer when nobody has priced him; see
-          `core/startsit/projection.ts`.
-
-          It is a *projection* in every state, and never a live score: this
-          screen does not read Sleeper's running points at all — that is the
-          Matchup screen's job. The word is in the tooltip and in the row's
-          accessible name so the bare number cannot be mistaken for one.
-        */}
         <span className="row-value">
+          {/*
+            The subject's own number, and never the other man's.
+
+            On a `swap` this is the incumbent's, because he is the subject of
+            the row; the challenger's is on the verdict line beside his name,
+            where it reads as part of the proposal rather than as a correction
+            to the figure above it.
+          */}
           <span
             className="proj"
             data-testid="starter-proj"
-            data-projection-source={slot.projectionSource ?? 'none'}
-            title={projectionTitle(slot.projection, slot.projectionSource)}
+            data-projection-source={shown.source ?? 'none'}
+            title={projectionTitle(shown.points, shown.source)}
           >
-            {slot.projection == null ? '—' : slot.projection.toFixed(1)}
+            {shown.points == null ? '—' : shown.points.toFixed(1)}
           </span>
         </span>
       </div>
-      {consequence ? (
-        <div className="player-row-consequence" data-testid="starter-conflict">
-          {consequence}
+      {/*
+        The verdict, on its own line, and only when it is not `keep`.
+
+        A quiet row is the message for a slot with nothing to do — a tick or a
+        `Keep` badge on five of nine rows is noise competing with the two rows
+        that matter. What earns a line is a change, or a reason there is not one.
+      */}
+      {row.verdict === 'swap' ? (
+        <div className="verdict-line" data-testid="verdict-swap">
+          <span className="verdict-arrow" aria-hidden="true">→</span> Start{' '}
+          <span className="verdict-name">{row.recommendedName}</span> instead
+          {row.projection != null ? <span className="faint"> · {row.projection.toFixed(1)}</span> : null}
+        </div>
+      ) : null}
+      {row.verdict === 'fill' ? (
+        <div className="verdict-line" data-testid="verdict-fill">
+          <span className="verdict-arrow" aria-hidden="true">→</span> This slot is empty in Sleeper
+        </div>
+      ) : null}
+      {row.verdict === 'no_pick' ? (
+        <div className="faint verdict-line" data-testid="verdict-no-pick">
+          {blocked ? `${blocked.reason}${blocked.detail ? ` — ${blocked.detail}` : ''}` : 'Cannot be scored this week'}
         </div>
       ) : null}
     </button>
@@ -973,11 +1083,16 @@ function BenchCard({
         {/*
           Against the name, exactly as on a starter — a direct child of the row
           rather than wrapped, so the seam either side of it is the row's own gap
-          on both. There is no `.row-tags` here because there is nothing to put
-          in it: `Locked` and `On your bench` are facts about a lineup slot, and
-          a bench player has none.
+          on both.
+
+          Nothing about a lineup slot, because a bench player holds none — and
+          because the lineup above now accounts for everybody who does. The
+          `Starting in Sleeper` tag that briefly lived here was the smaller fix
+          for a problem the slot rows solve properly: a player Sleeper starts is
+          in a row up there, so he is no longer down here to be tagged.
         */}
         <InjuryTag status={player.status} />
+
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
           <span

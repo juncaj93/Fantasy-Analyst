@@ -207,6 +207,23 @@ export interface DstProjectionInput {
   lineAsOf?: string | null;
   /** True at home, false on the road, absent when the schedule is unknown. */
   home?: boolean | null;
+  /**
+   * What the market has been paying the opposing offence, over games it priced.
+   *
+   * The fallback anchor, and only ever the fallback: when this defence's own
+   * game carries a total and a spread, that line is the better reading of this
+   * fixture and this field is not consulted at all.
+   *
+   * It is a *measurement of a market*, not a model — the mean implied team
+   * total across the opponent's own priced games, which is the same arithmetic
+   * and the same sign convention used above. That is what makes it admissible
+   * where a projection from another publisher would not be: it is still the
+   * betting market talking, about the same offence, a week or two earlier.
+   *
+   * `games` travels with it because one game is a data point and five are a
+   * form line, and the confidence below is allowed to know the difference.
+   */
+  opponentForm?: { impliedTotal: number; games: number } | null;
 }
 
 /**
@@ -238,17 +255,21 @@ export function projectDst(input: DstProjectionInput): DstProjection {
      * Both, or neither. A total without a spread cannot say which side of it
      * this defence is on, and half of an anchor is not a cheaper anchor — it is
      * a different number wearing the same name.
+     *
+     * With neither, the fixture is unpriced and there is one more place to look
+     * before giving up on it: what the market has been paying the offence
+     * across the field, in games it *did* price. See {@link fromOpponentForm}
+     * for why a defence gets that second look and a receiver does not.
      */
-    return {
-      ...UNKNOWN_BASE,
-      reasons: [
-        total == null && spread == null
-          ? 'no game line for this defence'
-          : total == null
-            ? 'no game total for this defence'
-            : 'no spread for this defence, so which side of the total is unknown',
-      ],
-    };
+    const missing =
+      total == null && spread == null
+        ? 'no game line for this defence'
+        : total == null
+          ? 'no game total for this defence'
+          : 'no spread for this defence, so which side of the total is unknown';
+
+    const fallback = fromOpponentForm(input, missing);
+    return fallback ?? { ...UNKNOWN_BASE, reasons: [missing] };
   }
 
   /*
@@ -285,6 +306,82 @@ export function projectDst(input: DstProjectionInput): DstProjection {
     qb: quarterbackAdjustment(input),
     home: input.home ?? null,
   });
+}
+
+/** How many priced opponent games the fallback anchor needs before it is used. */
+export const DST_FORM = {
+  /**
+   * One. A single priced game is a real number from a real market.
+   *
+   * Deliberately not three: in September a team has played once, and a rule
+   * that waits for a form line is a rule that refuses every defence in exactly
+   * the weeks the fallback exists for. What one game buys is stated rather than
+   * hidden — the confidence below is capped harder for it, and the reason names
+   * the count — which is the same treatment thin data gets everywhere else in
+   * this codebase.
+   */
+  minGames: 1,
+  /** Games below which the anchor is called thin and confidence drops to low. */
+  thinGames: 3,
+} as const;
+
+/**
+ * A defence's fallback anchor: what the market pays the offence across the field.
+ *
+ * ## Why a defence gets this and a receiver does not
+ *
+ * The rule everywhere else in this app is that no market means no number, and
+ * that rule is not being softened here — it is being met a different way. A
+ * receiver with no line for his game has no substitute available: his week
+ * turns on his own snaps, his own targets and his own health, and last week's
+ * team total says nothing about whether he will see eight looks or two. There
+ * is no measurement of *him* hiding in another game.
+ *
+ * A defence is different in kind, and the difference is this module's whole
+ * thesis stated in its header: a defensive fantasy week is dominated by one
+ * quantity, how many points the offence across the field scores. That offence
+ * has been priced by the same market, in its own games, and the mean of those
+ * implied totals is a genuine reading of how good it is. So where a receiver's
+ * fallback would be a guess, a defence's is the same market answering the same
+ * question a week late.
+ *
+ * ## What it is not allowed to become
+ *
+ * It is not a line for *this* fixture, and it never claims to be. The spread is
+ * gone, so the game-script residual is gone with it — zero here is the honest
+ * value rather than a missing one, exactly as on the forward path. The
+ * quarterback residual is gone for the same reason: there is no line for news
+ * to post-date. And confidence can never reach `high`, whatever the inputs,
+ * because the anchor is an average of other weeks rather than a price on this
+ * one.
+ *
+ * Null when there is nothing to stand on, and the caller then reports the
+ * original absence unchanged. A fallback that invents a number when even the
+ * fallback has no data would be the failure this whole lane exists to prevent.
+ */
+function fromOpponentForm(input: DstProjectionInput, missing: string): DstProjection | null {
+  const form = input.opponentForm ?? null;
+  if (!form || form.games < DST_FORM.minGames || !Number.isFinite(form.impliedTotal)) return null;
+  if (!scoresDefences(input.scoring)) return null;
+
+  const projection = buildFromAnchor({
+    opponentImpliedTotal: round1(form.impliedTotal),
+    spread: null,
+    scoring: input.scoring,
+    qb: { points: 0, detail: '', reason: null },
+    home: input.home ?? null,
+  });
+
+  const thin = form.games < DST_FORM.thinGames;
+  return {
+    ...projection,
+    confidence: thin ? 'low' : projection.confidence === 'high' ? 'medium' : projection.confidence,
+    reasons: [
+      ...projection.reasons,
+      `${missing} — anchored instead on what the market has paid this opponent's offence ` +
+        `(${round1(form.impliedTotal)} implied over ${form.games} priced game${form.games === 1 ? '' : 's'})`,
+    ],
+  };
 }
 
 /**

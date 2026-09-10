@@ -99,6 +99,14 @@ export interface StartSitInput {
    */
   opponentQuarterback?: { starterOut: boolean; observedAt: string | null } | null;
   /**
+   * What the market has paid this player's opponent, over games it priced.
+   *
+   * Read by the defence lane and by nothing else — see `dstProjection.ts`'s
+   * `fromOpponentForm` for why a defence may fall back on it and a receiver may
+   * not. Absent is the ordinary state and costs the fallback, not the score.
+   */
+  opponentForm?: { impliedTotal: number; games: number } | null;
+  /**
    * Whether this player's team is at home this week.
    *
    * Read by the defence model and nobody else, for the smallest of its three
@@ -613,6 +621,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     opponentQuarterback: input.opponentQuarterback ?? null,
     lineAsOf: input.lineAsOf ?? null,
     home: input.home ?? null,
+    opponentForm: input.opponentForm ?? null,
   });
 
   /*

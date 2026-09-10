@@ -67,9 +67,15 @@ test.describe('the recommended lineup, at a glance', () => {
    */
   test('leaves every row on the group surface, and puts the position in the chip', async ({ page }) => {
     const filled = page.locator('[data-testid="starter-row"][data-starter="true"]');
-    // Four of the eight slots: the demo roster is deliberately partial, and the
-    // defence it now rosters fills one of them.
-    expect(await filled.count(), 'the demo roster fills four slots').toBe(4);
+    /*
+     * Five of the eight slots carry a player now, not four.
+     *
+     * The list is the reader's own Sleeper lineup rather than this app's
+     * recommendation, so a slot Sleeper has filled is drawn even where the app
+     * disagrees with it — the tight end on injured reserve is in the seeded
+     * lineup, and his slot is precisely the one worth showing him in.
+     */
+    expect(await filled.count(), 'the demo roster fills five slots').toBe(5);
 
     const surface = await page.getByTestId('starters-group').evaluate((el) => getComputedStyle(el).backgroundColor);
     for (const card of await filled.all()) {
@@ -104,7 +110,13 @@ test.describe('the recommended lineup, at a glance', () => {
    * matters to a screen reader and survives a monochrome display.
    */
   test('says starter and bench in words, not only in colour', async ({ page }) => {
-    await expect(page.getByTestId('starters-title')).toContainText(/starters/i);
+    /*
+     * The heading names the lineup and says whether anything is wrong with it.
+     * It used to read `Recommended starters`, which named a list this app had
+     * invented rather than the one the reader owns.
+     */
+    await expect(page.getByTestId('starters-title')).toContainText(/your lineup/i);
+    await expect(page.getByTestId('starters-title')).toContainText(/change|nothing to change/i);
 
     const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
     /*
@@ -113,7 +125,7 @@ test.describe('the recommended lineup, at a glance', () => {
      * the one place it is always spoken, and that is what is asserted. What the
      * face carries instead is the position, checked in the test above.
      */
-    await expect(starter).toHaveAttribute('aria-label', /recommended starter at/i);
+    await expect(starter).toHaveAttribute('aria-label', /^[A-Z]+: .+, (keep him|start .+ instead)/i);
     // The projection is spoken as a projection rather than left as a bare number.
     await expect(starter).toHaveAttribute('aria-label', /projected [\d.]+ points/i);
 
@@ -157,26 +169,47 @@ test.describe('the recommended lineup, at a glance', () => {
     const slots = await page.getByTestId('starter-row').evaluateAll((rows) =>
       rows.map((r) => r.getAttribute('data-slot')),
     );
-    // The league's own order, defence included: dedicated slots first in the
-    // order Sleeper lists them, then the flex.
-    expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'DEF', 'FLEX']);
+    /*
+     * Sleeper's own `roster_positions` order, which is the order the reader
+     * sees in the app he is going to make the change in. It used to be the
+     * optimiser's internal order — every dedicated slot, then the flexes —
+     * which put DEF above FLEX and left him translating between two screens.
+     */
+    expect(slots).toEqual(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'DEF']);
   });
 
   /**
-   * A slot nothing can fill says so, rather than being quietly dropped — and
-   * says it in three words on a short row, because mid-draft there are four or
-   * five of them and the repetition was drowning the slots that *were* filled.
+   * A slot nothing can fill says so, rather than being quietly dropped.
+   *
+   * Two kinds of empty row, and they are deliberately different lengths. A slot
+   * with a rostered player behind it names him and says why he is not in it —
+   * that is the row that used to read `Nobody eligible yet` over a roster that
+   * plainly had an eligible player on it. A slot with genuinely nobody behind
+   * it keeps the three words and the short row it was cut down to, because
+   * mid-draft there are four or five of those and the repetition was drowning
+   * the slots that *were* filled.
    */
   test('shows an unfillable slot honestly, and briefly', async ({ page }) => {
     const empty = page.locator('[data-testid="starter-row"][data-starter="empty"]');
     expect(await empty.count()).toBeGreaterThan(0);
-    await expect(empty.first()).toContainText('Nobody eligible yet');
 
-    // Materially shorter than a row carrying a player, which is the point.
+    const bare = page.locator('[data-testid="starter-row"][data-starter="empty"][data-vacancy="none"]');
+    const explained = page.locator('[data-testid="starter-row"][data-starter="empty"][data-vacancy="explained"]');
     const filled = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
-    const blank = (await empty.first().boundingBox())!.height;
     const player = (await filled.boundingBox())!.height;
-    expect(blank, `an empty slot costs ${blank}px against a player's ${player}px`).toBeLessThan(player * 0.8);
+
+    if ((await bare.count()) > 0) {
+      await expect(bare.first()).toContainText('Nobody eligible yet');
+      // Materially shorter than a row carrying a player, which is the point.
+      const blank = (await bare.first().boundingBox())!.height;
+      expect(blank, `an empty slot costs ${blank}px against a player's ${player}px`).toBeLessThan(player * 0.8);
+    }
+
+    if ((await explained.count()) > 0) {
+      // It names the player and never claims nobody is eligible for him.
+      await expect(explained.first().getByTestId('vacancy-line')).toBeVisible();
+      await expect(explained.first()).not.toContainText('Nobody eligible yet');
+    }
 
     // A FLEX cannot be read off its own chip, so it still lists what it takes.
     const flex = page.locator('[data-testid="starter-row"][data-slot="FLEX"][data-starter="empty"]');
@@ -184,15 +217,33 @@ test.describe('the recommended lineup, at a glance', () => {
   });
 
   /**
-   * Nate Kowalski is on injured reserve and is one of two tight ends here. He
-   * is on the bench, untinted, and the tight-end slot went to the other one.
+   * Nate Kowalski is on injured reserve and Sleeper has him in the lineup.
+   *
+   * He is on the screen, and that is the fix rather than the regression: the
+   * slot he occupies is precisely the one worth showing him in, and hiding it
+   * would hide the change the reader needs to make. What must never happen is
+   * this app *recommending* him, which is now a separate attribute and a
+   * separate question.
+   *
+   * He is not also on the bench. The two lists split on the fact the reader's
+   * own app splits on — Sleeper's lineup above, Sleeper's bench below — so a
+   * player in one is not in the other.
    */
   test('never highlights a player who cannot play', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
-    const kowalski = page.locator('[data-testid="bench-row"][data-player-id="1009"]');
-    await expect(kowalski).toBeVisible();
-    await expect(kowalski).not.toHaveClass(/card-pos/);
-    await expect(page.locator('[data-testid="starter-row"][data-player-id="1009"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="bench-row"][data-player-id="1009"]')).toHaveCount(0);
+
+    const hisSlot = page.locator('[data-testid="starter-row"][data-player-id="1009"]');
+    /*
+     * `no_pick`: he is out and the thin demo bench has nobody eligible for the
+     * flex, so this app declines to name a starter rather than inventing one.
+     * The row says why in his own words — "is on injured reserve".
+     */
+    await expect(hisSlot).toHaveAttribute('data-verdict', 'no_pick');
+    await expect(hisSlot).toContainText(/injured reserve/i);
+    // Nowhere on the lineup is he the recommendation, in his own slot or any other.
+    await expect(page.locator('[data-testid="starter-row"][data-recommended-player-id="1009"]')).toHaveCount(0);
+    // And the tight-end slot went to the other one, as it always did.
     await expect(page.locator('[data-testid="starter-row"][data-slot="TE"]')).toContainText('Andre Sotelo');
   });
 });

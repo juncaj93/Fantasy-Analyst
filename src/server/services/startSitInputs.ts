@@ -15,7 +15,8 @@ import { EvidenceRepo } from '../repos/evidence.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
-import { homeByTeam } from '../../core/nfl/schedule.ts';
+import { homeByTeam, indoorByTeam } from '../../core/nfl/schedule.ts';
+import { seasonStartIso } from '../../core/dst/assemble.ts';
 import { InjuryService } from './injuryService.ts';
 import { UsageService, roleMetricsFrom } from './usageService.ts';
 import type { StoredUsageWeek } from '../repos/usage.ts';
@@ -130,6 +131,28 @@ export async function startSitInputsFor(
       ...(context.home.has((player.team ?? '').toUpperCase())
         ? { home: context.home.get((player.team ?? '').toUpperCase())! }
         : {}),
+      /*
+       * Indoors, when the fixture list says so, and nothing when it does not.
+       *
+       * The weather model has always had an indoor branch — a dome is the
+       * absence of the question rather than a mild day — and never had anything
+       * to trigger it, because nothing set `weather` at all. This does not
+       * invent a forecast: an outdoor game passes no object, so the component
+       * stays `unknown`, exactly as it was.
+       */
+      ...(context.indoor.get((player.team ?? '').toUpperCase())
+        ? { weather: { indoor: true, source: 'fixture list' } }
+        : {}),
+      /*
+       * The opposing offence's market form, for the defence lane's fallback.
+       *
+       * Set for everybody rather than only for defences because the engine's
+       * skill-position path does not read it — see the field's own note — and a
+       * per-position branch here would put the same fact in two shapes.
+       */
+      ...(game?.opponent && context.opponentForm.has(game.opponent.toUpperCase())
+        ? { opponentForm: context.opponentForm.get(game.opponent.toUpperCase())! }
+        : {}),
       defenseTendencies: context.defense,
       mode: opts.mode ?? 'balanced',
       propsStale: false,
@@ -159,6 +182,32 @@ export interface StartSitContext {
    * dropping the term.
    */
   home: Map<string, boolean>;
+  /**
+   * Which teams are playing indoors, off the same fixture rows as `home`.
+   *
+   * Built from `roof`, which this app already stores and had never read. It
+   * costs no additional query — the rows are the ones `home` is derived from —
+   * and it is the only environmental fact available here, since there is no
+   * weather feed. Absent for every team playing outdoors or under a roof whose
+   * state is unpublished, which leaves the weather component unknown rather
+   * than claiming a forecast nobody has.
+   */
+  indoor: Map<string, boolean>;
+  /**
+   * What the market has paid each offence, over the games it actually priced.
+   *
+   * The fallback anchor a defence may use when its *own* fixture is unpriced —
+   * see `dstProjection.ts`'s `fromOpponentForm` for why a defence gets that
+   * second look and a receiver does not.
+   *
+   * **Empty unless it could be needed.** The read below is skipped entirely
+   * when every fixture in this week's window already carries a line, because
+   * then no defence can reach the fallback and the query would buy nothing.
+   * That condition is free to evaluate — the events are already in hand — and
+   * it matters on a database this app has run to the edge of its quota twice
+   * this week.
+   */
+  opponentForm: Map<string, { impliedTotal: number; games: number }>;
 }
 
 export async function buildStartSitContext(
@@ -182,10 +231,17 @@ export async function buildStartSitContext(
    * knowing which side of a game a defence is on and the next one not. A season
    * or a week Sleeper has not published yet skips the read entirely.
    */
-  const home =
+  /*
+   * One read, two facts. `home` and `indoor` are both derived from the same
+   * fixture rows, so the second one is free — which matters on a database this
+   * app has repeatedly run to the edge of its quota.
+   */
+  const fixtures =
     state?.season && state.week != null && state.week > 0
-      ? homeByTeam(await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => []))
-      : new Map<string, boolean>();
+      ? await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => [])
+      : [];
+  const home = homeByTeam(fixtures);
+  const indoor = indoorByTeam(fixtures);
 
   const schedule: StartSitContext['schedule'] = new Map();
   for (const event of events) {
@@ -213,6 +269,22 @@ export async function buildStartSitContext(
     }
   }
 
-  return { schedule, defense, home };
+  /*
+   * One aggregate, and only when a defence could actually need it.
+   *
+   * `schedule` above is this week's events; if all of them carry a total and a
+   * spread then every defence is priced the ordinary way and the fallback is
+   * unreachable. Asking anyway would be a season-wide scan bought for nothing,
+   * on a path Team, Matchup and Waivers all run.
+   */
+  const anyUnpriced = [...schedule.values()].some((g) => g.total == null || g.spread == null);
+  const opponentForm =
+    anyUnpriced && state?.season
+      ? await new VegasEventsRepo(db)
+          .impliedTotalsByTeam(seasonStartIso(String(state.season)), now.toISOString())
+          .catch(() => new Map<string, { impliedTotal: number; games: number }>())
+      : new Map<string, { impliedTotal: number; games: number }>();
+
+  return { schedule, defense, home, indoor, opponentForm };
 }
 

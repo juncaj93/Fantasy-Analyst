@@ -117,6 +117,7 @@
       "src/core/sleeper/transform.ts",
       "src/core/startsit/mode.ts",
       "src/core/startsit/projection.ts",
+      "src/core/startsit/sleeperLineup.ts",
       "src/core/startsit/weekCard.ts",
       "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",

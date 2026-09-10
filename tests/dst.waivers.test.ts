@@ -285,6 +285,161 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     expect(context.home.size).toBe(0);
   });
 
+  /*
+   * A bye is a fact about the NFL calendar, and this app has a source for it.
+   *
+   * `unavailableReason` used to say `is on bye` for any defence with no game on
+   * its input, which is that claim inferred from a missing row in this app's own
+   * database. Two different things arrive here looking identical — a fixture
+   * never ingested, and a game no book has quoted — and neither is a bye. In
+   * week 1, where there are no byes at all, it was flatly false.
+   */
+  it('calls a bye a bye only when the schedule says so', async () => {
+    await new NflScheduleRepo(db).save(fixtures('JAX', [{ week: 3, opponent: null }]), '2026-09-01T00:00:00.000Z');
+
+    const bye = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [bye],
+      candidateInputs: [],
+      lineup: recommendLineup([bye], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    expect(plan!.current?.team).toBe('JAX');
+    expect(plan!.current?.unavailableReason).toBe('is on bye');
+  });
+
+  it('does not call an unread fixture a bye', async () => {
+    // No schedule saved at all: the honest answer is that this app has not read
+    // one, not that the NFL gave Jacksonville the week off.
+    const unknown = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 1,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [unknown],
+      candidateInputs: [],
+      lineup: recommendLineup([unknown], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    const reason = plan!.current?.unavailableReason;
+    expect(reason).not.toBe('is on bye');
+    expect(reason).toContain('no fixture');
+  });
+
+  it('says a game with no quoted line cannot be scored, which is a different sentence', async () => {
+    await new NflScheduleRepo(db).save(fixtures('JAX', [{ week: 3, opponent: 'CAR' }]), '2026-09-01T00:00:00.000Z');
+
+    const noLine = defence('def_jax', 'Jacksonville', { spread: null, total: null, opponent: 'CAR' }, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [noLine],
+      candidateInputs: [],
+      lineup: recommendLineup([noLine], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    expect(plan!.current?.unavailableReason).toBe('cannot be scored this week');
+  });
+
+  /*
+   * The one environmental fact this app has, finally reaching the model that
+   * has always had a branch for it.
+   *
+   * `roof` has been ingested with every fixture since the schedule landed and
+   * was read by nothing. `assessWeather` has had an indoor branch for just as
+   * long and was never given anything to trigger it, because `startSitInputsFor`
+   * set no `weather` at all. Both halves existed; the wire between them did not.
+   */
+  it('reads indoors off the fixture list, on the same rows as home and away', async () => {
+    await new NflScheduleRepo(db).save(
+      [
+        ...fixtures('DET', [{ week: 3, opponent: 'CHI', home: true }]).map((r) => ({ ...r, roof: 'dome' })),
+        ...fixtures('CHI', [{ week: 3, opponent: 'DET', home: false }]).map((r) => ({ ...r, roof: 'dome' })),
+        ...fixtures('BUF', [{ week: 3, opponent: 'NYJ', home: true }]).map((r) => ({ ...r, roof: 'outdoors' })),
+      ],
+      '2026-09-01T00:00:00.000Z',
+    );
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+
+    const context = await buildStartSitContext(db);
+
+    expect(context.indoor.get('DET')).toBe(true);
+    expect(context.indoor.get('CHI')).toBe(true);
+    // Outdoors is an absence rather than a false: this app has no forecast for
+    // it and must not produce one.
+    expect(context.indoor.has('BUF')).toBe(false);
+  });
+
+  it('will not call a retractable roof indoors, because nobody published its state', async () => {
+    await new NflScheduleRepo(db).save(
+      fixtures('DAL', [{ week: 3, opponent: 'NYG', home: true }]).map((r) => ({ ...r, roof: 'retractable' })),
+      '2026-09-01T00:00:00.000Z',
+    );
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+
+    expect((await buildStartSitContext(db)).indoor.has('DAL')).toBe(false);
+  });
+
+  /*
+   * The fallback anchor, assembled once and bought only when it can be used.
+   */
+  it('measures the opposing offence from the games the market did price', async () => {
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+    await new VegasEventsRepo(db).upsertMany([
+      /* This week's fixture: discovered, never quoted. */
+      { eventId: 'jax-w3', provider: 'mock', kickoff: '2026-09-20T17:00:00.000Z', homeTeam: 'JAX', awayTeam: 'CAR', total: null, spread: null, spreadTeam: null },
+      /* Carolina's own priced games — a weak offence, in the market's words. */
+      { eventId: 'car-w1', provider: 'mock', kickoff: '2026-09-06T17:00:00.000Z', homeTeam: 'CAR', awayTeam: 'ATL', total: 38, spread: 6, spreadTeam: 'CAR' },
+      { eventId: 'car-w2', provider: 'mock', kickoff: '2026-09-13T17:00:00.000Z', homeTeam: 'CAR', awayTeam: 'NO', total: 40, spread: 7, spreadTeam: 'CAR' },
+    ]);
+
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-16T12:00:00.000Z'));
+
+    /* 38/2 - 6/2 = 16, and 40/2 - 7/2 = 16.5. */
+    expect(context.opponentForm.get('CAR')).toEqual({ impliedTotal: 16.25, games: 2 });
+    /* And this week's fixture is still the unpriced one it actually is. */
+    expect(context.schedule.get('JAX')?.total).toBeNull();
+  });
+
+  it('does not buy the aggregate at all when every fixture is priced', async () => {
+    await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
+    await new VegasEventsRepo(db).upsertMany([
+      { eventId: 'jax-w3', provider: 'mock', kickoff: '2026-09-20T17:00:00.000Z', homeTeam: 'JAX', awayTeam: 'CAR', total: 44, spread: -3, spreadTeam: 'JAX' },
+    ]);
+
+    /*
+     * No defence can reach the fallback in a fully-priced week, so the read is
+     * skipped rather than made and discarded. Asserted because the alternative
+     * is a season-wide scan bought for nothing on every Team, Matchup and
+     * Waivers load, on a database this app has twice run to the edge of.
+     */
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-16T12:00:00.000Z'));
+
+    expect(context.opponentForm.size).toBe(0);
+  });
+
   it('says nothing, and reads nothing, in a league that starts no defence', async () => {
     const noDef = buildRosterShape(DST_ROSTER_POSITIONS.filter((p) => p !== 'DEF'));
     const plan = await buildDstPlan(db, {

@@ -1,0 +1,19 @@
+-- Sleeper's lineup, in the order Sleeper holds it.
+--
+-- `starters_json` has always stored the *set* of players in the lineup: the
+-- payload's `starters` array with its empty slots — Sleeper sends `"0"` —
+-- filtered out. That filter is what makes it a set, and it is also what throws
+-- away the only thing that says *where* each player is. Sleeper's array is
+-- positionally aligned with the league's `roster_positions`, so index 3 is the
+-- second WR slot; collapse the gaps and index 3 is whatever happened to follow.
+--
+-- The Team screen needs that alignment to show the reader his own lineup slot
+-- by slot and say what this app would change about each one. So the raw array
+-- is kept beside the set rather than replacing it: every existing reader keeps
+-- the shape it already expects, and nothing has to be migrated in place.
+--
+-- Defaulting to '[]' means a roster synced before this column existed reports
+-- "no slot order known", which the screen reads as a reason to fall back to the
+-- older set-based view rather than as an empty lineup. It fills in on the next
+-- league sync.
+ALTER TABLE rosters ADD COLUMN starter_slots_json TEXT NOT NULL DEFAULT '[]';

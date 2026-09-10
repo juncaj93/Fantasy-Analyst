@@ -115,7 +115,9 @@ describe('a value add', () => {
     expect(advice.valueAdds[0]!.name).toBe('Free Catcher');
     expect(advice.valueAdds[0]!.overName).toBe('Fourth Catcher');
     expect(advice.valueAdds[0]!.gain).toBeGreaterThanOrEqual(ROSTER_SPOT_GAIN);
-    expect(advice.valueAdds[0]!.reasons.join(' ')).toContain('last man on your bench');
+    // The sentence names the comparison that was actually made, which is the
+    // weakest man competing for his slots rather than the weakest man outright.
+    expect(advice.valueAdds[0]!.reasons.join(' ')).toContain('weakest WR option on the bench');
   });
 
   it('is never the same player already offered as a starting upgrade', () => {
@@ -556,5 +558,131 @@ describe('the threshold itself', () => {
     });
     expect(advice.upgrades).toHaveLength(1);
     expect(advice.threshold).toBe(0.5);
+  });
+});
+
+/**
+ * Why the board would not stop recommending backup quarterbacks.
+ *
+ * The reported symptom was a Waivers page offering a second and third
+ * quarterback to a manager who starts one and already had a good one. The cause
+ * was not the quarterbacks: the roster-spot tier measured every free agent, of
+ * every position, against a single number — the weakest scorable man on the
+ * bench, whoever he happened to be. That is a comparison between two different
+ * scales. A starting quarterback is a twenty-point week and a fourth receiver is
+ * a five-point one, so every startable quarterback on the wire "beat" the last
+ * man on the bench by ten points or more, cleared a half-point bar without
+ * noticing it was there, and then sorted to the top of the board by the size of
+ * the artefact.
+ *
+ * The bar is now drawn from the players who compete for the same slots, which
+ * is the comparison a manager actually makes.
+ */
+describe('the roster-spot tier, measured against the right players', () => {
+  /** Tony's Pizza: 1 QB, 2 RB, 3 WR, 2 FLEX, 1 DEF. */
+  const REAL_SHAPE = buildRosterShape([
+    'QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN',
+  ]);
+
+  function realRoster() {
+    return [
+      candidate('qb1', 'My Starting QB', 'QB', 21),
+      candidate('rb1', 'Back One', 'RB', 14),
+      candidate('rb2', 'Back Two', 'RB', 11),
+      candidate('wr1', 'Receiver One', 'WR', 15),
+      candidate('wr2', 'Receiver Two', 'WR', 12),
+      candidate('wr3', 'Receiver Three', 'WR', 10),
+      candidate('fx1', 'Flex One', 'RB', 9),
+      candidate('fx2', 'Flex Two', 'WR', 8),
+      candidate('bn1', 'Bench Back', 'RB', 7),
+      candidate('bn2', 'Bench Receiver', 'WR', 6),
+      candidate('bn3', 'Last Man On Bench', 'WR', 4),
+    ];
+  }
+
+  const STARTING = ['qb1', 'rb1', 'rb2', 'wr1', 'wr2', 'wr3', 'fx1', 'fx2'];
+
+  function adviseWith(wire: ReturnType<typeof candidate>[]) {
+    const roster = realRoster();
+    return recommendWaiverUpgrades({
+      roster,
+      candidates: wire,
+      shape: REAL_SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: roster.map((r) => r.player.id),
+      currentStarterIds: STARTING,
+    });
+  }
+
+  it('offers no backup quarterback to a manager who has a good one', () => {
+    const advice = adviseWith([
+      candidate('fa_qb1', 'Backup QB Alpha', 'QB', 17),
+      candidate('fa_qb2', 'Backup QB Beta', 'QB', 15),
+    ]);
+
+    // Seventeen points is a real quarterback and still worth nothing here: the
+    // league starts one, and the one being started is better.
+    expect(advice.valueAdds.filter((v) => v.position === 'QB')).toEqual([]);
+    expect(advice.upgrades.flatMap((u) => u.candidates).filter((c) => c.position === 'QB')).toEqual([]);
+  });
+
+  it('still offers the skill players who are genuinely better than the bench', () => {
+    const advice = adviseWith([
+      candidate('fa_qb1', 'Backup QB Alpha', 'QB', 17),
+      candidate('fa_rb', 'Waiver Back', 'RB', 8),
+    ]);
+
+    // The back is measured against the weakest flex-eligible body on the bench,
+    // who is the man a claim would actually displace.
+    const back = advice.valueAdds.find((v) => v.name === 'Waiver Back');
+    expect(back).toBeDefined();
+    expect(back!.overName).toBe('Last Man On Bench');
+    expect(advice.valueAdds.map((v) => v.position)).not.toContain('QB');
+  });
+
+  it('does not rank a quarterback above a receiver on the strength of the position', () => {
+    // The exact inversion that was reported: before this, the quarterback led
+    // the board at +13 and the receiver trailed at +3.
+    const advice = adviseWith([
+      candidate('fa_qb1', 'Backup QB Alpha', 'QB', 17),
+      candidate('fa_wr', 'Waiver Receiver', 'WR', 7),
+    ]);
+
+    expect(advice.valueAdds[0]?.name).toBe('Waiver Receiver');
+  });
+
+  it('recommends a quarterback the moment the position is actually a hole', () => {
+    /*
+     * Roster need, which is what the manager was asking for. With the starter
+     * out the QB slot is genuinely unfilled, and the same quarterback the tier
+     * above declined to mention becomes the answer to a real question — under
+     * the upgrade framing, which is the honest one for a slot with nobody in it.
+     */
+    const roster = realRoster();
+    roster[0] = { ...candidate('qb1', 'My Starting QB', 'QB', 21), injuryStatus: 'Out' };
+    const advice = recommendWaiverUpgrades({
+      roster,
+      candidates: [candidate('fa_qb1', 'Backup QB Alpha', 'QB', 17)],
+      shape: REAL_SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: roster.map((r) => r.player.id),
+      currentStarterIds: STARTING,
+    });
+
+    const qbSlot = advice.upgrades.find((u) => u.slot === 'QB');
+    expect(qbSlot?.need).toBe('unfilled');
+    expect(qbSlot?.candidates[0]?.name).toBe('Backup QB Alpha');
+  });
+
+  it('does not price displacing a starter at the cost of a bench body', () => {
+    /*
+     * A free agent a point better than the quarterback being started is an
+     * upgrade question, and the upgrade tier's bar is the one that governs it.
+     * Answering it here would sell a starting change for the price of a spare
+     * roster spot.
+     */
+    const advice = adviseWith([candidate('fa_qb1', 'Marginally Better QB', 'QB', 22)]);
+
+    expect(advice.valueAdds).toEqual([]);
   });
 });
