@@ -21,7 +21,7 @@
 
 import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
-import { buildFetchPlan, type FetchPlan, type PlannedPlayer } from '../../core/vegas/plan.ts';
+import { buildFetchPlan, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
 import type { RawPropSet, VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
@@ -32,6 +32,10 @@ import { PropsRepo } from '../repos/props.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
+import { MatchupRepo } from '../repos/matchup.ts';
+import { TrendingRepo } from '../repos/trending.ts';
+import type { LeagueRecord, RosterRecord } from '../../core/sleeper/types.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
 
 export interface VegasRefreshReport {
   provider: string;
@@ -51,6 +55,17 @@ export interface VegasRefreshReport {
   errors: string[];
   note: string;
 }
+
+/**
+ * How many of Sleeper's most-added free agents are worth a market line.
+ *
+ * The top of the "5-10" Alex asked for. Kept small on purpose: these are the
+ * lowest-priority tier in the plan, so a larger number would not buy more
+ * coverage on a short allowance — it would only lengthen a list the budget
+ * truncates anyway — and each one can drag in a whole game that no player on
+ * either roster is in.
+ */
+const WAIVER_CANDIDATES = 8;
 
 /**
  * How long the learned schedule stays good.
@@ -606,8 +621,35 @@ export class VegasRefreshService {
     if (!mine) return [];
 
     const starters = new Set(mine.starterIds ?? []);
-    const playerIds = [...new Set([...(mine.playerIds ?? []), ...starters])].filter(Boolean);
-    if (playerIds.length === 0) return [];
+    const ownIds = [...new Set([...(mine.playerIds ?? []), ...starters])].filter(Boolean);
+    if (ownIds.length === 0) return [];
+
+    /*
+     * Two more tiers, and neither can outrank the roster above.
+     *
+     * The allowance used to be spent on `mine` and on nothing else, which is
+     * narrower than the priority Alex actually asked for: his team, then his
+     * current opponent's, then the top few waiver adds. Everything past those
+     * three is still not planned at all.
+     *
+     * The cost is bounded by the shape of the unit rather than by a rule here.
+     * The provider bills per *event*, so a second roster only costs the games
+     * it adds that the reader's own roster was not already buying — and both
+     * extra tiers are capped at `low` in `buildFetchPlan`, so the budget offers
+     * every one of his own games first and reaches these with what is left. On
+     * a short allowance they simply do not happen, which is the correct
+     * outcome and needs no separate refusal.
+     */
+    const [opponentIds, waiverIds] = await Promise.all([
+      this.opponentPlayerIds(league, mine, rosters),
+      this.waiverCandidateIds(),
+    ]);
+
+    const tiers = new Map<string, PlanTier>();
+    for (const id of ownIds) tiers.set(id, 'mine');
+    for (const id of opponentIds) if (!tiers.has(id)) tiers.set(id, 'opponent');
+    for (const id of waiverIds) if (!tiers.has(id)) tiers.set(id, 'waiver');
+    const playerIds = [...tiers.keys()];
 
     const playerRepo = new PlayerRepo(this.db);
     const [index, ages] = await Promise.all([
@@ -637,9 +679,66 @@ export class VegasRefreshService {
         status,
         contested: !starter || (status != null && status.trim() !== ''),
         ageMinutes: ages.get(id) ?? null,
+        tier: tiers.get(id) ?? 'mine',
       });
     }
     return out;
+  }
+
+
+  /**
+   * The opponent's players this week, when the app already knows who that is.
+   *
+   * Read from `matchup_forecasts`, which the Matchup screen writes and which
+   * carries `opponent_roster_id` on a row keyed by league, season, week and
+   * roster — one indexed lookup of one row, and no Sleeper request. Empty
+   * before that screen has been opened this week, and empty on a bye. Both mean
+   * the same thing here: no opponent to price, so nothing planned for one.
+   */
+  private async opponentPlayerIds(
+    league: LeagueRecord,
+    mine: RosterRecord,
+    rosters: RosterRecord[],
+  ): Promise<string[]> {
+    const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const week = state?.week ?? null;
+    if (week == null || !Number.isFinite(week) || week < 1) return [];
+
+    const row = await new MatchupRepo(this.db)
+      .latest({ leagueId: league.id, season: league.season, week, rosterId: mine.rosterId })
+      .catch(() => null);
+    if (row?.opponentRosterId == null) return [];
+
+    const opponent = rosters.find((r) => r.rosterId === row.opponentRosterId) ?? null;
+    /*
+     * His starters, not his whole roster. A bench player on somebody else's
+     * team cannot change any decision the reader makes, and the point of the
+     * tier is the head-to-head total.
+     */
+    return [...new Set(opponent?.starterIds ?? [])].filter(Boolean);
+  }
+
+  /**
+   * The handful of free agents worth pricing, from Sleeper's own most-added list.
+   *
+   * Deliberately not the waiver board. Building that runs a start/sit assembly
+   * over every free agent in the league, which is the most expensive read in
+   * the app and precisely the thing this file exists to avoid triggering on a
+   * timer. The trending capture is already stored by a cron, costs one read,
+   * and answers a good enough version of the question: the players a market is
+   * worth buying for are the ones a league is actually moving on.
+   *
+   * {@link WAIVER_CANDIDATES} of them, which is the top of Alex's "5-10".
+   */
+  private async waiverCandidateIds(): Promise<string[]> {
+    const capture = await new TrendingRepo(this.db).capture('add').catch(() => null);
+    if (!capture) return [];
+    return capture.rows
+      .slice()
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, WAIVER_CANDIDATES)
+      .map((row) => row.playerId)
+      .filter(Boolean);
   }
 
   /** Minutes since each player's game was last priced. */

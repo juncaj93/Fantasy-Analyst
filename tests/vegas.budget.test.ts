@@ -278,3 +278,90 @@ describe('the cost of a season', () => {
     expect(sim.lines.join('\n')).toContain(`month (5 weeks): ${sim.monthly} of ${BUDGET.monthlyEntities}`);
   });
 });
+
+
+/**
+ * Whose games the allowance buys, and in what order.
+ *
+ * Alex's priority, in his words: his team, his current opponent's team, and the
+ * top few waiver adds — and nothing outside those three. The refresh used to
+ * plan the first of them and no others, which is narrower rather than broader
+ * than asked for; the tiers are how the other two were added without letting
+ * them compete with his own roster for a short allowance.
+ *
+ * The guarantee under test is *ordering*, not exclusion. Every one of his own
+ * games is offered to the budget before any game that exists only for somebody
+ * else's player, whatever their scores — because `canSpend` takes the plan in
+ * band order and stops, so a band is the only thing that survives a truncation.
+ */
+describe('whose games the allowance buys', () => {
+  /** A player whose game is imminent and contested — the strongest possible score. */
+  const urgent = (over: Partial<PlannedPlayer>) =>
+    player({ contested: true, status: 'Questionable', ageMinutes: null, ...over });
+
+  it('never lets an opponent-only game outrank one of the reader’s own', () => {
+    const plan = buildFetchPlan(
+      [
+        // The opponent's man could not be more urgent…
+        urgent({ playerId: 'theirs', eventId: 'e-theirs', tier: 'opponent' }),
+        // …and the reader's could not be quieter.
+        player({ playerId: 'mine', eventId: 'e-mine', tier: 'mine', contested: false, status: null }),
+      ],
+      { now: NOW },
+    );
+
+    expect(plan.events.map((e) => e.eventId)).toEqual(['e-mine', 'e-theirs']);
+    expect(plan.events[1]!.priority, "somebody else's game is never urgent").toBe('low');
+  });
+
+  it('puts a waiver candidate last, behind both', () => {
+    const plan = buildFetchPlan(
+      [
+        urgent({ playerId: 'w', eventId: 'e-waiver', tier: 'waiver' }),
+        urgent({ playerId: 't', eventId: 'e-theirs', tier: 'opponent' }),
+        player({ playerId: 'm', eventId: 'e-mine', tier: 'mine' }),
+      ],
+      { now: NOW },
+    );
+
+    expect(plan.events[0]!.eventId, "the reader's own game leads").toBe('e-mine');
+    // The other two share the `low` band and are separated by score alone,
+    // which is the intended behaviour: a contested add near kickoff is worth
+    // more than a quiet one, and neither is worth more than his own team.
+    for (const event of plan.events.slice(1)) expect(event.priority).toBe('low');
+  });
+
+  it('treats a shared game as the reader’s own', () => {
+    // He and his opponent both have somebody in it, so it is a game he needs
+    // priced for his own lineup and the cap must not apply.
+    const plan = buildFetchPlan(
+      [
+        urgent({ playerId: 'mine', eventId: 'shared', tier: 'mine' }),
+        player({ playerId: 'theirs', eventId: 'shared', tier: 'opponent' }),
+      ],
+      { now: NOW },
+    );
+
+    expect(plan.events).toHaveLength(1);
+    expect(plan.events[0]!.priority).not.toBe('low');
+    // And it is still one entity, which is the point of billing per event: a
+    // second roster costs only the games the first was not already buying.
+    expect(plan.estimatedEntities).toBe(1);
+  });
+
+  it('costs nothing extra when the two rosters share every game', () => {
+    const mine = ['a', 'b', 'c'].map((id) => player({ playerId: `mine-${id}`, eventId: `e-${id}`, tier: 'mine' }));
+    const theirs = ['a', 'b', 'c'].map((id) =>
+      player({ playerId: `theirs-${id}`, eventId: `e-${id}`, tier: 'opponent' }),
+    );
+
+    expect(buildFetchPlan([...mine, ...theirs], { now: NOW }).estimatedEntities).toBe(
+      buildFetchPlan(mine, { now: NOW }).estimatedEntities,
+    );
+  });
+
+  it('defaults an untiered player to the reader’s own, so an older caller is unchanged', () => {
+    const plan = buildFetchPlan([urgent({ playerId: 'p', eventId: 'e1' })], { now: NOW });
+    expect(plan.events[0]!.priority).not.toBe('low');
+  });
+});
