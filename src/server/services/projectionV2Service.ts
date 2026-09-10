@@ -40,7 +40,7 @@ import { DepthChartRepo, IdentityCrosswalkRepo, SnapCountRepo } from '../repos/n
 import { LeagueRepo } from '../repos/league.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { UsageRepo } from '../repos/usage.ts';
-import { SleeperProjectionsRepo } from '../repos/sleeperProjections.ts';
+import { SleeperProjectionsRepo, type StoredWeeklyProjection } from '../repos/sleeperProjections.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
 import { usageSeason } from './usageService.ts';
 import type { Database } from '../db.ts';
@@ -257,12 +257,30 @@ export class ProjectionV2Service {
     playerIds: string[],
   ): Promise<Map<string, number>> {
     if (week == null) return new Map();
-    const stored = await new SleeperProjectionsRepo(this.db).forWeek(season, week).catch(() => new Map());
+    /*
+     * `points` is the three published totals, not a number.
+     *
+     * This read used to be `Number.isFinite(row.points)` against that object,
+     * which is false for every row ever stored — so the Rotowire column of this
+     * report was empty on every run and read as "the feed has nothing for
+     * him". It typechecked because `.catch(() => new Map())` widens the result
+     * to `Map<any, any>`; the catch is still here, with the shape named so the
+     * next mistake of this kind is a compile error.
+     *
+     * Half PPR because this is a side-by-side report and not a screen: it wants
+     * one comparable column across every league it is ever run against, and
+     * `publishedFor` — which answers in the league's own scoring, and refuses
+     * where it must — is the thing to call when a number is going to be shown.
+     */
+    const stored = await new SleeperProjectionsRepo(this.db)
+      .forWeek(season, week)
+      .catch((): Map<string, StoredWeeklyProjection> => new Map());
     const wanted = new Set(playerIds);
     const out = new Map<string, number>();
     for (const [playerId, row] of stored) {
       if (!wanted.has(playerId)) continue;
-      if (row.points != null && Number.isFinite(row.points)) out.set(playerId, row.points);
+      const points = row.points.pts_half_ppr;
+      if (points != null && Number.isFinite(points)) out.set(playerId, points);
     }
     return out;
   }

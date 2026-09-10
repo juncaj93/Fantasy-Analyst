@@ -444,7 +444,68 @@ export function TeamScreen({
         refreshes it, which is the gesture the reader already knows and the one
         that costs no glass at all. See `PullToRefresh` below.
       */}
-      {selected ? <NavBar testId="league-card" title={selected.name} /> : <NavBar title="Team" />}
+      {/*
+        The league's name, and the two controls, on one bar.
+
+        They were a row of their own underneath, pushed to the trailing edge
+        with nothing on the left of them — which is what a control row looks
+        like when the thing that used to fill it has gone: the risk chips were
+        removed and the buttons kept the row they had shared. Reported as
+        floating with empty space beside them, and that is exactly what it was.
+
+        The bar already has a trailing slot, used by Setup, Players, Draft and
+        Review for the same purpose, so this is the app's existing arrangement
+        rather than a new one — and it gives the roster back a whole row.
+
+        Neither control exists during a draft. Compare asks which of two players
+        to start and Refresh re-reads a week; neither question exists while the
+        roster is still being assembled. The flag is the roster's own `live`,
+        the same one that decides whether the live view is drawn at all.
+      */}
+      {selected ? (
+        <NavBar
+          testId="league-card"
+          title={selected.name}
+          trailing={
+            roster?.live ? null : (
+              <span className="nav-actions-group" data-testid="team-controls">
+                <button
+                  className="btn btn-icon"
+                  data-testid="compare-open"
+                  aria-label="Compare players"
+                  title="Compare players"
+                  onClick={() => setCompare({ slot: null, seed: [] })}
+                >
+                  <CompareIcon />
+                </button>
+                {/*
+                  The same refresh the pull gesture runs, and deliberately so.
+
+                  `refreshAll` posts to the all-source orchestrator — the one
+                  Data Health's "Refresh now" calls — and then re-reads the
+                  roster, the lineup and the waiver scan. It is single-flight,
+                  so a tap while a pull is already running costs nothing. It
+                  exists beside the gesture because a gesture is
+                  undiscoverable, and this is the screen a reader comes back to
+                  when he thinks something has changed.
+                */}
+                <button
+                  className="btn btn-icon"
+                  data-testid="team-refresh"
+                  aria-label="Refresh roster and this week's data"
+                  title="Refresh"
+                  disabled={refreshing}
+                  onClick={() => void runRefresh()}
+                >
+                  <RefreshIcon className={refreshing ? 'spin' : undefined} />
+                </button>
+              </span>
+            )
+          }
+        />
+      ) : (
+        <NavBar title="Team" />
+      )}
 
       {message ? <Notice tone={message.tone === 'ok' ? 'ok' : message.tone === 'error' ? 'error' : 'warn'}>{message.text}</Notice> : null}
 
@@ -452,71 +513,6 @@ export function TeamScreen({
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       ) : (
         <>
-          {/*
-            Two controls, on the trailing edge, and no question for the reader.
-
-            This row used to open with Balanced / Floor / Ceiling — three
-            definitions of "best lineup" for the reader to choose between. The
-            app is in a better position to choose than he is, and it already
-            was: `suggestMode` has read the week's margin since it was written,
-            and now reads the live scoreline too, so the posture adapts to an
-            opponent bombing or blowing up on Sunday rather than waiting to be
-            told. A control the app can answer better than the person holding
-            the phone is a control that should not be on the phone. What it
-            said is not lost — the lineup card states the posture it answered
-            under and why.
-
-            The space that bought goes to the two things this screen had no
-            room for. Both are icon-only, on the trailing edge, at 44px: at
-            360px a labelled pair would take the row that was just saved.
-          */}
-          {/*
-            …and neither of them during a draft.
-
-            Compare asks which of two players to start and Refresh re-reads a
-            week. Neither question exists while the roster is still being
-            assembled. The flag is the roster's own `live`, the same one that
-            decides whether the live view is drawn at all, so there is one
-            answer on this screen to "is a draft happening".
-          */}
-          {roster?.live ? null : (
-          <div className="control-row control-row-trailing" data-testid="team-controls">
-            <button
-              className="btn btn-icon"
-              data-testid="compare-open"
-              aria-label="Compare players"
-              title="Compare players"
-              onClick={() => setCompare({ slot: null, seed: [] })}
-            >
-              <CompareIcon />
-            </button>
-            {/*
-              The same refresh the pull gesture runs, and deliberately the same.
-
-              `refreshAll` posts to the all-source orchestrator — the one the
-              Data Health "Refresh now" button calls — and then re-reads the
-              roster, the lineup and the waiver scan. That is exactly the scope
-              this button should have: re-sync the roster and recompute the
-              week from whatever landed. It is single-flight, so a tap while a
-              pull is already running costs nothing.
-
-              It exists beside the gesture rather than instead of it because a
-              gesture is undiscoverable, and this is the screen a reader comes
-              back to when he thinks something has changed.
-            */}
-            <button
-              className="btn btn-icon"
-              data-testid="team-refresh"
-              aria-label="Refresh roster and this week's data"
-              title="Refresh"
-              disabled={refreshing}
-              onClick={() => void runRefresh()}
-            >
-              <RefreshIcon className={refreshing ? 'spin' : undefined} />
-            </button>
-          </div>
-          )}
-
           {refresh ? (
             <div className="faint" data-testid="refresh-status" style={{ margin: '0 4px 10px' }}>
               {refresh.headline}
@@ -861,6 +857,7 @@ function VerdictCard({
   const subject = (subjectId != null && subjectId === recommended?.playerId ? recommended : current) ?? current ?? recommended;
   const position = subject?.position ?? '';
   const blocked = row.vacancy[0] ?? null;
+  const borrowed = blocked?.publishedProjection ?? null;
   /* The figure belonging to whoever leads the row — see the trailing field. */
   const shown =
     row.verdict === 'fill'
@@ -889,7 +886,9 @@ function VerdictCard({
         data-vacancy={blocked ? 'explained' : 'none'}
         aria-label={
           blocked
-            ? `${row.slot}: ${blocked.name} ${blocked.reason}` + (blocked.detail ? `, ${blocked.detail}` : '')
+            ? `${row.slot}: ${blocked.name} ${blocked.reason}` +
+              (borrowed != null ? `, ${spokenProjection(borrowed, 'sleeper')}` : '') +
+              (blocked.detail ? `, ${blocked.detail}` : '')
             : `${row.slot}: nobody eligible yet`
         }
       >
@@ -905,6 +904,29 @@ function VerdictCard({
               {accepts ? <span className="faint"> · {accepts}</span> : null}
             </span>
           )}
+          {/*
+            * Somebody else's number, on the one row this app has none of its own.
+            *
+            * A defence nobody has priced used to leave the column blank, which
+            * read as "nothing is known about Jacksonville" when what was true
+            * was "this app cannot rank him and Rotowire projects 8.6". The
+            * figure sits in the same field, at the same width, wearing the same
+            * borrowed styling every other published number wears — and the
+            * sentence beneath it still says this app has no opinion, because
+            * that has not changed and is the thing the reader is owed.
+            */}
+          {borrowed != null ? (
+            <span className="row-value">
+              <span
+                className="proj"
+                data-testid="vacancy-proj"
+                data-projection-source="sleeper"
+                title={projectionTitle(borrowed, 'sleeper')}
+              >
+                {borrowed.toFixed(1)}
+              </span>
+            </span>
+          ) : null}
         </div>
         {blocked && (blocked.detail || accepts) ? (
           <div className="faint vacancy-detail">

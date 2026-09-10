@@ -361,6 +361,43 @@ describe('an empty slot says who it could not use, and why', () => {
     expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.alreadyStarting).toBe(true);
   });
 
+  /**
+   * The dash the owner reported, and what replaced it.
+   *
+   * "Defense (Jacksonville) still shows no projection at all" — after a round
+   * that built a published fallback for exactly this case. Two things were
+   * wrong and only one of them was in the DST model. The feed was never asked
+   * for a defensive row (see `sleeperProjectionFallback.test.ts`), and even
+   * once it is, `recommendLineup` ranks on market alone by design, so an
+   * unscorable defence never reaches a slot and the figure had nowhere to go.
+   *
+   * It goes on the vacancy, which is the row the reader actually sees. The
+   * slot stays empty — this app still has no opinion and still says so — and
+   * the number beside it is Rotowire's, wearing Rotowire's label.
+   */
+  it('carries the published figure on the row, so the slot is not simply blank', () => {
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+      published: new Map([['def_jax', 8.57]]),
+    });
+    const slot = lineup.slots.find((s) => s.slot === 'DEF');
+
+    expect(slot?.vacancy[0]?.publishedProjection).toBe(8.57);
+    // And the slot itself is still empty, which is the part that must not move:
+    // a borrowed number is shown, never ranked on.
+    expect(slot?.playerId).toBeNull();
+    expect(slot?.projection).toBeNull();
+    expect(slot?.vacancy[0]?.reason).toContain('scored this week');
+  });
+
+  it('leaves the figure null when nobody published one for him', () => {
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+    });
+
+    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.publishedProjection).toBeNull();
+  });
+
   it('says he is out rather than unscorable when that is the reason', () => {
     const lineup = recommendLineup(
       [...field(), defence('def_jax', 'Jacksonville', { spread: -7.5, total: 42.5 }, { team: 'JAX', status: 'Out' })],

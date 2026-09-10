@@ -389,6 +389,44 @@ describe('the degraded state', () => {
     expect(result.teams.mine.winProbability).toBeNull();
   });
 
+  /**
+   * The refusal, said out loud.
+   *
+   * A guard that removes the win probability and explains nothing is
+   * indistinguishable from the feature having broken, and was read as exactly
+   * that: "win probability section is completely MISSING now, not fixed."
+   * Every branch names what is missing and in whose column.
+   */
+  it('says which side is short and why that voids the comparison', () => {
+    const players = lineups().map((p) =>
+      ['theirs-4', 'theirs-5', 'theirs-6'].includes(p.playerId) ? { ...p, projection: null } : p,
+    );
+    const reason = forecast(players, BEFORE).degradedReason!;
+
+    expect(reason).toContain('100%');
+    expect(reason).toContain('57%');
+    expect(reason, 'names whose total is understated').toContain("your opponent's total would be understated");
+    expect(reason, 'and why a missing man is not a small one').toContain('counts as zero');
+  });
+
+  it('says so differently when a side is simply not scorable at all', () => {
+    // Five of the opponent's seven, which fails the share test rather than the
+    // gap test — a different fact and a different sentence.
+    const players = lineups().map((p) =>
+      ['theirs-3', 'theirs-4', 'theirs-5', 'theirs-6', 'theirs-7'].includes(p.playerId)
+        ? { ...p, projection: null }
+        : p,
+    );
+    const reason = forecast(players, BEFORE).degradedReason!;
+
+    expect(reason).toMatch(/too few to forecast from/);
+    expect(reason).toContain("opponent's starters");
+  });
+
+  it('has nothing to explain when it is not refusing', () => {
+    expect(forecast(lineups(), BEFORE).degradedReason).toBeNull();
+  });
+
   it('names the confident wrong answer it is refusing to give', () => {
     /*
      * What the old rule produced, asserted so the fix cannot be undone quietly.

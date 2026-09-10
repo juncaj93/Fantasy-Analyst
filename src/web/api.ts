@@ -1348,6 +1348,8 @@ export interface SlotVacancy {
   reason: string;
   detail: string | null;
   alreadyStarting: boolean;
+  /** Rotowire's published figure in this league's scoring, where there is one. */
+  publishedProjection?: number | null;
 }
 
 export interface LineupSwap {

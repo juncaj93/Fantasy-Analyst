@@ -136,6 +136,17 @@ export interface MatchupForecast {
   freshness: SourceFreshness;
   /** True when no forecast could be produced and only the scoreboard stands. */
   degraded: boolean;
+  /**
+   * Which of the coverage tests refused, in one sentence, or null.
+   *
+   * The card used to say "forecast temporarily unavailable" and stop, which is
+   * what a reader sees when a service is down — and this is never that. It is
+   * always the same fact: some starters could not be priced, and the two totals
+   * are not comparable because of it. The owner reported the card on 10
+   * September 2026 as the win probability having gone *missing*, which is
+   * exactly how an unexplained absence reads.
+   */
+  degradedReason: string | null;
 }
 
 export interface ForecastInput {
@@ -320,10 +331,8 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * over the share threshold — reported the reader as a 93.8% favourite on a
    * fixture that is a coin flip when everybody is priced.
    */
-  const degraded =
-    mineCoverage < MIN_PROJECTED_SHARE ||
-    theirsCoverage < MIN_PROJECTED_SHARE ||
-    Math.abs(mineCoverage - theirsCoverage) > MAX_COVERAGE_GAP;
+  const degradedReason = coverageRefusal(mineCoverage, theirsCoverage);
+  const degraded = degradedReason != null;
 
   /*
    * The seed actually drawn with, reported as well as used.
@@ -427,7 +436,38 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
     clinch,
     freshness: assessFreshness(input.players, distributions),
     degraded,
+    degradedReason,
   };
+}
+
+/**
+ * Why the two sides cannot be compared, in a sentence, or null when they can.
+ *
+ * Both tests live here rather than in the expression they used to be written
+ * as, because the answer a reader needs is *which* of them refused. A card that
+ * says only "unavailable" cannot be acted on and does not read as a data gap;
+ * one that says the opponent has three unpriced starters tells him what is
+ * missing and that the score beside it is unaffected.
+ *
+ * Written in slots rather than percentages. "6 of 10" is a thing on the screen
+ * he can count; "60% coverage" is a statistic about it.
+ */
+function coverageRefusal(mine: number, theirs: number): string | null {
+  const thin = (share: number): string => `${Math.round(share * 100)}%`;
+  if (mine < MIN_PROJECTED_SHARE) {
+    return `Only ${thin(mine)} of your starters could be projected, which is too few to forecast from.`;
+  }
+  if (theirs < MIN_PROJECTED_SHARE) {
+    return `Only ${thin(theirs)} of your opponent's starters could be projected, which is too few to forecast from.`;
+  }
+  if (Math.abs(mine - theirs) > MAX_COVERAGE_GAP) {
+    const behind = mine > theirs ? "your opponent's" : 'your';
+    return (
+      `${thin(mine)} of your starters and ${thin(theirs)} of your opponent's could be projected. ` +
+      `An unprojected starter counts as zero, so ${behind} total would be understated and the two are not comparable.`
+    );
+  }
+  return null;
 }
 
 /**

@@ -141,13 +141,18 @@ export class MatchupService {
        * request — which on a Sunday is one every thirty seconds — never waits on
        * Sleeper for a number it is allowed to show and not to reason with.
        *
-       * No `positionOf` here, and that is a decision rather than an omission.
-       * The tight-end-premium case it exists for needs a position per player and
-       * this bag deliberately does not carry the evaluations — so in such a
-       * league `sleeperScoringKey` refuses every unknown position and this path
-       * yields no fallback at all, which is the safe direction. Every other
-       * league is unaffected, because position only matters when there is a
-       * premium.
+       * `positionOf` is forwarded, and the note that used to sit here saying it
+       * deliberately was not is the defect it describes. The reasoning was that
+       * a bag carrying no positions should take the conservative answer, and
+       * that position only mattered for a tight-end premium. Neither held:
+       * position decides which of the feed's assumed settings are checked at
+       * all, so an unknown position is checked against every one of them, and
+       * this league pays six points for a passing touchdown. The conservative
+       * answer was therefore *every player in the league refused* — which is
+       * what a probe of production found on 10 September 2026, an opponent
+       * column with four unpriced starters and not one borrowed number on
+       * either side of it. `build.ts` reads the position off the evaluations it
+       * has already built, so the cost of this is nothing.
        */
       publishedProjections: (opts) =>
         new SleeperProjectionService(this.db, this.deps.sleeper).publishedFor({
@@ -155,6 +160,7 @@ export class MatchupService {
           week: opts.week,
           playerIds: opts.playerIds,
           profile: opts.profile,
+          positionOf: opts.positionOf,
         }),
       previousForecast: (opts) => this.previousState(opts.leagueId, opts.season, opts.week, opts.rosterId),
       cached: () => CACHE.get(this.db) ?? null,
