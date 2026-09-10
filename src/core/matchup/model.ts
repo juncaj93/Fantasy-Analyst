@@ -71,25 +71,18 @@ export interface MatchupPlayerView {
   /** Fantasy Analyst's projected final total. Null when he could not be scored. */
   projectedFinal: number | null;
   /**
-   * Rotowire's published total for him, for display only, when this app has none.
+   * True when {@link projectedFinal} was built on Rotowire's number, not ours.
    *
-   * A separate field from {@link projectedFinal} rather than a fallback folded
-   * into it, and the separation is the whole safety property: nothing in this
-   * module reads it, the simulator never sees it, and `projectedFinal` stays
-   * exactly what it has always been — the mean of the distribution that was
-   * actually drawn from. A single field carrying either would put somebody
-   * else's model into the win probability the first time a caller forgot which
-   * it was holding.
+   * Carried through from {@link MatchupPlayerInput.projectionBorrowed} so the
+   * screen can draw the figure as borrowed — lighter, italic and marked. There
+   * is deliberately one projection rather than two fields, so no caller can
+   * simulate one number and print the other; which model it came from is a flag
+   * beside it.
    *
-   * It is filled in by `build.ts` *after* the forecast is computed, for the
-   * same reason. Mostly the opponent's, because this app prices the reader's
-   * roster and no other; a screen showing nine dashes down one column is a
-   * screen that looks broken, and the number exists and is free.
-   *
-   * Optional because the model does not produce it and a cached forecast from
-   * an older build will not carry it.
+   * Mostly the opponent's, because this app prices the reader's roster and no
+   * other. Optional, so a forecast cached by an older build still reads.
    */
-  publishedFinal?: number | null;
+  projectionBorrowed?: boolean;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
   phase: PlayerDistribution['phase'];
@@ -388,6 +381,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       actual: distribution.settled,
       projectedFinal: distribution.projectionUnknown ? null : projectedFinal(distribution),
       remaining: distribution.projectionUnknown ? null : effectiveRemaining(distribution),
+      ...(player.projectionBorrowed ? { projectionBorrowed: true } : {}),
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),

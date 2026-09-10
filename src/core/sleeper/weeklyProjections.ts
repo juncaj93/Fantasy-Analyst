@@ -137,28 +137,30 @@ const EVERYTHING = Object.keys(PUBLISHED_ASSUMPTIONS) as AssumedSetting[];
  * refused a quarterback: the number exists, and quoting it would understate or
  * overstate a real amount.
  *
- * **Two categories are deliberately not compared**, and the omission is the
- * honest part of this table rather than a gap in it. `forcedFumble` and
- * `twoPointReturn` are settings this app cannot establish a published
- * assumption for — nothing reachable from here states what the feed paid for
- * them, and this repository's own sample of a real league table
- * (`demo/fixtures/dst.ts`) pays a forced fumble where a bare default would not.
- * Guessing a value in order to compare against it would be inventing the very
- * assumption the comparison exists to check. Both are worth a fraction of a
- * point a week against a points-allowed band worth up to ten, so the trade is
- * a slightly loose refusal rather than a confidently wrong number.
+ * `forcedFumble` and `twoPointReturn` were left out of this table when it was
+ * written, because nothing reachable from here established what the feed paid
+ * for them and guessing a value in order to compare against it would have
+ * invented the very assumption the comparison exists to check. The owner
+ * supplied both on 10 September 2026: a forced fumble is not scored at all —
+ * only the recovery counts — and a returned two-point conversion is worth two.
+ * They are compared like every other category now.
  *
- * If somebody later reads the assumption off a real payload, they belong here
- * with the rest — the shape is already right for them.
+ * Note what that means for a league that *does* pay a forced fumble: it differs
+ * from the feed on a category the feed does not pay, so it is refused, and its
+ * defences fall back to no published number rather than a slightly wrong one.
+ * That is the same rule every other category follows and it is the intended
+ * outcome — `demo/fixtures/dst.ts` pays one, and is refused accordingly.
  */
 const PUBLISHED_DST_ASSUMPTIONS = {
   sack: 1,
   interception: 2,
   fumbleRecovery: 2,
+  forcedFumble: 0,
   defensiveTd: 6,
   specialTeamsTd: 6,
   safety: 2,
   blockedKick: 2,
+  twoPointReturn: 2,
 } as const;
 
 /**

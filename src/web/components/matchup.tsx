@@ -743,22 +743,27 @@ function PlayerHalf({
         player in the NFL, so the number exists and is free.
 
         Lighter, in italic, and titled with whose it is — the same treatment a
-        borrowed figure gets on the Team screen. It is display only: it reaches
-        no total, no win probability and no recommendation, which is enforced
-        by it arriving in a different field entirely. See
-        `MatchupPlayerView.publishedFinal`.
+        borrowed figure gets on the Team screen. Unlike there, this one *does*
+        reach the forecast: on the owner's decision of 10 September 2026 an
+        unpriced starter is simulated on Rotowire's number rather than
+        contributing zero, because a confident zero is the worse estimate. It
+        still never reaches the lineup. See `MatchupPlayerInput.projection`.
       */}
-      {player.projectedFinal == null && player.publishedFinal != null ? (
+      {player.projectionBorrowed && player.projectedFinal != null ? (
         <span
           className="matchup-player-proj matchup-player-proj-borrowed"
           data-testid="matchup-player-proj"
           data-projection-source="sleeper"
-          title="Published by Rotowire, via Sleeper — no betting market has priced him. Not used to rank."
+          title="Built on Rotowire's published projection, via Sleeper — no betting market has priced him."
         >
-          {player.publishedFinal.toFixed(1)}
+          {player.projectedFinal.toFixed(1)}
         </span>
       ) : (
-        <span className="matchup-player-proj" data-testid="matchup-player-proj" data-projection-source={player.projectedFinal == null ? 'none' : 'market'}>
+        <span
+          className="matchup-player-proj"
+          data-testid="matchup-player-proj"
+          data-projection-source={player.projectedFinal == null ? 'none' : 'market'}
+        >
           {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
         </span>
       )}

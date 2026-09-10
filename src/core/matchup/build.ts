@@ -51,7 +51,7 @@ import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
 import { marketProjection } from '../startsit/projection.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
-import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast, type MatchupPlayerView } from './model.ts';
+import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
 import { GAME_MINUTES } from './distribution.ts';
 import type { SlotSpec } from './decision.ts';
 import type { PreviousInsightState } from './insights.ts';
@@ -244,26 +244,24 @@ export async function buildMatchupResponse(
   const evaluations = new Map<string, StartSitEvaluation>();
   for (const input of inputs) evaluations.set(input.player.id, evaluatePlayer(input, profile));
 
-  const slots = buildSlotSpecs(league.rosterPositions);
-  const players = [
-    ...toPlayers(mineRow, 'mine', evaluations, slots),
-    ...toPlayers(theirsRow, 'theirs', evaluations, slots),
-  ];
-
   /*
-   * The published fallback, read once, before anything is built from it.
+   * The published fallback, read before anything is built from it.
    *
    * It used to be fetched below the forecast, and the comment there called the
    * order of the two statements the guarantee that `buildForecast` could not
    * see it. That was never what enforced it, and saying so was the risk: the
-   * enforcement is `toPlayer`, which fills `projection` from `marketProjection`
-   * and from nothing else, and which is where the rule is written down. A
-   * forecast built on a model this app cannot explain is one it cannot defend,
-   * and that is still true — the simulator below reads market numbers only.
+   * enforcement is the import graph, which `sleeperProjectionFallback.test.ts`
+   * asserts — the simulator, the draft score, the trade engine and the
+   * start/sit engine cannot reach this feed, and still cannot.
    *
-   * It moves because a second caller now needs it before the forecast exists:
-   * `suggestMode` reads it as a strictly-below-market fallback so that a side
-   * this app does not price can still be estimated. See `modeSidePlayers`.
+   * It moves up because two callers now need it before the forecast exists:
+   * `suggestMode`, which reads it as a strictly-below-market fallback so a side
+   * this app does not price can still be estimated, and `toPlayer`, which since
+   * 10 September 2026 lets it fill `projection` where there is no market. See
+   * the note there for what that changed and what it did not.
+   *
+   * Keyed on `allIds` rather than on the assembled players, because the players
+   * are now built *from* this and the two lists are the same set anyway.
    *
    * Swallowed on failure for the same reason the lineup route swallows it —
    * this fills a blank, and a blank is a state the screen already says out loud.
@@ -274,13 +272,19 @@ export async function buildMatchupResponse(
       published = await sources.publishedProjections({
         season: league.season,
         week,
-        playerIds: players.map((p) => p.playerId),
+        playerIds: allIds,
         profile,
       });
     } catch {
       published = new Map();
     }
   }
+
+  const slots = buildSlotSpecs(league.rosterPositions);
+  const players = [
+    ...toPlayers(mineRow, 'mine', evaluations, slots, published),
+    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published),
+  ];
 
   const forecastInput = {
     leagueId: league.id,
@@ -409,32 +413,8 @@ export async function buildMatchupResponse(
     });
   }
 
-  /*
-   * The published figures, attached to the finished forecast.
-   *
-   * After `buildForecast`, and that ordering is the safety property rather than
-   * a convenience: the simulation has already run, on `projection` alone, and
-   * nothing it produced can have seen this. `publishedFinal` is a second field
-   * beside `projectedFinal` for the same reason — see its note in `model.ts` —
-   * so no caller can hold one while believing it has the other.
-   *
-   * It exists because of a measured asymmetry, not a preference. This app
-   * prices the reader's roster and no other, so the opponent's column was a run
-   * of dashes on the one screen whose whole subject is the opponent. Rotowire's
-   * week is already stored for every player in the NFL, so filling them costs
-   * nothing — and the screen draws them in a lighter weight, because a borrowed
-   * number that looks like this app's own is worse than a dash.
-   */
-  const withPublished = decorateWithPublished(forecast, published);
-  const response: MatchupResponse = {
-    ...base,
-    found: true,
-    reason: null,
-    forecast: withPublished,
-    cards,
-    cached: false,
-  };
-  sources.remember({ fingerprint: withPublished.fingerprint, response });
+  const response: MatchupResponse = { ...base, found: true, reason: null, forecast, cards, cached: false };
+  sources.remember({ fingerprint: forecast.fingerprint, response });
 
   /*
    * And, only for a caller that brought somewhere to write it, the ledger.
@@ -505,6 +485,7 @@ function toPlayers(
   side: MatchupSide,
   evaluations: Map<string, StartSitEvaluation>,
   slots: SlotSpec[],
+  published: ReadonlyMap<string, number>,
 ): MatchupPlayerInput[] {
   const starters = row.starters ?? [];
   const points = row.players_points ?? {};
@@ -515,12 +496,12 @@ function toPlayers(
   starters.forEach((playerId, index) => {
     if (!playerId || playerId === '0') return;
     const slot = slots[index];
-    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true));
+    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true, published));
   });
 
   for (const playerId of row.players ?? []) {
     if (startingIds.has(playerId)) continue;
-    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false));
+    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false, published));
   }
 
   return out;
@@ -600,6 +581,28 @@ function gameRemaining(kickoff: string | null, now: Date): number {
 }
 
 
+
+/**
+ * The one number a player is simulated on, and whose it is.
+ *
+ * Market first, always. The published figure is quoted exactly as it arrives —
+ * no availability penalty taken off it and no adjustment added, for the reason
+ * `core/startsit/projection.ts` gives about its own fallback: this app's
+ * bounded nudges were fitted to this app's own base, and applying them to
+ * somebody else's model would be arithmetic nobody has validated on a number
+ * nobody here computed. Clamped at zero, because a projection below it is not a
+ * statement anybody makes.
+ */
+function projectionFor(
+  evaluation: StartSitEvaluation | undefined,
+  published: number | null,
+): { points: number | null; borrowed: boolean } {
+  const market = marketProjection(evaluation);
+  if (market != null) return { points: market, borrowed: false };
+  if (published == null || !Number.isFinite(published)) return { points: null, borrowed: false };
+  return { points: Math.max(0, Math.round(published * 100) / 100), borrowed: true };
+}
+
 function toPlayer(
   playerId: string,
   side: MatchupSide,
@@ -607,8 +610,10 @@ function toPlayer(
   actual: number,
   slot: string | null,
   starting: boolean,
+  published: ReadonlyMap<string, number>,
 ): MatchupPlayerInput {
   const evaluation = evaluations.get(playerId);
+  const figure = projectionFor(evaluation, published.get(playerId) ?? null);
   return {
     playerId,
     name: evaluation?.name ?? playerId,
@@ -619,16 +624,35 @@ function toPlayer(
     starting,
     side,
     /*
-     * The engine's number, and deliberately not the screen's.
+     * This app's number where it has one, and Rotowire's where it does not.
      *
-     * This field is the mean of the distribution the simulator draws from, so it
-     * decides the projected final, the win probability and every swap this
-     * feature recommends. `marketProjection` is therefore the only thing that
-     * may fill it: the published Rotowire fallback is display-only, and a
-     * forecast built on a model this app cannot explain is a forecast it cannot
-     * defend. See `core/startsit/projection.ts`.
+     * This field is the mean of the distribution the simulator draws from, so
+     * it decides the projected final, the win probability and every swap this
+     * feature recommends. It carried `marketProjection` and nothing else until
+     * 10 September 2026, on the rule that a forecast built on a model this app
+     * cannot explain is a forecast it cannot defend.
+     *
+     * The owner overruled that here, for this feature only, and the reason is
+     * what the alternative actually was. A null does not make the model
+     * cautious — `buildDistribution` settles an unprojected player as
+     * truth-only, so he contributes *zero* to his side's total. This app prices
+     * the reader's roster and no other, so that fell almost entirely on the
+     * opponent, and the arithmetic is in `MAX_COVERAGE_GAP`: an opponent priced
+     * 4 of 7 came back as a 93.8% loss on a fixture that is a coin flip when
+     * everybody is priced. A lower-confidence estimate beats a confident zero.
+     *
+     * The wall it does not cross: the simulator, the draft score, the trade
+     * engine and the start/sit engine still cannot reach the published feed —
+     * `sleeperProjectionFallback.test.ts` asserts that against the import graph.
+     * This is the *assembly* choosing what number a player carries, which is
+     * this file's job, and the model simulating whatever it is handed.
+     *
+     * The lineup is untouched. `recommendLineup` still ranks on market alone,
+     * because "who should I start" is a decision this app makes and a forecast
+     * is an estimate it reports.
      */
-    projection: marketProjection(evaluation),
+    projection: figure.points,
+    ...(figure.borrowed ? { projectionBorrowed: true } : {}),
     actual: Number.isFinite(actual) ? actual : 0,
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',
@@ -728,39 +752,3 @@ export function isWeekSettled(currentWeek: number | null, week: number, seasonTy
 }
 
 
-/**
- * Copy a forecast with each player's published total attached.
- *
- * A pure reshaping of what the model already produced. It adds one field per
- * player and changes nothing else — not the totals, not the win probability,
- * not the ordering — which is what makes it safe to run over a forecast that
- * has already been simulated and is about to be cached.
- */
-function decorateWithPublished(
-  forecast: MatchupForecast,
-  published: ReadonlyMap<string, number>,
-): MatchupForecast {
-  if (published.size === 0) return forecast;
-
-  const attach = (player: MatchupPlayerView | null): MatchupPlayerView | null => {
-    if (!player) return null;
-    /*
-     * Only where this app has nothing of its own. A published figure beside a
-     * market one is not a second opinion the reader asked for, and showing it
-     * would invite exactly the comparison this app declines to make.
-     */
-    if (player.projectedFinal != null) return player;
-    const figure = published.get(player.playerId);
-    if (figure == null || !Number.isFinite(figure)) return player;
-    return { ...player, publishedFinal: Math.max(0, Math.round(figure * 100) / 100) };
-  };
-
-  return {
-    ...forecast,
-    slots: forecast.slots.map((row) => ({ ...row, mine: attach(row.mine), theirs: attach(row.theirs) })),
-    bench: {
-      mine: forecast.bench.mine.map((p) => attach(p)!).filter(Boolean),
-      theirs: forecast.bench.theirs.map((p) => attach(p)!).filter(Boolean),
-    },
-  };
-}

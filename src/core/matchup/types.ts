@@ -10,10 +10,15 @@
  *     field with a different name because it is a different kind of statement,
  *     and the one failure this feature must never have is a projected number
  *     rendered where a real one belongs.
- *  2. **A projection is Fantasy Analyst's, or it is absent.** Sleeper publishes
- *     its own projection on the same payload (`custom_points`), and it is never
- *     read. A player the start/sit engine could not score arrives with
- *     `projection: null`, which the model treats as unknown rather than zero.
+ *  2. **A projection is Fantasy Analyst's, or Rotowire's, and the field says
+ *     which.** Sleeper's `custom_points` on the matchup payload is still never
+ *     read. What changed on 10 September 2026, on the owner's decision, is that
+ *     a starter this app cannot price falls back to Rotowire's published week
+ *     rather than arriving as `projection: null` — because the model settles a
+ *     null as truth-only, and a starter contributing *zero* to his side's total
+ *     is a worse estimate than a lower-confidence one. {@link
+ *     MatchupPlayerInput.projectionBorrowed} carries which it is, all the way
+ *     to the screen, so the number is never drawn as this app's own.
  *  3. **Game state is a fact about a clock, not about a player.** Whether an
  *     outcome is still uncertain is decided once, from kickoff and now, and
  *     every downstream module reads that decision rather than re-deriving it —
@@ -80,10 +85,21 @@ export interface MatchupPlayerInput {
    * is precisely the double-counting §3 forbids. The service strips the
    * component; see `matchupService`.
    *
-   * Null when the engine could not score him, which is a real state in
-   * September and is never substituted with Sleeper's projection or a zero.
+   * Rotowire's published figure where this app has no market for him, and null
+   * only where neither exists. See {@link projectionBorrowed}, and the note at
+   * the top of this file for why the fallback was let in here specifically.
    */
   projection: number | null;
+  /**
+   * True when {@link projection} is Rotowire's number rather than this app's.
+   *
+   * A separate boolean rather than a second number, so there is exactly one
+   * projection to simulate and no caller can hold the wrong one. It travels to
+   * the view and decides how the figure is drawn — lighter, italic, and marked
+   * — because the one thing this fallback may never do is look like a number
+   * this app computed.
+   */
+  projectionBorrowed?: boolean;
   /** Sleeper's settled points for him so far. Never written by this app. */
   actual: number;
   /** ISO kickoff for his game, when the schedule is known. */

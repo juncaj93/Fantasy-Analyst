@@ -31,7 +31,6 @@ import {
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
-import type { MatchupForecast, MatchupPlayerView } from '../src/core/matchup/model.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../src/core/sleeper/types.ts';
 import { candidate, signalWithNet } from './helpers/startsit.ts';
@@ -408,7 +407,24 @@ describe('the weekly card quotes it and names it', () => {
  * whole forecasts is the strongest available statement that the fallback
  * reaches none of it.
  */
-describe('the matchup forecast is simulated without it', () => {
+/**
+ * The one feature that *does* simulate on it, and everything that still does not.
+ *
+ * This block asserted the opposite until 10 September 2026: the matchup
+ * forecast ran on `marketProjection` alone and the published feed reached only
+ * the cards. The owner reversed it for this feature, and the reason is what a
+ * null actually did — `buildDistribution` settles an unprojected starter as
+ * truth-only, so he contributed *zero* to his side's total. This app prices the
+ * reader's roster and no other, so that fell on the opponent, and an opponent
+ * priced 4 of 7 came back as a 93.8% loss on a fixture that is a coin flip when
+ * everybody is priced. A lower-confidence estimate beats a confident zero.
+ *
+ * So what this block now defends is the shape of the exception rather than its
+ * absence: the forecast may borrow, it says so on every player that did, and
+ * the lineup, the draft board and the trade engine still may not — which the
+ * import-graph tests at the bottom of this file hold.
+ */
+describe('the matchup forecast may borrow, and says which players it borrowed for', () => {
   const LEAGUE: LeagueRecord = {
     id: 'l1',
     sleeperLeagueId: 's1',
@@ -467,29 +483,29 @@ describe('the matchup forecast is simulated without it', () => {
   /**
    * Everything the simulator produces, and one field that is not simulated.
    *
-   * This used to compare the two forecast objects whole. It cannot any more,
-   * and the exception is worth stating precisely rather than loosening the
-   * assertion: `suggestedMode` is carried on the forecast but is not produced
-   * by it — `suggestMode` reads the published week as a strictly-below-market
-   * fallback, so that a matchup against a roster this app does not buy lines
-   * for can be called at all. That is a posture and a sentence, not a
-   * probability.
+   * The feed changes the forecast now, and that is the point of it.
    *
-   * So the claim narrows to what it was always about: the distributions, the
-   * correlation, the simulation, the projected final, the win probability and
-   * the swap advice are identical with and without the feed. The one field
-   * allowed to differ is checked separately, and checked to *actually* differ —
-   * an exception nobody exercises is an exception that quietly becomes a hole.
+   * Asserted as a difference rather than an equality, because an exception
+   * nobody exercises is an exception that quietly becomes a hole: without the
+   * feed this fixture prices nobody and the forecast degrades; with it, every
+   * starter carries a number and there is a real answer.
    */
-  it('produces an identical forecast with and without the published feed', async () => {
+  it('turns a forecast it could not make into one it can', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
     expect(withIt.found).toBe(true);
 
-    expect(simulatedPart(withIt.forecast!)).toEqual(simulatedPart(without.forecast!));
+    // Nobody priced, nothing to simulate: the degraded path §33 describes.
+    expect(without.forecast!.degraded).toBe(true);
+    expect(without.forecast!.teams.mine.winProbability).toBeNull();
+
+    // Borrowed throughout, and now a forecast rather than a scoreboard.
+    expect(withIt.forecast!.degraded).toBe(false);
+    expect(withIt.forecast!.teams.mine.winProbability).not.toBeNull();
+    expect(withIt.forecast!.teams.mine.projectedFinal).not.toBeNull();
   });
 
-  it('attaches the published figure beside the projection, never into it', async () => {
+  it('marks every player whose projection it borrowed', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const players = [
       ...withIt.forecast!.slots.flatMap((row) => [row.mine, row.theirs]),
@@ -499,14 +515,32 @@ describe('the matchup forecast is simulated without it', () => {
 
     expect(players.length).toBeGreaterThan(0);
     for (const player of players) {
-      // This fixture prices nobody, so every one of them is unscorable and
-      // every one of them should have borrowed a figure.
-      expect(player.projectedFinal, `${player.playerId} must not be scored`).toBeNull();
-      expect(player.publishedFinal, `${player.playerId} should carry a borrowed figure`).not.toBeNull();
+      // This fixture has no market at all, so every figure is borrowed and
+      // every one of them has to say so — the flag is what the screen draws
+      // the lighter, italic treatment from.
+      expect(player.projectedFinal, `${player.playerId} should carry a figure`).not.toBeNull();
+      expect(player.projectionBorrowed, `${player.playerId} must be marked borrowed`).toBe(true);
     }
   });
 
-  it('lets the published week reach the posture, which is not simulated', async () => {
+  it('does not mark a player it priced itself', async () => {
+    // The other direction, so the flag means something. Same fixture, real
+    // markets: the figures are this app's and nothing is marked.
+    const priced: MatchupSources = {
+      ...sources(PUBLISHED),
+      startSitInputs: async (ids) =>
+        ids.map((id, i) =>
+          candidate(id, `Player ${id}`, id.slice(0, 2).toUpperCase(), 15 + i, { signal: signalWithNet(2) }),
+        ),
+    };
+    const response = await buildMatchupResponse(priced, 'l1');
+    const starters = response.forecast!.slots.flatMap((row) => [row.mine, row.theirs]).filter(Boolean);
+
+    expect(starters.length).toBeGreaterThan(0);
+    for (const player of starters) expect(player!.projectionBorrowed ?? false).toBe(false);
+  });
+
+  it('lets the published week reach the posture too', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
 
@@ -516,15 +550,6 @@ describe('the matchup forecast is simulated without it', () => {
     // With it, both sides carry a number and the matchup can be called.
     expect(withIt.forecast!.suggestedMode.auto).toBe(true);
     expect(withIt.forecast!.suggestedMode.reasons.join(' ')).toMatch(/Rotowire/);
-  });
-
-  it('leaves the projected final and the win probability unknown, as a market-less week is', () => {
-    // The degraded path §33 describes: a scoreboard, and no forecast on top of
-    // it. The published numbers must not turn it into a confident afternoon.
-    return buildMatchupResponse(sources(PUBLISHED), 'l1').then((response) => {
-      expect(response.forecast!.teams.mine.projectedFinal).toBeNull();
-      expect(response.forecast!.teams.mine.winProbability).toBeNull();
-    });
   });
 
   /**
@@ -753,7 +778,14 @@ describe('no recommendation engine can reach the fallback', () => {
  * this a routing fix rather than a new source.
  */
 describe('a defence with no line at all', () => {
-  /** Sleeper's defaults for the categories a published DST total is built from. */
+  /**
+   * Sleeper's defaults for the categories a published DST total is built from.
+   *
+   * `def_2pt` is here and `ff` deliberately is not: the owner's correction of
+   * 10 September 2026 is that the feed pays two for a returned two-point
+   * conversion and nothing at all for a forced fumble. A league that pays one
+   * is a league that differs, and is refused — see the test below.
+   */
   const DEFAULT_DST = {
     rec: 0.5,
     sack: 1,
@@ -763,6 +795,7 @@ describe('a defence with no line at all', () => {
     def_st_td: 6,
     safe: 2,
     blk_kick: 2,
+    def_2pt: 2,
     pts_allow_0: 10,
     pts_allow_1_6: 7,
     pts_allow_7_13: 4,
@@ -789,6 +822,20 @@ describe('a defence with no line at all', () => {
     const rich = buildScoringProfile({ ...DEFAULT_DST, sack: 2 }, []);
     expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
     expect(publishedRefusal(rich, 'DEF')).toMatch(/pays a defense differently/);
+  });
+
+  it('is refused when the league pays for a forced fumble, which the feed does not', () => {
+    // The owner's correction, as a behaviour: only the recovery counts, so a
+    // league paying the forced fumble too is scoring a category the published
+    // total does not carry.
+    const paysFf = buildScoringProfile({ ...DEFAULT_DST, ff: 1 }, []);
+    expect(sleeperScoringKey(paysFf, 'DEF')).toBeNull();
+    expect(publishedRefusal(paysFf, 'DEF')).toMatch(/pays a defense differently/);
+  });
+
+  it('is refused when a two-point return is worth something other than two', () => {
+    const rich = buildScoringProfile({ ...DEFAULT_DST, def_2pt: 6 }, []);
+    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
   });
 
   it('is refused when the points-allowed bands have been retuned', () => {
@@ -818,36 +865,3 @@ describe('a defence with no line at all', () => {
     expect(marketProjection(unscorable)).toBeNull();
   });
 });
-
-
-/**
- * A forecast with the two fields that are *carried* on it, rather than
- * simulated, taken off.
- *
- * `suggestedMode` and each player's `publishedFinal` both legitimately read the
- * published feed: the first is a posture and a sentence, the second is a figure
- * drawn in a lighter weight beside the column this app could not price. Neither
- * is produced by the simulator, and `build.ts` attaches both after it has run.
- *
- * Everything this strips away is asserted separately, and asserted to actually
- * differ — an exception nobody exercises is a hole. What is left is the claim
- * that has always mattered: the distributions, the correlation, the simulation,
- * the projected finals, the win probability and the swap advice are identical
- * with the feed and without it.
- */
-function simulatedPart(forecast: MatchupForecast): unknown {
-  const strip = (player: MatchupPlayerView | null) => {
-    if (!player) return null;
-    const { publishedFinal: _borrowed, ...simulated } = player;
-    return simulated;
-  };
-  const { suggestedMode: _mode, ...rest } = forecast;
-  return {
-    ...rest,
-    slots: forecast.slots.map((row) => ({ ...row, mine: strip(row.mine), theirs: strip(row.theirs) })),
-    bench: {
-      mine: forecast.bench.mine.map(strip),
-      theirs: forecast.bench.theirs.map(strip),
-    },
-  };
-}
