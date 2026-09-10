@@ -99,8 +99,8 @@ export class LeagueRepo {
         batch.map((r) =>
           this.db
             .prepare(
-              `INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, reserve_json, is_mine, settings_json, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)`,
+              `INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, starter_slots_json, reserve_json, is_mine, settings_json, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             )
             .bind(
               leagueId,
@@ -109,6 +109,7 @@ export class LeagueRepo {
               r.ownerName,
               toJson(r.playerIds),
               toJson(r.starterIds),
+              toJson(r.starterSlotIds ?? []),
               toJson(r.reserveIds),
               r.isMine ? 1 : 0,
               toJson(r.settings ?? {}),
@@ -131,6 +132,7 @@ export class LeagueRepo {
       ownerName: (r['owner_name'] as string | null) ?? null,
       playerIds: parseJson<string[]>(r['players_json'], []),
       starterIds: parseJson<string[]>(r['starters_json'], []),
+      starterSlotIds: parseJson<(string | null)[]>(r['starter_slots_json'], []),
       reserveIds: parseJson<string[]>(r['reserve_json'], []),
       isMine: Number(r['is_mine'] ?? 0) === 1,
       settings: parseJson<Record<string, unknown>>(r['settings_json'], {}),

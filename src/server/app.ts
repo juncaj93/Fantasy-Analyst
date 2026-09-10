@@ -787,6 +787,23 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label, notes: leagueFitNotes(profile, shape) },
       rosterShape: shape,
+      /*
+       * The league's own slot order, and the lineup laid out against it.
+       *
+       * `starters` below is the same lineup as a set and stays exactly as it
+       * was. These two are what let the Team screen draw one row per slot with
+       * a verdict on each, instead of two lists the reader reconciles by hand:
+       * `rosterPositions` is the order Sleeper shows him, and `starterSlotIds`
+       * says who is in each one — `null` where Sleeper has left a slot empty.
+       *
+       * `starterSlotIds` is absent on a roster synced before migration 0039.
+       * That is read as "the order is not known" and the screen places the same
+       * starters by eligibility instead; see `core/startsit/sleeperLineup.ts`.
+       */
+      rosterPositions: league.rosterPositions ?? [],
+      ...(mine?.starterSlotIds && mine.starterSlotIds.length > 0
+        ? { starterSlotIds: mine.starterSlotIds }
+        : {}),
       starters: hydrate(mine?.starterIds ?? []),
       bench: hydrate((mine?.playerIds ?? []).filter((id) => !(mine?.starterIds ?? []).includes(id))),
       // Mid-draft there is no lineup to show, only players held and slots still

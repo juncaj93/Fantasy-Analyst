@@ -199,6 +199,17 @@ export function toRosterRecords(
       ownerName: owner?.display_name ?? owner?.username ?? null,
       playerIds: (r.players ?? []).filter(Boolean),
       starterIds: (r.starters ?? []).filter((p) => !!p && p !== '0'),
+      /*
+       * The same array, uncollapsed.
+       *
+       * `starterIds` above is a set and the filter is what makes it one. This
+       * keeps the positions, because Sleeper's `starters` is aligned index for
+       * index with the league's `roster_positions` and that alignment is the
+       * only record of *which slot* a player is in. `'0'` is Sleeper's empty
+       * slot and becomes null rather than disappearing, so the gaps stay where
+       * they are.
+       */
+      starterSlotIds: (r.starters ?? []).map((p) => (p && p !== '0' ? p : null)),
       reserveIds: (r.reserve ?? []).filter(Boolean),
       isMine: !!myUserId && r.owner_id === myUserId,
       settings: r.settings ?? null,

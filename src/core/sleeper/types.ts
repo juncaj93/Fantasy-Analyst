@@ -249,6 +249,22 @@ export interface RosterRecord {
   ownerName: string | null;
   playerIds: string[];
   starterIds: string[];
+  /**
+   * The lineup with its gaps kept, aligned to the league's `roster_positions`.
+   *
+   * Index for index with the starting slots the league defines, so entry 3 is
+   * whoever Sleeper has in slot 3 and null is a slot Sleeper has left empty.
+   * {@link starterIds} is the same array as a set; this is the only record of
+   * where each player actually sits, which is what lets a screen show a lineup
+   * slot by slot instead of as a bag of names.
+   *
+   * Absent or empty on a roster synced before the column existed — "the order
+   * is not known", which is a different thing from an empty lineup and is read
+   * that way downstream. Optional rather than required for exactly that reason:
+   * a caller that has no slot order should be made to say so, not to invent an
+   * empty array that looks like a lineup nobody has filled.
+   */
+  starterSlotIds?: (string | null)[];
   reserveIds: string[];
   isMine: boolean;
   /**
