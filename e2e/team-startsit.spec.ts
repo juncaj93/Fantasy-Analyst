@@ -573,15 +573,15 @@ test.describe('waiver upgrades', () => {
     expect(await bid.getByRole('button').count(), 'a bid must carry no control at all').toBe(0);
   });
 
-  /**
-   * The budget quoted is the league's own, and it is never invented.
-   *
-   * The demo league publishes a $100 budget and $35 spent, so the footer has to
-   * read $65 — a card that assumed Sleeper's $100 default would say $100 here
-   * and be wrong in exactly the way this whole layer exists to avoid.
+  /*
+   * The budget footer is not on this screen any more, and its test went with
+   * it — see `waivers.spec.ts`. Team carries two rows of the board as a teaser
+   * and a wallet under two rows frames almost none of the spending it
+   * describes. This asserts the absence, so the move cannot silently undo
+   * itself.
    */
-  test('states the budget it priced against, from the league settings', async ({ page }) => {
-    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
+  test('does not close the roster with the league wallet', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toHaveCount(0);
   });
 
   /**

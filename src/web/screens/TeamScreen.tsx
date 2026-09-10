@@ -33,7 +33,6 @@ import {
   type StartSitEvaluation,
   type StartSitMode,
   type StartSitRefreshReport,
-  type FaabAdvice,
   type WaiverAdvice,
 } from '../api.ts';
 import { MODE_DESCRIPTION, MODE_LABEL, START_SIT_MODES } from '../../core/startsit/mode.ts';
@@ -698,7 +697,7 @@ export function TeamScreen({
                   <DstLine plan={waivers?.dst ?? null} />
 
                   {waiverBoard ? (
-                    <WaiverSection board={waiverBoard} faab={waivers?.faab ?? null} onOpen={setWaiverDetail} />
+                    <WaiverSection board={waiverBoard} onOpen={setWaiverDetail} />
                   ) : null}
                 </>
               )}
@@ -1210,12 +1209,9 @@ function BenchSection({
  */
 function WaiverSection({
   board,
-  faab,
   onOpen,
 }: {
   board: WaiverBoard;
-  /** The league's wallet, which belongs under the rows rather than on one. */
-  faab: FaabAdvice | null;
   onOpen: (row: WaiverBoardRow) => void;
 }) {
   /*
@@ -1248,12 +1244,15 @@ function WaiverSection({
         <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
       ))}
       {/*
-        The wallet the prices above were quoted from. It belongs to the league
-        rather than to any one row, so it sits under them once — see the note on
-        `BudgetFooter`, which is the league-intelligence pass's own component and
-        is used here unchanged.
+        The wallet is not on this screen, and the reason is what this section is.
+
+        Team shows the strongest two upgrades as a *teaser* — see
+        `TEAM_WAIVER_ROWS`. A wallet is the frame you read a bid against, and
+        there are no bids here to read: the rows below the fold, the ones the
+        budget would actually be spent on, are on Waivers. So `BudgetFooter`
+        moved to the bottom of that page, under the board it prices, where it is
+        beside the numbers it qualifies rather than under two of them.
       */}
-      <BudgetFooter faab={faab} />
       {/*
         Only the part that changes a reading.
 
@@ -1287,37 +1286,6 @@ const TEAM_WAIVER_ROWS = 2;
 
 function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * The budget the advice above was priced against, said out loud.
- *
- * A recommendation of $19 means nothing without the wallet it came from, and
- * the two numbers that make it legible — what is left, and what winning has
- * cost in this league — are exactly the two a reader would otherwise have to go
- * to Sleeper to find.
- */
-function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
-  if (!faab) return null;
-  if (!faab.rule.usesFaab) {
-    return (
-      <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
-        {faab.rule.provenance}.
-      </div>
-    );
-  }
-  const mine = faab.mine;
-  return (
-    <div className="faint" style={{ marginTop: 6 }} data-testid="faab-budget">
-      {mine?.remaining == null
-        ? 'Your remaining budget is unknown.'
-        : `$${mine.remaining} of $${faab.rule.total} left.`}
-      {faab.prices.sample > 0
-        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
-        : ' No winning bids recorded in this league yet.'}
-      <div>{faab.losingBids}</div>
-    </div>
-  );
 }
 
 /**

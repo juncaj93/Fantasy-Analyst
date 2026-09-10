@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LeagueSummary, type StartSitRefreshReport, type WaiverAdvice } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
-import { WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
+import { BudgetFooter, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -215,6 +215,15 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               {note}
             </div>
           ))}
+
+          {/*
+            The wallet, last, under the board it prices.
+
+            It used to close the Team page, under a two-row teaser of this same
+            board — a frame around almost none of the spending it describes, on
+            a screen about a lineup. The bids it qualifies are the rows above.
+          */}
+          <BudgetFooter faab={advice?.faab ?? null} />
         </>
       )}
 

@@ -355,3 +355,36 @@ test.describe('the waivers page', () => {
     expect(scrollWidth).toBeLessThanOrEqual(width);
   });
 });
+
+
+/**
+ * The wallet the board was priced against.
+ *
+ * Moved here from the Team page, where it closed a two-row teaser of this same
+ * board. The claim is unchanged and it is the one worth keeping: the demo
+ * league publishes a $100 budget and $35 spent, so the footer has to read $65.
+ * A card that assumed Sleeper's $100 default would say $100 here and be wrong
+ * in exactly the way this layer exists to avoid.
+ */
+test.describe('the league wallet, under the board', () => {
+  test.beforeEach(async ({ page }) => openWaivers(page));
+
+  test('states the budget it priced against, from the league settings', async ({ page }) => {
+    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
+  });
+
+  test('sits below the rows it qualifies, not above them', async ({ page }) => {
+    /*
+     * Order rather than mere presence: a wallet above the board is a figure
+     * with nothing yet to spend it on, which is the arrangement this move was
+     * made to get away from.
+     */
+    const footer = page.getByTestId('faab-budget');
+    await expect(footer).toBeVisible();
+    const rows = page.getByTestId('waiver-row');
+    if ((await rows.count()) === 0) return;
+    const rowBottom = await rows.last().evaluate((el) => el.getBoundingClientRect().bottom);
+    const footerTop = await footer.evaluate((el) => el.getBoundingClientRect().top);
+    expect(footerTop).toBeGreaterThanOrEqual(rowBottom - 1);
+  });
+});
