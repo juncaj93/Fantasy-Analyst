@@ -303,8 +303,22 @@ export async function sheetBodyScroll(page: Page): Promise<{ top: number; max: n
  * of the screen is both inside it and the honest description of the gesture.
  */
 export async function tapAboveCard(page: Page): Promise<void> {
+  /*
+   * Halfway between the top of the screen and the top of the card.
+   *
+   * This used to tap twenty pixels down, and twenty pixels was the problem: the
+   * `.sheet-dismiss` zone ends about a hundred pixels from the top once the
+   * layer has scrolled to the card's detent, so the old point was inside the
+   * one strip that worked while the six hundred pixels below it — the whole of
+   * what a reader would actually point at — answered nothing. Every caller of
+   * this helper passed, and cards could still only be dismissed by swiping.
+   *
+   * Measured against the card rather than the viewport so it stays honest for a
+   * tall sheet and a short one alike.
+   */
   const port = (await page.locator('.sheet-scroller').boundingBox())!;
-  await page.mouse.click(port.x + port.width / 2, port.y + 20);
+  const card = (await page.locator('.sheet').boundingBox())!;
+  await page.mouse.click(port.x + port.width / 2, (port.y + card.y) / 2);
 }
 
 /**

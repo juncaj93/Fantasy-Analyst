@@ -481,6 +481,88 @@ test.describe('pushing a sheet away', () => {
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
+  /**
+   * Anywhere above the card, and not just the strip at the top.
+   *
+   * Reported as cards that could only be dismissed by swiping, and the report
+   * was right. `.sheet-dismiss` carried the tap handler and it is the layer's
+   * *scrollable* content, so once the layer has scrolled to the card's detent
+   * only its last hundred pixels are on screen. Measured at 390×844 with a
+   * player card open: the card's top edge at y≈733, the dismiss zone ending at
+   * y≈101, and six hundred and thirty pixels between them belonging to
+   * `.sheet-snap`, which answered nothing.
+   *
+   * The helper above used to tap twenty pixels down — inside the strip that
+   * worked — which is why every existing test passed through all of it. This
+   * walks the whole gap instead, so a handler that ever narrows again fails
+   * here rather than in somebody's hand.
+   */
+  test('closes on a tap anywhere in the gap above the card', async ({ page }) => {
+    // Quarter, half and three-quarters of the way down the visible backdrop.
+    // The old handler answered only the first of these.
+    for (const fraction of [0.25, 0.5, 0.75]) {
+      await openPlayerCard(page);
+      await expect(page.getByTestId('player-sheet')).toBeVisible();
+
+      const scroller = (await page.locator('.sheet-scroller').boundingBox())!;
+      const card = (await page.locator('.sheet').boundingBox())!;
+      const gap = card.y - scroller.y;
+      expect(gap, 'the card must leave something above it to tap').toBeGreaterThan(80);
+
+      await page.mouse.click(scroller.x + scroller.width / 2, scroller.y + gap * fraction);
+      await expect(
+        page.getByTestId('player-sheet'),
+        `a tap ${Math.round(fraction * 100)}% down the backdrop must close the card`,
+      ).toHaveCount(0);
+    }
+  });
+
+  /**
+   * A push that started on the card and lifted off it is not a tap outside.
+   *
+   * The delegated handler's real edge, and it was got wrong first time round.
+   * A press that begins on the card and ends past it still produces a `click`,
+   * and the browser reports that click against the *common ancestor* of where
+   * it went down and where it came up — the scroller, which is outside the
+   * card. A rule reading only the target dismissed on it, which turned every
+   * push too small to commit into a dismissal, and that is the one thing the
+   * settle exists to prevent.
+   *
+   * So the card must still be here after a push that springs back.
+   */
+  test('is not dismissed by a push that started on it and sprang back', async ({ page }) => {
+    await openPlayerCard(page);
+    await handOnCard(page);
+    await page.evaluate(async () => {
+      const el = document.querySelector('.sheet-scroller') as HTMLElement;
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.7;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    await handOffCard(page);
+    await pastTheSettle(page);
+
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+  });
+
+  /**
+   * …and a tap on the card itself never closes it.
+   *
+   * The other half of the rule, and the one that a delegated handler could
+   * plausibly get wrong: the scroller hears every tap in the layer now, so it
+   * has to be able to tell the card from the space around it.
+   */
+  test('stays open when the tap lands on the card', async ({ page }) => {
+    await openPlayerCard(page);
+    const card = (await page.locator('.sheet').boundingBox())!;
+
+    await page.mouse.click(card.x + card.width / 2, card.y + 30);
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+
+    // Including on the body, well inside it.
+    await page.mouse.click(card.x + card.width / 2, card.y + Math.min(card.height - 20, 120));
+    await expect(page.getByTestId('player-sheet')).toBeVisible();
+  });
+
   test('leaves the controls inside it tappable', async ({ page }) => {
     await openScoringKey(page);
     await page.getByTestId('sheet-close').click();
