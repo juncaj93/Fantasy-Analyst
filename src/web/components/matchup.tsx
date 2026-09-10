@@ -733,9 +733,35 @@ function PlayerHalf({
       <span className="matchup-actual" data-testid="matchup-player-actual">
         {player.actual.toFixed(1)}
       </span>
-      <span className="matchup-player-proj" data-testid="matchup-player-proj">
-        {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
-      </span>
+      {/*
+        This app's number, or a borrowed one drawn so it cannot be mistaken for it.
+
+        The opponent's column used to be a run of dashes on the one screen whose
+        subject is the opponent: this app buys market lines for the reader's own
+        roster and nobody else's, so his opponent's starters are unpriced except
+        by coincidence. Rotowire's published week is already stored for every
+        player in the NFL, so the number exists and is free.
+
+        Lighter, in italic, and titled with whose it is — the same treatment a
+        borrowed figure gets on the Team screen. It is display only: it reaches
+        no total, no win probability and no recommendation, which is enforced
+        by it arriving in a different field entirely. See
+        `MatchupPlayerView.publishedFinal`.
+      */}
+      {player.projectedFinal == null && player.publishedFinal != null ? (
+        <span
+          className="matchup-player-proj matchup-player-proj-borrowed"
+          data-testid="matchup-player-proj"
+          data-projection-source="sleeper"
+          title="Published by Rotowire, via Sleeper — no betting market has priced him. Not used to rank."
+        >
+          {player.publishedFinal.toFixed(1)}
+        </span>
+      ) : (
+        <span className="matchup-player-proj" data-testid="matchup-player-proj" data-projection-source={player.projectedFinal == null ? 'none' : 'market'}>
+          {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
+        </span>
+      )}
     </span>
   );
 

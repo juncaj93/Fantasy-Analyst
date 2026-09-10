@@ -8603,6 +8603,30 @@ div.matchup-result {
   color: var(--text-faint);
 }
 
+/*
+ * A projection this app borrowed rather than computed.
+ *
+ * Mostly the opponent's column, and for a structural reason: market lines are
+ * bought for the reader's own roster and nobody else's, so his opponent's
+ * starters are unpriced except by coincidence. The alternative to this was a
+ * run of dashes down the one screen whose subject is the opponent.
+ *
+ * Three signals, because one of them is not enough at 0.68rem: the dotted
+ * underline this app already uses for a borrowed figure — see
+ * `.proj[data-projection-source='sleeper']`, and it is deliberately the same
+ * mark rather than a second vocabulary — plus italics and a further step down
+ * in weight. Anything less and a lighter grey at this size is indistinguishable
+ * from the ordinary faint the figure beside it is already drawn in.
+ */
+.matchup-player-proj-borrowed {
+  color: var(--text-faint);
+  opacity: 0.72;
+  font-style: italic;
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
 /* The spine. Fixed width, so it never moves between rows. */
 .slot-pill {
   flex: 0 0 auto;

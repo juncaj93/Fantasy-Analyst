@@ -70,6 +70,26 @@ export interface MatchupPlayerView {
   actual: number;
   /** Fantasy Analyst's projected final total. Null when he could not be scored. */
   projectedFinal: number | null;
+  /**
+   * Rotowire's published total for him, for display only, when this app has none.
+   *
+   * A separate field from {@link projectedFinal} rather than a fallback folded
+   * into it, and the separation is the whole safety property: nothing in this
+   * module reads it, the simulator never sees it, and `projectedFinal` stays
+   * exactly what it has always been — the mean of the distribution that was
+   * actually drawn from. A single field carrying either would put somebody
+   * else's model into the win probability the first time a caller forgot which
+   * it was holding.
+   *
+   * It is filled in by `build.ts` *after* the forecast is computed, for the
+   * same reason. Mostly the opponent's, because this app prices the reader's
+   * roster and no other; a screen showing nine dashes down one column is a
+   * screen that looks broken, and the number exists and is free.
+   *
+   * Optional because the model does not produce it and a cached forecast from
+   * an older build will not carry it.
+   */
+  publishedFinal?: number | null;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
   phase: PlayerDistribution['phase'];
@@ -165,6 +185,38 @@ export interface ForecastInput {
  * answer and is the only one that does not mislead.
  */
 export const MIN_PROJECTED_SHARE = 0.5;
+
+/**
+ * How differently the two sides may be covered before the comparison is void.
+ *
+ * {@link MIN_PROJECTED_SHARE} asks whether each side is *scorable*. This asks
+ * the question it does not: whether the two are being measured on the same
+ * basis. They are different tests, and only the second catches the case that
+ * was actually reported.
+ *
+ * An unprojected starter contributes zero — see `buildDistribution`, which
+ * settles him as truth-only — so a side's projected total is understated in
+ * direct proportion to how much of it could not be priced. Both sides can clear
+ * the share test, both numbers can be individually defensible, and the
+ * subtraction between them can still be nonsense.
+ *
+ * Measured on this module's own seven-a-side fixture, with the reader's roster
+ * fully priced and the opponent's thinned one starter at a time:
+ *
+ *     opponent 7/7  →  50.4%   (the fixture is a coin flip)
+ *     opponent 6/7  →  69.0%
+ *     opponent 5/7  →  81.6%
+ *     opponent 4/7  →  93.8%   — and 4/7 is 0.57, over the share threshold
+ *
+ * Nothing is wrong with the reader's side in any of those rows. The opponent
+ * has simply been given a smaller team. Reported on 10 September 2026 as a
+ * 98%/2% split on a week that had barely been played.
+ *
+ * 0.2 rather than something tighter because a gap of a slot on a nine-slot
+ * lineup is ordinary noise and worth tolerating; a gap of a fifth is two whole
+ * starters' worth of points missing from one side of a subtraction.
+ */
+export const MAX_COVERAGE_GAP = 0.2;
 
 /** The share of one side's starting slots the engine could actually score. */
 function coverage(starters: PlayerDistribution[], side: MatchupSide): number {
@@ -265,9 +317,20 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * Do not "fix" it by lowering the threshold: the share is what stops a
    * confident wrong forecast, and the coverage is what is actually missing.
    */
+  const mineCoverage = coverage(startingDistributions, 'mine');
+  const theirsCoverage = coverage(startingDistributions, 'theirs');
+  /*
+   * …and the second test, which is about the comparison rather than the sides.
+   *
+   * Passing the share test twice does not make two totals comparable. See
+   * `MAX_COVERAGE_GAP` for the measured ladder: an opponent priced 4 of 7 —
+   * over the share threshold — reported the reader as a 93.8% favourite on a
+   * fixture that is a coin flip when everybody is priced.
+   */
   const degraded =
-    coverage(startingDistributions, 'mine') < MIN_PROJECTED_SHARE ||
-    coverage(startingDistributions, 'theirs') < MIN_PROJECTED_SHARE;
+    mineCoverage < MIN_PROJECTED_SHARE ||
+    theirsCoverage < MIN_PROJECTED_SHARE ||
+    Math.abs(mineCoverage - theirsCoverage) > MAX_COVERAGE_GAP;
 
   /*
    * The seed actually drawn with, reported as well as used.

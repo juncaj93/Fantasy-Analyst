@@ -51,7 +51,7 @@ import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
 import { marketProjection } from '../startsit/projection.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
-import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
+import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast, type MatchupPlayerView } from './model.ts';
 import { GAME_MINUTES } from './distribution.ts';
 import type { SlotSpec } from './decision.ts';
 import type { PreviousInsightState } from './insights.ts';
@@ -409,8 +409,32 @@ export async function buildMatchupResponse(
     });
   }
 
-  const response: MatchupResponse = { ...base, found: true, reason: null, forecast, cards, cached: false };
-  sources.remember({ fingerprint: forecast.fingerprint, response });
+  /*
+   * The published figures, attached to the finished forecast.
+   *
+   * After `buildForecast`, and that ordering is the safety property rather than
+   * a convenience: the simulation has already run, on `projection` alone, and
+   * nothing it produced can have seen this. `publishedFinal` is a second field
+   * beside `projectedFinal` for the same reason — see its note in `model.ts` —
+   * so no caller can hold one while believing it has the other.
+   *
+   * It exists because of a measured asymmetry, not a preference. This app
+   * prices the reader's roster and no other, so the opponent's column was a run
+   * of dashes on the one screen whose whole subject is the opponent. Rotowire's
+   * week is already stored for every player in the NFL, so filling them costs
+   * nothing — and the screen draws them in a lighter weight, because a borrowed
+   * number that looks like this app's own is worse than a dash.
+   */
+  const withPublished = decorateWithPublished(forecast, published);
+  const response: MatchupResponse = {
+    ...base,
+    found: true,
+    reason: null,
+    forecast: withPublished,
+    cards,
+    cached: false,
+  };
+  sources.remember({ fingerprint: withPublished.fingerprint, response });
 
   /*
    * And, only for a caller that brought somewhere to write it, the ledger.
@@ -701,4 +725,42 @@ export function isWeekSettled(currentWeek: number | null, week: number, seasonTy
   if (type === 'post' || type === 'off') return true;
   if (type === 'pre') return false;
   return currentWeek != null && Number.isFinite(currentWeek) && week < currentWeek;
+}
+
+
+/**
+ * Copy a forecast with each player's published total attached.
+ *
+ * A pure reshaping of what the model already produced. It adds one field per
+ * player and changes nothing else — not the totals, not the win probability,
+ * not the ordering — which is what makes it safe to run over a forecast that
+ * has already been simulated and is about to be cached.
+ */
+function decorateWithPublished(
+  forecast: MatchupForecast,
+  published: ReadonlyMap<string, number>,
+): MatchupForecast {
+  if (published.size === 0) return forecast;
+
+  const attach = (player: MatchupPlayerView | null): MatchupPlayerView | null => {
+    if (!player) return null;
+    /*
+     * Only where this app has nothing of its own. A published figure beside a
+     * market one is not a second opinion the reader asked for, and showing it
+     * would invite exactly the comparison this app declines to make.
+     */
+    if (player.projectedFinal != null) return player;
+    const figure = published.get(player.playerId);
+    if (figure == null || !Number.isFinite(figure)) return player;
+    return { ...player, publishedFinal: Math.max(0, Math.round(figure * 100) / 100) };
+  };
+
+  return {
+    ...forecast,
+    slots: forecast.slots.map((row) => ({ ...row, mine: attach(row.mine), theirs: attach(row.theirs) })),
+    bench: {
+      mine: forecast.bench.mine.map((p) => attach(p)!).filter(Boolean),
+      theirs: forecast.bench.theirs.map((p) => attach(p)!).filter(Boolean),
+    },
+  };
 }

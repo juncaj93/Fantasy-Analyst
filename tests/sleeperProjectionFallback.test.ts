@@ -31,6 +31,7 @@ import {
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
+import type { MatchupForecast, MatchupPlayerView } from '../src/core/matchup/model.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../src/core/sleeper/types.ts';
 import { candidate, signalWithNet } from './helpers/startsit.ts';
@@ -485,9 +486,24 @@ describe('the matchup forecast is simulated without it', () => {
     const without = await buildMatchupResponse(sources(null), 'l1');
     expect(withIt.found).toBe(true);
 
-    const { suggestedMode: _withMode, ...simulatedWith } = withIt.forecast!;
-    const { suggestedMode: _withoutMode, ...simulatedWithout } = without.forecast!;
-    expect(simulatedWith).toEqual(simulatedWithout);
+    expect(simulatedPart(withIt.forecast!)).toEqual(simulatedPart(without.forecast!));
+  });
+
+  it('attaches the published figure beside the projection, never into it', async () => {
+    const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
+    const players = [
+      ...withIt.forecast!.slots.flatMap((row) => [row.mine, row.theirs]),
+      ...withIt.forecast!.bench.mine,
+      ...withIt.forecast!.bench.theirs,
+    ].filter((p): p is NonNullable<typeof p> => p != null);
+
+    expect(players.length).toBeGreaterThan(0);
+    for (const player of players) {
+      // This fixture prices nobody, so every one of them is unscorable and
+      // every one of them should have borrowed a figure.
+      expect(player.projectedFinal, `${player.playerId} must not be scored`).toBeNull();
+      expect(player.publishedFinal, `${player.playerId} should carry a borrowed figure`).not.toBeNull();
+    }
   });
 
   it('lets the published week reach the posture, which is not simulated', async () => {
@@ -802,3 +818,36 @@ describe('a defence with no line at all', () => {
     expect(marketProjection(unscorable)).toBeNull();
   });
 });
+
+
+/**
+ * A forecast with the two fields that are *carried* on it, rather than
+ * simulated, taken off.
+ *
+ * `suggestedMode` and each player's `publishedFinal` both legitimately read the
+ * published feed: the first is a posture and a sentence, the second is a figure
+ * drawn in a lighter weight beside the column this app could not price. Neither
+ * is produced by the simulator, and `build.ts` attaches both after it has run.
+ *
+ * Everything this strips away is asserted separately, and asserted to actually
+ * differ — an exception nobody exercises is a hole. What is left is the claim
+ * that has always mattered: the distributions, the correlation, the simulation,
+ * the projected finals, the win probability and the swap advice are identical
+ * with the feed and without it.
+ */
+function simulatedPart(forecast: MatchupForecast): unknown {
+  const strip = (player: MatchupPlayerView | null) => {
+    if (!player) return null;
+    const { publishedFinal: _borrowed, ...simulated } = player;
+    return simulated;
+  };
+  const { suggestedMode: _mode, ...rest } = forecast;
+  return {
+    ...rest,
+    slots: forecast.slots.map((row) => ({ ...row, mine: strip(row.mine), theirs: strip(row.theirs) })),
+    bench: {
+      mine: forecast.bench.mine.map(strip),
+      theirs: forecast.bench.theirs.map(strip),
+    },
+  };
+}
