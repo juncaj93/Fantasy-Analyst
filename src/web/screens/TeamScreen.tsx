@@ -62,7 +62,7 @@ import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../..
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
-import { buildLineupVerdicts, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -609,7 +609,15 @@ export function TeamScreen({
                           setCompare({ slot: row.slot, seed: [row.currentPlayerId, row.recommendedPlayerId] });
                           return;
                         }
-                        const subject = row.recommendedPlayerId ?? row.currentPlayerId;
+                        /*
+                         * The card belongs to whoever the row is *about*, which
+                         * is not always who this app would start there — see
+                         * `verdictSubjectId`, which both this and the row's own
+                         * headline are now drawn from. Reading the two ids in
+                         * the opposite order here is what opened Kenneth
+                         * Walker's card from Ladd McConkey's row.
+                         */
+                        const subject = verdictSubjectId(row);
                         if (subject) {
                           openPlayer(subject, {
                             starting: true,
@@ -850,8 +858,13 @@ function VerdictCard({
    * leads with the man currently starting — the reader is looking for his own
    * lineup, and finding a stranger's name in the slot is how a screen loses him
    * — and the change is stated underneath, in the order he would act on it.
+   *
+   * The rule itself is `verdictSubjectId`, shared with the tap handler that
+   * opens this row, because a headline and a tap that each decided this for
+   * themselves is precisely how the row came to open the wrong man's card.
    */
-  const subject = row.verdict === 'fill' ? recommended : (current ?? recommended);
+  const subjectId = verdictSubjectId(row);
+  const subject = (subjectId != null && subjectId === recommended?.playerId ? recommended : current) ?? current ?? recommended;
   const position = subject?.position ?? '';
   const blocked = row.vacancy[0] ?? null;
   /* The figure belonging to whoever leads the row — see the trailing field. */

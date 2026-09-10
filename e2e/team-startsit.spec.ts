@@ -1124,3 +1124,73 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(details).toContainText(/not used to rank/i);
   });
 });
+
+
+/**
+ * Tapping a name opens that name's card.
+ *
+ * The one-line claim behind a defect reported from a live Week 1 lineup: two
+ * players in the two FLEX slots, and tapping either brought up the other's
+ * card. The mechanism is in `lineup.verdicts.test.ts`, which owns the crossed
+ * flex — the screen decided "whose row is this?" once for the headline and
+ * again, in the opposite order, for the tap.
+ *
+ * This file owns the browser half, and states it as correspondence rather than
+ * as the specific pair: whatever `data-player-id` a row carries, the card that
+ * comes up carries the same one. That holds for every row in every lineup,
+ * which is the property that was actually broken — a test pinned to McConkey
+ * and Walker would pass again the moment the demo roster changed.
+ */
+test.describe('the row and the card are about the same player', () => {
+  test.beforeEach(async ({ page }) => openTeam(page));
+
+  test('opens the card of the man printed on the row', async ({ page }) => {
+    /*
+     * `keep` rows only, and deliberately. A `swap` row is about two people and
+     * opens the comparison instead — that is the row's whole point — so it is a
+     * different assertion, made below.
+     */
+    const rows = page.locator('[data-testid="starter-row"][data-starter="true"][data-verdict="keep"]');
+    const count = await rows.count();
+    expect(count, 'the demo lineup has a settled row to tap').toBeGreaterThan(0);
+
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i);
+      const expected = await row.getAttribute('data-player-id');
+      await row.click();
+
+      /*
+       * Either surface is a legitimate answer to the tap — a player this app
+       * has no evaluation for opens the comparison seeded with him rather than
+       * a card about nothing. What is not legitimate is either one coming up
+       * about somebody else, so both are checked against the same id.
+       */
+      const card = page.getByTestId('weekly-card');
+      const compare = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+      await expect(card.or(compare.first())).toBeVisible();
+
+      if (await card.isVisible()) {
+        await expect(card).toHaveAttribute('data-player-id', expected!);
+        await page.getByTestId('sheet-close').click();
+      } else {
+        await expect(compare.first()).toHaveAttribute('data-player-id', expected!);
+        await page.getByTestId('sheet-close').click();
+      }
+      await expect(row).toBeVisible();
+    }
+  });
+
+  test('opens the comparison, holding both men, from a row that names two', async ({ page }) => {
+    const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
+    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+
+    const incumbent = await swap.getAttribute('data-player-id');
+    const challenger = await swap.getAttribute('data-recommended-player-id');
+    await swap.click();
+
+    const chosen = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+    await expect(chosen).toHaveCount(2);
+    const ids = await chosen.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+    expect(new Set(ids)).toEqual(new Set([incumbent, challenger]));
+  });
+});
