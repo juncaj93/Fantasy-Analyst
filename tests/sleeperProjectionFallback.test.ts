@@ -715,3 +715,90 @@ describe('no recommendation engine can reach the fallback', () => {
     expect(offenders.map((f) => path.relative(ROOT, f))).toEqual([]);
   });
 });
+
+
+/**
+ * A defence nobody quoted, which is now a number rather than a dash.
+ *
+ * The Week 1 gap left open by the market-anchored DST work: `projectDst` needs
+ * either this defence's own game line or a priced opponent to anchor on, and
+ * Jacksonville had neither. The row said nothing, correctly, and "nothing" is a
+ * poor answer for the one slot the reader has least else to go on.
+ *
+ * What blocked the fallback was not the DST model. It was `sleeperScoringKey`:
+ * `DEF` had no entry in RELEVANT, so a defence fell through to EVERYTHING and
+ * was checked against eight *offensive* settings, none of which can move
+ * Rotowire's number for a defence. In a six-point-passing-touchdown league,
+ * every defence was refused a published total because of a rule about
+ * quarterbacks.
+ *
+ * The fallback itself is the one that already existed, unchanged: quoted
+ * exactly as published, labelled `sleeper`, never ranked on. That is what makes
+ * this a routing fix rather than a new source.
+ */
+describe('a defence with no line at all', () => {
+  /** Sleeper's defaults for the categories a published DST total is built from. */
+  const DEFAULT_DST = {
+    rec: 0.5,
+    sack: 1,
+    int: 2,
+    fum_rec: 2,
+    def_td: 6,
+    def_st_td: 6,
+    safe: 2,
+    blk_kick: 2,
+    pts_allow_0: 10,
+    pts_allow_1_6: 7,
+    pts_allow_7_13: 4,
+    pts_allow_14_20: 1,
+    pts_allow_21_27: 0,
+    pts_allow_28_34: -1,
+    pts_allow_35p: -4,
+  };
+
+  it('may read the published total in a league scored the way the feed assumes', () => {
+    expect(sleeperScoringKey(buildScoringProfile(DEFAULT_DST, []), 'DEF')).toBe('pts_half_ppr');
+  });
+
+  it('is no longer refused over a rule about quarterbacks', () => {
+    // The exact defect. Six-point passing touchdowns cannot move a defence.
+    const passing = buildScoringProfile({ ...DEFAULT_DST, pass_td: 6 }, []);
+    expect(sleeperScoringKey(passing, 'QB'), 'the quarterback is still refused').toBeNull();
+    expect(sleeperScoringKey(passing, 'DEF'), 'the defence never threw a pass').toBe('pts_half_ppr');
+  });
+
+  it('is refused when the league pays a defence differently', () => {
+    // Two points a sack against the feed's one is a real difference on a real
+    // category, and it is refused for the same reason the quarterback is.
+    const rich = buildScoringProfile({ ...DEFAULT_DST, sack: 2 }, []);
+    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
+    expect(publishedRefusal(rich, 'DEF')).toMatch(/pays a defense differently/);
+  });
+
+  it('is refused when the points-allowed bands have been retuned', () => {
+    // The largest single term in a defence's projection.
+    const retuned = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 15 }, []);
+    expect(sleeperScoringKey(retuned, 'DEF')).toBeNull();
+    expect(publishedRefusal(retuned, 'DEF')).toMatch(/points-allowed bands/);
+  });
+
+  it('is refused when the league scores yards allowed, which the feed does not', () => {
+    const yards = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 10, yds_allow_0_100: 5 }, []);
+    expect(sleeperScoringKey(yards, 'DEF')).toBeNull();
+  });
+
+  it('quotes the published figure and says whose it is', () => {
+    /*
+     * The end of the path. An unscorable defence — no market expectation, so no
+     * score — carrying a published number comes back labelled `sleeper`, which
+     * is what every surface keys its provenance off.
+     */
+    const unscorable = { score: null, expectation: { points: null }, components: [] };
+    const quoted = weeklyProjection(unscorable, 6.4);
+
+    expect(quoted.points).toBe(6.4);
+    expect(quoted.source).toBe('sleeper');
+    // And it still cannot be mistaken for this app's own number.
+    expect(marketProjection(unscorable)).toBeNull();
+  });
+});
