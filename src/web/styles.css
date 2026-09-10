@@ -995,6 +995,26 @@ body,
 }
 
 /*
+ * Two icons handed to the bar's trailing slot as one occupant.
+ *
+ * `.nav-actions` is the bar's own container and already lays its children out;
+ * this exists because Team passes a *pair* of buttons through a slot shaped for
+ * one node, and a bare fragment would have left them un-gapped. Same axis, same
+ * gap, so the pair sits exactly where a single trailing button would.
+ *
+ * Team's controls used to have a row of their own beneath the league name,
+ * which after the Floor/Balanced/Ceiling chips were removed was a full-width
+ * row holding two 44px icons and a stretch of nothing to their left. In the
+ * bar they read as what they are — actions belonging to the league on the
+ * banner — and the roster starts a row higher up the screen.
+ */
+.nav-actions-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/*
  * Back, said the way iOS says it: a chevron and the place you came from, in
  * the accent colour, with no box around it. It is navigation — never an undo —
  * and it does exactly what the browser's own back would do from a pushed
@@ -4500,19 +4520,6 @@ label {
    */
   min-height: var(--tap);
   margin-bottom: var(--sp-2);
-}
-
-/*
- * A control row with nothing on its leading edge.
- *
- * The Team row used to open with a segmented control that took the width and
- * pushed one button to the end. With the chips gone there is nothing to fill
- * it, and two icons floating at the left of an empty row read as leftovers —
- * so the row pushes them to the trailing edge, where a right-handed thumb is
- * and where every other trailing control in this app sits.
- */
-.control-row-trailing {
-  justify-content: flex-end;
 }
 
 /* Both occupants give up their own bottom margin — the row owns it now. */

@@ -47,6 +47,16 @@
  * rushing, receiving and turnovers. Each position is therefore checked against
  * the settings that actually move it, and refused on those alone.
  *
+ * ## Why a defence is not like that
+ *
+ * Everything above is about a published *total*, which is a single number that
+ * cannot be decomposed — so the only question available is whether it was
+ * computed under rules close enough to this league's. A defence's row is
+ * different: the feed publishes the projected counts beside the total, so this
+ * app can score Rotowire's stat line under the league's own defensive table and
+ * get a number that is exactly right for the league rather than nearly right.
+ * See {@link scorePublishedDefense}. No defence quotes a published total.
+ *
  * **What this cannot see.** `ScoringProfile` models nine values, so a league
  * carrying bonuses outside that set — a hundred-yard rushing bonus, a
  * first-down premium — matches here and is still playing a different game. That
@@ -57,7 +67,7 @@
  */
 
 import type { ScoringProfile } from './scoring.ts';
-import { buildDstScoring, type DstScoring, type ScoringTier } from './dstScoring.ts';
+import type { DstScoring, ScoringTier } from './dstScoring.ts';
 
 /** Which of the three published totals a league is entitled to read. */
 export type SleeperScoringKey = 'pts_std' | 'pts_half_ppr' | 'pts_ppr';
@@ -69,11 +79,20 @@ export const SLEEPER_PROJECTION_PUBLISHER = 'rotowire';
  * The positions worth asking for.
  *
  * The endpoint takes repeated `position[]` parameters and answers with every
- * player at those positions. Kickers and defences are omitted because Rotowire's
- * numbers for them are near-noise and this app does not draw them on the screens
- * that read this feed; adding them later is one entry in this list.
+ * player at those positions.
+ *
+ * `DEF` was missing until 10 September 2026, and its absence is worth recording
+ * because of what it cost. The previous round built a published fallback for
+ * defences end to end — the scoring, the refusal rule, the label on the screen,
+ * the tests — and shipped it against a feed that was never asked for a single
+ * defensive row. Jacksonville showed a dash in production the same way it had
+ * before the feature existed, and every part of the feature looked correct in
+ * isolation. Thirty-two rows a week; the whole of the fix is this list.
+ *
+ * Kickers stay out. Nothing this app draws reads a kicker's projection, so
+ * fetching them would be storage spent on a column nobody looks at.
  */
-export const SLEEPER_PROJECTION_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
+export const SLEEPER_PROJECTION_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'DEF'] as const;
 
 /**
  * Sleeper's default scoring, as the published totals assume it.
@@ -116,140 +135,106 @@ const RELEVANT: Readonly<Record<string, readonly AssumedSetting[]>> = {
 const EVERYTHING = Object.keys(PUBLISHED_ASSUMPTIONS) as AssumedSetting[];
 
 /**
- * What the published feed assumes a defence is paid, category by category.
+ * Rotowire's projected stat line for a defence, in counts rather than points.
  *
- * A defence is the one position whose published total shares *no* setting with
- * the table above. Rotowire's number for Cincinnati does not move if a league
- * pays six points for a passing touchdown; it moves if the league pays two
- * points for a sack instead of one, or shifts the points-allowed bands.
+ * A defence is the one position whose published *total* this app does not quote.
+ * Everybody else gets one of three totals computed under scoring close enough to
+ * a real league's to stand behind; a defence gets nothing of the sort, because
+ * two leagues that agree on every other rule can disagree about a defence by
+ * more than a defence is worth — one pays ten for a shutout and another pays
+ * five, one scores yards allowed and another does not.
  *
- * That mismatch used to cost the fallback entirely. `DEF` had no entry in
- * {@link RELEVANT}, so it fell through to `EVERYTHING` and was checked against
- * eight offensive settings — none of which can move it. In a league that pays
- * six-point passing touchdowns, every defence was refused a published total
- * because of a rule about quarterbacks. That is the same defect reported on 2
- * September about Joe Burrow, arriving from the opposite direction: there the
- * refusal was right and looked wrong, here it was simply wrong.
+ * The feed publishes the components, though: expected sacks, interceptions,
+ * fumble recoveries, touchdowns, points allowed, yards allowed. So the number a
+ * defence is worth **in this league** is not a guess and does not need one. It
+ * is this line put through the league's own table by {@link scorePublishedDefense}.
  *
- * These are the categories a defence's published total is actually built from,
- * at the values a default Sleeper league pays. A league that differs on any of
- * them is refused, for the same reason a six-point-passing-touchdown league is
- * refused a quarterback: the number exists, and quoting it would understate or
- * overstate a real amount.
- *
- * `forcedFumble` and `twoPointReturn` were left out of this table when it was
- * written, because nothing reachable from here established what the feed paid
- * for them and guessing a value in order to compare against it would have
- * invented the very assumption the comparison exists to check. The owner
- * supplied both on 10 September 2026: a forced fumble is not scored at all —
- * only the recovery counts — and a returned two-point conversion is worth two.
- * They are compared like every other category now.
- *
- * Note what that means for a league that *does* pay a forced fumble: it differs
- * from the feed on a category the feed does not pay, so it is refused, and its
- * defences fall back to no published number rather than a slightly wrong one.
- * That is the same rule every other category follows and it is the intended
- * outcome — `demo/fixtures/dst.ts` pays one, and is refused accordingly.
+ * That replaced a comparison table — a hand-written copy of what the feed was
+ * assumed to pay, used to decide whether its total was safe to quote. Two of its
+ * nine values had never been established and were filled in from an answer about
+ * a *league* rather than about the feed, and on 10 September 2026 all 32 rows of
+ * the live week were fitted against their own published totals: the feed pays 1
+ * per forced fumble, not 0. Reconstructing the totals from the components under
+ * Sleeper's defaults then matched to within 0.03 points a team, worst case 0.06.
+ * A table that has to be right about somebody else's model is a liability when
+ * the components are published beside the total.
  */
-const PUBLISHED_DST_ASSUMPTIONS = {
-  sack: 1,
-  interception: 2,
-  fumbleRecovery: 2,
-  forcedFumble: 0,
-  defensiveTd: 6,
-  specialTeamsTd: 6,
-  safety: 2,
-  blockedKick: 2,
-  twoPointReturn: 2,
-} as const;
-
-/**
- * Sleeper's default points-allowed bands, in a league's own settings keys.
- *
- * The standard table every default Sleeper league starts with. A league that
- * has retuned it is scoring a shutout differently from the feed, and that is
- * the single largest term in a defence's projection.
- *
- * Written as *settings* and run through `buildDstScoring` below rather than
- * hand-written as tiers, because the tier shape is half-open — `pts_allow_0`
- * becomes `{ from: 0, to: 1 }`, not `{ from: 0, to: 0 }` — and a reference
- * table transcribed into the wrong convention would refuse every league in the
- * world while looking exactly right. Building it through the same function the
- * league's own table is built by makes the comparison like-for-like by
- * construction.
- */
-const PUBLISHED_DST_SETTINGS = {
-  pts_allow_0: 10,
-  pts_allow_1_6: 7,
-  pts_allow_7_13: 4,
-  pts_allow_14_20: 1,
-  pts_allow_21_27: 0,
-  pts_allow_28_34: -1,
-  pts_allow_35p: -4,
-} as const;
-
-let publishedDstTiers: readonly ScoringTier[] | null = null;
-function publishedPointsAllowed(): readonly ScoringTier[] {
-  publishedDstTiers ??= buildDstScoring(PUBLISHED_DST_SETTINGS).pointsAllowed;
-  return publishedDstTiers;
+export interface PublishedDefenseLine {
+  sacks: number;
+  interceptions: number;
+  fumbleRecoveries: number;
+  forcedFumbles: number;
+  /** Touchdowns the defence scores. Returns are counted separately below. */
+  defensiveTds: number;
+  /** Kick and punt return touchdowns, which many leagues price apart. */
+  specialTeamsTds: number;
+  safeties: number;
+  blockedKicks: number;
+  /** Expected points allowed, which the points-allowed table is read at. */
+  pointsAllowed: number | null;
+  /** Expected yards allowed, for the leagues that score it. */
+  yardsAllowed: number | null;
 }
 
 /**
- * Whether this league's defence scoring is the one the feed assumed.
+ * What this league pays for the week Rotowire has projected, or null.
  *
- * Returns the clause explaining a refusal, or null when the published total may
- * be quoted. Deliberately strict: an unreadable rule set (`supported: false`)
- * is refused, a differing category is refused, and a league that has touched
- * the points-allowed or yards-allowed tables at all is refused, because those
- * tables are where most of a defence's expected points actually come from.
+ * Null exactly when the league's defence scoring could not be read, which is
+ * the same condition everything else downstream treats as "no opinion" — see
+ * `core/sleeper/dstScoring.ts`. A supported league always gets a number, even a
+ * league whose rules are nothing like Sleeper's defaults, because nothing here
+ * is being compared against an assumption: the counts are Rotowire's and the
+ * points-per-count are the league's own.
+ *
+ * Both tables are read at the *expected* value rather than summed over a
+ * distribution, which is what the feed itself does — it publishes `pts_allow`
+ * 15.75 alongside a single `pts_allow_14_20: 1` — so this reproduces the
+ * published total for a default league rather than quietly disagreeing with it.
  */
-export function publishedDstRefusal(dst: DstScoring | null | undefined): string | null {
+export function scorePublishedDefense(
+  line: PublishedDefenseLine,
+  dst: DstScoring | null | undefined,
+): number | null {
+  if (!dst || !dst.supported) return null;
+
+  let points =
+    line.sacks * dst.sack +
+    line.interceptions * dst.interception +
+    line.fumbleRecoveries * dst.fumbleRecovery +
+    line.forcedFumbles * dst.forcedFumble +
+    line.defensiveTds * dst.defensiveTd +
+    line.specialTeamsTds * dst.specialTeamsTd +
+    line.safeties * dst.safety +
+    line.blockedKicks * dst.blockedKick;
+
+  points += tierPoints(dst.pointsAllowed, line.pointsAllowed);
+  points += tierPoints(dst.yardsAllowed, line.yardsAllowed);
+
+  return Math.round(points * 100) / 100;
+}
+
+/** The band this figure falls in, or nothing when the league has no table. */
+function tierPoints(tiers: readonly ScoringTier[], value: number | null): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  const tier = tiers.find((t) => value >= t.from && value < t.to);
+  return tier?.points ?? 0;
+}
+
+/**
+ * Why this league gets no published number for a defence, or null when it does.
+ *
+ * One reason left, where there used to be four. A league is no longer refused
+ * for scoring a defence differently from the feed — that is precisely the case
+ * {@link scorePublishedDefense} handles — so the only way to have no answer is
+ * to have no readable rules to score against.
+ */
+export function publishedDefenseRefusal(dst: DstScoring | null | undefined): string | null {
   if (!dst) return 'this league’s defense scoring could not be read';
-  if (!dst.supported) {
-    return dst.unsupported.length > 0
-      ? `this league scores defenses on rules this app cannot map (${dst.unsupported.join(', ')})`
-      : 'this league’s defense scoring could not be read';
-  }
-
-  const differing = (Object.keys(PUBLISHED_DST_ASSUMPTIONS) as (keyof typeof PUBLISHED_DST_ASSUMPTIONS)[]).filter(
-    (key) => !same(dst[key], PUBLISHED_DST_ASSUMPTIONS[key]),
-  );
-  if (differing.length > 0) {
-    return `this league pays a defense differently from the published feed (${differing.join(', ')})`;
-  }
-
-  if (dst.yardsAllowed.length > 0) {
-    return 'this league scores yards allowed, which the published feed does not';
-  }
-  if (!sameTiers(dst.pointsAllowed, publishedPointsAllowed())) {
-    return 'this league’s points-allowed bands differ from the published feed’s';
-  }
-  return null;
+  if (dst.supported) return null;
+  return dst.unsupported.length > 0
+    ? `this league scores defenses on rules this app cannot map (${dst.unsupported.join(', ')})`
+    : 'this league’s defense scoring could not be read';
 }
-
-function sameTiers(a: readonly ScoringTier[], b: readonly ScoringTier[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((tier, i) => {
-    const other = b[i]!;
-    return bound(tier.from, other.from) && bound(tier.to, other.to) && same(tier.points, other.points);
-  });
-}
-
-/**
- * Two band edges, one of which is routinely `Infinity`.
- *
- * `same` is a tolerance comparison, and `Math.abs(Infinity - Infinity)` is NaN,
- * so every comparison against the open-ended top band came back false — which
- * refused every league on earth over a table identical to the one it was being
- * compared with. Caught by the test that asserts a default league *may* read
- * the fallback; without that direction of the assertion this would have looked
- * like a strict rule working perfectly.
- */
-function bound(a: number, b: number): boolean {
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return a === b;
-  return same(a, b);
-}
-
 
 /** Exact within a float's tolerance — these are settings, not measurements. */
 function same(a: number, b: number): boolean {
@@ -278,16 +263,14 @@ export function sleeperScoringKey(
   const pos = String(position ?? '').trim().toUpperCase();
 
   /*
-   * A defence is judged on defence scoring, and on nothing else.
+   * A defence reads no published total at all, in any league.
    *
-   * Every setting in `PUBLISHED_ASSUMPTIONS` is an offensive one, so running a
-   * defence through them answers a question about somebody else's position.
-   * See `publishedDstRefusal` for what is actually checked, and for why this
-   * used to refuse Cincinnati over a rule about quarterbacks.
+   * Not a refusal — an answer to a different question. `scorePublishedDefense`
+   * computes a defence's number from Rotowire's projected counts under this
+   * league's own table, which is exact where quoting a foreign total could only
+   * ever be close, so there is nothing here for a defence to fall back to.
    */
-  if (pos === 'DEF' || pos === 'DST') {
-    return publishedDstRefusal(profile.dst) == null ? scoringKeyFor(profile) : null;
-  }
+  if (pos === 'DEF' || pos === 'DST') return null;
 
   for (const key of RELEVANT[pos] ?? EVERYTHING) {
     if (!same(profile[key] as number, PUBLISHED_ASSUMPTIONS[key])) return null;
@@ -301,14 +284,7 @@ export function sleeperScoringKey(
   return scoringKeyFor(profile);
 }
 
-/**
- * Which of the three published totals this league reads, by its reception value.
- *
- * A defence takes the same column as everybody else — the feed publishes one
- * `pts_half_ppr` per player and a defence catches no passes, so the three are
- * the same number for it. Reading the league's own column keeps one rule for
- * which total is quoted rather than a second one for defences.
- */
+/** Which of the three published totals this league reads, by its reception value. */
 function scoringKeyFor(profile: ScoringProfile): SleeperScoringKey | null {
   if (same(profile.ppr, 0)) return 'pts_std';
   if (same(profile.ppr, 0.5)) return 'pts_half_ppr';
@@ -347,10 +323,9 @@ export function publishedRefusal(
   if (sleeperScoringKey(profile, position) != null) return null;
 
   const pos = String(position ?? '').trim().toUpperCase();
-  /* The same split as above: a defence's refusal names defence settings. */
-  if (pos === 'DEF' || pos === 'DST') {
-    return publishedDstRefusal(profile.dst) ?? 'this league reads no published total for a defense';
-  }
+  /* A defence is scored under this league's own rules, so the only refusal
+   * left is that those rules could not be read at all. */
+  if (pos === 'DEF' || pos === 'DST') return publishedDefenseRefusal(profile.dst);
   const differing = (RELEVANT[pos] ?? EVERYTHING).filter(
     (key) => !same(profile[key] as number, PUBLISHED_ASSUMPTIONS[key]),
   );
@@ -390,12 +365,15 @@ export interface SleeperWeeklyProjection {
   publisher: string | null;
   /** The three totals, each null when the row does not carry it. */
   points: Record<SleeperScoringKey, number | null>;
+  /** The projected counts, on a defence's row only. Null for everybody else. */
+  defense: PublishedDefenseLine | null;
 }
 
 interface RawRow {
   player_id?: unknown;
   company?: unknown;
   stats?: Record<string, unknown> | null;
+  player?: { position?: unknown } | null;
 }
 
 function finite(value: unknown): number | null {
@@ -430,10 +408,42 @@ export function parseSleeperWeeklyProjections(payload: unknown): SleeperWeeklyPr
     if (points.pts_std == null && points.pts_half_ppr == null && points.pts_ppr == null) continue;
 
     const company = raw.company == null ? '' : String(raw.company).trim().toLowerCase();
-    out.push({ playerId, publisher: company || null, points });
+    out.push({ playerId, publisher: company || null, points, defense: defenseLine(raw, stats) });
   }
 
   return out;
+}
+
+/**
+ * A defence's projected counts, or null when this row is not a defence.
+ *
+ * Identified by the position on the row rather than by which stats are present,
+ * because a defence projected to do nothing at all would carry no defensive
+ * stats and must still be recognised as a defence — and because a running back
+ * with a return touchdown carries `st_td` without being one.
+ *
+ * Zero where a count is absent, which is what the feed means by omitting it: a
+ * row without `safe` is a defence projected not to record a safety, not a
+ * defence whose safeties are unknown. `pts_allow` and `yds_allow` are the
+ * exception and stay null, because reading a missing expectation as zero would
+ * put every such defence in the shutout band.
+ */
+function defenseLine(raw: RawRow, stats: Record<string, unknown>): PublishedDefenseLine | null {
+  const position = String(raw.player?.position ?? '').trim().toUpperCase();
+  if (position !== 'DEF' && position !== 'DST') return null;
+  const count = (key: string): number => finite(stats[key]) ?? 0;
+  return {
+    sacks: count('sack'),
+    interceptions: count('int'),
+    fumbleRecoveries: count('fum_rec'),
+    forcedFumbles: count('ff'),
+    defensiveTds: count('def_td'),
+    specialTeamsTds: count('st_td'),
+    safeties: count('safe'),
+    blockedKicks: count('blk_kick'),
+    pointsAllowed: finite(stats['pts_allow']),
+    yardsAllowed: finite(stats['yds_allow']),
+  };
 }
 
 /**

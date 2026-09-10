@@ -1,0 +1,20 @@
+-- Rotowire's projected counts for a defence, beside the totals already stored.
+--
+-- The three published totals answer "what is this player worth" for every
+-- position but one. A defence is the exception: two leagues that agree on every
+-- other rule can pay a shutout ten points and five, and one of them scores
+-- yards allowed as well — so a single foreign total is not a number either can
+-- use. The feed publishes the components (sacks, takeaways, touchdowns, points
+-- and yards allowed), and scoring those under the league's own table gives an
+-- answer that is exact rather than close. See core/sleeper/weeklyProjections.ts.
+--
+-- One JSON column rather than ten real ones, which is against this schema's
+-- habit and deliberate here. Thirty-two rows a week carry it and roughly four
+-- hundred do not, so ten columns would be ten nulls on every row that is not a
+-- defence, and none of the ten is ever filtered or ordered by — the line is
+-- read whole, by primary key, and scored in memory.
+--
+-- Nullable with no backfill. A row stored before this migration reads as a
+-- defence with no line, which is the same state as a defence the feed has not
+-- projected: no published number, exactly as before. The next refresh fills it.
+alter table sleeper_weekly_projections add column defense_json text;

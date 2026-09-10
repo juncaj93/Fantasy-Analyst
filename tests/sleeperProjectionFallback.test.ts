@@ -24,7 +24,10 @@ import { describe, expect, it } from 'vitest';
 import { marketProjection, weeklyProjection } from '../src/core/startsit/projection.ts';
 import {
   parseSleeperWeeklyProjections,
+  publishedDefenseRefusal,
+  scorePublishedDefense,
   sleeperProjectionPath,
+  SLEEPER_PROJECTION_POSITIONS,
   sleeperScoringKey,
   publishedRefusal,
 } from '../src/core/sleeper/weeklyProjections.ts';
@@ -32,6 +35,7 @@ import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
+import { DST_SCORING_UNSUPPORTED } from '../src/core/sleeper/dstScoring.ts';
 import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../src/core/sleeper/types.ts';
 import { candidate, signalWithNet } from './helpers/startsit.ts';
 
@@ -254,6 +258,8 @@ describe('reading the feed', () => {
       playerId: '4046',
       publisher: 'rotowire',
       points: { pts_std: 17.4, pts_half_ppr: 20.98, pts_ppr: 24.6 },
+      // A quarterback has no defensive line. See the defence block below.
+      defense: null,
     });
   });
 
@@ -490,6 +496,62 @@ describe('the matchup forecast may borrow, and says which players it borrowed fo
    * feed this fixture prices nobody and the forecast degrades; with it, every
    * starter carries a number and there is a real answer.
    */
+  /**
+   * The regression that emptied the opponent's column in production.
+   *
+   * Every fixture above stubs `publishedProjections` as a map lookup, which
+   * cannot fail the way production failed: there the source is the real one,
+   * and the real one checks the league's settings *per position*. The matchup's
+   * source bag passed no positions — deliberately, on the reasoning that a
+   * caller who cannot say who it is asking about should get the conservative
+   * answer — and an unknown position is checked against every setting the feed
+   * assumes at once.
+   *
+   * This league pays six points for a passing touchdown. So the conservative
+   * answer was every player in it refused, and a probe of the live app on 10
+   * September 2026 found what that looks like from outside: four unpriced
+   * opponent starters, no borrowed number anywhere on either side, coverage of
+   * 0.9 against 0.6, and no win probability at all.
+   *
+   * The stub here is the real rule rather than a map, so the assertion is about
+   * routing and not about arithmetic.
+   */
+  it('asks the feed who each player is, so one rule about quarterbacks does not silence it', async () => {
+    const sixPointPassing: LeagueRecord = { ...LEAGUE, scoringSettings: { rec: 0.5, pass_td: 6 } };
+    const asked: (string | null)[] = [];
+
+    const withPositions: MatchupSources = {
+      ...sources(null),
+      leagues: {
+        getLeague: async () => sixPointPassing,
+        listRosters: async () => [roster(1, true, MINE), roster(2, false, THEIRS)],
+      },
+      publishedProjections: async ({ playerIds, profile, positionOf }) => {
+        const out = new Map<string, number>();
+        for (const id of playerIds) {
+          const position = positionOf(id);
+          asked.push(position);
+          if (sleeperScoringKey(profile, position) != null) out.set(id, 12);
+        }
+        return out;
+      },
+    };
+
+    const response = await buildMatchupResponse(withPositions, 'l1');
+    const rows = (response.forecast?.slots ?? []).flatMap((r) => [r.mine, r.theirs]).filter(Boolean);
+
+    // The bag knows who it is asking about at all, which is the fix.
+    expect(asked).toContain('RB');
+    expect(asked.filter((p) => p == null)).toEqual([]);
+
+    // A passing setting refuses the quarterback and nobody else.
+    const borrowed = rows.filter((p) => p!.projectionBorrowed).map((p) => p!.playerId).sort();
+    expect(borrowed).toEqual(['rb1', 'rb2', 'te1', 'te2', 'wr1', 'wr2']);
+    for (const qb of ['qb1', 'qb2']) {
+      expect(rows.find((p) => p!.playerId === qb)?.projectionBorrowed).toBeUndefined();
+    }
+  });
+
   it('turns a forecast it could not make into one it can', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
@@ -766,31 +828,33 @@ describe('no recommendation engine can reach the fallback', () => {
  * Jacksonville had neither. The row said nothing, correctly, and "nothing" is a
  * poor answer for the one slot the reader has least else to go on.
  *
- * What blocked the fallback was not the DST model. It was `sleeperScoringKey`:
- * `DEF` had no entry in RELEVANT, so a defence fell through to EVERYTHING and
- * was checked against eight *offensive* settings, none of which can move
- * Rotowire's number for a defence. In a six-point-passing-touchdown league,
- * every defence was refused a published total because of a rule about
- * quarterbacks.
+ * The first attempt at this routed a defence to the published *total* and put a
+ * comparison table in front of it — nine categories and a points-allowed table,
+ * hand-written as what Rotowire was assumed to pay, quoted only to a league
+ * that matched all of it. It never fired once in production, for two reasons
+ * measured on 10 September 2026 rather than reasoned about:
  *
- * The fallback itself is the one that already existed, unchanged: quoted
- * exactly as published, labelled `sleeper`, never ranked on. That is what makes
- * this a routing fix rather than a new source.
+ *   1. The feed was never asked for a defensive row. `SLEEPER_PROJECTION_POSITIONS`
+ *      listed QB, RB, WR and TE, so the table it was being compared against had
+ *      nothing in it to compare. That is the first test below.
+ *   2. Two of the nine values in the comparison table had never been
+ *      established. Fitting all 32 published defences against their own totals
+ *      showed the feed pays 1 per forced fumble, and the table said 0.
+ *
+ * So the table is gone. The feed publishes the projected *counts* beside the
+ * total, which means a defence's number can be computed under this league's own
+ * rules instead of being quoted from somebody else's — exactly right rather
+ * than nearly right, and available to every league rather than to the ones that
+ * happen to match Sleeper's defaults. That is `scorePublishedDefense`.
  */
 describe('a defence with no line at all', () => {
-  /**
-   * Sleeper's defaults for the categories a published DST total is built from.
-   *
-   * `def_2pt` is here and `ff` deliberately is not: the owner's correction of
-   * 10 September 2026 is that the feed pays two for a returned two-point
-   * conversion and nothing at all for a forced fumble. A league that pays one
-   * is a league that differs, and is refused — see the test below.
-   */
+  /** Sleeper's defaults, which the published totals are computed under. */
   const DEFAULT_DST = {
     rec: 0.5,
     sack: 1,
     int: 2,
     fum_rec: 2,
+    ff: 1,
     def_td: 6,
     def_st_td: 6,
     safe: 2,
@@ -805,49 +869,137 @@ describe('a defence with no line at all', () => {
     pts_allow_35p: -4,
   };
 
-  it('may read the published total in a league scored the way the feed assumes', () => {
-    expect(sleeperScoringKey(buildScoringProfile(DEFAULT_DST, []), 'DEF')).toBe('pts_half_ppr');
+  /**
+   * Jacksonville's own published week, copied off the live feed.
+   *
+   * A real row rather than a tidy one, because the arithmetic below is a claim
+   * about the feed's model and a made-up stat line could only ever confirm the
+   * claim it was made up from. Sleeper published these counts and the total
+   * 9.47 for JAX in week 1 of 2026.
+   */
+  const JACKSONVILLE = {
+    sacks: 2.99,
+    interceptions: 0.9,
+    fumbleRecoveries: 0.69,
+    forcedFumbles: 0.9,
+    defensiveTds: 0.21,
+    specialTeamsTds: 0,
+    safeties: 0,
+    blockedKicks: 0.07,
+    pointsAllowed: 15.75,
+    yardsAllowed: 270.98,
+  };
+
+  it('is asked for at all, which is the whole of why this never fired', () => {
+    /*
+     * The defect in one assertion. Every other part of the fallback was built,
+     * labelled and tested, against a feed request that filtered defences out.
+     */
+    expect(SLEEPER_PROJECTION_POSITIONS).toContain('DEF');
+    expect(sleeperProjectionPath('2026', 1)).toContain('position[]=DEF');
   });
 
-  it('is no longer refused over a rule about quarterbacks', () => {
-    // The exact defect. Six-point passing touchdowns cannot move a defence.
+  it('reproduces the published total when the league is scored the way the feed is', () => {
+    /*
+     * The fit, as a test. Scoring Rotowire's own counts under Sleeper's own
+     * defaults has to come back at Rotowire's own total, or the components are
+     * not the components the total was built from — and every league-specific
+     * number below would be built on sand.
+     *
+     * Measured across all 32 defences of the live week: mean absolute error
+     * 0.03, worst 0.06. Jacksonville lands exactly.
+     */
+    const profile = buildScoringProfile(DEFAULT_DST, []);
+    expect(scorePublishedDefense(JACKSONVILLE, profile.dst)).toBeCloseTo(9.47, 2);
+  });
+
+  it('answers a league that scores a defence nothing like the feed does', () => {
+    /*
+     * The case the old comparison table refused, and the reason it is gone.
+     * This is the owner's real league: it pays nothing for a forced fumble
+     * where the feed pays one, and nothing in the two worst points-allowed
+     * bands where the feed charges -1 and -4.
+     *
+     * The old rule called that "differs" and showed a dash. It differs, and the
+     * answer is 8.57 — Rotowire's forecast of what Jacksonville will do, priced
+     * at what this league pays for it. Exactly 0.9 below the published total,
+     * which is the one forced fumble the league does not pay for.
+     */
+    const league = buildScoringProfile(
+      { ...DEFAULT_DST, ff: 0, pts_allow_28_34: 0, pts_allow_35p: 0 },
+      [],
+    );
+    expect(scorePublishedDefense(JACKSONVILLE, league.dst)).toBeCloseTo(8.57, 2);
+  });
+
+  it('prices the same week differently for two leagues, because they pay differently', () => {
+    const stingy = buildScoringProfile({ ...DEFAULT_DST, sack: 2 }, []);
+    const plain = buildScoringProfile(DEFAULT_DST, []);
+    const a = scorePublishedDefense(JACKSONVILLE, stingy.dst)!;
+    const b = scorePublishedDefense(JACKSONVILLE, plain.dst)!;
+    // One extra point per sack, on 2.99 projected sacks.
+    expect(a - b).toBeCloseTo(2.99, 2);
+  });
+
+  it('scores yards allowed for the leagues that have a table for it', () => {
+    const yards = buildScoringProfile({ ...DEFAULT_DST, yds_allow_200_299: 5 }, []);
+    const plain = buildScoringProfile(DEFAULT_DST, []);
+    const withYards = scorePublishedDefense(JACKSONVILLE, yards.dst)!;
+    const without = scorePublishedDefense(JACKSONVILLE, plain.dst)!;
+    // 270.98 yards allowed falls in the band this league pays 5 for.
+    expect(withYards - without).toBeCloseTo(5, 2);
+  });
+
+  it('has no answer only when the league’s own rules cannot be read', () => {
+    expect(scorePublishedDefense(JACKSONVILLE, DST_SCORING_UNSUPPORTED)).toBeNull();
+    expect(scorePublishedDefense(JACKSONVILLE, null)).toBeNull();
+    expect(publishedDefenseRefusal(DST_SCORING_UNSUPPORTED)).toMatch(/could not be read/);
+    expect(publishedDefenseRefusal(buildScoringProfile(DEFAULT_DST, []).dst)).toBeNull();
+  });
+
+  it('never quotes a published total for a defence, in any league', () => {
+    /*
+     * Not a refusal — a different question. The three totals are one number
+     * computed under one defensive table, and a defence's number is computed
+     * here instead. A league that matches the feed exactly still takes the
+     * computed route, so there is one path rather than two that could disagree.
+     */
+    for (const dst of [DEFAULT_DST, { ...DEFAULT_DST, sack: 2 }]) {
+      expect(sleeperScoringKey(buildScoringProfile(dst, []), 'DEF')).toBeNull();
+      expect(sleeperScoringKey(buildScoringProfile(dst, []), 'DST')).toBeNull();
+    }
+    // And a six-point passing touchdown still has nothing to do with it.
     const passing = buildScoringProfile({ ...DEFAULT_DST, pass_td: 6 }, []);
     expect(sleeperScoringKey(passing, 'QB'), 'the quarterback is still refused').toBeNull();
-    expect(sleeperScoringKey(passing, 'DEF'), 'the defence never threw a pass').toBe('pts_half_ppr');
+    expect(publishedDefenseRefusal(passing.dst), 'the defence never threw a pass').toBeNull();
   });
 
-  it('is refused when the league pays a defence differently', () => {
-    // Two points a sack against the feed's one is a real difference on a real
-    // category, and it is refused for the same reason the quarterback is.
-    const rich = buildScoringProfile({ ...DEFAULT_DST, sack: 2 }, []);
-    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
-    expect(publishedRefusal(rich, 'DEF')).toMatch(/pays a defense differently/);
-  });
+  it('reads a defence’s counts off the feed and nobody else’s', () => {
+    const [defence] = parseSleeperWeeklyProjections([
+      {
+        player_id: 'JAX',
+        company: 'rotowire',
+        player: { position: 'DEF' },
+        stats: { pts_half_ppr: 9.47, sack: 2.99, int: 0.9, ff: 0.9, pts_allow: 15.75 },
+      },
+    ]);
+    expect(defence?.defense?.sacks).toBe(2.99);
+    expect(defence?.defense?.pointsAllowed).toBe(15.75);
+    // Absent counts are zero; an absent expectation stays unknown, because
+    // reading a missing `pts_allow` as 0 would put the defence in the shutout
+    // band and pay it ten points for it.
+    expect(defence?.defense?.safeties).toBe(0);
 
-  it('is refused when the league pays for a forced fumble, which the feed does not', () => {
-    // The owner's correction, as a behaviour: only the recovery counts, so a
-    // league paying the forced fumble too is scoring a category the published
-    // total does not carry.
-    const paysFf = buildScoringProfile({ ...DEFAULT_DST, ff: 1 }, []);
-    expect(sleeperScoringKey(paysFf, 'DEF')).toBeNull();
-    expect(publishedRefusal(paysFf, 'DEF')).toMatch(/pays a defense differently/);
-  });
-
-  it('is refused when a two-point return is worth something other than two', () => {
-    const rich = buildScoringProfile({ ...DEFAULT_DST, def_2pt: 6 }, []);
-    expect(sleeperScoringKey(rich, 'DEF')).toBeNull();
-  });
-
-  it('is refused when the points-allowed bands have been retuned', () => {
-    // The largest single term in a defence's projection.
-    const retuned = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 15 }, []);
-    expect(sleeperScoringKey(retuned, 'DEF')).toBeNull();
-    expect(publishedRefusal(retuned, 'DEF')).toMatch(/points-allowed bands/);
-  });
-
-  it('is refused when the league scores yards allowed, which the feed does not', () => {
-    const yards = buildScoringProfile({ ...DEFAULT_DST, pts_allow_0: 10, yds_allow_0_100: 5 }, []);
-    expect(sleeperScoringKey(yards, 'DEF')).toBeNull();
+    const [receiver] = parseSleeperWeeklyProjections([
+      {
+        player_id: '4034',
+        company: 'rotowire',
+        player: { position: 'WR' },
+        stats: { pts_half_ppr: 13.33, st_td: 0.06 },
+      },
+    ]);
+    // A receiver with a return touchdown is not a defence.
+    expect(receiver?.defense).toBeNull();
   });
 
   it('quotes the published figure and says whose it is', () => {
