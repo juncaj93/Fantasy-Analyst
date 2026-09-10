@@ -260,8 +260,8 @@ function emptinessOf(decision: DecisionPayload): { agent: string; reader: string
       return (decision.inputs.roster?.inputs?.length ?? 0) + (decision.inputs.candidates?.inputs?.length ?? 0) > 0
         ? null
         : {
-            agent: 'decision.inputs holds no defences at all, so there is no plan to rebuild',
-            reader: 'No defence could be read for this league, so there is no defence plan to explain yet.',
+            agent: 'decision.inputs holds no defenses at all, so there is no plan to rebuild',
+            reader: 'No defense could be read for this league, so there is no defense plan to explain yet.',
           };
     case 'trade-offer':
       return (decision.inputs.pool?.inputs?.length ?? 0) > 0

@@ -350,7 +350,7 @@ describe('an empty slot says who it could not use, and why', () => {
 
     // `dstProjection.ts`'s sentence, unedited — so the screen cannot invent a
     // more specific cause than the model was prepared to state.
-    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.detail).toBe('no game line for this defence');
+    expect(lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0]?.detail).toBe('no game line for this defense');
   });
 
   it('marks the incumbent, so the row is about the player Sleeper is starting', () => {

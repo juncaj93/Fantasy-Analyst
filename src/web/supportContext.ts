@@ -60,7 +60,7 @@ export const CONTEXT_LABELS: Record<SupportContext, string> = {
   lineup: 'Team',
   matchup: 'Matchup',
   'waiver-plan': 'Waivers',
-  'dst-plan': 'Defence',
+  'dst-plan': 'Defense',
   'trade-offer': 'Trades',
 };
 

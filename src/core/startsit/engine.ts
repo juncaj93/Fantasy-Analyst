@@ -655,7 +655,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
 
   push({
     key: 'vegas',
-    label: 'Defence market expectation',
+    label: 'Defense market expectation',
     display: dst.points == null ? 'unavailable' : `${dst.points.toFixed(1)} pts`,
     value: dst.points ?? 0,
     unknown: dst.points == null,
@@ -686,7 +686,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     else if (dst.confidence === 'medium') uncertainty -= 0.5;
     if (input.propsStale) {
       uncertainty -= 0.75;
-      confidenceReasons.push('the game line behind this defence is stale');
+      confidenceReasons.push('the game line behind this defense is stale');
     }
   }
   push({

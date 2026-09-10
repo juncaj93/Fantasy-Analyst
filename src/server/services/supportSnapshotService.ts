@@ -152,7 +152,7 @@ export async function captureSupportSnapshot(
       const { request } = gathered;
       if (request.dstSources == null) {
         throw new SnapshotUnavailable(
-          `This league starts no ${DEFENCE_POSITION}, so there is no defence decision to capture.`,
+          `This league starts no ${DEFENCE_POSITION}, so there is no defense decision to capture.`,
         );
       }
       /*

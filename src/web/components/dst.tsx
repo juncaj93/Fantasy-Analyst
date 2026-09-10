@@ -72,7 +72,7 @@ export function DstLine({ plan }: { plan: DstPlan | null | undefined }) {
         className="card card-tight dst-line"
         data-testid="dst-line"
         data-decision={plan.decision}
-        aria-label={`Defence: ${plan.headline}. Tap for why.`}
+        aria-label={`Defense: ${plan.headline}. Tap for why.`}
         onClick={() => {
           /*
            * The defence is a decision without a screen.
@@ -104,7 +104,7 @@ export function DstLine({ plan }: { plan: DstPlan | null | undefined }) {
 export function DstSheet({ plan, onClose }: { plan: DstPlan; onClose: () => void }) {
   const [evidence, setEvidence] = useState(false);
   return (
-    <Sheet title="Defence" onClose={onClose} testId="dst-detail">
+    <Sheet title="Defense" onClose={onClose} testId="dst-detail">
       <div className="weekly" data-testid="dst-detail-body" data-decision={plan.decision}>
         <div className="weekly-head">
           <PlayerIdentity position="DEF" team={plan.target?.team ?? plan.current?.team ?? null} />
@@ -113,7 +113,7 @@ export function DstSheet({ plan, onClose }: { plan: DstPlan; onClose: () => void
 
         {plan.temporary ? (
           <div className="faint" data-testid="dst-temporary" style={{ margin: '0 2px 8px' }}>
-            One week only — this covers a week without a game and does not replace the defence you hold.
+            One week only — this covers a week without a game and does not replace the defense you hold.
           </div>
         ) : null}
 

@@ -396,7 +396,7 @@ export async function replayWaiverSnapshot(
   exact('claimPlan.claims', 'the plan', claimLines(output), claimLines(replayed), differences);
   exact(
     'dst.decision',
-    'the defence',
+    'the defense',
     output.dst?.decision ?? null,
     replayed.dst?.decision ?? null,
     differences,

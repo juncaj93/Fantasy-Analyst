@@ -242,8 +242,8 @@ export function projectDst(input: DstProjectionInput): DstProjection {
       ...UNKNOWN_BASE,
       reasons: [
         scoring.unsupported.length > 0
-          ? `this league scores defences on rules this app cannot map (${scoring.unsupported.join(', ')})`
-          : 'this league’s defence scoring could not be read',
+          ? `this league scores defenses on rules this app cannot map (${scoring.unsupported.join(', ')})`
+          : 'this league’s defense scoring could not be read',
       ],
     };
   }
@@ -263,10 +263,10 @@ export function projectDst(input: DstProjectionInput): DstProjection {
      */
     const missing =
       total == null && spread == null
-        ? 'no game line for this defence'
+        ? 'no game line for this defense'
         : total == null
-          ? 'no game total for this defence'
-          : 'no spread for this defence, so which side of the total is unknown';
+          ? 'no game total for this defense'
+          : 'no spread for this defense, so which side of the total is unknown';
 
     const fallback = fromOpponentForm(input, missing);
     return fallback ?? { ...UNKNOWN_BASE, reasons: [missing] };
@@ -296,7 +296,7 @@ export function projectDst(input: DstProjectionInput): DstProjection {
    * which is that this league does not score it.
    */
   if (!scoresDefences(scoring)) {
-    return { ...UNKNOWN_BASE, opponentImpliedTotal, reasons: ['this league does not score defences'] };
+    return { ...UNKNOWN_BASE, opponentImpliedTotal, reasons: ['this league does not score defenses'] };
   }
 
   return buildFromAnchor({
@@ -419,8 +419,8 @@ export function outlookDst(opts: {
       ...UNKNOWN_BASE,
       reasons: [
         opts.scoring.unsupported.length > 0
-          ? `this league scores defences on rules this app cannot map (${opts.scoring.unsupported.join(', ')})`
-          : 'this league\u2019s defence scoring could not be read',
+          ? `this league scores defenses on rules this app cannot map (${opts.scoring.unsupported.join(', ')})`
+          : 'this league\u2019s defense scoring could not be read',
       ],
     };
   }
@@ -428,7 +428,7 @@ export function outlookDst(opts: {
     return {
       ...UNKNOWN_BASE,
       opponentImpliedTotal: round1(opts.opponentImpliedTotal),
-      reasons: ['this league does not score defences'],
+      reasons: ['this league does not score defenses'],
     };
   }
 
@@ -538,7 +538,7 @@ function buildFromAnchor(args: {
       key: event.key,
       label: event.label,
       points: round2(event.rate * event.per),
-      detail: `${event.rate} ${event.unit} × ${event.per} — a league baseline, the same for every defence`,
+      detail: `${event.rate} ${event.unit} × ${event.per} — a league baseline, the same for every defense`,
     });
   }
 
@@ -619,7 +619,7 @@ function buildFromAnchor(args: {
      */
     confidence = 'low';
     reasons.push(
-      'this league scores no points or yards allowed, so the market reaches its defences only through a capped game-script residual',
+      'this league scores no points or yards allowed, so the market reaches its defenses only through a capped game-script residual',
     );
   }
   if (scoring.pointsAllowed.length === 0 && scoring.yardsAllowed.length > 0 && confidence === 'high') {

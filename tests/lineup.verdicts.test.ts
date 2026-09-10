@@ -143,7 +143,7 @@ describe('the verdict on one slot', () => {
     expect(def.verdict).toBe('empty');
     expect(def.currentPlayerId).toBeNull();
     expect(def.vacancy[0]?.name).toBe('Jacksonville');
-    expect(def.vacancy[0]?.detail).toBe('no game line for this defence');
+    expect(def.vacancy[0]?.detail).toBe('no game line for this defense');
   });
 
   it('says empty when there is nobody in it and nobody for it', () => {

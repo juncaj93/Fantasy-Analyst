@@ -166,7 +166,7 @@ async function capture(
       const { request } = gathered;
       if (request.dstSources == null || (shape.starters[DEFENCE_POSITION] ?? 0) === 0) {
         throw new SnapshotUnavailable(
-          `This league starts no ${DEFENCE_POSITION}, so there is no defence decision to capture.`,
+          `This league starts no ${DEFENCE_POSITION}, so there is no defense decision to capture.`,
         );
       }
       return {
