@@ -299,26 +299,33 @@ export function TeamScreen({
   }, [roster, lineup, byId]);
 
   /*
-   * The bench: everybody the lineup above does not already account for.
+   * The bench: who Sleeper is not starting.
    *
-   * "Not in the recommended lineup" is what this used to mean, and it stopped
-   * being right when the lineup became Sleeper's rather than this app's. A
-   * player Sleeper is starting appears in a slot row up there — as the man to
-   * keep, or as the man a swap would replace — and listing him down here as
-   * well put him in two places at once, in one case saying keep him above and
-   * showing him benched below.
+   * "Not in the *recommended* lineup" is what this used to mean, and it stopped
+   * being right when the list above became Sleeper's lineup rather than this
+   * app's. A player Sleeper starts appears in a slot row up there — as the man
+   * to keep, or the man a swap would replace — and listing him here as well put
+   * him in two places at once, in one case saying keep him above and showing
+   * him benched below.
    *
-   * So a slot row *claims* its players, both of them, and the bench is the
-   * remainder. Order is unchanged: best replacement first, then the ones that
-   * could not be scored, then anybody the lineup never saw.
+   * So the two lists now split on the same fact the reader's own app splits on:
+   * a slot row holds whoever Sleeper has in that slot, and the bench holds
+   * everybody else. A player the app wants *started* stays here, because here
+   * is where he actually is — the row above names him in its verdict line, and
+   * the two together say "he is on your bench, and he should not be". Claiming
+   * him for the lineup would leave the bench describing a roster the reader
+   * does not have.
+   *
+   * Order is unchanged: best replacement first, then the ones that could not be
+   * scored, then anybody the lineup never saw.
    */
   const bench = useMemo(() => {
     if (!roster) return [];
-    const claimed = new Set(
-      verdicts.flatMap((r) => [r.currentPlayerId, r.recommendedPlayerId]).filter((id): id is string => id != null),
+    const inSleeperLineup = new Set(
+      verdicts.map((r) => r.currentPlayerId).filter((id): id is string => id != null),
     );
     /* Before the lineup exists there are no rows, so fall back to the app's own. */
-    const spokenFor = claimed.size > 0 ? claimed : startingIds;
+    const spokenFor = inSleeperLineup.size > 0 ? inSleeperLineup : startingIds;
     const order = [
       ...(lineup?.bench ?? []).map((e) => e.playerId),
       ...(lineup?.undecidable ?? []).map((e) => e.playerId),

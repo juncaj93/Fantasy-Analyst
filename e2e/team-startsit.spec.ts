@@ -217,23 +217,22 @@ test.describe('the recommended lineup, at a glance', () => {
   });
 
   /**
-   * Nate Kowalski is on injured reserve and is one of two tight ends here. He
-   * is on the bench, untinted, and the tight-end slot went to the other one.
+   * Nate Kowalski is on injured reserve and Sleeper has him in the lineup.
+   *
+   * He is on the screen, and that is the fix rather than the regression: the
+   * slot he occupies is precisely the one worth showing him in, and hiding it
+   * would hide the change the reader needs to make. What must never happen is
+   * this app *recommending* him, which is now a separate attribute and a
+   * separate question.
+   *
+   * He is not also on the bench. The two lists split on the fact the reader's
+   * own app splits on — Sleeper's lineup above, Sleeper's bench below — so a
+   * player in one is not in the other.
    */
   test('never highlights a player who cannot play', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
-    const kowalski = page.locator('[data-testid="bench-row"][data-player-id="1009"]');
-    await expect(kowalski).toBeVisible();
-    await expect(kowalski).not.toHaveClass(/card-pos/);
-    /*
-     * He is on the screen, and that is the fix rather than the regression.
-     *
-     * Sleeper has him in the tight-end slot, so the lineup draws him there —
-     * hiding the slot would hide the change. What must never happen is this app
-     * *recommending* him, and that is now a separate attribute and a separate
-     * question: the slot he occupies is the one telling the reader to start
-     * somebody else.
-     */
+    await expect(page.locator('[data-testid="bench-row"][data-player-id="1009"]')).toHaveCount(0);
+
     const hisSlot = page.locator('[data-testid="starter-row"][data-player-id="1009"]');
     /*
      * `no_pick`: he is out and the thin demo bench has nobody eligible for the
