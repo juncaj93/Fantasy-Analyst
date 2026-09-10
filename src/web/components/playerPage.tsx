@@ -38,6 +38,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { api, type EvidenceItem, type MyGuyFlag, type PlayerDetail, type PlayerSignal } from '../api.ts';
 import { RECENCY_WINDOWS } from '../../core/evidence/aggregate.ts';
 import {
@@ -838,7 +839,7 @@ function Market({
           <tbody>
             {props.map((p) => (
               <tr key={p.market}>
-                <td>{p.market}</td>
+                <td>{marketLabel(p.market)}</td>
                 <td>
                   {p.line != null
                     ? p.line

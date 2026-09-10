@@ -62,6 +62,7 @@ import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
 import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -1846,7 +1847,7 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
             <div className="components">
               {e.expectation.contributions.map((c) => (
                 <div className="component" key={c.market}>
-                  <span className="component-label">{c.market}</span>
+                  <span className="component-label">{marketLabel(c.market)}</span>
                   <span className="component-value">{c.points.toFixed(2)}</span>
                   <span className="component-detail">{c.detail}</span>
                 </div>
