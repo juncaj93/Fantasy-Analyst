@@ -946,15 +946,39 @@ function VerdictCard({
       onClick={onOpen}
     >
       <div className="player-row-top">
-        <span className="slot-label">{row.slot}</span>
+        {/*
+          Position, club, name — the leading edge every list in this app shares.
+
+          The slot does *not* go here, and that is load-bearing rather than a
+          preference: the identity cluster is a fixed-width pill so that every
+          name on the screen starts on the same x, starter or bench, and a slot
+          chip in front of it shifts the whole row by however many letters the
+          slot happens to have. `FLEX` and `QB` are different widths, so it does
+          not even shift them by the same amount — the column goes ragged, which
+          is what `e2e/row-alignment.spec.ts` exists to catch and did.
+        */}
         <PlayerIdentity position={position} team={subject.team ?? ''} />
         <span className="player-name">{subject.name}</span>
         <InjuryTag status={subject.status} />
-        {row.locked ? (
-          <span className="tag tag-calm tag-mini" data-testid="locked-tag">
-            🔒 Locked
-          </span>
-        ) : null}
+        {/*
+          The tags about the *slot*, after the name, for the reason above.
+
+          The slot is named only where the pill has not already said it: a back
+          in an RB spot would be the row saying `RB` twice, and a back in a FLEX
+          spot is the one case where the slot carries something the pill cannot.
+        */}
+        <span className="row-tags">
+          {position && position.toUpperCase() !== row.slot.toUpperCase() ? (
+            <span className="tag tag-calm tag-mini" data-testid="slot-tag" title={`Starting at ${row.slot}`}>
+              {row.slot}
+            </span>
+          ) : null}
+          {row.locked ? (
+            <span className="tag tag-calm tag-mini" data-testid="locked-tag">
+              Locked
+            </span>
+          ) : null}
+        </span>
         <span className="row-value">
           {/*
             The subject's own number, and never the other man's.
