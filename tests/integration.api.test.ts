@@ -456,6 +456,39 @@ describe('API with seeded data', () => {
   });
 
   /**
+   * The league's own slot order, which the Team screen draws from.
+   *
+   * The production smoke test compares the rendered rows against exactly this,
+   * because the rows follow Sleeper's `roster_positions` rather than the
+   * optimiser's internal slot order. That coupling is the contract this guards:
+   * if the endpoint stopped publishing the order, or published it with the
+   * bench in it, the smoke gate would fail on production after a deploy rather
+   * than here.
+   */
+  it('publishes the league slot order, and the lineup fills exactly those slots', async () => {
+    const roster = await json<{ rosterPositions?: string[] }>(
+      get('/api/leagues/demo-league/roster', cookie),
+    );
+    const lineup = await json<{ found: boolean; slots: { slot: string }[] }>(
+      get('/api/leagues/demo-league/lineup', cookie),
+    );
+
+    const NOT_A_LINEUP_SLOT = ['BN', 'IR', 'TAXI'];
+    const starting = (roster.rosterPositions ?? [])
+      .map((p) => String(p ?? '').toUpperCase())
+      .filter((p) => p && !NOT_A_LINEUP_SLOT.includes(p));
+
+    expect(starting.length).toBeGreaterThan(0);
+    /*
+     * The same slots, and only a different order — the optimiser builds every
+     * dedicated slot then the flexes, and Sleeper lists them however the league
+     * does. Compared as multisets so this says "the same lineup" without
+     * re-asserting the ordering the screen deliberately stopped using.
+     */
+    expect([...starting].sort()).toEqual(lineup.slots.map((s) => s.slot).sort());
+  });
+
+  /**
    * The demo league's draft is in progress, so the Team page must be able to
    * show what has been drafted rather than waiting for Sleeper's roster to fill
    * in — which does not happen until the draft ends.

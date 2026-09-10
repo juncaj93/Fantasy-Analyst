@@ -1646,7 +1646,32 @@ test.describe('the season features', () => {
     const drawn = await page
       .getByTestId('starter-row')
       .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-slot')));
-    expect(drawn).toEqual(lineup!.slots.map((s) => s.slot));
+
+    /*
+     * The rows follow **Sleeper's** slot order, not the optimiser's.
+     *
+     * This used to compare against `lineup.slots`, which is the order
+     * `buildSlots` happens to construct — every dedicated slot, then the flexes
+     * — and that coupling is exactly what the Team screen was rebuilt to break.
+     * The reader is going to make the change in Sleeper, so the screen draws his
+     * lineup in the order Sleeper shows it to him; on this league that moved DEF
+     * from above the flexes to below them, and the assertion failed on a
+     * difference that was the point.
+     *
+     * `roster_positions` is the league's own answer and is what the screen
+     * builds from, so it is what this compares against. A deployment too old to
+     * publish it falls back to the claim underneath — every slot drawn is a slot
+     * this league starts — which is what the test was really defending and is
+     * order-independent.
+     */
+    const roster = await apiJson<{ rosterPositions?: string[] }>(page, `/api/leagues/${id}/roster`);
+    const NOT_A_LINEUP_SLOT = ['BN', 'IR', 'TAXI'];
+    const starting = (roster?.rosterPositions ?? [])
+      .map((p) => String(p ?? '').toUpperCase())
+      .filter((p) => p && !NOT_A_LINEUP_SLOT.includes(p));
+
+    if (starting.length > 0) expect(drawn).toEqual(starting);
+    else expect([...drawn].sort()).toEqual(lineup!.slots.map((s) => s.slot).sort());
 
     /*
      * Starter and bench are said in words — in the accessible name.
@@ -1665,7 +1690,25 @@ test.describe('the season features', () => {
       const position = (await card.getAttribute('data-position'))!;
       await expect(card).toHaveClass(new RegExp(`card-pos-${position}\\b`));
       await expect(card).not.toHaveClass(/(^|\s)card-pos(\s|$)/);
-      await expect(card).toHaveAttribute('aria-label', /recommended starter at/i);
+      /*
+       * The row's whole state, in words, in the accessible name.
+       *
+       * It used to read `recommended starter at`, from when the list was this
+       * app's recommendation. It is the reader's own Sleeper lineup now and the
+       * label leads with the slot, then the player, then a verdict about that
+       * slot — `keep him`, `start <somebody> instead`, or the reason there is no
+       * pick for it.
+       *
+       * The verdict clause is deliberately *not* matched here. There are five of
+       * them and a production roster reaches the quiet ones: a defence nobody
+       * has priced is `no_pick` and says so in its own words, which no
+       * enumeration of phrases would survive for long. What every row does carry
+       * is the slot it is for and its projection spoken as a projection, and
+       * that is the claim this was defending — a row says what it means in words
+       * and not only in colour.
+       */
+      await expect(card).toHaveAttribute('aria-label', /^[A-Z0-9_/]+: \S/);
+      await expect(card).toHaveAttribute('aria-label', /projected [\d.]+ points|projection unavailable/i);
     }
     for (const card of await page.getByTestId('bench-row').all()) {
       await expect(card).not.toHaveClass(/card-pos/);
