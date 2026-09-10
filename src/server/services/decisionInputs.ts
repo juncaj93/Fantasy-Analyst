@@ -23,6 +23,8 @@ import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { startSitInputsFor, buildStartSitContext } from './startSitInputs.ts';
 import { MatchupRepo } from '../repos/matchup.ts';
+import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
+import type { SeasonMarketKey } from '../../core/vegas/types.ts';
 import { evaluatePlayer } from '../../core/startsit/engine.ts';
 import {
   BALANCED_BY_DEFAULT,
@@ -372,9 +374,21 @@ export async function gatherWaiverInputs(
   const context = await buildStartSitContext(db);
   const week = base.nflState?.week ?? 1;
 
-  const [rosterInputs, candidateInputs] = await Promise.all([
+  const [rosterInputs, candidateInputs, seasonMarkets] = await Promise.all([
     startSitInputsFor(db, mine.playerIds, { context }),
     startSitInputsFor(db, candidateIds, { context }),
+    /*
+     * The season market for the candidates, and only the candidates.
+     *
+     * The board is the one surface that draws a rest-of-season column, so this
+     * is scoped to the ids it will actually draw. Swallowed to an empty map:
+     * a deployment that has taken no season snapshot loses the column and
+     * keeps the board, which is the same trade every other optional column on
+     * this page already makes.
+     */
+    new SeasonMarketsRepo(db)
+      .latestForPlayers(base.league.season, candidateIds)
+      .catch(() => new Map<string, { market: SeasonMarketKey; line: number | null }[]>()),
   ]);
 
   /*
@@ -427,6 +441,17 @@ export async function gatherWaiverInputs(
       strategy,
       /* The same capture the pricing pass reads, handed over for surfacing too. */
       trending: strategy?.trending,
+      /*
+       * The season market for the candidates on the board, for the
+       * rest-of-season column.
+       *
+       * One read over the ids already in hand, and only the candidates — the
+       * board is the only thing that shows this, and widening it to the roster
+       * would pay for rows nobody draws. Swallowed to an empty map on failure:
+       * the column is additive, and a board without it is the board that
+       * shipped yesterday. See `core/waivers/seasonOutlook.ts`.
+       */
+      seasonMarkets,
       budgets: strategy?.budget ?? null,
       prices: strategy?.prices ?? null,
       /*

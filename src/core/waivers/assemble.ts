@@ -55,6 +55,8 @@ import {
   type WaiverValueAdd,
 } from '../startsit/waivers.ts';
 import { recommendLineup, type LineupRecommendation } from '../startsit/lineup.ts';
+import { SEASON_GAMES, seasonOutlookFor } from './seasonOutlook.ts';
+import type { SeasonMarketKey } from '../vegas/types.ts';
 import { waiverMultiWeekFor } from '../contracts/integration.ts';
 import { waiverLeagueIntel, withCompetition, type WaiverIntelRoster } from './intel.ts';
 import { trendingHeadline, type TrendingVelocity } from '../market/trending.ts';
@@ -112,6 +114,16 @@ export interface WaiverAssemblyRequest {
    * capture yet, and it costs the board its unknown tier rather than breaking it.
    */
   trending?: ReadonlyMap<string, TrendingVelocity> | undefined;
+  /**
+   * Each candidate's season-long market lines, for the rest-of-season read.
+   *
+   * Optional, and absent is a first-class state rather than a degraded one: a
+   * deployment that has taken no season snapshot loses the season column and
+   * keeps the board. See `waivers/seasonOutlook.ts` for why this exists beside
+   * the four-week `multiWeek` column rather than instead of it — different
+   * horizon, different source, and the one that can speak in week one.
+   */
+  seasonMarkets?: ReadonlyMap<string, { market: SeasonMarketKey; line: number | null }[]> | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -238,11 +250,47 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     profile,
     currentWeek: request.week,
   });
+  /*
+   * And the season, from the market rather than from form.
+   *
+   * `multiWeek` above is this week's score carried forward through role,
+   * schedule and regression, so it needs stored usage and says nothing in week
+   * one. Season lines are quoted before a snap is played and are already held
+   * for the draft board, so the two answer the same reader's question from
+   * opposite ends of the evidence. Neither is ranked on.
+   */
+  const seasonScores = new Map<string, number | null>([
+    ...advice.upgrades.flatMap((u) => u.candidates.map((c) => [c.playerId, c.score] as const)),
+    ...advice.valueAdds.map((c) => [c.playerId, c.score] as const),
+  ]);
+  const seasonOutlook = new Map<string, ReturnType<typeof seasonOutlookFor>>();
+  if (request.seasonMarkets) {
+    const gamesRemaining = Math.max(0, SEASON_GAMES - request.week + 1);
+    for (const playerId of boardIds) {
+      const markets = request.seasonMarkets.get(playerId);
+      if (!markets || markets.length === 0) continue;
+      const input = candidateInputs.find((c) => c.player.id === playerId);
+      if (!input) continue;
+      const outlook = seasonOutlookFor({
+        position: input.player.position ?? '',
+        markets,
+        profile,
+        thisWeekScore: seasonScores.get(playerId) ?? null,
+        gamesRemaining,
+      });
+      /* `unknown` is not a finding, and a chip saying so on every row is noise. */
+      if (outlook.level !== 'unknown') seasonOutlook.set(playerId, outlook);
+    }
+  }
+
   const upgradesWithValue = advice.upgrades.map((upgrade) => ({
     ...upgrade,
     candidates: upgrade.candidates.map((candidate) => {
       const value = multiWeek.get(candidate.playerId);
-      return value ? { ...candidate, multiWeek: value } : candidate;
+      const season = seasonOutlook.get(candidate.playerId);
+      return value || season
+        ? { ...candidate, ...(value ? { multiWeek: value } : {}), ...(season ? { seasonOutlook: season } : {}) }
+        : candidate;
     }),
   }));
 
@@ -328,11 +376,13 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   const ownsDefence = (position: string) => defenceIsPlanned && position === DEFENCE_POSITION;
 
   const valueAdds = advice.valueAdds.filter((add) => !ownsDefence(add.position)).map((add) => {
+    const season = seasonOutlook.get(add.playerId);
     const value = multiWeek.get(add.playerId);
     const line = lineFor(trending, add.playerId);
     return {
       ...add,
       ...(value ? { multiWeek: value } : {}),
+      ...(season ? { seasonOutlook: season } : {}),
       ...(line ? { reasons: [...add.reasons, line] } : {}),
     };
   });

@@ -8618,6 +8618,29 @@ div.matchup-result {
  * in weight. Anything less and a lighter grey at this size is indistinguishable
  * from the ordinary faint the figure beside it is already drawn in.
  */
+/*
+ * A chip about the season, among chips about this Sunday.
+ *
+ * The row's other tags come from this app's own weekly engine; this one is the
+ * market's season-long line divided by the games that are left. Different
+ * horizon, different source — and a reader who took the figure behind it for a
+ * weekly number would be out by a factor of twenty, so it does not get to look
+ * like its neighbours. Outlined rather than filled, which reads as "a different
+ * kind of claim" without competing with the fit chip for attention.
+ */
+.tag-season {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.tag-season[data-level='season_asset'] {
+  border-color: var(--pos);
+  color: var(--pos);
+  font-style: normal;
+}
+
 .matchup-player-proj-borrowed {
   color: var(--text-faint);
   opacity: 0.72;

@@ -45,6 +45,7 @@
  * the bundle a phone downloads to draw this screen.
  */
 import { weekRange } from '../dst/weeks.ts';
+import type { SeasonOutlook } from './seasonOutlook.ts';
 import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
 
 export interface WaiverLeagueIntel {
@@ -86,12 +87,25 @@ export interface WaiverLeagueIntel {
     confidence: 'high' | 'medium' | 'low';
     display: string;
   }[] | null;
-  /** What he is worth past this Sunday. */
+  /** What he is worth past this Sunday, from his form over four weeks. */
   multiWeek?: {
     level: 'season_long' | 'multi_week' | 'streamer' | 'unknown';
     label: string;
     detail?: string | null;
   } | null;
+  /**
+   * What the season market makes of him, beside what this week does.
+   *
+   * A different horizon from {@link multiWeek} and a different source, which is
+   * why both are here: that one carries this week's score forward through form
+   * and needs stored usage, so it says nothing in week one, and this one is
+   * quoted before a snap is played. See `waivers/seasonOutlook.ts`.
+   *
+   * Absent rather than `unknown` when it could not be read — the board reports
+   * a missing column as pending, and a chip reading "unknown" on every row is
+   * noise the reader learns to skip.
+   */
+  seasonOutlook?: SeasonOutlook | null;
   /** Where the league-specific ranking put him. Sorted on when present. */
   leagueRank?: number | null;
 }
@@ -250,6 +264,8 @@ export interface WaiverBoardRow {
   shortTerm: { gain: number; label: string; over: string | null };
   /** Past this week. Null until the league-intelligence pass provides it. */
   multiWeek: NonNullable<WaiverLeagueIntel['multiWeek']> | null;
+  /** The season market's reading of him, beside the week's. Null when unread. */
+  seasonOutlook: SeasonOutlook | null;
   /** What he will cost. Null until then, and never estimated here. */
   faab: NonNullable<WaiverLeagueIntel['faab']> | null;
   /** Who else wants him. Null until then. */
@@ -575,6 +591,12 @@ function dstRow(option: DstOption, plan: DstPlan, role: WaiverDstRole): WaiverBo
       over: stash ? null : (plan.current?.name ?? null),
     },
     multiWeek: dstMultiWeek(option, stash),
+    /*
+     * A defence has no season market. Nobody quotes a unit's receiving yards,
+     * and the planner's own multi-week reading above is the horizon that
+     * belongs to it.
+     */
+    seasonOutlook: null,
     faab: null,
     competition: null,
     bidders: null,
@@ -655,6 +677,7 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
       over: upgrade.currentName,
     },
     multiWeek: candidate.multiWeek ?? null,
+    seasonOutlook: candidate.seasonOutlook ?? null,
     faab: candidate.faab ?? null,
     competition: candidate.competition ?? null,
     bidders: candidate.bidders ?? null,
@@ -695,6 +718,7 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
       over: add.overName ?? null,
     },
     multiWeek: add.multiWeek ?? null,
+    seasonOutlook: add.seasonOutlook ?? null,
     faab: add.faab ?? null,
     competition: add.competition ?? null,
     bidders: add.bidders ?? null,
@@ -743,6 +767,7 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
      */
     shortTerm: { gain: 0, label: 'Not scored', over: null },
     multiWeek: null,
+    seasonOutlook: null,
     faab: null,
     competition: null,
     bidders: null,

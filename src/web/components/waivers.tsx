@@ -325,6 +325,26 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
           {row.fit.label}
         </span>
         {row.multiWeek ? <span className="tag">{row.multiWeek.label}</span> : null}
+        {/*
+          The season, marked as a different kind of claim from the ones beside it.
+
+          Every other chip on this row is about this week and comes from this
+          app's own engine. This one is the market's season-long line divided by
+          the games left, so it is a different horizon *and* a different source,
+          and a reader who took it for a weekly figure would be reading it as
+          twenty times what it says. Hence its own tone rather than the shared
+          `.tag` — see `.tag-season` — and a title carrying both numbers.
+        */}
+        {row.seasonOutlook ? (
+          <span
+            className="tag tag-season"
+            data-testid="waiver-season"
+            data-level={row.seasonOutlook.level}
+            title={row.seasonOutlook.detail ?? undefined}
+          >
+            {row.seasonOutlook.label}
+          </span>
+        ) : null}
         {row.competition ? (
           <span className="tag" data-testid="waiver-competition">
             {row.competition.label}
@@ -454,6 +474,19 @@ export function WaiverDetailSheet({
                 </>
               ) : (
                 <UnknownField what="Multi-week value" />
+              )}
+            </dd>
+          </div>
+          <div className="weekly-line">
+            <dt>Rest of season</dt>
+            <dd data-testid="waiver-season-line">
+              {row.seasonOutlook ? (
+                <>
+                  {row.seasonOutlook.label}
+                  {row.seasonOutlook.detail ? <span className="faint"> · {row.seasonOutlook.detail}</span> : null}
+                </>
+              ) : (
+                <UnknownField what="Season outlook" />
               )}
             </dd>
           </div>
