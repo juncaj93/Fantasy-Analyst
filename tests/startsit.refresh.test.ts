@@ -15,6 +15,8 @@ import { StartSitRefreshService, DEDUPE_SECONDS } from '../src/server/services/s
 import { VegasUsageRepo } from '../src/server/repos/vegasUsage.ts';
 import { PropsRepo } from '../src/server/repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../src/server/repos/settings.ts';
+import { UsageSourceRepo } from '../src/server/repos/usage.ts';
+import { USAGE_SOURCE, usageSeason } from '../src/server/services/usageService.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { createTestDb } from './helpers/db.ts';
 
@@ -119,7 +121,31 @@ describe('the Start/Sit refresh', () => {
     expect(provider.calls).toBe(0);
   });
 
+  /**
+   * One dead source, and the others answering for themselves.
+   *
+   * The usage source is given a recent check first, and that is the fix rather
+   * than a convenience. `refreshUsage` builds its own `UsageService`, so unlike
+   * `vegas` there is no provider to inject — and with no stored check it went
+   * to nflverse over the network. The assertion below is that `usage` did *not*
+   * come back `unavailable`, so what the test actually measured was whether a
+   * third party was up: it passed on `main` and failed on a branch that touches
+   * neither the orchestrator nor `UsageService`, which is how it was noticed.
+   *
+   * A check inside `MANUAL_MIN_AGE_MINUTES.usage` makes the source answer
+   * `current` from stored state and reach nothing. That is the same branch a
+   * real Sunday-morning refresh takes — the weekly file is settled the moment a
+   * game ends — and it leaves this test measuring the thing it is named for:
+   * Vegas is on fire, and the others still report for themselves.
+   */
   it('keeps one dead source from taking the others down', async () => {
+    const now = new Date();
+    await new UsageSourceRepo(db).recordCheck(USAGE_SOURCE, usageSeason(now), {
+      checkedAt: new Date(now.getTime() - 60_000).toISOString(),
+      outcome: 'ok',
+      note: null,
+    });
+
     const report = await new StartSitRefreshService(db, { vegas: new BrokenProvider() }).refresh();
     expect(report.complete).toBe(false);
     // Vegas failed; usage and injury still answered for themselves.

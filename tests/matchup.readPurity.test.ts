@@ -437,6 +437,26 @@ describe('the read path has nothing to write with', () => {
  * inequality.
  */
 describe('the ledger changes nothing about what is returned', () => {
+  /*
+   * The two sides are held at the same ledger state, and that is load-bearing.
+   *
+   * This used to compare a database `captureCalibration` had just written to
+   * against one that had never been written to at all, and call any difference
+   * contamination. It is not: `MatchupService.previousState` reads
+   * `matchup_forecasts` on the way in, so a database with a forecast in it has
+   * history to compare against and one without it does not, and the insights
+   * correctly reflect that. Measured, the whole difference was three insight
+   * priorities — 104.1905 against 104.189 — which is `winImpact` doing its job.
+   *
+   * It failed intermittently rather than always because `previousState` checks
+   * an in-memory cache before the stored row, so whether the two paths agreed
+   * depended on what else had run in the process: 8 runs in 10 on `main`.
+   *
+   * So both sides capture first. The claim §5 actually wants — the ledger does
+   * not change what is returned — survives in the only form in which it is
+   * true, and the read staying non-mutating is asserted directly by counting
+   * rows either side of it rather than inferred from a diff.
+   */
   it('a recorded call and a pure call produce the identical response', async () => {
     const clock = () => new Date('2026-09-13T16:20:00.000Z');
 
@@ -447,19 +467,27 @@ describe('the ledger changes nothing about what is returned', () => {
     const recorded = await createTestDb();
     await seedDemoData(recorded);
 
-    const pure = await new MatchupService(control, { sleeper: sleeperServing(rows()), now: clock }).forLeague(
-      'demo-league',
+    const reader = new MatchupService(control, { sleeper: sleeperServing(rows()), now: clock });
+    const writer = new MatchupService(recorded, { sleeper: sleeperServing(rows()), now: clock });
+    await reader.captureCalibration('demo-league');
+    await writer.captureCalibration('demo-league');
+
+    const rowsBefore = await calibrationRows(control);
+    expect(rowsBefore, 'both sides start from the same written state').toBe(
+      await calibrationRows(recorded),
     );
 
-    const writer = new MatchupService(recorded, { sleeper: sleeperServing(rows()), now: clock });
-    await writer.captureCalibration('demo-league');
+    const pure = await reader.forLeague('demo-league');
     // Read it back through the endpoint's own entry point, so the comparison is
     // response-to-response rather than response-to-internal-state.
     const afterWriting = await writer.forLeague('demo-league');
 
     expect(afterWriting).toEqual(pure);
-    expect(await calibrationRows(control), 'the control must not have been written to').toBe(0);
-    expect(await calibrationRows(recorded), 'and the writer must actually have written').toBe(2);
+    // The read path wrote nothing on either side — the property the diff above
+    // used to stand in for, now asserted for itself.
+    expect(await calibrationRows(control), 'the read must not have written').toBe(rowsBefore);
+    expect(await calibrationRows(recorded), 'on either side').toBe(rowsBefore);
+    expect(rowsBefore, 'and the capture must actually have written').toBe(2);
   });
 
   /**
