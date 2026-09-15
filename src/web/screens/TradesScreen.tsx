@@ -274,8 +274,8 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
             header of this file already claims.
           */}
           {([
-            ['upgrade', 'Trade ideas', smart.offers.filter((o) => o.category === 'upgrade')],
-            ['arbitrage', 'Buy low / sell high', smart.offers.filter((o) => o.category !== 'upgrade')],
+            ['upgrade', 'Trade ideas', smart.offers.filter((o) => (o.category ?? 'upgrade') === 'upgrade')],
+            ['arbitrage', 'Buy low / sell high', smart.offers.filter((o) => (o.category ?? 'upgrade') !== 'upgrade')],
           ] as const).map(([key, title, group]) =>
             group.length === 0 ? null : (
               <div key={key} data-testid={`smart-trades-${key}`}>

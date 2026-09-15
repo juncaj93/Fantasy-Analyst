@@ -103,6 +103,8 @@ function offer(o: {
   activity: string;
   sample: number;
   seasons: number;
+  /** Absent means `upgrade`, which is what every offer was before categories. */
+  category?: 'upgrade' | 'buy_low' | 'sell_high';
 }) {
   const player = ([playerId, name, position, value]: [string, string, string, number]) => ({
     playerId,
@@ -112,8 +114,44 @@ function offer(o: {
   });
   const outgoing = o.give.reduce((s, p) => s + p[3], 0);
   const incoming = o.get.reduce((s, p) => s + p[3], 0);
+  const category = o.category ?? 'upgrade';
   return {
     id: o.id,
+    category,
+    /*
+     * The reads behind an arbitrage offer, and empty on an ordinary one.
+     *
+     * Shaped like the engine's own output rather than minimally, because the
+     * sheet renders every field of it — a fixture carrying only what today's
+     * assertions read is a fixture that stops catching tomorrow's crash.
+     */
+    arbitrage:
+      category === 'upgrade'
+        ? []
+        : [
+            {
+              playerId: o.get[0]![0],
+              kind: category,
+              strength: 0.82,
+              residualPerGame: category === 'buy_low' ? -4.1 : 4.1,
+              expectedPerGame: 12.4,
+              observedPerGame: category === 'buy_low' ? 8.3 : 16.5,
+              games: 5,
+              tdDependency: {
+                profile: 'td_dependent_weak_opportunity',
+                share: 0.61,
+                touchdowns: 4,
+                scoringGames: 3,
+                games: 5,
+                points: -0.9,
+                display: '61% of production from 4 scores in 3 of 5 games',
+                driver: 'TD-dependent',
+              },
+              tallyFactor: 1.17,
+              headline: `${o.get[0]![1]} is running 4.1 pts a game under what he was drafted to be.`,
+              reasons: ['4.1 pts a game under his preseason 12.4, over 5 games.', 'The newsletter tally is -2 over 3 items.'],
+            },
+          ],
     partner: { key: o.id.split(':')[0], rosterId: Number(o.id.split(':')[0]), displayName: o.partner, userId: `u${o.partner}` },
     give: o.give.map(player),
     get: o.get.map(player),
@@ -564,5 +602,129 @@ test.describe('the market inventory', () => {
     await exploreMarket(page);
     await expect(page.getByTestId('trade-row').first()).toBeVisible();
     expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+/**
+ * Buy-low and sell-high ideas, which the board has to be able to tell apart.
+ *
+ * The category exists because the two kinds are judged by different tests: an
+ * upgrade's case is the points it adds this Sunday, and an arbitrage idea's
+ * case is that those points are near zero on purpose. A reader who cannot see
+ * which one produced a suggestion will judge it by the wrong one — so the tag
+ * and the section are behaviour, not decoration, and they are checked at every
+ * supported width like everything else on this screen.
+ */
+test.describe('value arbitrage, told apart from a lineup upgrade', () => {
+  /*
+   * Its own board rather than a fourth offer on the shared one.
+   *
+   * `BOARD` is calibrated: one test counts how many ideas fit above the taskbar
+   * and another counts manager cues, and both are real claims that a fourth row
+   * would silently recalibrate rather than break honestly. So the arbitrage
+   * cases get a fixture of their own — two upgrades and one buy-low, which is
+   * the shape the reserved-slot rule actually produces.
+   */
+  const ARBITRAGE_BOARD = {
+    ...BOARD,
+    offers: [
+      BOARD.offers[0]!,
+      BOARD.offers[1]!,
+      offer({
+        id: '5:h>i',
+        partner: 'Priya',
+        give: [['h', 'Khalil Shakir', 'WR', 9.1]],
+        get: [['i', 'Christian Kirk', 'WR', 9.6]],
+        /*
+         * Near zero by construction — that is what a buy-low is, and it is the
+         * reason the ordinary user-benefit bar would have suppressed it.
+         */
+        userGain: 0.1,
+        partnerGain: 1.1,
+        fairness: 'even',
+        activity: 'active',
+        sample: 7,
+        seasons: 3,
+        category: 'buy_low',
+      }),
+    ],
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await openTrades(page, ARBITRAGE_BOARD);
+    await expect(page.getByTestId('smart-trades')).toBeVisible();
+  });
+
+  test('puts the two kinds in their own sections', async ({ page }) => {
+    await expect(page.getByTestId('smart-trades-upgrade')).toBeVisible();
+    await expect(page.getByTestId('smart-trades-arbitrage')).toBeVisible();
+
+    // Upgrades first: the question this screen exists to answer is still what
+    // to do about the lineup, and arbitrage is the second opinion beside it.
+    const upgrades = (await page.getByTestId('smart-trades-upgrade').boundingBox())!;
+    const arbitrage = (await page.getByTestId('smart-trades-arbitrage').boundingBox())!;
+    expect(upgrades.y).toBeLessThan(arbitrage.y);
+  });
+
+  test('tags only the arbitrage rows, and names which kind', async ({ page }) => {
+    const tags = page.getByTestId('smart-trade-kind');
+
+    // One tag for one arbitrage offer — an upgrade carries none, because a tag
+    // on every row is a tag that says nothing.
+    await expect(tags).toHaveCount(1);
+    await expect(tags.first()).toHaveAttribute('data-category', 'buy_low');
+    await expect(tags.first()).toContainText('Buy low');
+  });
+
+  test('leads the sheet with the arbitrage case, above the roster reasoning', async ({ page }) => {
+    await page.getByTestId('smart-trades-arbitrage').getByTestId('smart-trade-row').first().click();
+    await expect(page.getByTestId('smart-trade-detail')).toBeVisible();
+
+    const arbitrage = page.getByTestId('smart-trade-arbitrage');
+    await expect(arbitrage).toBeVisible();
+
+    /*
+     * Above "Why it works", because it *is* the case. An arbitrage offer's
+     * lineup points are near zero by construction, so printing the roster
+     * reasoning first and this underneath would bury the only claim being made.
+     */
+    const caseBox = (await arbitrage.boundingBox())!;
+    const reasons = (await page.getByTestId('smart-trade-reasons').boundingBox())!;
+    expect(caseBox.y).toBeLessThan(reasons.y);
+  });
+
+  test('does not overflow at any supported width with a tag on the row', async ({ page }) => {
+    expect(await horizontalOverflow(page)).toBe(0);
+
+    await page.getByTestId('smart-trades-arbitrage').getByTestId('smart-trade-row').first().click();
+    await expect(page.getByTestId('smart-trade-detail')).toBeVisible();
+    expect(await horizontalOverflow(page)).toBe(0);
+
+    const body = (await page.getByTestId('smart-trade-detail-body').boundingBox())!;
+    expect(body.x + body.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+  });
+
+  /**
+   * And the screen survives a payload that predates the category entirely.
+   *
+   * This app caches API responses offline, so a freshly deployed bundle can be
+   * handed a body serialised by the worker before it. `offer.arbitrage.length`
+   * on such a body is a TypeError that takes the sheet down rather than
+   * degrading it — which is exactly how this was found, on a fixture written
+   * before the field existed.
+   */
+  test('draws an offer with no category at all as an ordinary upgrade', async ({ page }) => {
+    const legacy = {
+      ...BOARD,
+      offers: BOARD.offers.slice(0, 1).map(({ category: _category, arbitrage: _arbitrage, ...rest }) => rest),
+    };
+    await openTrades(page, legacy);
+
+    await expect(page.getByTestId('smart-trades-upgrade')).toBeVisible();
+    await expect(page.getByTestId('smart-trade-kind')).toHaveCount(0);
+
+    await page.getByTestId('smart-trade-row').first().click();
+    await expect(page.getByTestId('smart-trade-detail')).toBeVisible();
+    await expect(page.getByTestId('smart-trade-arbitrage')).toHaveCount(0);
   });
 });

@@ -18,7 +18,7 @@
  * points of weekly lineup or a count of something.
  */
 
-import { CATEGORY_LABELS } from '../../core/trades/category.ts';
+import { CATEGORY_LABELS, type OfferCategory } from '../../core/trades/category.ts';
 import type { OfferEvaluation } from '../api.ts';
 import { DetailLabel } from './common.tsx';
 import { ReasonList, withoutRepeats } from './decisions.tsx';
@@ -35,6 +35,7 @@ import { TradeLadderFold } from './tradeLadder.tsx';
  */
 export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpen: () => void }) {
   const cue = managerCue(offer);
+  const category = categoryOf(offer);
 
   return (
     <button type="button" className="smart-trade" data-testid="smart-trade-row" onClick={onOpen}>
@@ -48,9 +49,9 @@ export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpe
         "your lineup is short at flex", and a reader who could not tell the two
         apart would judge an arbitrage trade by the wrong test.
       */}
-      {offer.category === 'upgrade' ? null : (
-        <span className="smart-trade-kind" data-testid="smart-trade-kind" data-category={offer.category}>
-          {CATEGORY_LABELS[offer.category]}
+      {category === 'upgrade' ? null : (
+        <span className="smart-trade-kind" data-testid="smart-trade-kind" data-category={category}>
+          {CATEGORY_LABELS[category]}
         </span>
       )}
 
@@ -99,6 +100,23 @@ export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpe
 }
 
 /**
+ * Which category this offer is, read defensively.
+ *
+ * `category` and `arbitrage` are recent fields, and a screen must not assume
+ * the payload in front of it carries them. The honest reason is not politeness
+ * about old servers: this app caches API responses offline, so a bundle that
+ * has just been deployed can be handed a body serialised by the worker that
+ * preceded it, and `offer.arbitrage.length` on that body is a TypeError that
+ * takes the whole sheet down rather than degrading it.
+ *
+ * Absent reads as `upgrade`, which is what every offer was before the category
+ * existed — so a stale payload draws exactly the screen it was built for.
+ */
+function categoryOf(offer: OfferEvaluation): OfferCategory {
+  return offer.category ?? 'upgrade';
+}
+
+/**
  * The whole case, in the sheet grammar the rest of the app uses.
  *
  * `Sheet` rather than a pushed page or a bespoke overlay: it is the component
@@ -119,6 +137,7 @@ export function SmartTradeSheet({
 }) {
   const reasons = withoutRepeats(offer.reasons);
   const caveats = withoutRepeats(offer.caveats, reasons);
+  const arbitrage = offer.arbitrage ?? [];
   /*
    * The one player this offer is actually chasing, when there is exactly one.
    *
@@ -207,11 +226,11 @@ export function SmartTradeSheet({
           this category exists to bypass. Printing the roster reasoning first
           and this underneath would bury the only thing being claimed.
         */}
-        {offer.arbitrage.length > 0 ? (
+        {arbitrage.length > 0 ? (
           <>
-            <DetailLabel>{CATEGORY_LABELS[offer.category]}</DetailLabel>
+            <DetailLabel>{CATEGORY_LABELS[categoryOf(offer)]}</DetailLabel>
             <div data-testid="smart-trade-arbitrage">
-              {offer.arbitrage.map((read) => (
+              {arbitrage.map((read) => (
                 <div className="smart-trade-arb" key={read.playerId} data-kind={read.kind}>
                   <p className="smart-trade-arb-headline">{read.headline}</p>
                   <ReasonList muted items={read.reasons} />
