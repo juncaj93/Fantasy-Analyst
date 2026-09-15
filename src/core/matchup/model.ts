@@ -83,6 +83,15 @@ export interface MatchupPlayerView {
    * other. Optional, so a forecast cached by an older build still reads.
    */
   projectionBorrowed?: boolean;
+  /**
+   * True when {@link projectedFinal} was built on the preseason season total
+   * over sixteen games — the third tier, and the weakest.
+   *
+   * Carried through from {@link MatchupPlayerInput.projectionEstimated}, and
+   * mutually exclusive with {@link projectionBorrowed}. Optional for the same
+   * reason that one is: a forecast cached by an older build still reads.
+   */
+  projectionEstimated?: boolean;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
   phase: PlayerDistribution['phase'];
@@ -416,6 +425,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       projectedFinal: distribution.projectionUnknown ? null : projectedFinal(distribution),
       remaining: distribution.projectionUnknown ? null : effectiveRemaining(distribution),
       ...(player.projectionBorrowed ? { projectionBorrowed: true } : {}),
+      ...(player.projectionEstimated ? { projectionEstimated: true } : {}),
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),

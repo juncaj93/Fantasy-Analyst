@@ -1,0 +1,25 @@
+-- Reading one snapshot's projection for a named handful of players.
+--
+-- `idx_preseason_projections_snapshot` covers `snapshot_id` alone, so
+-- `pointsForSnapshot(id, [thirty ids])` planned as
+--
+--   SEARCH preseason_projections USING INDEX idx_preseason_projections_snapshot
+--
+-- which walks every row of the snapshot — about six hundred of them — and
+-- filters the player ids in memory. Thirty rows wanted, six hundred read.
+--
+-- That was tolerable while the only caller was the Trades board, which a reader
+-- opens by hand. It stopped being tolerable when the Matchup screen started
+-- asking: that screen polls every thirty seconds on a Sunday, and D1 bills rows
+-- read rather than rows returned.
+--
+-- With `player_id` and `points` in the key the same statement plans as
+--
+--   SEARCH preseason_projections USING COVERING INDEX ... (snapshot_id=? AND player_id=?)
+--
+-- one indexed seek per id, nothing else touched, and the table itself never
+-- opened. Measured in `tests/matchup.preseasonTier.test.ts`, which asserts the
+-- plan rather than the answer — an assertion about the number would pass just
+-- as happily against the scan.
+CREATE INDEX IF NOT EXISTS idx_preseason_projections_snapshot_player
+  ON preseason_projections (snapshot_id, player_id, points);

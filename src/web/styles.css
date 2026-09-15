@@ -8657,6 +8657,28 @@ div.matchup-result {
   text-decoration-thickness: 1px;
 }
 
+/*
+ * The third tier: not a weekly projection at all, but an August season total
+ * over sixteen games.
+ *
+ * It keeps the borrowed treatment and changes the rule from dotted to dashed,
+ * matching `.tag-season`'s outline — the vocabulary this app already uses for
+ * a claim about the season sitting among claims about this Sunday. The dash is
+ * not what a reader will notice at 0.68rem and is not meant to be; the tilde
+ * the component prints in front of the figure is. This is the corroborating
+ * signal for somebody who has learned the difference, not the announcement of
+ * it, and neither one is carrying the meaning alone — the title and the
+ * `aria-label` both say it in words.
+ *
+ * No further step down in opacity. 0.72 against `--text-faint` is already at
+ * the floor of what passes contrast at this size, and the honest way to say
+ * "weaker still" was never to make it harder to read.
+ */
+.matchup-player-proj-estimated {
+  text-decoration-style: dashed;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The spine. Fixed width, so it never moves between rows. */
 .slot-pill {
   flex: 0 0 auto;

@@ -46,6 +46,8 @@ import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
+import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
+import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import type { Database } from '../db.ts';
 
 /*
@@ -162,6 +164,32 @@ export class MatchupService {
           profile: opts.profile,
           positionOf: opts.positionOf,
         }),
+      /*
+       * The last resort, and it is called only when there is something for it
+       * to resolve — `build.ts` passes the players who reached the third tier
+       * and skips the bag entirely when that list is empty.
+       *
+       * Two statements, both indexed, and neither of them `latest()`. That
+       * method is built on `list()`, which counts every projection row in the
+       * season to fill in an Admin screen's totals — eighteen hundred rows to
+       * answer "which capture is newest", on a request that repeats every
+       * thirty seconds while games are on. `latestId` is the same answer from
+       * one covering-index row, and the seek that follows is covered too since
+       * migration 0041.
+       *
+       * Scoped by `scoringKey` before anything else, the same rule the draft
+       * board and the trade board keep. A snapshot captured under other scoring
+       * is not a worse number for this reader, it is the wrong one at a
+       * plausible size: fifty points out on every quarterback and right on
+       * everybody else. A league with no matching capture gets an empty map and
+       * a dash, which is the correct answer rather than a degraded one.
+       */
+      preseasonProjections: async (opts) => {
+        const repo = new PreseasonProjectionsRepo(this.db);
+        const snapshotId = await repo.latestId(opts.season, scoringKey(projectionScoringFrom(opts.profile)));
+        if (snapshotId == null) return new Map<string, number>();
+        return repo.pointsForSnapshot(snapshotId, opts.playerIds);
+      },
       previousForecast: (opts) => this.previousState(opts.leagueId, opts.season, opts.week, opts.rosterId),
       cached: () => CACHE.get(this.db) ?? null,
       remember: (entry) => CACHE.set(this.db, entry),

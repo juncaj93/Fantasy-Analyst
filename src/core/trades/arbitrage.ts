@@ -69,6 +69,7 @@
  * nobody, and — like every other module in this directory — never acts.
  */
 
+import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
 import { RECENCY_WEIGHTS } from '../startsit/usageTrend.ts';
 import { TD_DEPENDENCY, assessTdDependency, type TdDependencyAssessment } from '../startsit/tdDependency.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
@@ -87,14 +88,14 @@ export const ARBITRAGE = {
   /**
    * Games of preseason expectation a season projection is spread over.
    *
-   * Seventeen would be the schedule and is the wrong number: it charges every
-   * player for a bye he has not reached and for the weeks he was hurt, both of
-   * which make September look like underperformance. Sixteen is the ordinary
-   * count of games a healthy starter actually plays, and the residual is a
-   * per-game one either way — a player is compared against the week he was
-   * expected to have, not against a season he has not finished.
+   * Shared with `core/matchup/build.ts` since 15 September 2026, when the
+   * Matchup screen started dividing the same season total for the same reason
+   * — see `core/nfl/expectedGames.ts` for the number itself and for why
+   * seventeen is the wrong one. Named here rather than re-derived so the two
+   * cannot drift, and kept on this object so the constant reads the same at
+   * every call site in this file.
    */
-  expectedGames: 16,
+  expectedGames: EXPECTED_GAMES,
   /**
    * Points per game of shortfall at which a buy-low read is maxed out.
    *

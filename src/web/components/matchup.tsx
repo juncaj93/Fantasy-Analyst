@@ -753,20 +753,46 @@ function PlayerHalf({
         by coincidence. Rotowire's published week is already stored for every
         player in the NFL, so the number exists and is free.
 
-        Lighter, in italic, and titled with whose it is — the same treatment a
-        borrowed figure gets on the Team screen. Unlike there, this one *does*
-        reach the forecast: on the owner's decision of 10 September 2026 an
-        unpriced starter is simulated on Rotowire's number rather than
-        contributing zero, because a confident zero is the worse estimate. It
-        still never reaches the lineup. See `MatchupPlayerInput.projection`.
+        Three sources now, and three treatments, because the confidence gap
+        between them is real and a reader who cannot see it is being misled:
+
+          market     plain
+          published  lighter, italic, dotted underline
+          preseason  the same, plus a tilde and a dashed underline
+
+        The tilde is doing the work at 0.68rem. Dotted against dashed is a
+        distinction nobody can make at that size and a colour step would fail
+        contrast, but `~14.2` reads as an approximation at a glance and in a
+        screen reader, which is what the third tier is: the preseason season
+        total over sixteen, with no account of who he plays or whether he is
+        still the starter. The dashed rule and `.tag-season`'s outline are the
+        same vocabulary — a claim about the season among claims about Sunday.
+
+        All three reach the forecast. On the owner's decision of 10 September
+        2026, extended on 15 September, an unpriced starter is simulated on
+        whatever number exists rather than contributing zero, because a
+        confident zero is the worse estimate. None of them reaches the lineup.
+        See `MatchupPlayerInput.projection`.
       */}
-      {player.projectionBorrowed && player.projectedFinal != null ? (
+      {(player.projectionBorrowed || player.projectionEstimated) && player.projectedFinal != null ? (
         <span
-          className="matchup-player-proj matchup-player-proj-borrowed"
+          className={`matchup-player-proj matchup-player-proj-borrowed${
+            player.projectionEstimated ? ' matchup-player-proj-estimated' : ''
+          }`}
           data-testid="matchup-player-proj"
-          data-projection-source="sleeper"
-          title="Built on Rotowire's published projection, via Sleeper — no betting market has priced him."
+          data-projection-source={player.projectionEstimated ? 'preseason' : 'sleeper'}
+          title={
+            player.projectionEstimated
+              ? 'A rough number: his preseason projection for the whole season, divided by a full season of games. No betting market and no weekly projection has priced him.'
+              : "Built on Rotowire's published projection, via Sleeper — no betting market has priced him."
+          }
+          aria-label={
+            player.projectionEstimated
+              ? `Roughly ${player.projectedFinal.toFixed(1)} projected, estimated from his preseason season projection`
+              : `${player.projectedFinal.toFixed(1)} projected, from Rotowire via Sleeper`
+          }
         >
+          {player.projectionEstimated ? '~' : ''}
           {player.projectedFinal.toFixed(1)}
         </span>
       ) : (

@@ -18,7 +18,12 @@
  *     null as truth-only, and a starter contributing *zero* to his side's total
  *     is a worse estimate than a lower-confidence one. {@link
  *     MatchupPlayerInput.projectionBorrowed} carries which it is, all the way
- *     to the screen, so the number is never drawn as this app's own.
+ *     to the screen, so the number is never drawn as this app's own. A third
+ *     tier followed on 15 September 2026 for the players Rotowire does not
+ *     price either: this league's own preseason season total over sixteen
+ *     games, marked by {@link MatchupPlayerInput.projectionEstimated} and drawn
+ *     differently again, because a flattened August number is a weaker claim
+ *     than a weekly one somebody made with this Sunday in front of them.
  *  3. **Game state is a fact about a clock, not about a player.** Whether an
  *     outcome is still uncertain is decided once, from kickoff and now, and
  *     every downstream module reads that decision rather than re-deriving it —
@@ -85,9 +90,11 @@ export interface MatchupPlayerInput {
    * is precisely the double-counting §3 forbids. The service strips the
    * component; see `matchupService`.
    *
-   * Rotowire's published figure where this app has no market for him, and null
-   * only where neither exists. See {@link projectionBorrowed}, and the note at
-   * the top of this file for why the fallback was let in here specifically.
+   * Rotowire's published figure where this app has no market for him, this
+   * league's preseason season total over sixteen games where Rotowire has none
+   * either, and null only where all three are missing. See {@link
+   * projectionBorrowed} and {@link projectionEstimated}, and the note at the
+   * top of this file for why the fallbacks were let in here specifically.
    */
   projection: number | null;
   /**
@@ -100,6 +107,23 @@ export interface MatchupPlayerInput {
    * this app computed.
    */
   projectionBorrowed?: boolean;
+  /**
+   * True when {@link projection} is neither this app's nor Rotowire's, but the
+   * preseason season total divided by `EXPECTED_GAMES`.
+   *
+   * The weakest of the three and marked as the weakest, because it is the only
+   * one that is not about this week at all: it is what somebody thought the
+   * player was worth in August, flattened across a season, with no account of
+   * who he plays, whether his role has changed or whether he is now the backup.
+   * The screen draws it differently from a borrowed weekly figure for that
+   * reason — see `matchup.tsx`.
+   *
+   * Mutually exclusive with {@link projectionBorrowed}; `projectionFor` picks
+   * exactly one tier. Two optional booleans rather than one discriminant
+   * because a cached response from an older worker must still render — see the
+   * note at the assignment in `build.ts`.
+   */
+  projectionEstimated?: boolean;
   /** Sleeper's settled points for him so far. Never written by this app. */
   actual: number;
   /** ISO kickoff for his game, when the schedule is known. */
