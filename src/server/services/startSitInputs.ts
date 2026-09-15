@@ -14,6 +14,7 @@ import { PlayerRepo } from '../repos/players.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
+import { slateWindow } from '../../core/nfl/slateWindow.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
 import { homeByTeam, indoorByTeam } from '../../core/nfl/schedule.ts';
 import { seasonStartIso } from '../../core/dst/assemble.ts';
@@ -44,11 +45,26 @@ export async function startSitInputsFor(
 ): Promise<StartSitInput[]> {
   if (playerIds.length === 0) return [];
   const propsRepo = new PropsRepo(db);
-  const [players, propsByPlayer, previousProps, kickoffs, signals] = await Promise.all([
+  /*
+   * This week's games, and only this week's.
+   *
+   * The same window `buildStartSitContext` passes to `VegasEventsRepo.between`,
+   * from the same function, because the two reads are two halves of one fact
+   * and they had drifted: the events half was windowed from the day it was
+   * written and the props half never was. See `core/nfl/slateWindow.ts` for
+   * what that cost in production on 15 September 2026.
+   *
+   * The same window also bounds the kickoff read below, which is the secondary
+   * source behind the fixture list. It used to be the only one, and unbounded:
+   * the newest `game_start` that had ever mentioned the player, whatever week
+   * it belonged to.
+   */
+  const slate = slateWindow();
+  const [players, propsByPlayer, previousProps, pricedKickoffs, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
-    propsRepo.latestForPlayers(playerIds),
-    propsRepo.previousForPlayers(playerIds),
-    propsRepo.kickoffsForPlayers(playerIds),
+    propsRepo.latestForPlayers(playerIds, slate),
+    propsRepo.previousForPlayers(playerIds, slate),
+    propsRepo.kickoffsForPlayers(playerIds, slate),
     new EvidenceRepo(db).getSignals(playerIds),
   ]);
 
@@ -108,10 +124,30 @@ export async function startSitInputsFor(
       player,
       props: propsByPlayer.get(id) ?? [],
       previousProps: previousProps.get(id) ?? [],
-      // Absent means the schedule is unknown, which is never treated as a lock:
-      // refusing a change the user can still make would be the app inventing a
-      // restriction.
-      kickoff: kickoffs.get(id) ?? null,
+      /*
+       * From the league's fixture list, not from whatever a book last quoted.
+       *
+       * It used to come from `PropsRepo.kickoffsForPlayers`, which read the
+       * `game_start` of the newest snapshot that mentioned the player — with
+       * no bound on which week that snapshot was for. On the Tuesday of week 2
+       * that was the previous Sunday's kickoff for nine of ten starters, every
+       * one of them therefore `locked`, and a locked starter cannot be moved
+       * by the optimiser or traded for: the trade board's own diagnostics
+       * showed 107 candidates scored and every one rejected at "your lineup
+       * would gain 0.0 pts".
+       *
+       * The fixture list first, then the `game_start` of a game a book has
+       * quoted *in this week's window*. The second is a genuine fallback
+       * rather than a duplicate: `nfl_schedule` is an ingested table that can
+       * be empty, and a deployment that has not read it yet must not lose
+       * every kickoff it holds. What it may never do again is answer from a
+       * week that is over.
+       *
+       * Absent means the schedule is unknown, which is never treated as a lock:
+       * refusing a change the user can still make would be the app inventing a
+       * restriction.
+       */
+      kickoff: game?.kickoff ?? pricedKickoffs.get(id) ?? null,
       signal: signals.get(id) ?? null,
       injuryStatus: player.status,
       injury: injuries.get(id) ?? null,
@@ -222,8 +258,7 @@ export async function buildStartSitContext(
   usageService = new UsageService(db),
   now = new Date(),
 ): Promise<StartSitContext> {
-  const from = new Date(now.getTime() - 12 * 3_600_000).toISOString();
-  const to = new Date(now.getTime() + 9 * 86_400_000).toISOString();
+  const { from, to } = slateWindow(now);
 
   const [events, defense, state] = await Promise.all([
     new VegasEventsRepo(db).between(from, to).catch(() => []),
@@ -250,13 +285,48 @@ export async function buildStartSitContext(
   const home = homeByTeam(fixtures);
   const indoor = indoorByTeam(fixtures);
 
+  /*
+   * The slate, seeded from the fixture list and priced from the book.
+   *
+   * The order is the point, and it is a division of ownership rather than a
+   * preference. `nfl_schedule` is the NFL's own fixture list: it has all
+   * thirty-two teams, it knows a bye from an unpriced game, and it carries a
+   * kickoff for a fixture no book has quoted. `vegas_events` has only the
+   * games somebody is taking bets on, and what it uniquely holds is the price.
+   *
+   * So every team this week gets an entry with its opponent and its kickoff,
+   * and the loop below adds a spread and a total to the ones that have been
+   * priced. Before this, the map was built from the events alone — which meant
+   * that "who does he play and when" was only answerable for a player whose
+   * game a book had quoted, and on the Tuesday of a new week, when the odds
+   * cron has not run since the previous Sunday, that was nobody.
+   */
   const schedule: StartSitContext['schedule'] = new Map();
+  for (const fixture of fixtures) {
+    const team = fixture.team.toUpperCase();
+    if (!team) continue;
+    schedule.set(team, {
+      opponent: fixture.opponent ? fixture.opponent.toUpperCase() : null,
+      spread: null,
+      total: null,
+      kickoff: fixture.kickoff,
+    });
+  }
+
   for (const event of events) {
     const sides = [event.homeTeam, event.awayTeam].filter((t): t is string => !!t).map((t) => t.toUpperCase());
     if (sides.length === 0) continue;
     for (const team of sides) {
-      if (schedule.has(team)) continue;
-      const opponent = sides.find((t) => t !== team) ?? null;
+      const fixture = schedule.get(team);
+      /*
+       * Priced twice in one window is possible — a Thursday game and the
+       * following Thursday can both be inside nine days — and the fixture list
+       * says which of them is this week's. A team already carrying a price
+       * keeps it; a team the schedule does not list at all is still admitted,
+       * because a missing fixture row must not be able to hide a game.
+       */
+      if (fixture && (fixture.spread != null || fixture.total != null)) continue;
+      const opponent = fixture?.opponent ?? sides.find((t) => t !== team) ?? null;
       /*
        * The spread, resolved against the team it was stored for.
        *
@@ -272,7 +342,15 @@ export async function buildStartSitContext(
           : spreadTeam === team
             ? event.spread
             : -event.spread;
-      schedule.set(team, { opponent, spread, total: event.total ?? null, kickoff: event.kickoff });
+      schedule.set(team, {
+        opponent,
+        spread,
+        total: event.total ?? null,
+        // The fixture list's kickoff wins where there is one: it is published
+        // by the league rather than by a book, and it exists for games nobody
+        // has priced.
+        kickoff: fixture?.kickoff ?? event.kickoff,
+      });
     }
   }
 
