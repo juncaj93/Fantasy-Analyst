@@ -102,9 +102,12 @@ console.log('\n=== 2b. the fixture list, which is where kickoffs come from ===')
 const rollover = await get('/api/diagnostics/rollover');
 console.log(`  GET /api/diagnostics/rollover -> ${rollover.status}`);
 if (rollover.json) {
-  const text = JSON.stringify(rollover.json);
-  const hit = text.match(/"schedule"\s*:\s*\{[^}]*\}/);
-  console.log(`  ${hit ? hit[0] : text.slice(0, 700)}`);
+  for (const c of rollover.json.checks ?? []) {
+    console.log(`  ${String(c.name).padEnd(26)} ${String(c.status).padEnd(10)} found=${c.found ?? '-'}  ${c.detail ?? ''}`);
+  }
+  if (!(rollover.json.checks ?? []).some((c) => /schedule|fixture/i.test(String(c.name)))) {
+    console.log('  (no schedule/fixture check in this list — coverage is not reported here)');
+  }
 }
 
 // ------------------------------------------------------------ 3. the lineup
@@ -171,14 +174,30 @@ const waivers = await get(`/api/leagues/${league.id}/waivers`);
 if (waivers.status !== 200) {
   console.log(`  GET waivers -> ${waivers.status} ${waivers.text ?? ''}`);
 } else {
+  /*
+   * The board's own vocabulary, not a guess at it.
+   *
+   * The first run of this probe read `candidates` / `recommendations` / `rows`,
+   * none of which this endpoint has, and printed "returned: 0" — which reads
+   * exactly like an empty board and was in fact an empty question. The real
+   * lanes are `upgrades`, `valueAdds` and `unknowns`.
+   */
   const w = waivers.json ?? {};
-  const list = w.candidates ?? w.recommendations ?? w.rows ?? [];
-  console.log(`  returned         : ${list.length}`);
-  console.log(`  keys             : ${Object.keys(w).join(', ')}`);
-  for (const c of list.slice(0, 8)) {
-    console.log(`    ${String(c.name ?? c.playerId).slice(0, 24).padEnd(25)} ${c.position ?? ''} score=${c.score ?? '?'} proj=${c.projection ?? '—'} role=${c.role ?? '-'}`);
+  const lanes = ['upgrades', 'valueAdds', 'unknowns'];
+  for (const lane of lanes) {
+    const rows = w[lane] ?? [];
+    console.log(`  ${lane.padEnd(10)} : ${rows.length}`);
+    for (const c of rows.slice(0, 5)) {
+      console.log(
+        `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+          ` score=${c.score ?? '?'} proj=${c.projection ?? '—'} shelf=${c.shelfLife ?? '-'} role=${c.role ?? '-'}`,
+      );
+    }
   }
-  if (w.note || w.reason) console.log(`  note             : ${w.note ?? w.reason}`);
+  console.log(`  considered       : ${w.considered ?? '?'}   skipped: ${w.skipped ?? '?'}   threshold: ${JSON.stringify(w.threshold ?? null)}`);
+  console.log(`  pool             : ${JSON.stringify(w.pool ?? null)}`);
+  console.log(`  headline         : ${w.headline ?? '(none)'}`);
+  for (const n of w.notes ?? []) console.log(`  note             : ${n}`);
 }
 
 // ------------------------------------------------------------ 6. the trades
@@ -189,7 +208,17 @@ if (diag.status !== 200) {
 } else {
   const d = diag.json ?? {};
   console.log(`  keys             : ${Object.keys(d).join(', ')}`);
-  console.log(`  ${JSON.stringify(d).slice(0, 1800)}`);
+  /*
+   * The field added in #268, checked rather than assumed present. An empty
+   * board because the market is quiet and an empty board because nobody has
+   * imported the preseason snapshot are different states, and if this comes
+   * back absent while section 7 reports zero snapshots then the warning is
+   * not reaching the screen and the reader is still being left to infer.
+   */
+  console.log(`  arbitrageOff     : ${d.arbitrageOff ?? '(absent)'}`);
+  console.log(`  warnings         : ${JSON.stringify(d.warnings ?? [])}`);
+  console.log(`  search           : ${JSON.stringify(d.search ?? null)}`);
+  console.log(`  notes            : ${JSON.stringify(d.notes ?? [])}`);
 }
 
 // ------------------------------------------- 7. does the preseason tier exist
