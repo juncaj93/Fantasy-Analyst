@@ -1716,6 +1716,17 @@ export interface SmartTradeBoard {
   };
   notes: string[];
   warnings: string[];
+  /**
+   * Why buy-low and sell-high produced nothing, when the cause is a setup step.
+   *
+   * An empty board because the market is quiet and an empty board because
+   * nobody has imported the input are different states and must never read the
+   * same. A probe of production on 15 September 2026 found zero preseason
+   * snapshots stored under any scoring key — so the lane had been shipped
+   * switched off, returning a board indistinguishable from "nothing to
+   * suggest". Absent when the lane ran.
+   */
+  arbitrageOff?: string | null;
 }
 
 /**

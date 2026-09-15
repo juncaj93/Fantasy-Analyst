@@ -311,6 +311,27 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         </StatusRow>
       ) : null}
 
+      {/*
+        A lane that is switched off, said out loud.
+
+        Distinct from the line above it, and the distinction is the whole
+        point: "no meaningful hole to trade for" is a finding about the
+        league, and this is a setup step nobody has taken. A probe of
+        production on 15 September 2026 found no preseason projection stored
+        under any scoring key, which meant buy-low and sell-high had been
+        shipped switched off and were returning a board that looked exactly
+        like a quiet market.
+
+        `warn` rather than `info` because it is actionable by exactly one
+        person, and printed whether or not there are offers — an upgrade board
+        with the arbitrage lane dark is still missing half of what it does.
+      */}
+      {smart?.arbitrageOff ? (
+        <StatusRow tone="warn" data-testid="smart-trades-arbitrage-off">
+          Buy-low and sell-high are switched off. {smart.arbitrageOff}
+        </StatusRow>
+      ) : null}
+
       {board.sections.length === 0 ? (
         <Empty>
           Nothing to suggest yet. Trade ideas come from newsletter evidence moving in the last 30 days — once a few

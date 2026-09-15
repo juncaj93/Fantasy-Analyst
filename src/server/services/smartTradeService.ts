@@ -69,6 +69,16 @@ import type { StartSitInput } from '../../core/startsit/engine.ts';
  */
 export interface SmartTradeBoard extends Omit<TradeAssembly, 'rejections'> {
   league: { id: string; name: string } | null;
+  /**
+   * Why buy-low and sell-high produced nothing, when the cause is a setup step
+   * rather than a quiet market. Absent when the lane ran.
+   *
+   * The two states are indistinguishable from an empty board, and one of them
+   * is actionable by exactly one person. A probe of production on 15 September
+   * 2026 found no preseason projection stored under any scoring key, so the
+   * lane had been shipped switched off and nothing said so.
+   */
+  arbitrageOff?: string | null;
 }
 
 /** The reads, before the search. Shared by the board and by the snapshot. */
@@ -79,6 +89,11 @@ export interface TradeGathering {
   rosterRecords?: RosterRecord[];
   /** Set only in the no-league case, where the board's note is not the search's. */
   noLeagueNote?: string;
+  /**
+   * Why the buy-low / sell-high lane produced nothing, when the reason is a
+   * setup step rather than a quiet market. Null when the lane ran.
+   */
+  arbitrageOff?: string | null;
 }
 
 export class SmartTradeService {
@@ -208,8 +223,9 @@ export class SmartTradeService {
      * swallowed to an empty map on failure: an arbitrage lane that could take
      * the Trades screen down would be a worse feature than no arbitrage lane.
      */
+    const off: string[] = [];
     const arbitrage = wanted
-      ? await this.arbitrage(inputs, league.season, profile).catch((err) => {
+      ? await this.arbitrage(inputs, league.season, profile, warnings, off).catch((err) => {
           warnings.push(`buy-low and sell-high reads could not be built: ${String(err)}`);
           return new Map<string, ArbitrageRead>();
         })
@@ -235,6 +251,7 @@ export class SmartTradeService {
         warnings,
       },
       rosterRecords: rosters,
+      arbitrageOff: off[0] ?? null,
     };
   }
 
@@ -247,6 +264,14 @@ export class SmartTradeService {
       league: gathered.league == null ? null : { id: gathered.league.id, name: gathered.league.name },
       ...board,
       ...(gathered.noLeagueNote ? { notes: [gathered.noLeagueNote] } : {}),
+      /*
+       * Optional on the wire, and deliberately so: this app caches API
+       * responses offline, so a fresh bundle routinely renders a body an
+       * older worker produced. An added optional field reads as `undefined`
+       * to old code and absent to new; see the Trades sheet on 14 September
+       * for what a required one costs.
+       */
+      ...(gathered.arbitrageOff ? { arbitrageOff: gathered.arbitrageOff } : {}),
     };
   }
 
@@ -268,13 +293,37 @@ export class SmartTradeService {
     inputs: StartSitInput[],
     season: string,
     profile: ScoringProfile,
+    warnings: string[] = [],
+    off: string[] = [],
   ): Promise<Map<string, ArbitrageRead>> {
     const out = new Map<string, ArbitrageRead>();
     if (inputs.length === 0) return out;
 
     const repo = new PreseasonProjectionsRepo(this.db);
     const snapshot = await repo.latest(season, scoringKey(projectionScoringFrom(profile)));
-    if (!snapshot) return out;
+    /*
+     * No snapshot, and the reader is told so.
+     *
+     * This lane measures a season's production against what the player was
+     * expected to be, and the expectation is a hand-imported artifact. A
+     * probe of production on 15 September 2026 found zero snapshots stored
+     * under any scoring key, which meant the whole buy-low / sell-high
+     * feature had been shipped switched off and was returning an empty board
+     * that looked exactly like "there is nothing to suggest".
+     *
+     * Those two states are not the same and must never read the same. An
+     * empty board because the market is quiet is a finding; an empty board
+     * because nobody has imported the input is a setup step, and the only
+     * person who can take it needs to know it is outstanding.
+     */
+    if (!snapshot) {
+      const sentence =
+        `No preseason projection has been imported for ${profile.label} ${season}, so there is nothing ` +
+        `to measure this season's production against. Import one in Setup to switch buy-low and sell-high on.`;
+      warnings.push(`arbitrage lane inert: ${sentence}`);
+      off.push(sentence);
+      return out;
+    }
 
     const points = await repo.pointsForSnapshot(
       snapshot.id,

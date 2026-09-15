@@ -10,6 +10,7 @@
 import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
 import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import type { SlateWindow } from '../../core/nfl/slateWindow.ts';
 
 export class PropsRepo implements SnapshotStore {
   constructor(private readonly db: Database) {}
@@ -88,11 +89,36 @@ export class PropsRepo implements SnapshotStore {
     }
   }
 
-  /** Most recent consensus props for a set of players. */
-  async latestForPlayers(playerIds: string[]): Promise<Map<string, PlayerProp[]>> {
+  /**
+   * Most recent consensus props for a set of players, for the games in a window.
+   *
+   * ## The window is not optional in spirit
+   *
+   * This table has no season column and no week column. A snapshot's only
+   * temporal anchor is the `game_start` of the fixture it belongs to, and the
+   * `ps.id = (newest per event)` clause below means a week 1 event's snapshot
+   * stays the newest snapshot of *that event* for ever. Without a bound on
+   * `game_start`, this method answers a question nobody asked — "what is the
+   * last thing a book ever said about this player" — and the caller reads the
+   * answer as "what does the market expect of him this week".
+   *
+   * On 15 September 2026, the Tuesday of week 2, that is exactly what happened
+   * in production: nine of ten starters priced from the previous Sunday's
+   * lines, every one of them locked against a kickoff that had already passed.
+   * The companion read on the same request, `VegasEventsRepo.between`, had been
+   * windowed since it was written, so the game lines for those fixtures were
+   * correctly absent while their player props were not.
+   *
+   * The parameter is optional only because {@link VegasRefreshService} has a
+   * legitimate use for the unbounded question — it is deciding which players
+   * still need buying, across a fetch horizon that can span two NFL weeks, and
+   * "what do we already hold" is genuinely not week-scoped. Every caller
+   * serving a screen passes {@link slateWindow}.
+   */
+  async latestForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
     const out = new Map<string, PlayerProp[]>();
     if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(
@@ -100,13 +126,14 @@ export class PropsRepo implements SnapshotStore {
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
               AND ps.scope = 'week'
+              ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
                  WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1
               )`,
         )
-        .bind(...batch)
+        .bind(...batch, ...(window ? [window.from, window.to] : []))
         .all<Record<string, unknown>>();
       for (const r of rows.results) {
         const pid = String(r['player_id']);
@@ -120,36 +147,6 @@ export class PropsRepo implements SnapshotStore {
   }
 
   /**
-   * Kickoff time per player, taken from the newest snapshot that quoted them.
-   *
-   * The schedule is not stored separately — a prop snapshot carries the game it
-   * belongs to, so the event a player has lines for is the game they are
-   * playing in. Players nobody quoted are simply absent, and the caller treats
-   * an absent kickoff as "unknown" rather than as "not playing".
-   */
-  async kickoffsForPlayers(playerIds: string[]): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
-      const placeholders = batch.map(() => '?').join(',');
-      const rows = await this.db
-        .prepare(
-          `SELECT pp.player_id AS player_id, ps.game_start AS game_start
-             FROM player_props pp
-             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
-            WHERE pp.player_id IN (${placeholders})
-              AND ps.scope = 'week'
-            ORDER BY ps.fetched_at ASC`,
-        )
-        .bind(...batch)
-        .all<Record<string, unknown>>();
-      // Ascending, so the last write per player is the newest snapshot's view.
-      for (const r of rows.results) out.set(String(r['player_id']), String(r['game_start']));
-    }
-    return out;
-  }
-
-  /**
    * The lines each player carried at the previous snapshot of their game.
    *
    * "Previous" is the second-newest snapshot for that event, which is what
@@ -157,10 +154,10 @@ export class PropsRepo implements SnapshotStore {
    * "since some arbitrary point". A player whose game has only been fetched
    * once has no previous lines, and no movement is claimed for them.
    */
-  async previousForPlayers(playerIds: string[]): Promise<Map<string, PlayerProp[]>> {
+  async previousForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
     const out = new Map<string, PlayerProp[]>();
     if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS)) {
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(
@@ -168,13 +165,14 @@ export class PropsRepo implements SnapshotStore {
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
               AND ps.scope = 'week'
+              ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
                  WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1 OFFSET 1
               )`,
         )
-        .bind(...batch)
+        .bind(...batch, ...(window ? [window.from, window.to] : []))
         .all<Record<string, unknown>>();
       for (const r of rows.results) {
         const pid = String(r['player_id']);
