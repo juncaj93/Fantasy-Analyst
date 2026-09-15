@@ -132,6 +132,20 @@ export interface MatchupSources {
     week: number;
     playerIds: string[];
     profile: ScoringProfile;
+    /**
+     * Which position each id plays, without which the feed answers nothing.
+     *
+     * Not optional in practice, though the signature allows an implementation
+     * to ignore it. The published totals are checked per position, so a caller
+     * that cannot say who it is asking about is checked against every setting
+     * at once — and one changed setting anywhere in a league then refuses every
+     * player in it. This bag used to omit it deliberately, on the reasoning
+     * that a caller with no positions should get the conservative answer; what
+     * that actually produced in production was an opponent column with six of
+     * ten starters priced and no borrowed number anywhere, because the league
+     * pays six points for a passing touchdown.
+     */
+    positionOf(playerId: string): string | null;
   }): Promise<ReadonlyMap<string, number>>;
   /** The caller's memo of its own last response, for the fingerprint short-circuit. */
   cached(): { fingerprint: string; response: MatchupResponse } | null;
@@ -274,6 +288,7 @@ export async function buildMatchupResponse(
         week,
         playerIds: allIds,
         profile,
+        positionOf: (playerId) => evaluations.get(playerId)?.position ?? null,
       });
     } catch {
       published = new Map();

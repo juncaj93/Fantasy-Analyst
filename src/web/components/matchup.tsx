@@ -79,8 +79,19 @@ export function ScoreCard({
       </div>
 
       {degraded ? (
+        /*
+          Why, not just that.
+
+          This said "forecast temporarily unavailable" and nothing else, which
+          is the sentence a service outage gets — and this is never an outage.
+          It is always the same fact: some starters could not be priced, so the
+          two totals are not measuring the same thing. Read on 10 September
+          2026 as the win probability having simply gone, which is what an
+          unexplained absence looks like from the outside.
+        */
         <div className="matchup-degraded" data-testid="matchup-degraded">
-          Fantasy Analyst forecast temporarily unavailable. The score above is Sleeper’s and is unaffected.
+          {forecast.degradedReason ?? 'Fantasy Analyst has no forecast for this matchup.'}{' '}
+          The score above is Sleeper’s and is unaffected.
         </div>
       ) : final ? (
         /* The odds go, the margin arrives, and the recap is the card below. */

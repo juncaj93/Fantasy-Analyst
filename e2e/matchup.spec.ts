@@ -591,6 +591,10 @@ test.describe('the states of an afternoon', () => {
         {},
         {
           degraded: true,
+          degradedReason:
+            "100% of your starters and 57% of your opponent's could be projected. " +
+            "An unprojected starter counts as zero, so your opponent's total would be understated " +
+            'and the two are not comparable.',
           teams: {
             mine: { rosterId: 1, side: 'mine', name: 'Ceedeez Nuts', avatar: null, record: '9-5', actual: 107, projectedFinal: null, winProbability: null },
             theirs: { rosterId: 2, side: 'theirs', name: 'Juncer’s Hog Format', avatar: null, record: '9-5', actual: 124.2, projectedFinal: null, winProbability: null },
@@ -617,7 +621,17 @@ test.describe('the states of an afternoon', () => {
 
     await expect(page.getByTestId('matchup-actual-mine')).toHaveText('107.00');
     await expect(page.getByTestId('matchup-actual-theirs')).toHaveText('124.20');
-    await expect(page.getByTestId('matchup-degraded')).toBeVisible();
+    /*
+     * And it says why. A card that removes the win probability and explains
+     * nothing reads as the feature having broken — reported as exactly that on
+     * 10 September 2026 — when what happened is a coverage gap the reader can
+     * see the size of.
+     */
+    const degraded = page.getByTestId('matchup-degraded');
+    await expect(degraded).toBeVisible();
+    await expect(degraded).toContainText("57% of your opponent's");
+    await expect(degraded).toContainText('counts as zero');
+    await expect(degraded, 'the score beside it is still Sleeper’s').toContainText('unaffected');
     await expect(page.getByTestId('matchup-win')).toHaveCount(0);
     await expect(page.getByTestId('matchup-proj-mine')).toContainText('no forecast');
     // The lineup is still drawn: it is Sleeper's, and Sleeper is fine.

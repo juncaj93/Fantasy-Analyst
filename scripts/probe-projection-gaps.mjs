@@ -34,15 +34,19 @@ console.log('scoringLabel:', league.scoringLabel ?? '(none)');
 
 console.log('\n=== 1. is the published feed in the database at all ===');
 const health = await get('/api/data-health');
-const sources = health.sources ?? health.rows ?? [];
-const named = Array.isArray(sources) ? sources : Object.values(sources ?? {});
-for (const s of named) {
-  const label = `${s.source ?? s.key ?? s.name ?? '?'}`;
-  if (/sleeper|projection|rotowire|usage|vegas/i.test(label)) {
-    console.log(`  ${label}: ${s.state ?? s.status ?? s.outcome ?? '?'} — ${s.detail ?? s.summary ?? ''}`);
+const named = Array.isArray(health.sources) ? health.sources : [];
+if (named.length === 0) {
+  console.log('  (no source list; keys were:', Object.keys(health ?? {}).join(', '), ')');
+} else {
+  for (const s of named) {
+    if (!/published|sleeper|roster|vegas|usage|nfl-state/i.test(String(s.id ?? ''))) continue;
+    console.log(
+      `  ${String(s.id).padEnd(22)} state=${s.state}  lastSuccess=${s.lastSuccessAt ?? 'never'}` +
+        `  age=${s.ageMinutes ?? '?'}m  outcome=${s.technical?.lastOutcome ?? '-'}`,
+    );
+    if (s.note) console.log(`      note: ${s.note}`);
   }
 }
-if (named.length === 0) console.log('  (data-health returned no recognisable source list)');
 
 console.log('\n=== 2. the lineup: what each slot is scored from ===');
 const lineup = await get(`/api/leagues/${league.id}/lineup`);
@@ -69,6 +73,8 @@ if (matchup.__error) console.log('  ', matchup.__error);
 else if (!matchup.forecast) console.log('  no forecast. reason:', matchup.reason ?? '(none given)');
 else {
   const f = matchup.forecast;
+  console.log('  cached:', matchup.cached ?? f.cached ?? '(not reported)');
+  console.log('  week:', f.week ?? matchup.week ?? '?');
   console.log('  degraded:', f.degraded);
   console.log('  win%:', f.teams?.mine?.winProbability ?? 'null', ' projectedFinal:', f.teams?.mine?.projectedFinal ?? 'null');
   console.log('  freshness:', JSON.stringify(f.freshness ?? {}));

@@ -28,6 +28,7 @@ import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import {
   parseSleeperWeeklyProjections,
+  scorePublishedDefense,
   sleeperScoringKey,
   type SleeperWeeklyProjection,
 } from '../../core/sleeper/weeklyProjections.ts';
@@ -86,7 +87,24 @@ export class SleeperProjectionService {
     if (!opts.force) {
       const held = await this.repo.freshness(season, week);
       const ageHours = held.fetchedAt ? (this.now().getTime() - Date.parse(held.fetchedAt)) / 3_600_000 : null;
-      if (held.players > 0 && ageHours != null && Number.isFinite(ageHours) && ageHours < MAX_AGE_HOURS) {
+      /*
+       * Young *and* whole. Age alone was not enough.
+       *
+       * The feed was not asked for defences until 10 September 2026, so the
+       * week already in the database when that shipped was hours old, complete
+       * by every measure this gate had, and missing all thirty-two of them —
+       * which would have left the defence on Team showing the same dash the fix
+       * was for until the stored week aged past twelve hours. A week with no
+       * defence rows in it is a week fetched under the old question, whatever
+       * its timestamp says, and is refetched.
+       *
+       * The cost of being wrong about this is bounded and small. Only the crons
+       * and the Refresh tap reach here, both on a clock, so a week the feed
+       * genuinely publishes no defences for costs one extra fetch per tick —
+       * four hundred upserts on a table that holds one week — and cannot loop.
+       */
+      const whole = held.players > 0 && held.defenses > 0;
+      if (whole && ageHours != null && Number.isFinite(ageHours) && ageHours < MAX_AGE_HOURS) {
         return { ...base, outcome: 'current', detail: `${held.players} player(s), refreshed within the day` };
       }
     }
@@ -126,9 +144,17 @@ export class SleeperProjectionService {
    * scoring does not match any published total gets an empty map, which is the
    * same thing as no fallback and renders as `—`; see `sleeperScoringKey`.
    *
-   * `positionOf` exists for the one case where the answer is per-player rather
-   * than per-league: a tight-end premium leaves the published totals correct for
-   * everybody except tight ends.
+   * `positionOf` is what makes the answer per-player rather than per-league, and
+   * a caller that omits it is not being cautious, it is being refused. An
+   * unknown position is checked against every setting the feed assumes, so in a
+   * league that has changed any one of them — six-point passing touchdowns, say
+   * — *every* player comes back with no fallback. That is what emptied the
+   * opponent's column on Matchup in production on 10 September 2026: the source
+   * bag there passed no positions on purpose, and the league pays six for a
+   * passing touchdown, so a rule about quarterbacks silenced the whole feed.
+   * Two positions are per-player rather than per-league in their own right: a
+   * tight-end premium leaves the totals correct for everybody but tight ends,
+   * and a defence reads no total at all.
    */
   async publishedFor(opts: {
     season: string;
@@ -146,7 +172,28 @@ export class SleeperProjectionService {
     for (const playerId of opts.playerIds) {
       const row = stored.get(playerId);
       if (!row) continue;
-      const key = sleeperScoringKey(opts.profile, opts.positionOf?.(playerId) ?? null);
+      const position = opts.positionOf?.(playerId) ?? null;
+
+      /*
+       * A defence is computed, not quoted.
+       *
+       * `sleeperScoringKey` answers null for a defence in every league, because
+       * the three published totals are somebody else's defensive rules applied
+       * to somebody else's table. What is quotable is the projected stat line
+       * beside them, scored here under this league's own settings — so a league
+       * paying nothing for a shutout and a league paying ten both get a number
+       * that is right for them. See `core/sleeper/weeklyProjections.ts`.
+       */
+      const pos = String(position ?? '').trim().toUpperCase();
+      if (pos === 'DEF' || pos === 'DST') {
+        if (!row.defense) continue;
+        const points = scorePublishedDefense(row.defense, opts.profile.dst);
+        if (points == null) continue;
+        out.set(playerId, points);
+        continue;
+      }
+
+      const key = sleeperScoringKey(opts.profile, position);
       if (!key) continue;
       const points = row.points[key];
       if (points == null) continue;

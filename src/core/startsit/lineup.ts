@@ -168,6 +168,25 @@ export interface SlotVacancy {
   detail: string | null;
   /** True when Sleeper currently has him in a starting spot, so the row is his. */
   alreadyStarting: boolean;
+  /**
+   * What Rotowire's published week says he is worth, when this app has nothing.
+   *
+   * A different kind of number from the one that would have gone in the slot,
+   * and the reason it belongs on the vacancy rather than in it: this app cannot
+   * rank him and is not pretending to. The screen shows the figure beside the
+   * sentence explaining that it is not this app's — the defence Sleeper already
+   * has in the slot then reads "Jacksonville, 8.6, Rotowire, can't be scored
+   * here" rather than a dash and an apology.
+   *
+   * Null whenever the feed has no number for him or the league's own rules
+   * could not be read to score one. See `core/sleeper/weeklyProjections.ts`.
+   *
+   * Optional rather than required because the screen's own copy of this shape
+   * parses a response, and a response written by a deployment older than this
+   * field carries no key at all — which is the same as no figure and must not
+   * be a parse failure.
+   */
+  publishedProjection?: number | null;
 }
 
 export interface LineupSwap {
@@ -426,7 +445,7 @@ export function recommendLineup(
        */
       vacancy: player
         ? []
-        : vacanciesFor(s, [...undecidable, ...ruledOut], lockedIds, currentStarters),
+        : vacanciesFor(s, [...undecidable, ...ruledOut], lockedIds, currentStarters, opts.published),
     };
   });
 
@@ -841,6 +860,7 @@ function vacanciesFor(
   candidates: readonly StartSitEvaluation[],
   lockedIds: ReadonlySet<string>,
   currentStarters: ReadonlySet<string>,
+  published: ReadonlyMap<string, number> | undefined,
 ): SlotVacancy[] {
   return candidates
     .filter((e) => spec.accepts.includes(e.position))
@@ -850,6 +870,7 @@ function vacanciesFor(
       position: e.position,
       ...unscorableReason(e, lockedIds.has(e.playerId)),
       alreadyStarting: currentStarters.has(e.playerId),
+      publishedProjection: published?.get(e.playerId) ?? null,
     }))
     .sort((a, b) => Number(b.alreadyStarting) - Number(a.alreadyStarting) || a.name.localeCompare(b.name));
 }

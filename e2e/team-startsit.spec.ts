@@ -1039,22 +1039,47 @@ test.describe('the control row, and refresh', () => {
   });
 
   /**
-   * Two controls, one row, on the trailing edge.
+   * Two controls, on the league's own banner row.
    *
    * Measured rather than eyeballed. This used to check three mode chips and a
-   * labelled Compare button sharing a line at 360px; with the chips gone the
-   * row holds two icons, and the property worth keeping is the same one — they
-   * are on the row, they do not wrap below it, and neither has shrunk below a
-   * thumb.
+   * labelled Compare button sharing a line at 360px. The chips went, which left
+   * a full-width row holding two 44px icons and a stretch of nothing to their
+   * left — reported on 10 September 2026 as "floating alone with empty space to
+   * their left" — so they moved into the trailing slot of the bar the league
+   * name is already in, which is where every other trailing control in this app
+   * sits.
+   *
+   * The property asserted is the move itself: both icons are inside the banner,
+   * they overlap the league name vertically rather than sitting under it, and
+   * neither has shrunk below a thumb to get there.
    */
-  test('keeps both icons on the control row, at a thumb size', async ({ page }) => {
-    const controls = page.getByTestId('team-controls');
-    const rowBox = (await controls.boundingBox())!;
+  test('keeps both icons on the league banner row, at a thumb size', async ({ page }) => {
+    const banner = page.getByTestId('league-card');
+    const bannerBox = (await banner.boundingBox())!;
+    const nameBox = (await banner.locator('.nav-title').boundingBox())!;
+
+    // One row, not two: the banner is no taller than a tap target plus its own
+    // padding, which a wrapped second row could not be.
+    await expect(page.getByTestId('team-controls')).toBeVisible();
+
     for (const id of ['compare-open', 'team-refresh']) {
       const box = (await page.getByTestId(id).boundingBox())!;
       expect(box.height, `${id} must stay a tap target`).toBeGreaterThanOrEqual(43);
-      expect(box.y, `${id} must be on the control row`).toBeGreaterThanOrEqual(rowBox.y - 1);
-      expect(box.y + box.height, `${id} must not wrap below it`).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+      expect(box.width, `${id} must stay a tap target`).toBeGreaterThanOrEqual(43);
+
+      // Inside the banner, horizontally and vertically.
+      expect(box.y, `${id} must be inside the banner`).toBeGreaterThanOrEqual(bannerBox.y - 1);
+      expect(box.y + box.height, `${id} must be inside the banner`).toBeLessThanOrEqual(
+        bannerBox.y + bannerBox.height + 1,
+      );
+
+      // Beside the league name rather than below it: the two boxes share
+      // vertical space, which is the whole of what "inline" means here.
+      expect(box.y, `${id} must share the row with the league name`).toBeLessThan(nameBox.y + nameBox.height);
+      expect(box.y + box.height, `${id} must share the row with the league name`).toBeGreaterThan(nameBox.y);
+
+      // And to the trailing side of it.
+      expect(box.x, `${id} must sit after the league name`).toBeGreaterThanOrEqual(nameBox.x + nameBox.width - 1);
     }
   });
 });
