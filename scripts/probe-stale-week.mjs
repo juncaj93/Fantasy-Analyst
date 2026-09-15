@@ -72,7 +72,7 @@ console.log(`  nflState         : ${JSON.stringify(s.season ?? s.nflState ?? nul
 const health = await get('/api/data-health');
 for (const src of health.json?.sources ?? []) {
   const id = String(src.id ?? '');
-  if (!/vegas|published|sleeper|usage|nfl|roster|injur/i.test(id)) continue;
+  if (!/vegas|published|sleeper|usage|nfl|roster|injur|schedule/i.test(id)) continue;
   console.log(
     `  ${id.padEnd(24)} state=${String(src.state).padEnd(12)} last=${ago(src.lastSuccessAt)}` +
       `  outcome=${src.technical?.lastOutcome ?? '-'}`,
@@ -87,6 +87,25 @@ console.log(`  events stored    : ${v.events}`);
 console.log(`  last refreshed   : ${v.lastRefreshedAt ?? 'never'}  (${ago(v.lastRefreshedAt)})`);
 console.log(`  budget           : ${v.budget?.used}/${v.budget?.limit} ${v.budget?.state ?? ''}`);
 console.log('  --- the question: is that a week 1 refresh being read as week 2? ---');
+
+// --------------------------------------------- 2b. is the fixture list there
+/*
+ * The question the first run of this probe did not ask, and should have.
+ *
+ * Kickoffs now come from `nfl_schedule` with a priced game as the fallback.
+ * If that table is empty, and the week's games are unpriced, the app holds no
+ * kickoff for anybody — which is the *correct* state on a Tuesday before the
+ * odds cron runs, but it is a different state from "the schedule is there",
+ * and the difference decides whether locks work on Sunday.
+ */
+console.log('\n=== 2b. the fixture list, which is where kickoffs come from ===');
+const rollover = await get('/api/diagnostics/rollover');
+console.log(`  GET /api/diagnostics/rollover -> ${rollover.status}`);
+if (rollover.json) {
+  const text = JSON.stringify(rollover.json);
+  const hit = text.match(/"schedule"\s*:\s*\{[^}]*\}/);
+  console.log(`  ${hit ? hit[0] : text.slice(0, 700)}`);
+}
 
 // ------------------------------------------------------------ 3. the lineup
 console.log('\n=== 3. the lineup: kickoffs, locks and whose number each is ===');

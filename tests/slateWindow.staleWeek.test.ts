@@ -188,27 +188,63 @@ describe('a kickoff is a fact about the fixture list', () => {
     expect(Date.parse(LAST_SUNDAY_KICKOFF)).toBeLessThan(TUESDAY.getTime());
   });
 
-  it('says it does not know rather than inventing one, when there is no fixture', async () => {
+  it('falls back to a priced game in this week’s window when the fixture list is empty', async () => {
+    /*
+     * `nfl_schedule` is an ingested table and can be empty — the demo fixture
+     * has no rows in it at all, and that is how this was caught: taking the
+     * kickoff *only* from the fixture list lost every kickoff the app held and
+     * changed the lineup's own scores, which the "one engine, not two" e2e
+     * correctly refused.
+     *
+     * So a game a book has quoted is still a kickoff. What it may never be
+     * again is a game from a week that is over.
+     */
+    const db = await seed({ fixtures: false, weekTwoPriced: true });
+    const input = await inputFor(db);
+
+    expect(input.kickoff).toBe(THIS_SUNDAY_KICKOFF);
+  });
+
+  it('says it does not know rather than reaching back into a finished week', async () => {
+    // No fixture list, and the only priced game is last Sunday's. Unknown is
+    // never a lock; a kickoff from a week that is over silently is.
     const input = await inputFor(await seed({ fixtures: false }));
 
-    // Unknown is never a lock: refusing a change the reader can still make
-    // would be the app inventing a restriction.
     expect(input.kickoff).toBeNull();
   });
 });
 
 describe('what it costs', () => {
-  it('asks the database one question fewer than before', async () => {
+  it('bounds the kickoff read rather than dropping it, at the same query count', async () => {
     /*
-     * `kickoffsForPlayers` is gone rather than windowed. Its whole job was to
-     * infer a schedule from prop snapshots, and the schedule is stored.
+     * An earlier draft of this change deleted `kickoffsForPlayers` outright,
+     * on the reasoning that the schedule is stored so inferring one from
+     * betting data is redundant. It is not redundant when the schedule table
+     * is empty, and the cost of finding that out was a red CI run: the demo
+     * has no `nfl_schedule` rows, every kickoff went null, and the lineup's
+     * scores moved while the comparison's did not.
+     *
+     * So the read stays and takes the window. Same number of queries as
+     * before, each of them now answering about this week.
      */
     const inner = await seed();
     const counting = countingDb(inner);
     await startSitInputsFor(counting.db, [QB]);
 
-    expect(counting.callsMatching('ps.game_start AS game_start')).toBe(0);
-    expect(counting.callsMatching('FROM player_props')).toBeLessThanOrEqual(2);
+    expect(counting.callsMatching('ps.game_start AS game_start')).toBe(1);
+    expect(counting.callsMatching('FROM player_props')).toBeLessThanOrEqual(3);
+  });
+
+  it('never asks the kickoff question without a window', () => {
+    /*
+     * The parameter is required in the signature, which is the enforcement.
+     * This asserts the call site has not quietly grown an overload: the two
+     * props reads may legitimately go unbounded for `VegasRefreshService`, and
+     * this one may not.
+     */
+    const source = readFileSync(new URL('../src/server/repos/props.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/kickoffsForPlayers\(playerIds: string\[\], window: SlateWindow\)/);
+    expect(source).not.toMatch(/kickoffsForPlayers\(playerIds: string\[\], window\?/);
   });
 });
 

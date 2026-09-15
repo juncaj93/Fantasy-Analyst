@@ -54,15 +54,17 @@ export async function startSitInputsFor(
    * written and the props half never was. See `core/nfl/slateWindow.ts` for
    * what that cost in production on 15 September 2026.
    *
-   * One read fewer than before, too. `kickoffsForPlayers` is gone — a player's
-   * kickoff now comes off the fixture list in the context below, which knows
-   * it for every team rather than only for the ones a book has quoted.
+   * The same window also bounds the kickoff read below, which is the secondary
+   * source behind the fixture list. It used to be the only one, and unbounded:
+   * the newest `game_start` that had ever mentioned the player, whatever week
+   * it belonged to.
    */
   const slate = slateWindow();
-  const [players, propsByPlayer, previousProps, signals] = await Promise.all([
+  const [players, propsByPlayer, previousProps, pricedKickoffs, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
     propsRepo.latestForPlayers(playerIds, slate),
     propsRepo.previousForPlayers(playerIds, slate),
+    propsRepo.kickoffsForPlayers(playerIds, slate),
     new EvidenceRepo(db).getSignals(playerIds),
   ]);
 
@@ -134,11 +136,18 @@ export async function startSitInputsFor(
        * showed 107 candidates scored and every one rejected at "your lineup
        * would gain 0.0 pts".
        *
+       * The fixture list first, then the `game_start` of a game a book has
+       * quoted *in this week's window*. The second is a genuine fallback
+       * rather than a duplicate: `nfl_schedule` is an ingested table that can
+       * be empty, and a deployment that has not read it yet must not lose
+       * every kickoff it holds. What it may never do again is answer from a
+       * week that is over.
+       *
        * Absent means the schedule is unknown, which is never treated as a lock:
        * refusing a change the user can still make would be the app inventing a
        * restriction.
        */
-      kickoff: game?.kickoff ?? null,
+      kickoff: game?.kickoff ?? pricedKickoffs.get(id) ?? null,
       signal: signals.get(id) ?? null,
       injuryStatus: player.status,
       injury: injuries.get(id) ?? null,

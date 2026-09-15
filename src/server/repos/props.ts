@@ -147,6 +147,47 @@ export class PropsRepo implements SnapshotStore {
   }
 
   /**
+   * Kickoff per player, from the games in a window.
+   *
+   * The secondary source, behind the fixture list. `nfl_schedule` is
+   * authoritative — it has all thirty-two teams and a kickoff for games nobody
+   * has priced — but it is an ingested table that can be empty, and a
+   * deployment whose schedule has not been read yet must not lose every
+   * kickoff it has. Where a book has quoted a game in the current window, the
+   * `game_start` on that snapshot is the same fact from a second source.
+   *
+   * The window is **required**, unlike on the reads above, and that is the
+   * whole difference between this method and the one it replaces. The previous
+   * version took the newest snapshot that had ever mentioned the player,
+   * whatever week it belonged to, which on the Tuesday of week 2 handed back
+   * the previous Sunday's kickoff for nine of ten starters and locked every
+   * one of them. A kickoff that may be any week's is worse than no kickoff at
+   * all: unknown is never treated as a lock, and a wrong one silently is.
+   */
+  async kickoffsForPlayers(playerIds: string[], window: SlateWindow): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (playerIds.length === 0) return out;
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT pp.player_id AS player_id, ps.game_start AS game_start
+             FROM player_props pp
+             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+            WHERE pp.player_id IN (${placeholders})
+              AND ps.scope = 'week'
+              AND ps.game_start >= ? AND ps.game_start <= ?
+            ORDER BY ps.fetched_at ASC`,
+        )
+        .bind(...batch, window.from, window.to)
+        .all<Record<string, unknown>>();
+      // Ascending, so the last write per player is the newest snapshot's view.
+      for (const r of rows.results) out.set(String(r['player_id']), String(r['game_start']));
+    }
+    return out;
+  }
+
+  /**
    * The lines each player carried at the previous snapshot of their game.
    *
    * "Previous" is the second-newest snapshot for that event, which is what
