@@ -23,6 +23,9 @@ import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { countingDb } from './helpers/countingDb.ts';
 import { MatchupRepo } from '../src/server/repos/matchup.ts';
+import { PlayerRepo } from '../src/server/repos/players.ts';
+import { gatherOpponentExposure } from '../src/server/services/decisionInputs.ts';
+import { player as testPlayer } from './helpers/players.ts';
 import type { Database } from '../src/server/db.ts';
 
 const LATEST_SQL =
@@ -98,5 +101,108 @@ describe('finding out who the reader is playing', () => {
     // `suggestLineupMode`. It must not throw and must not invent an opponent.
     const db = await seasonOfForecasts();
     expect(await new MatchupRepo(db).latest({ leagueId: 'l1', season: '2026', week: 15, rosterId: 5 })).toBeNull();
+  });
+});
+
+/**
+ * …and what reading the opponent's stacked games costs on top of it.
+ *
+ * The Floor/Ceiling pass now reads `core/startsit/correlation.ts`, which needs
+ * one fact per opposing starter: which NFL game he is in. That fact is a
+ * primary-key lookup in `players` plus the fixture list the assembly has
+ * already built for the reader's own roster — so the whole of the new cost is
+ * meant to be *one statement over nine ids*, and nothing else.
+ *
+ * The thing it must never become is `startSitInputsFor` over a second roster.
+ * That buys props, injuries, usage weeks and evidence for twelve more players,
+ * which is the spend the owner declined on 9 September 2026 and the reason the
+ * opponent's side of the Matchup screen is unpriced. These assert the shape of
+ * the read rather than the exposure map it produces, for the reason the tests
+ * above give.
+ */
+describe('reading which games the opponent is stacked in', () => {
+  const EMPTY_CONTEXT = {
+    schedule: new Map([
+      ['KC', { opponent: 'BUF', spread: -2.5, total: 52, kickoff: null }],
+      ['BUF', { opponent: 'KC', spread: 2.5, total: 52, kickoff: null }],
+    ]),
+    defense: new Map(),
+    home: new Map(),
+    indoor: new Map(),
+    opponentForm: new Map(),
+  };
+
+  async function withPlayers(): Promise<Database> {
+    const db = await createTestDb();
+    await new PlayerRepo(db).upsertMany(
+      Array.from({ length: 9 }, (_, i) =>
+        testPlayer({ id: `o${i}`, fullName: `Their Player ${i}`, team: i < 3 ? 'KC' : 'BUF', position: 'WR' }),
+      ),
+    );
+    return db;
+  }
+
+  const starterIds = Array.from({ length: 9 }, (_, i) => `o${i}`);
+
+  it('costs one statement, over the ids it was given', async () => {
+    const counted = countingDb(await withPlayers());
+    counted.reset();
+
+    await gatherOpponentExposure(counted.db, { mode: 'ceiling', starterIds, context: EMPTY_CONTEXT });
+
+    expect(counted.callsMatching('FROM players')).toBe(1);
+    expect(counted.rowsMatching('FROM players')).toBe(9);
+  });
+
+  it('never touches the reads that price a roster', async () => {
+    const counted = countingDb(await withPlayers());
+    counted.reset();
+
+    await gatherOpponentExposure(counted.db, { mode: 'floor', starterIds, context: EMPTY_CONTEXT });
+
+    // The declined spend, named one table at a time so a regression says which.
+    for (const table of ['FROM player_props', 'FROM usage_weeks', 'FROM evidence', 'FROM injuries']) {
+      expect(counted.callsMatching(table), `${table} is the opponent-pricing spend that was declined`).toBe(0);
+    }
+  });
+
+  it('reads nothing at all in a Balanced week', async () => {
+    // `assessCorrelation` returns zero points in Balanced, so a map fetched
+    // here would be multiplied by nothing. Skipped rather than fetched-and-
+    // discarded, which is the same rule `opponentForm` keeps in the context.
+    const counted = countingDb(await withPlayers());
+    counted.reset();
+
+    const exposure = await gatherOpponentExposure(counted.db, {
+      mode: 'balanced',
+      starterIds,
+      context: EMPTY_CONTEXT,
+    });
+
+    expect(exposure.size).toBe(0);
+    expect(counted.tallies()).toHaveLength(0);
+  });
+
+  it('reads nothing for a roster on a bye, or a week with no pairing', async () => {
+    const counted = countingDb(await withPlayers());
+    counted.reset();
+
+    await gatherOpponentExposure(counted.db, { mode: 'ceiling', starterIds: [], context: EMPTY_CONTEXT });
+
+    expect(counted.tallies()).toHaveLength(0);
+  });
+
+  it('keys the exposure on the same game string the lineup counts with', async () => {
+    // Both teams, sorted, joined — see `lineup.ts`'s `gameKey`. Two spellings
+    // of one fixture would make the two halves of the shape argument silently
+    // disagree about which game anybody is in.
+    const exposure = await gatherOpponentExposure(await withPlayers(), {
+      mode: 'ceiling',
+      starterIds,
+      context: EMPTY_CONTEXT,
+    });
+
+    expect([...exposure.keys()]).toEqual(['BUF@KC']);
+    expect(exposure.get('BUF@KC')?.total).toBe(52);
   });
 });

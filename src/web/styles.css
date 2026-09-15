@@ -9429,6 +9429,74 @@ div.matchup-result {
   color: var(--on-status-neutral);
 }
 
+/*
+  The category tag on a buy-low or sell-high row.
+
+  Sits above the give/get line rather than beside the manager cue, because it
+  qualifies the whole idea and the cue qualifies one clause of it. Uppercase and
+  tracked out at a small size so it reads as a section marker rather than as
+  another sentence competing with the two below it — the row already carries
+  three lines of prose and a fourth voice would be one too many.
+
+  Colour is never the only carrier: the word is the signal and the tint is the
+  reinforcement, which is the same rule the position palette keeps. Buy-low
+  borrows the positive hue and sell-high the warning one — not because selling
+  is bad, but because "act before this regresses" is the urgent half of the pair
+  and warm is how this app has always said urgent.
+*/
+.smart-trade-kind {
+  align-self: flex-start;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-bottom: 2px;
+  background: var(--status-neutral);
+  color: var(--on-status-neutral);
+  white-space: nowrap;
+}
+
+.smart-trade-kind[data-category='buy_low'] {
+  background: var(--pos-tint);
+  color: var(--pos);
+}
+
+.smart-trade-kind[data-category='sell_high'] {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+/*
+  The arbitrage case inside the sheet.
+
+  A headline sentence and its evidence, set apart from the roster reasoning
+  below it by a rule on the leading edge rather than by a box — the sheet is
+  already a stack of labelled blocks and a second border style inside one would
+  read as a nested card.
+*/
+.smart-trade-arb {
+  border-inline-start: 2px solid var(--status-neutral);
+  padding-inline-start: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.smart-trade-arb[data-kind='buy_low'] {
+  border-inline-start-color: var(--pos);
+}
+
+.smart-trade-arb[data-kind='sell_high'] {
+  border-inline-start-color: var(--warn);
+}
+
+.smart-trade-arb-headline {
+  margin: 0 0 4px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
 .smart-trade-group {
   display: flex;
   flex-direction: column;

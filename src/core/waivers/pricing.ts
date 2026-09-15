@@ -157,7 +157,7 @@ export function priceWaiverUpgrades(opts: {
            */
           gainOverReplacement: gainOverNextBest(upgrade, candidate),
           roleStability: role,
-          shelfLife: shelfLifeOf(candidate),
+          shelfLife: shelfLifeOf(candidate, upgrade.need),
           futureOpportunity: 'normal',
           marketHeat,
           rivalsWithNeed: rivalsFor(candidate.playerId),
@@ -215,17 +215,52 @@ export function roleStabilityOf(candidate: WaiverCandidate): RoleStability {
 }
 
 /**
+ * Games of measured usage before a role that is not moving counts as settled.
+ *
+ * {@link THIN_SAMPLE_GAMES}, the same four the projection features use, because
+ * the question is the same one: how many weeks before a share stops being an
+ * accident. Kept as its own name rather than imported so this module's pricing
+ * does not silently move when a feature window is retuned.
+ */
+export const SETTLED_ROLE_GAMES = 4;
+
+/**
  * How long the reason he is available is likely to last.
  *
- * Deliberately conservative. Only a measured, rising role is treated as a
- * season-long asset; a healthy body filling a slot nobody can start is a
- * multi-week hold; and anything the app cannot read is `unknown`, which the
- * strategy module prices as two weeks rather than as optimism.
+ * Deliberately conservative, and it had a hole that only opened as the season
+ * accumulated weeks. `roleStabilityOf` above distinguishes a **stable** measured
+ * role from one nobody has measured; this did not — `stable` fell through to
+ * `unknown`, which the strategy module prices at two weeks of value, the same
+ * as a player with no usage series at all.
+ *
+ * In week 1 that was invisible, because nothing had a usage series and every
+ * candidate was genuinely unknown. It stops being invisible the moment four
+ * weeks are stored: a running back with a settled, measured role is the most
+ * biddable thing on a wire and was being priced as a fortnight's rental. Four
+ * games and a trend of `stable` is the plainest evidence of duration this app
+ * collects, and `multi_week` — capped at four of the remaining weeks by
+ * `recommendBid` — is a reading of it, not optimism about it.
+ *
+ * `season` stays where it was, on a rising role only. A role that is *growing*
+ * is the one claim worth the whole rest of the schedule; a role that is merely
+ * holding is not, because the thing that ends it has not happened yet.
  */
-export function shelfLifeOf(candidate: WaiverCandidate): ShelfLife {
+export function shelfLifeOf(candidate: WaiverCandidate, need?: WaiverUpgrade['need']): ShelfLife {
   if (candidate.role.games > 0 && (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate')) {
     return 'season';
   }
-  if (candidate.reasons.some((r) => r.includes('fills a slot'))) return 'multi_week';
+  if (candidate.role.games >= SETTLED_ROLE_GAMES && candidate.role.trend === 'stable') return 'multi_week';
+  /*
+   * A body for a slot nobody can legally start, read off the slot rather than
+   * off the sentence describing it.
+   *
+   * `need` is the structural fact and the reasons are prose for a card — which
+   * is exactly the coupling `WaiverCandidate.role` was added to end, one
+   * function below this one. The string match is kept as a fallback for callers
+   * that have a candidate and no upgrade, and it is the one to delete when
+   * there are none left.
+   */
+  if (need === 'unfilled') return 'multi_week';
+  if (need === undefined && candidate.reasons.some((r) => r.includes('fills a slot'))) return 'multi_week';
   return 'unknown';
 }
