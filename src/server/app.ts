@@ -884,7 +884,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
       throw err;
     }
-    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props, mode, modeSuggestion } = gathered;
+    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props, mode, modeSuggestion, opponentExposure } =
+      gathered;
 
     /*
      * The whole decision, in one call.
@@ -909,6 +910,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       published,
       publishedRefusal,
       unknownPlayers,
+      opponentExposure,
     });
 
     return jsonResponse({
@@ -1259,11 +1261,28 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/diagnostics/matchup-calibration', async (ctx) => {
     const version = ctx.url.searchParams.get('model');
     const repo = new MatchupRepo(ctx.env.db);
-    const report = await repo.calibration(version ?? undefined);
+    /*
+     * Two questions off the same table, because they are not the same question
+     * and only one of them was being asked.
+     *
+     * The buckets grade the win probability. `projections` grades the numbers
+     * the rest of the app reasons with — a model can be perfectly calibrated on
+     * who wins while every projection it makes is four points high, because
+     * that bias cancels on both sides of one subtraction and does not cancel
+     * anywhere else it is used.
+     *
+     * A second read of a table already open, and no new storage: both halves
+     * have been on the row since migration 0023.
+     */
+    const [report, projections] = await Promise.all([
+      repo.calibration(version ?? undefined),
+      repo.projectionAccuracy(version ?? undefined),
+    ]);
     return jsonResponse({
       modelVersion: version ?? MATCHUP_MODEL_VERSION,
       minSample: MIN_CALIBRATION_SAMPLE,
       ...report,
+      projections,
     });
   });
 

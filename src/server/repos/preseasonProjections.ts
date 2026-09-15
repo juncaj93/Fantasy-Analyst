@@ -203,6 +203,35 @@ export class PreseasonProjectionsRepo {
     return all.find((s) => s.scoringKey === scoringKey) ?? null;
   }
 
+  /**
+   * The same snapshot, as an id, for a caller that wants nothing else about it.
+   *
+   * {@link latest} is built on {@link list}, and `list` is a `LEFT JOIN` onto
+   * `preseason_projections` with a `GROUP BY` — it counts the rows of every
+   * snapshot in the season to fill in `rows`, `players` and `unresolved` for a
+   * screen that displays them. Three snapshots of six hundred players is
+   * eighteen hundred rows touched to answer "which capture is newest", and D1
+   * bills rows read.
+   *
+   * The Admin screen wants those counts and should keep paying for them. The
+   * Matchup screen wants an id, on a poll that runs every thirty seconds while
+   * games are on, and this is what it asks: one row from the covering index
+   * `idx_preseason_projection_lookup`, which is `(season, scoring_key,
+   * captured_at DESC)` and therefore never opens the table at all.
+   */
+  async latestId(season: string, scoringKey: string): Promise<number | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT id FROM preseason_projection_snapshots
+          WHERE season = ? AND scoring_key = ?
+          ORDER BY captured_at DESC, id DESC
+          LIMIT 1`,
+      )
+      .bind(season, scoringKey)
+      .first<{ id: number }>();
+    return row ? Number(row.id) : null;
+  }
+
   /** Projected points by player id, from one snapshot. */
   async pointsForSnapshot(snapshotId: number, playerIds?: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();

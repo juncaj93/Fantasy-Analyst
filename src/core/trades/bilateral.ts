@@ -44,7 +44,9 @@
  * anybody.
  */
 
-import { MANAGER_FIT_CAP, managerFitFor, type ManagerFit, type ManagerFitInput } from './managerFit.ts';
+import { MANAGER_FIT_CAP, managerFitFor, type ActivityClass, type ManagerFit, type ManagerFitInput } from './managerFit.ts';
+import type { ArbitrageRead } from './arbitrage.ts';
+import type { OfferCategory } from './category.ts';
 import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
 
 // ------------------------------------------------------------- the bounds --
@@ -100,6 +102,139 @@ export const FAIRNESS_BANDS = { even: 0.1, edge: 0.25 } as const;
  * weekly lineup less than a bench swap does is not a trade idea.
  */
 export const MIN_USER_GAIN = 1;
+
+/**
+ * The same bar, for a trade that is not trying to fix this week's lineup.
+ *
+ * {@link MIN_USER_GAIN} asks "does this improve the lineup enough to be worth
+ * changing something", and for an upgrade that is the whole question. For a
+ * buy-low it is the wrong question asked confidently: acquiring a player who is
+ * running four points a game under his draft price is a bet on the rest of the
+ * season, and it very often moves this Sunday's starting lineup by nothing at
+ * all. Suppressing it for that is the gate doing the opposite of its job.
+ *
+ * So arbitrage offers are held to this instead: the lineup may not get
+ * materially *worse*. Zero would be too strict — a buy-low is frequently a
+ * small, deliberate short-term cost — and anything much below this would let
+ * the board recommend giving up a real starting slot for a theory. Half a point
+ * is under the bench-swap threshold the upgrade bar is matched to, which is the
+ * honest way to say "this week is allowed to be a wash".
+ *
+ * **Every other gate is untouched.** The value range, the legality of both
+ * lineups, the material-harm bar and the counterparty's own roster logic all
+ * apply exactly as they do to an upgrade — see `evaluate`, where this is the
+ * only branch arbitrage takes.
+ */
+export const MIN_ARBITRAGE_USER_GAIN = -0.5;
+
+/*
+ * The category and its label live in `./category.ts`, which imports nothing.
+ *
+ * Re-exported here so this module stays the one place a caller needs, and
+ * defined there because the Trades screen needs the label and nothing else —
+ * and an import of this file from the render path drags the whole engine into
+ * the chunk every page load fetches. See that file's header for the 25KB.
+ */
+export { CATEGORY_LABELS, type OfferCategory } from './category.ts';
+
+/**
+ * Extra offers per partner, by how often that manager actually trades.
+ *
+ * Alex, 15 September 2026: *managers who trade often should receive a higher
+ * volume of suggested trades, and those trades should lean toward what benefits
+ * me even if only mildly fair to the other side — a frequent trader is more
+ * likely to engage with an imperfect-but-plausible offer than a rare trader is
+ * with a perfect one.*
+ *
+ * The first half of that is this table, and it is the half the previous round
+ * did not do: {@link MANAGER_FIT_CAP} was raised to 0.18 so activity could move
+ * the *ordering*, but the per-partner cap stayed at two for everybody, so an
+ * active manager could not actually receive more ideas — only better-placed
+ * ones. A board of five that reaches five people is not the board Alex asked
+ * for.
+ *
+ * Bounded at four, and `unknown` gets exactly what it got before. §10's rule
+ * holds: an unmeasured manager is not a measured non-trader, and he must not be
+ * penalised for a backfill nobody has run.
+ */
+export const OFFERS_BY_ACTIVITY: Record<ActivityClass, number> = {
+  active: 4,
+  selective: 3,
+  unknown: 2,
+  low_activity: 1,
+  effectively_inactive: 1,
+};
+
+
+/**
+ * Slots on the board an arbitrage read may claim before the ranking runs.
+ *
+ * Two of five. Enough that a genuine buy-low and a genuine sell-high can both
+ * be seen on a week when the lineup also has holes to fix, and few enough that
+ * the board does not become a theory page: three of five arbitrage offers would
+ * be a board that had stopped answering "what should I do about my lineup".
+ *
+ * Unused unless there is something to put in them. A week with no arbitrage
+ * read spends none of them and the board is exactly what it was.
+ */
+export const ARBITRAGE_RESERVED_SLOTS = 2;
+
+/**
+ * What a full-strength arbitrage read is worth in the pruning order, in points.
+ *
+ * `generateCandidates` ranks by expected lineup upgrade and keeps
+ * `scoredPerPartner` of them, so a candidate whose whole case is that a player
+ * is mispriced ranks near zero and is dropped before it is ever scored. Five
+ * points is roughly what a genuinely useful upgrade is worth on that scale,
+ * which puts a strong arbitrage package among the ordinary candidates rather
+ * than above them — it is competing for the shortlist, not skipping it.
+ *
+ * Note this is a *pruning* number and nothing else. It never reaches the
+ * composite, the fairness band or any gate; the worst it can do is spend one of
+ * twelve optimiser runs on a package that is then rejected like any other.
+ */
+export const ARBITRAGE_PRIORITY_POINTS = 5;
+
+/**
+ * Where a full-strength arbitrage read sits on the user-benefit scale.
+ *
+ * The benefit term is `starterGain / REFERENCE_GAIN`, so an upgrade worth three
+ * points of weekly lineup scores 0.6. Reading a full-strength arbitrage at 1
+ * would put every buy-low above every real upgrade on the board — which is not
+ * what Alex asked for and is not defensible either: a bet on the rest of the
+ * season is a genuinely less certain claim than three points this Sunday, and
+ * the composite should say so.
+ *
+ * At 0.4 a maximal read ranks like a two-point upgrade — comfortably worth
+ * seeing, routinely beaten by a real one. Visibility is not what this number is
+ * for: {@link ARBITRAGE_RESERVED_SLOTS} guarantees that separately, which is
+ * exactly why this one is free to be honest about relative confidence instead
+ * of being tuned to get the category onto the screen.
+ *
+ * It was 0.6 for an afternoon, and the case that moved it is worth recording:
+ * a read placed on a player who was *already* a good upgrade target produced
+ * two packages for the same man, one worth 2.9 points of lineup and one worth
+ * nothing this week, and the board surfaced the second. Two offers for one
+ * player are deduplicated by score, so the scale is what decides which survives
+ * — and when the same player is reachable both ways, the way that also wins
+ * the week has to be the one that shows.
+ */
+export const ARBITRAGE_BENEFIT_SCALE = 0.4;
+
+/**
+ * Optimiser runs held back for arbitrage candidates, per partner.
+ *
+ * Three of `scoredPerPartner`'s twelve. The expensive stage of this search is
+ * the lineup optimiser and it runs twice per scored candidate, so this is the
+ * one arbitrage constant that costs measurable work — six extra lineup passes
+ * per partner, and only in a league that has arbitrage reads at all.
+ *
+ * Three rather than one because the package shapes that suit a buy-low are the
+ * ones the priority ordering likes least, so a single reserved slot would often
+ * hold the least sensible of them. Nine ordinary candidates is still more than
+ * the search has ever needed to find its two offers per partner.
+ */
+export const ARBITRAGE_SCORED_SLOTS = 3;
 
 /**
  * Points of lineup loss to the partner past which the offer harms them.
@@ -203,6 +338,21 @@ export const RATIONALE_TEXT: Record<RosterRationale, string> = {
 export interface OfferEvaluation {
   /** Stable within one run: partner, give, get. Used for dedup and for keys. */
   id: string;
+  /**
+   * Which reasoning produced this offer, so a reader can judge it as that kind.
+   *
+   * `upgrade` unless an arbitrage read is what let it through the user-benefit
+   * gate — see {@link MIN_ARBITRAGE_USER_GAIN}. An offer that clears the
+   * ordinary bar on its own stays an upgrade even when it happens to involve a
+   * buy-low target, because then the arbitrage is not what is carrying it and
+   * labelling it as such would be claiming reasoning the board did not use.
+   */
+  category: OfferCategory;
+  /**
+   * The arbitrage reads behind a `buy_low` or `sell_high` offer, in strength
+   * order. Empty on an upgrade.
+   */
+  arbitrage: ArbitrageRead[];
   partner: TradePartnerView;
   /** What the user sends. */
   give: OfferPlayer[];
@@ -252,6 +402,16 @@ export interface TradeCandidatePackage {
   get: string[];
   /** Cheap objective-value-only ordering key, for the pruning stage. */
   priority: number;
+  /**
+   * True when this package acquires a buy-low or sheds a sell-high.
+   *
+   * Carried rather than recomputed at the cut below, because the cut is the
+   * third and last place the need-shaped pipeline has to be told about a trade
+   * that is not about need — and the one where getting it wrong is invisible:
+   * the candidate is enumerated, ranked, and then silently dropped before any
+   * gate has an opinion about it.
+   */
+  arbitrage: boolean;
 }
 
 /** Why a candidate never became an offer. Every rejection is nameable. */
@@ -294,6 +454,18 @@ export interface BilateralInput {
   me: RosterView;
   partners: { view: RosterView; partner: TradePartnerView; fit: Omit<ManagerFitInput, 'offer'> }[];
   bounds?: Partial<TradeBounds>;
+  /**
+   * Buy-low and sell-high reads, by player id, for every roster in the league.
+   *
+   * Absent or empty and this module behaves exactly as it did before: every
+   * offer is an `upgrade`, every offer clears {@link MIN_USER_GAIN} on its own,
+   * and no category label appears anywhere. That is the property that makes
+   * this safe to add to a shipped board — the arbitrage lane is additive, and a
+   * deployment with no preseason projection imported never opens it.
+   *
+   * See `core/trades/arbitrage.ts` for what a read is and is not.
+   */
+  arbitrage?: ReadonlyMap<string, ArbitrageRead>;
 }
 
 // ---------------------------------------------------------------- the work --
@@ -307,6 +479,7 @@ export interface BilateralInput {
  */
 export function findBilateralTrades(input: BilateralInput): BilateralReport {
   const bounds = { ...TRADE_BOUNDS, ...input.bounds };
+  const arbitrage = input.arbitrage ?? new Map<string, ArbitrageRead>();
   const rejections: Rejection[] = [];
   const notes: string[] = [];
   const offers: OfferEvaluation[] = [];
@@ -315,7 +488,14 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
   let scored = 0;
 
   for (const { view, partner, fit } of input.partners) {
-    const candidates = generateCandidates({ me: input.me, them: view, partnerKey: partner.key, bounds, rejections });
+    const candidates = generateCandidates({
+      me: input.me,
+      them: view,
+      partnerKey: partner.key,
+      bounds,
+      rejections,
+      arbitrage,
+    });
     generated += candidates.length;
 
     /*
@@ -327,7 +507,32 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
      * than silently discarded, because "we bounded coverage here" is a fact the
      * probe has to be able to report.
      */
-    const survivors = candidates.slice(0, bounds.scoredPerPartner);
+    /*
+     * …and the cut reserves room for arbitrage the same way everything else
+     * downstream does.
+     *
+     * The boost above puts an arbitrage package among the ordinary candidates
+     * and that turned out not to be enough, for a reason worth writing down:
+     * `priority` is `target.upgrade + give.useful`, and `give.useful` is *how
+     * much the partner is helped*. The package the pruner therefore likes best
+     * for any target is the one that overpays for him — which is precisely the
+     * wrong package for a buy-low, where the whole idea is to acquire him
+     * cheaply. Measured on this module's fixture: the sensible bench-for-bench
+     * buy-low ranked seventeenth of fifty, and four packages that gave up a
+     * starter for the same player ranked above it and were all rejected.
+     *
+     * Retuning the priority to punish overpaying would be tuning a heuristic to
+     * hit one fixture. Reserving a few of the twelve is the same bounded,
+     * stated move this file already makes at the partner cap and the board cap,
+     * and the cost is explicit: at most {@link ARBITRAGE_SCORED_SLOTS} extra
+     * optimiser runs, only in a league that has arbitrage reads at all.
+     */
+    const survivors = withArbitrage({
+      ranked: candidates,
+      extra: candidates.filter((c) => c.arbitrage),
+      cap: bounds.scoredPerPartner,
+      reserve: ARBITRAGE_SCORED_SLOTS,
+    });
     if (candidates.length > survivors.length) {
       rejections.push({
         partnerKey: partner.key,
@@ -341,7 +546,7 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
 
     const evaluated: OfferEvaluation[] = [];
     for (const candidate of survivors) {
-      const offer = evaluate({ candidate, me: input.me, them: view, partner, fit, rejections });
+      const offer = evaluate({ candidate, me: input.me, them: view, partner, fit, rejections, arbitrage });
       if (offer) evaluated.push(offer);
     }
 
@@ -353,10 +558,33 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
      * idea wearing two hats. Deduplicating on the target rather than on the
      * whole package is what actually removes them.
      */
+    /*
+     * How many ideas this particular manager is worth sending.
+     *
+     * Two for everybody was the rule, and it is the rule that made the previous
+     * round's frequency weighting only half a change: an active trader's offers
+     * were ranked higher and there were still exactly two of them. See
+     * {@link OFFERS_BY_ACTIVITY}.
+     *
+     * Read from the same `managerFitFor` the ordering reads, on the manager
+     * rather than on any one offer — `evaluated[0]` carries it because every
+     * offer against one partner shares one partner. A partner with no surviving
+     * offer needs no cap at all.
+     */
+    const perPartner = Math.max(
+      1,
+      Math.min(
+        bounds.offersPerPartner === TRADE_BOUNDS.offersPerPartner
+          ? (OFFERS_BY_ACTIVITY[evaluated[0]?.managerFit.activity ?? 'unknown'] ?? bounds.offersPerPartner)
+          : bounds.offersPerPartner,
+        bounds.offersTotal,
+      ),
+    );
+
     const kept: OfferEvaluation[] = [];
     const usedTargets = new Set<string>();
-    for (const offer of evaluated.sort(compareOffers)) {
-      if (kept.length >= bounds.offersPerPartner) break;
+    const keep = (offer: OfferEvaluation, limit: number): void => {
+      if (kept.length >= limit) return;
       const targets = offer.get.map((p) => p.playerId);
       if (targets.some((id) => usedTargets.has(id))) {
         rejections.push({
@@ -366,11 +594,34 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
           reason: 'duplicate_package',
           detail: 'a stronger offer for the same player is already listed',
         });
-        continue;
+        return;
       }
       for (const id of targets) usedTargets.add(id);
       kept.push(offer);
-    }
+    };
+
+    /*
+     * The same tail reservation the board makes, made per partner as well.
+     *
+     * Reserving room on the board achieves nothing if the offer never reaches
+     * it, and this cap is where it would not: two per partner, both taken by
+     * upgrades, and a buy-low against the one manager who holds the
+     * underperforming player is dropped before the board has an opinion. In a
+     * twelve-team league there is usually room elsewhere; against the partner
+     * who happens to hold both, there is not, and that is the partner it
+     * matters for.
+     *
+     * Upgrades still go first and still keep their order. The last slot is the
+     * only one held back, and only when there is an arbitrage offer to put in
+     * it.
+     */
+    const ranked = evaluated.sort(compareOffers);
+    const arbitrageHere = ranked.filter((offer) => offer.category !== 'upgrade');
+    const upgradeRoom = arbitrageHere.length > 0 ? Math.max(1, perPartner - 1) : perPartner;
+
+    for (const offer of ranked) keep(offer, upgradeRoom);
+    for (const offer of arbitrageHere) if (!kept.includes(offer)) keep(offer, perPartner);
+    for (const offer of ranked) if (!kept.includes(offer)) keep(offer, perPartner);
     offers.push(...kept);
   }
 
@@ -392,8 +643,8 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
    */
   const surfaced: OfferEvaluation[] = [];
   const spoken = new Set<string>();
-  for (const offer of ranked) {
-    if (surfaced.length >= bounds.offersTotal) break;
+  const take = (offer: OfferEvaluation): boolean => {
+    if (surfaced.length >= bounds.offersTotal) return false;
     const involved = [...offer.give, ...offer.get].map((p) => p.playerId);
     if (involved.some((id) => spoken.has(id))) {
       rejections.push({
@@ -403,10 +654,52 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
         reason: 'duplicate_package',
         detail: 'a better offer for one of these players is already listed',
       });
-      continue;
+      return false;
     }
     for (const id of involved) spoken.add(id);
     surfaced.push(offer);
+    return true;
+  };
+
+  /*
+   * Arbitrage is given room at the tail of the board, not the head of it.
+   *
+   * Without some reservation the category is real and unreachable: an arbitrage
+   * offer's composite is built from a read's strength rather than from weekly
+   * lineup points, so on a roster that *does* have holes the upgrades out-score
+   * it, and a board of five would be five upgrades on exactly the weeks a
+   * buy-low is most interesting — the suppression Alex asked to have removed,
+   * arriving by a different door.
+   *
+   * But reserving the *front* of the board was worse than the problem. Measured
+   * on this module's own fixture: a sell-high on a player who also appeared in
+   * a 4.9-point upgrade took the first slot, and the board-wide one-idea-per-
+   * player rule then dropped the upgrade — trading a real five points for a
+   * theory about the same man.
+   *
+   * So the ordinary ranking fills the board first and is only held back from
+   * the last {@link ARBITRAGE_RESERVED_SLOTS}, which arbitrage may then claim.
+   * Upgrades keep their order and their precedence; arbitrage gets a floor
+   * rather than a ceiling on somebody else. A week with no arbitrage read
+   * reserves nothing and produces byte-identical output.
+   */
+  const arbitrageOffers = ranked.filter((offer) => offer.category !== 'upgrade');
+  const reserved = Math.min(ARBITRAGE_RESERVED_SLOTS, arbitrageOffers.length, bounds.offersTotal - 1);
+  const upgradeRoom = Math.max(0, bounds.offersTotal - Math.max(0, reserved));
+
+  for (const offer of ranked) {
+    if (surfaced.length >= upgradeRoom) break;
+    take(offer);
+  }
+  for (const offer of arbitrageOffers) {
+    if (surfaced.length >= bounds.offersTotal) break;
+    if (surfaced.includes(offer)) continue;
+    take(offer);
+  }
+  for (const offer of ranked) {
+    if (surfaced.length >= bounds.offersTotal) break;
+    if (surfaced.includes(offer)) continue;
+    take(offer);
   }
 
   if (input.partners.length === 0) {
@@ -437,6 +730,54 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
   };
 }
 
+/**
+ * Merge an arbitrage shortlist into a need-ranked one, without displacing it.
+ *
+ * The two lists answer different questions and the cap has to serve both. A
+ * straight concatenation would let a strong arbitrage read push every upgrade
+ * out of a six-long shortlist; leaving the arbitrage entries to compete on the
+ * upgrade ordering would drop all of them, because their upgrade is zero or
+ * negative and that is the point.
+ *
+ * So a bounded slice of the cap is reserved: at most a third of it, and never
+ * more than there are entries to put in it. The need-ranked list keeps
+ * everything else, so on a roster with holes to fix the shortlist is almost
+ * entirely what it was.
+ */
+function withArbitrage<T>(args: { ranked: T[]; extra: T[]; cap: number; reserve?: number }): T[] {
+  const { ranked, extra, cap } = args;
+  if (extra.length === 0) return ranked.slice(0, cap);
+  const want = args.reserve ?? Math.max(1, Math.floor(cap / 3));
+  const reserved = Math.min(extra.length, want, Math.max(0, cap - 1));
+
+  /*
+   * `ranked` may legitimately contain the arbitrage entries too, and must.
+   *
+   * At the scoring cut the two lists overlap by design: a package that acquires
+   * a buy-low target can also be an outright upgrade, and the first version of
+   * this partitioned rather than overlapped — which quietly removed such a
+   * package from the ordinary ranking and then failed to reserve a slot for it,
+   * because three better-priced packages for the same player took them.
+   * Measured: a read placed on a player who was already a good target turned a
+   * 2.9-point upgrade into a lineup wash.
+   *
+   * So the head is taken from the full ordering, the reserved tail admits
+   * arbitrage entries that missed it, and anything still short is filled from
+   * the ordering again. Deduplicated by identity, which is exact here — every
+   * element is an object from one array.
+   */
+  const chosen = ranked.slice(0, Math.max(0, cap - reserved));
+  for (const item of extra) {
+    if (chosen.length >= cap) break;
+    if (!chosen.includes(item)) chosen.push(item);
+  }
+  for (const item of ranked) {
+    if (chosen.length >= cap) break;
+    if (!chosen.includes(item)) chosen.push(item);
+  }
+  return chosen;
+}
+
 /** Does this roster have anything a trade could fix? §18's fourth empty state. */
 function hasNeed(me: RosterView): boolean {
   for (const need of me.needs.values()) if (need.level === 'hole' || need.level === 'weak') return true;
@@ -464,8 +805,11 @@ export function generateCandidates(args: {
   partnerKey: string;
   bounds: TradeBounds;
   rejections: Rejection[];
+  /** Buy-low and sell-high reads, for the enumeration below. Empty is the norm. */
+  arbitrage?: ReadonlyMap<string, ArbitrageRead>;
 }): TradeCandidatePackage[] {
   const { me, them, partnerKey, bounds } = args;
+  const arbitrage = args.arbitrage ?? new Map<string, ArbitrageRead>();
 
   /*
    * Their players worth wanting: the ones who would actually improve a slot.
@@ -476,21 +820,50 @@ export function generateCandidates(args: {
    * better than what the user already has is not a target however good he is in
    * the abstract — that is the "receiving side has no plausible use" prune, run
    * from the user's side.
+   *
+   * …and it is the *deeper* half of the gate Alex asked to have reconciled.
+   * Relaxing `MIN_USER_GAIN` downstream achieves nothing on its own, because a
+   * buy-low target who improves no slot today never reaches a gate at all —
+   * he is not enumerated. So a player carrying a buy-low read is admitted here
+   * even at `upgrade <= 0`, which is the state a buy-low is *defined* by: he is
+   * cheap precisely because he is not currently better than what you have.
+   *
+   * Everything after this point treats him like any other target. He is priced
+   * against the same fairness bands, the same lineup legality and the same
+   * counterparty logic; the only thing that changed is that he was allowed into
+   * the room.
    */
-  const targets = tradeableFrom(them)
-    .map((id) => ({ id, upgrade: upgradeOver(me, them, id) }))
-    .filter((t) => t.upgrade > 0)
-    .sort((a, b) => b.upgrade - a.upgrade || a.id.localeCompare(b.id))
-    .slice(0, bounds.targetsPerPartner);
+  const upgrades = tradeableFrom(them).map((id) => ({ id, upgrade: upgradeOver(me, them, id) }));
+  const targets = withArbitrage({
+    ranked: upgrades.filter((t) => t.upgrade > 0).sort((a, b) => b.upgrade - a.upgrade || a.id.localeCompare(b.id)),
+    extra: upgrades
+      .filter((t) => t.upgrade <= 0 && arbitrage.get(t.id)?.kind === 'buy_low')
+      .sort((a, b) => (arbitrage.get(b.id)!.strength - arbitrage.get(a.id)!.strength) || a.id.localeCompare(b.id)),
+    cap: bounds.targetsPerPartner,
+  });
 
   /*
    * My players worth sending: surplus first, and only where the partner has a
    * plausible use. "Sending side cannot absorb the loss" is enforced here as a
    * filter on position level, and again exactly by the optimiser downstream.
+   *
+   * `spare` is relaxed for a sell-high for the mirror-image reason: the player
+   * you want to sell at his peak is, almost by definition, one you are
+   * currently starting, so a surplus-only shortlist can never contain him. It
+   * is safe to relax *here* because it is not the thing protecting the lineup —
+   * the optimiser downstream is, and it still refuses any package that opens a
+   * slot or takes the week materially backwards. `useful` stays, because a
+   * player the partner has no use for is not a sale, he is a message nobody
+   * answers.
    */
-  const giveable = tradeableFrom(me)
-    .map((id) => ({ id, useful: upgradeOver(them, me, id), spare: spareness(me, id) }))
-    .filter((g) => g.useful > 0 && g.spare > 0)
+  const mine = tradeableFrom(me).map((id) => ({
+    id,
+    useful: upgradeOver(them, me, id),
+    spare: spareness(me, id),
+  }));
+  const giveable = withArbitrage({
+    ranked: mine
+      .filter((g) => g.useful > 0 && g.spare > 0)
     /*
      * Multiplied rather than added, and that is the difference between a useful
      * shortlist and a wasted one.
@@ -502,8 +875,12 @@ export function generateCandidates(args: {
      * question that actually matters: what do I have that helps them *and* that
      * I can afford to lose.
      */
-    .sort((a, b) => b.useful * b.spare - a.useful * a.spare || a.id.localeCompare(b.id))
-    .slice(0, bounds.givePerPartner);
+      .sort((a, b) => b.useful * b.spare - a.useful * a.spare || a.id.localeCompare(b.id)),
+    extra: mine
+      .filter((g) => g.useful > 0 && g.spare <= 0 && arbitrage.get(g.id)?.kind === 'sell_high')
+      .sort((a, b) => (arbitrage.get(b.id)!.strength - arbitrage.get(a.id)!.strength) || a.id.localeCompare(b.id)),
+    cap: bounds.givePerPartner,
+  });
 
   if (targets.length === 0 || giveable.length === 0) {
     args.rejections.push({
@@ -521,11 +898,74 @@ export function generateCandidates(args: {
 
   const out: TradeCandidatePackage[] = [];
   const seen = new Set<string>();
+
+  /**
+   * What an arbitrage read is worth in the pruning order, in upgrade points.
+   *
+   * The third place the need-shaped pipeline has to be told about a trade that
+   * is not about need, and the easiest one to miss. `priority` here is
+   * denominated in *points of lineup upgrade*, so a buy-low package scores near
+   * zero on it by construction — and `scoredPerPartner` then drops it before
+   * the optimiser ever looks, which is the suppression arriving a third time
+   * wearing a bound rather than a gate.
+   *
+   * Scaled to the same units rather than added as a flag: at full strength a
+   * read is worth about what a genuinely useful upgrade is worth, so an
+   * arbitrage package sits among the ordinary candidates instead of on top of
+   * them. Only the sides that mean something are read — a buy-low is what Alex
+   * receives, a sell-high what he sends — which is the same asymmetry the gate
+   * below keeps.
+   */
+  const arbitrageBoost = (give: string[], get: string[]): { carries: boolean; delta: number } => {
+    if (arbitrage.size === 0) return { carries: false, delta: 0 };
+    /*
+     * The arbitrage player has to be the deal, not part of one.
+     *
+     * A buy-low bundled with a second incoming player is not a clean buy-low —
+     * it is a package whose value is dominated by somebody this module has no
+     * opinion about, and its fairness gap is driven by that player rather than
+     * by the mispriced one. Left out of the reserved slots for that reason and
+     * for a practical one: those bundles receive more value than they send, so
+     * they collect the full boost and are then rejected on the value range,
+     * which is three reserved optimiser runs spent on nothing.
+     */
+    const reads = [
+      ...(get.length === 1 ? get.map((id) => arbitrage.get(id)).filter((r) => r?.kind === 'buy_low') : []),
+      ...(give.length === 1 ? give.map((id) => arbitrage.get(id)).filter((r) => r?.kind === 'sell_high') : []),
+    ].filter((r): r is ArbitrageRead => r != null);
+    if (reads.length === 0) return { carries: false, delta: 0 };
+
+    /*
+     * …minus whatever this shape overpays, which is the half that matters.
+     *
+     * `priority` above is `target.upgrade + give.useful`, and `give.useful` is
+     * how much the *partner* is helped — so for any given target the pruner
+     * likes the package that sends him the most, which is exactly the wrong
+     * package for a buy-low. The whole idea is to acquire a mispriced player
+     * cheaply, and the shortlist was filling with the four ways of overpaying
+     * for him.
+     *
+     * Subtracting the overpay reorders the arbitrage candidates among
+     * themselves toward value parity without touching how they rank against
+     * ordinary upgrades, which is what the reserved slots already handle.
+     * Objective values, so this is a subtraction and not a model.
+     */
+    const out = give.reduce((sum, id) => sum + (me.valueOf.get(id) ?? 0), 0);
+    const incoming = get.reduce((sum, id) => sum + (them.valueOf.get(id) ?? 0), 0);
+    const overpay = Math.max(0, out - incoming);
+    return {
+      carries: true,
+      delta: ARBITRAGE_PRIORITY_POINTS * Math.max(...reads.map((r) => r.strength)) - overpay,
+    };
+  };
+
   const add = (give: string[], get: string[], priority: number) => {
     const key = packageKey(give, get);
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ partnerKey, give, get, priority: round3(priority) });
+
+    const boost = arbitrageBoost(give, get);
+    out.push({ partnerKey, give, get, priority: round3(priority + boost.delta), arbitrage: boost.carries });
   };
 
   for (const target of targets) {
@@ -666,6 +1106,7 @@ function evaluate(args: {
   partner: TradePartnerView;
   fit: Omit<ManagerFitInput, 'offer'>;
   rejections: Rejection[];
+  arbitrage: ReadonlyMap<string, ArbitrageRead>;
 }): OfferEvaluation | null {
   const { candidate, me, them, partner } = args;
   const reject = (reason: RejectionReason, detail: string) => {
@@ -690,13 +1131,49 @@ function evaluate(args: {
     );
   }
 
+  /*
+   * Which question this package is answering, decided before the bar is set.
+   *
+   * A package that acquires a buy-low target, or sheds a sell-high candidate,
+   * is value arbitrage — and the bar for arbitrage is a different bar, because
+   * the gain it is claiming is not a gain in this week's lineup. See
+   * {@link MIN_ARBITRAGE_USER_GAIN}.
+   *
+   * Read off the players on each side rather than off the package as a whole:
+   * a buy-low is something Alex *receives* and a sell-high is something he
+   * *sends*, and a read pointing the wrong way is not a reason to do anything.
+   */
+  const reads = [
+    ...candidate.get.map((id) => args.arbitrage.get(id)).filter((r) => r?.kind === 'buy_low'),
+    ...candidate.give.map((id) => args.arbitrage.get(id)).filter((r) => r?.kind === 'sell_high'),
+  ].filter((r): r is ArbitrageRead => r != null);
+  const strongest = [...reads].sort((a, b) => b.strength - a.strength);
+
   // ------------------------------------------------ gate 2: does it help me --
   const userDelta = me.delta(candidate.give, candidate.get);
   if (!userDelta.legal) return reject('opens_hole_for_user', 'it would leave a starting slot of yours empty');
-  if (userDelta.starterGain < MIN_USER_GAIN) {
+  /*
+   * The gate Alex asked to be reconciled, reconciled in one line.
+   *
+   * §18's "no meaningful hole to trade for" is this bar: with the lineup
+   * already fine, nothing clears a one-point weekly gain and the board
+   * correctly says there is nothing to do. That is right for an *upgrade* and
+   * wrong for arbitrage, which is a bet on the rest of the season and is
+   * frequently a wash this Sunday. A great buy-low target must surface when the
+   * lineup is otherwise fine, which is the state it is most likely to arrive
+   * in.
+   *
+   * Only the bar moves. Every other gate — value range above, both lineups
+   * legal, no material harm, the counterparty's own roster logic — is the same
+   * code running on the same package.
+   */
+  const bar = strongest.length > 0 ? MIN_ARBITRAGE_USER_GAIN : MIN_USER_GAIN;
+  if (userDelta.starterGain < bar) {
     return reject(
       'user_benefit_negligible',
-      `your lineup would gain ${userDelta.starterGain.toFixed(1)} pts, below the ${MIN_USER_GAIN} pt bar`,
+      strongest.length > 0
+        ? `your lineup would lose ${Math.abs(userDelta.starterGain).toFixed(1)} pts, past the ${Math.abs(bar)} pt this arbitrage may cost`
+        : `your lineup would gain ${userDelta.starterGain.toFixed(1)} pts, below the ${MIN_USER_GAIN} pt bar`,
     );
   }
 
@@ -734,13 +1211,53 @@ function evaluate(args: {
       getting: getting.length,
       partnerReceives: giving.map((p) => p.position),
       partnerSends: getting.map((p) => p.position),
+      /*
+       * Whether this one is edged your way, for the frequency lean.
+       *
+       * The band and not the gap, so the term cannot vary with a decimal
+       * nothing under it supports — and `edge_user` only, because the wider
+       * band was rejected at gate 1 above. See `EDGE_TO_ACTIVE_TRADER`.
+       */
+      edgeToUser: fairness.band === 'edge_user',
     },
   });
 
-  const breakdown = scoreOf({ user: userSide, fairness, counterparty: partnerSide, managerFit, size: giving.length + getting.length });
+  /*
+   * The category, and the one condition that makes the label honest.
+   *
+   * An arbitrage read only *labels* an offer when it is what let the offer
+   * through. A package that clears {@link MIN_USER_GAIN} on its own is an
+   * upgrade that happens to involve a buy-low target, and calling it a buy-low
+   * would be claiming reasoning the board did not need — the same rule
+   * `applyLineupPreferences` keeps about naming correlation only when
+   * correlation moved something.
+   */
+  const carriedByArbitrage = strongest.length > 0 && userDelta.starterGain < MIN_USER_GAIN;
+  const category: OfferCategory = carriedByArbitrage ? strongest[0]!.kind : 'upgrade';
+
+  const breakdown = scoreOf({
+    user: userSide,
+    fairness,
+    counterparty: partnerSide,
+    managerFit,
+    size: giving.length + getting.length,
+    /*
+     * What an arbitrage offer is scored on instead of this week's points.
+     *
+     * The `user` term is `starterGain / REFERENCE_GAIN`, which for a buy-low is
+     * approximately zero by construction — it is the number the gate above just
+     * declined to judge it on. Scoring it that way anyway would let it through
+     * the gate and then rank it last, which is a more confusing answer than
+     * suppressing it was. The read's own strength is the benefit being claimed,
+     * so it is the benefit that is ranked.
+     */
+    ...(carriedByArbitrage ? { arbitrageStrength: strongest[0]!.strength } : {}),
+  });
 
   return {
     id: `${partner.key}:${packageKey(candidate.give, candidate.get)}`,
+    category,
+    arbitrage: carriedByArbitrage ? strongest : [],
     partner,
     give: giving,
     get: getting,
@@ -866,8 +1383,19 @@ export function scoreOf(args: {
   counterparty: SideOutcome;
   managerFit: ManagerFit;
   size: number;
+  /**
+   * The arbitrage read's own strength, when that is what the offer is claiming.
+   *
+   * Replaces the weekly-lineup term rather than adding to it, because they are
+   * two answers to the same question — "how much is this worth to me" — and
+   * adding them would pay an arbitrage offer twice for a gain it makes once.
+   */
+  arbitrageStrength?: number;
 }): OfferEvaluation['breakdown'] {
-  const user = clamp01(args.user.starterGain / REFERENCE_GAIN);
+  const user =
+    args.arbitrageStrength != null
+      ? clamp01(args.arbitrageStrength) * ARBITRAGE_BENEFIT_SCALE
+      : clamp01(args.user.starterGain / REFERENCE_GAIN);
 
   /*
    * An edge to the user is *better* than an even deal, and paying over the odds

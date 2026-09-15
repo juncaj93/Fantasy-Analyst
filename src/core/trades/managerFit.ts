@@ -74,6 +74,37 @@ export const MANAGER_FIT_CAP = 0.18;
  */
 export const TRADE_SHRINKAGE_K = 4;
 
+/**
+ * What an edge in the user's favour is worth against a manager who trades.
+ *
+ * Alex, 15 September 2026: *managers who trade often should receive a higher
+ * volume of suggested trades, and those trades should lean toward what benefits
+ * me even if only mildly fair to the other side — a frequent trader is more
+ * likely to engage with an imperfect-but-plausible offer than a rare trader is
+ * with a perfect one.*
+ *
+ * The volume half of that is `OFFERS_BY_ACTIVITY` in `bilateral.ts`. This is
+ * the lean, and **where it lives is the whole of its safety.** It is a term in
+ * this module rather than an adjustment to the fairness score, because the
+ * fairness score is objective and this file's one invariant is that behaviour
+ * reaches the composite through exactly one capped channel — `total minus
+ * managerFit` is identical whoever the partner is, and two tests hold it. An
+ * activity-aware fairness term would have been a second channel wearing the
+ * first one's name, which is the double-count the header of `RANK_WEIGHTS`
+ * records as a real defect rather than a design choice.
+ *
+ * So it is a term like any other: scaled by the evidence behind it, summed with
+ * the rest, and clamped at {@link MANAGER_FIT_CAP}. An offer already at the cap
+ * on activity alone gains nothing from it, which is the correct ceiling —
+ * "trades often" and "trades often and this one is edged your way" are not
+ * worth more than the most history may ever be worth.
+ *
+ * And it cannot widen what counts as fair. `edgeToUser` is set only for the
+ * `edge_user` band; anything past `FAIRNESS_BANDS.edge` was rejected at gate 1
+ * before a profile was read at all.
+ */
+export const EDGE_TO_ACTIVE_TRADER = 0.25;
+
 /** Fully observed seasons with no trade at all before inactivity is a finding. */
 export const INACTIVITY_SEASONS = 2;
 
@@ -111,6 +142,15 @@ export interface OfferShapeSummary {
   partnerReceives: string[];
   /** Positions the partner would send. */
   partnerSends: string[];
+  /**
+   * True when the objective value of this offer already tilts toward the user.
+   *
+   * The `edge_user` band and nothing wider — an offer past
+   * `FAIRNESS_BANDS.edge` was rejected at gate 1 and never reaches this module.
+   * Optional, and absent reads as false, so a caller that does not supply it
+   * gets the behaviour this file had before {@link EDGE_TO_ACTIVE_TRADER}.
+   */
+  edgeToUser?: boolean;
 }
 
 export interface ManagerFitEvidence {
@@ -345,6 +385,32 @@ export function managerFitFor(input: ManagerFitInput): ManagerFit {
 
   if (t && input.askingUserId && t.repeatPartners.some((p) => p.userId === input.askingUserId)) {
     terms.push({ key: 'repeat_partner', detail: 'has dealt with you before', value: cap * 0.2 });
+  }
+
+  /*
+   * An edge in your favour, offered to somebody who actually trades.
+   *
+   * The reasoning is about who replies rather than about what is fair: a
+   * manager who makes deals every month will look at a plausible offer that is
+   * slightly your way, and a manager who has made two trades in three seasons
+   * will not look at anything. Ranking the first ahead is spending the board on
+   * the conversations that can happen.
+   *
+   * Only for the two classes that have actually been measured as trading.
+   * `unknown` returns above this line and is unaffected, `low_activity` and
+   * `effectively_inactive` are excluded — nudging an edged offer toward a
+   * manager who does not trade would be the feature promoting exactly the
+   * suggestion least likely to land.
+   */
+  if (offer?.edgeToUser && (activity === 'active' || activity === 'selective')) {
+    terms.push({
+      key: 'edge_to_active_trader',
+      detail:
+        activity === 'active'
+          ? 'trades often enough to look at an offer that is slightly your way'
+          : 'trades from time to time, and this one is slightly your way',
+      value: cap * EDGE_TO_ACTIVE_TRADER * (activity === 'active' ? 1 : 0.5),
+    });
   }
 
   /*

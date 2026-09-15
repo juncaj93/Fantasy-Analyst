@@ -119,6 +119,7 @@
       "src/core/startsit/projection.ts",
       "src/core/startsit/sleeperLineup.ts",
       "src/core/startsit/weekCard.ts",
+      "src/core/trades/category.ts",
       "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",
       "src/web/demo/DemoIndicator.tsx",

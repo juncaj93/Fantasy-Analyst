@@ -119,7 +119,7 @@ export function opponentExposure(
  */
 export function assessCorrelation(
   player: GameParticipant,
-  exposure: Map<string, OpponentExposure>,
+  exposure: ReadonlyMap<string, OpponentExposure>,
   mode: StartSitMode,
 ): CorrelationAssessment {
   if (exposure.size === 0) return NO_CORRELATION;
@@ -196,7 +196,7 @@ export interface TiebreakResult {
 export function breakTieOnCorrelation(
   a: { playerId: string; name: string; score: number | null; gameId: string | null },
   b: { playerId: string; name: string; score: number | null; gameId: string | null },
-  exposure: Map<string, OpponentExposure>,
+  exposure: ReadonlyMap<string, OpponentExposure>,
   mode: StartSitMode,
 ): TiebreakResult | null {
   if (a.score == null || b.score == null) return null;

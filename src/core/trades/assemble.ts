@@ -40,6 +40,7 @@ import {
 } from './bilateral.ts';
 import { TRADEABLE, tradeCapabilityOf, type TradeCapability } from './capability.ts';
 import type { ManagerFitInput } from './managerFit.ts';
+import type { ArbitrageRead } from './arbitrage.ts';
 import type { ManagerTradeTendencies } from '../managers/tradeTendencies.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
@@ -96,6 +97,16 @@ export interface TradeAssemblyRequest {
    */
   inputs: StartSitInput[];
   history: TradeHistoryContext;
+  /**
+   * Buy-low and sell-high reads for the league's players, by id.
+   *
+   * Built by the caller for the same reason {@link TradeHistoryContext} is: the
+   * expectation behind a read is a preseason projection, a preseason projection
+   * is a database, and this module reaches none. Absent is the ordinary state
+   * for a deployment that has imported no projection, and it produces the board
+   * that shipped yesterday — see `BilateralInput.arbitrage`.
+   */
+  arbitrage?: ReadonlyMap<string, ArbitrageRead> | undefined;
   /** Surfaced offers, bounded by the engine at twenty whatever is asked for. */
   limit?: number | undefined;
   /** Carried through rather than discarded; see `warnings` on the result. */
@@ -234,6 +245,7 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
   const report = findBilateralTrades({
     me,
     partners,
+    ...(request.arbitrage ? { arbitrage: request.arbitrage } : {}),
     ...(request.limit ? { bounds: { offersTotal: Math.max(1, Math.min(request.limit, 20)) } } : {}),
   });
 

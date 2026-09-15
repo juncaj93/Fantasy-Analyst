@@ -71,6 +71,54 @@ export const GAME_MINUTES = 185;
 export const PACE_TRUST = 0.6;
 
 /**
+ * The most a player's observed pace may claim his full game is worth, as a
+ * multiple of the pregame projection.
+ *
+ * {@link PACE_TRUST} bounds the *weight* on the observed pace and not its
+ * *magnitude*, and those are not the same guarantee. `settled / elapsed` grows
+ * without limit as `elapsed` goes to zero, so a small weight on a very large
+ * number is still a very large number — the failure is one-sided, because a
+ * scoreless player's implied pace is zero and the same blend can only move him
+ * as far as his own projection.
+ *
+ * Measured on this module before the cap, on a quarterback projected 20 who
+ * scores 24 points in the first eight minutes:
+ *
+ *     8 min   implied 555/game   →  projected final 56.4
+ *     12 min  implied 370/game   →  projected final 55.4
+ *     30 min  implied 148/game   →  projected final 51.2
+ *
+ * Two things are wrong there rather than one. The number itself is not a
+ * projection anybody would defend, and it is **highest at its least
+ * informative moment** — the same 24 points read as worth more at eight
+ * minutes than at thirty, which inverts the whole argument the blend is
+ * making. A live win probability computed from that is not a cautious answer,
+ * it is a confident wrong one, and it arrives on the screen at exactly the
+ * moment somebody is watching.
+ *
+ * Three, because a player genuinely can triple his projection and the cap must
+ * not be the thing that says he cannot — it exists to stop a rate estimated
+ * from four minutes of football, not to argue with a real afternoon. The
+ * banked points are never touched by it: they are truth and they are added
+ * back whatever this says.
+ */
+export const PACE_CEILING = 3;
+
+/**
+ * The rate a player projected at nothing is still allowed to imply, in points.
+ *
+ * A purely multiplicative cap has one degenerate end: three times a projection
+ * of 0.4 is 1.2, so the deep-bench starter who has just caught a touchdown is
+ * told his pace means nothing at all. That is the one live case a reader
+ * genuinely would notice, because it is the player he is watching.
+ *
+ * About one touchdown, added to the multiple rather than replacing it, so the
+ * cap is generous where the projection is small and effectively unchanged
+ * where it is not: a receiver projected 12 caps at 42 a game either way.
+ */
+export const PACE_FLOOR_ALLOWANCE = 6;
+
+/**
  * Coefficient of variation by position, before the role adjustment.
  *
  * Read as: a receiver's week has a standard deviation of about half its mean.
@@ -298,9 +346,23 @@ export function buildDistribution(
    * The blend leans further toward the observed pace the further into the game
    * it is — early, a quiet quarter says almost nothing; late, it is most of
    * what is known — and {@link PACE_TRUST} caps how far that can go.
+   *
+   * The rate itself is capped at {@link PACE_CEILING} times the projection,
+   * which is the other half of that sentence and used not to be there: a small
+   * weight on an unbounded rate is unbounded. The cap binds in one direction
+   * only, because a scoreless player's implied rate is zero and already sits
+   * inside it.
+   *
+   * There is no floor on `elapsed` beyond the one that stops the division:
+   * with the rate bounded, the weight going to zero takes the whole term with
+   * it smoothly. The guard this replaces — ignore the pace below 2% elapsed —
+   * left a cliff exactly where it was trying to help, and a projected final
+   * that jumped seven points between the third minute and the fourth.
    */
   const paceWeight = clock.phase === 'live' ? clamp(clock.elapsed * PACE_TRUST, 0, PACE_TRUST) : 0;
-  const impliedFromPace = clock.elapsed > 0.02 ? settled / clock.elapsed : player.projection;
+  const observedPace = settled / Math.max(clock.elapsed, 1e-6);
+  const paceCap = Math.max(player.projection, 0) * PACE_CEILING + PACE_FLOOR_ALLOWANCE;
+  const impliedFromPace = Math.min(observedPace, paceCap);
   const fullExpectation = paceWeight * impliedFromPace + (1 - paceWeight) * player.projection;
   const remainingMean = Math.max(0, round2(fullExpectation * remainingShare));
 

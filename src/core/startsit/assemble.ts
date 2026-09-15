@@ -29,6 +29,7 @@
  */
 
 import { recommendLineup, type LineupRecommendation } from './lineup.ts';
+import type { OpponentExposure } from './correlation.ts';
 import { weeklyProjection, type ProjectableEvaluation, type ProjectionSource } from './projection.ts';
 import { weeklyIntelligence, type WeeklyIntelligence } from '../contracts/integration.ts';
 import type { StartSitInput } from './engine.ts';
@@ -75,6 +76,15 @@ export interface LineupAssemblyRequest {
    * that keeps Rotowire's numbers out of a recommendation.
    */
   publishedRefusal?: string | null;
+  /**
+   * The games the opponent has stacked this week, for the Floor/Ceiling pass.
+   *
+   * A value like everything else here, so the replay stays a pure function of
+   * the file it was handed. Absent is the ordinary state — Balanced weeks, a
+   * roster on a bye, a week the Matchup screen has not been opened on — and it
+   * changes nothing: see `recommendLineup`'s own note on the field.
+   */
+  opponentExposure?: ReadonlyMap<string, OpponentExposure>;
   now?: string | Date;
 }
 
@@ -93,6 +103,7 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
     currentStarterIds: request.currentStarterIds,
     mode: request.mode,
     published,
+    ...(request.opponentExposure === undefined ? {} : { opponentExposure: request.opponentExposure }),
     ...(request.now === undefined ? {} : { now: request.now }),
   });
 

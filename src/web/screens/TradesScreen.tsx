@@ -258,19 +258,43 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
       */}
       {smart && smart.offers.length > 0 ? (
         <div data-testid="smart-trades">
-          <div className="section-title section-title-row">
-            <span>Trade ideas</span>
-            <span className="section-title-meta">
-              <span className="section-count">{smart.offers.length}</span>
-            </span>
-          </div>
-          <div className="smart-trade-group" role="list" aria-label="Trade ideas">
-            {smart.offers.map((o) => (
-              <div role="listitem" key={o.id}>
-                <SmartTradeRow offer={o} onOpen={() => setOpenOffer(o.id)} />
+          {/*
+            Two sections, because they answer two questions.
+
+            An upgrade says "your flex is thin and this fixes it"; a buy-low
+            says "this player and his price have come apart". Judging the second
+            by the first's test — how many points does my lineup gain this
+            Sunday — is exactly the mistake the category exists to prevent, and
+            a single undifferentiated list invites it, because the reader has no
+            way to know which one they are looking at.
+
+            The engine's order is preserved *within* each section. This file
+            still decides nothing about which ideas appear or how they rank —
+            it partitions a list it was handed, which is the same restraint the
+            header of this file already claims.
+          */}
+          {([
+            ['upgrade', 'Trade ideas', smart.offers.filter((o) => (o.category ?? 'upgrade') === 'upgrade')],
+            ['arbitrage', 'Buy low / sell high', smart.offers.filter((o) => (o.category ?? 'upgrade') !== 'upgrade')],
+          ] as const).map(([key, title, group]) =>
+            group.length === 0 ? null : (
+              <div key={key} data-testid={`smart-trades-${key}`}>
+                <div className="section-title section-title-row">
+                  <span>{title}</span>
+                  <span className="section-title-meta">
+                    <span className="section-count">{group.length}</span>
+                  </span>
+                </div>
+                <div className="smart-trade-group" role="list" aria-label={title}>
+                  {group.map((o) => (
+                    <div role="listitem" key={o.id}>
+                      <SmartTradeRow offer={o} onOpen={() => setOpenOffer(o.id)} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+            ),
+          )}
         </div>
       ) : null}
 

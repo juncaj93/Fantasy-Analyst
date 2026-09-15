@@ -64,6 +64,7 @@ import type { RosterShape } from '../sleeper/scoring.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
+import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { weeklyProjection, type ProjectionSource } from './projection.ts';
 
@@ -279,6 +280,25 @@ export function recommendLineup(
      * that holds that claim; see `sleeperProjectionFallback.test.ts`.
      */
     published?: ReadonlyMap<string, number>;
+    /**
+     * The games the opponent has stacked this week, keyed by game.
+     *
+     * The second half of the shape reasoning, and the half that was missing.
+     * {@link shapeScore} reads *this* lineup — my quarterback with my receiver,
+     * my starters piled into one game — and says nothing at all about the
+     * lineup being played against, which in head-to-head is half the question:
+     * a game the opponent owns both ends of is the game that beats you if it
+     * goes off, and the game you want to be in if you are chasing points.
+     *
+     * Absent or empty is the ordinary state and changes nothing —
+     * `assessCorrelation` returns zero points for an empty exposure map, in
+     * Balanced, and for a player whose game is unknown. See `correlation.ts`
+     * for the bound, which is the reason this can be let into a lineup pass at
+     * all: it may move {@link CORRELATION.maxPoints} and it only ever speaks
+     * about players who are already inside {@link LINEUP_PREFERENCE_TOLERANCE}
+     * of each other.
+     */
+    opponentExposure?: ReadonlyMap<string, OpponentExposure>;
   } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
@@ -413,7 +433,14 @@ export function recommendLineup(
    * could not rank. The unpriced are withheld from the pass instead, so the
    * priced players keep their preference and Balanced still returns at once.
    */
-  const preferenceNotes = applyLineupPreferences(assignment, slots, playable, mode, lockedIds);
+  const preferenceNotes = applyLineupPreferences(
+    assignment,
+    slots,
+    playable,
+    mode,
+    lockedIds,
+    opts.opponentExposure ?? new Map(),
+  );
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
   notes.push(...preferenceNotes, ...placementNotes);
 
@@ -650,6 +677,7 @@ function applyLineupPreferences(
   playable: StartSitEvaluation[],
   mode: StartSitMode,
   lockedIds: Set<string>,
+  opponentExposure: ReadonlyMap<string, OpponentExposure>,
 ): string[] {
   if (mode === 'balanced') return [];
   const notes: string[] = [];
@@ -679,25 +707,61 @@ function applyLineupPreferences(
 
     const lineup = [...assignment.values()];
     const currentShape = shapeScore(lineup, mode);
-    let best: { player: StartSitEvaluation; gain: number } | null = null;
+    /*
+     * What being in the opponent's biggest game is worth to the incumbent.
+     *
+     * Read once per slot rather than once per candidate, because it is a fact
+     * about the player already in it. Zero whenever there is no exposure map,
+     * in Balanced, and for a player whose fixture is unknown.
+     */
+    const currentCorrelation = assessCorrelation(participantOf(current), opponentExposure, mode);
+    let best: { player: StartSitEvaluation; gain: number; correlation: string | null } | null = null;
 
     for (const candidate of candidates) {
       const swapped = lineup.map((e) => (e.playerId === current.playerId ? candidate : e));
       // The projection given up, against the shape gained. Both in points, so
       // the comparison is not between a number and a preference.
       const cost = (current.score ?? 0) - (candidate.score ?? 0);
-      const gain = shapeScore(swapped, mode) - currentShape - cost;
-      if (gain > 0.01 && (!best || gain > best.gain)) best = { player: candidate, gain: round2(gain) };
+      /*
+       * …and the opponent's half of the same argument.
+       *
+       * `shapeScore` above asks what this lineup looks like to itself.
+       * `assessCorrelation` asks what it looks like across the net: Ceiling pays
+       * to be in the game the opponent has stacked, Floor pays to be out of it,
+       * and Balanced never reaches here at all. Bounded to
+       * {@link CORRELATION.maxPoints} per player by that module, so the pair of
+       * reads below can move a swap and can never be most of the reason for
+       * one — and the tolerance filter above has already refused every
+       * candidate this could otherwise have talked into a lineup.
+       */
+      const candidateCorrelation = assessCorrelation(participantOf(candidate), opponentExposure, mode);
+      const correlationGain = candidateCorrelation.points - currentCorrelation.points;
+      const gain = shapeScore(swapped, mode) - currentShape + correlationGain - cost;
+      if (gain > 0.01 && (!best || gain > best.gain)) {
+        best = {
+          player: candidate,
+          gain: round2(gain),
+          // Named only when the opponent read is what tipped it. A note that
+          // claimed correlation on a swap the shape score would have made
+          // anyway would be describing reasoning that did not happen.
+          correlation: correlationGain > 0.01 ? candidateCorrelation.display : null,
+        };
+      }
     }
 
     if (best) {
       assignment.set(index, best.player);
       started.delete(current.playerId);
       started.add(best.player.playerId);
+      const within = `who projects within ${LINEUP_PREFERENCE_TOLERANCE} points`;
       notes.push(
-        mode === 'ceiling'
-          ? `Ceiling mode: ${best.player.name} starts over ${current.name}, who projects within ${LINEUP_PREFERENCE_TOLERANCE} points, because his game correlates with the rest of the lineup.`
-          : `Floor mode: ${best.player.name} starts over ${current.name}, who projects within ${LINEUP_PREFERENCE_TOLERANCE} points, to avoid leaning the lineup on one game.`,
+        best.correlation
+          ? mode === 'ceiling'
+            ? `Ceiling mode: ${best.player.name} starts over ${current.name}, ${within} — ${best.correlation}, and that is the game worth being in if you are chasing.`
+            : `Floor mode: ${best.player.name} starts over ${current.name}, ${within} — ${current.name} is in the game the opponent is stacked in, which is the one that beats a lead.`
+          : mode === 'ceiling'
+            ? `Ceiling mode: ${best.player.name} starts over ${current.name}, ${within}, because his game correlates with the rest of the lineup.`
+            : `Floor mode: ${best.player.name} starts over ${current.name}, ${within}, to avoid leaning the lineup on one game.`,
       );
     }
   }
@@ -751,6 +815,18 @@ function shapeScore(lineup: StartSitEvaluation[], mode: StartSitMode): number {
 function gameKey(player: StartSitEvaluation): string | null {
   if (!player.team || !player.opponent) return null;
   return [player.team, player.opponent].sort().join('@');
+}
+
+/**
+ * An evaluation reduced to the three fields the correlation read needs.
+ *
+ * Built through {@link gameKey} rather than beside it, which is the point: the
+ * key the opponent's exposure map is keyed by and the key this lineup's own
+ * concentration is counted by have to be the same string, or the two halves of
+ * the shape argument would silently be about different games.
+ */
+function participantOf(player: StartSitEvaluation): { playerId: string; name: string; gameId: string | null } {
+  return { playerId: player.playerId, name: player.name, gameId: gameKey(player) };
 }
 
 /**

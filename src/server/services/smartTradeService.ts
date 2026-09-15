@@ -40,7 +40,11 @@ import { tradeCapabilityOf } from '../../core/trades/capability.ts';
 import type { ManagerTradeTendencies, LeagueTradeBaseline } from '../../core/managers/tradeTendencies.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
+import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
+import { readArbitrage, type ArbitrageRead } from '../../core/trades/arbitrage.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
+import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
 
@@ -190,12 +194,34 @@ export class SmartTradeService {
       return [];
     });
 
+    /*
+     * The buy-low and sell-high reads, built once for the whole league.
+     *
+     * Everything the reading needs except one number is already in `inputs`:
+     * `startSitInputsFor` fetched the weekly usage and the newsletter tally for
+     * every rostered player in one batched pass, because the optimiser needs
+     * them anyway. The one number it did not fetch is the preseason
+     * expectation, which is two reads — the snapshot for this league's scoring,
+     * and its rows for the ids already in hand.
+     *
+     * Skipped along with the pool when nothing downstream could use it, and
+     * swallowed to an empty map on failure: an arbitrage lane that could take
+     * the Trades screen down would be a worse feature than no arbitrage lane.
+     */
+    const arbitrage = wanted
+      ? await this.arbitrage(inputs, league.season, profile).catch((err) => {
+          warnings.push(`buy-low and sell-high reads could not be built: ${String(err)}`);
+          return new Map<string, ArbitrageRead>();
+        })
+      : new Map<string, ArbitrageRead>();
+
     return {
       league,
       request: {
         leagueSettings: league.leagueSettings,
         shape,
         profile,
+        arbitrage,
         rosters: rosters.map((r) => ({
           rosterId: r.rosterId,
           ownerId: r.ownerId,
@@ -222,6 +248,52 @@ export class SmartTradeService {
       ...board,
       ...(gathered.noLeagueNote ? { notes: [gathered.noLeagueNote] } : {}),
     };
+  }
+
+  /**
+   * Read every rostered player for value arbitrage, in two queries.
+   *
+   * The expectation is this league's own preseason projection, scoped by
+   * `scoringKey` before anything else — the same rule the draft board keeps,
+   * and for the same reason: a snapshot captured under other scoring is not a
+   * worse answer for this reader, it is the wrong number at a plausible size,
+   * wrong by fifty points on every quarterback and right on everybody else. A
+   * league with no matching snapshot gets an empty map and a board with no
+   * arbitrage lane, which is the correct answer rather than a degraded one.
+   *
+   * No pricing, no clock and no provider. `readArbitrage` is pure and this
+   * function is two reads and a loop over values already in memory.
+   */
+  private async arbitrage(
+    inputs: StartSitInput[],
+    season: string,
+    profile: ScoringProfile,
+  ): Promise<Map<string, ArbitrageRead>> {
+    const out = new Map<string, ArbitrageRead>();
+    if (inputs.length === 0) return out;
+
+    const repo = new PreseasonProjectionsRepo(this.db);
+    const snapshot = await repo.latest(season, scoringKey(projectionScoringFrom(profile)));
+    if (!snapshot) return out;
+
+    const points = await repo.pointsForSnapshot(
+      snapshot.id,
+      inputs.map((input) => input.player.id),
+    );
+    if (points.size === 0) return out;
+
+    for (const input of inputs) {
+      const read = readArbitrage({
+        playerId: input.player.id,
+        name: input.player.fullName,
+        position: input.player.position ?? '',
+        preseasonPoints: points.get(input.player.id) ?? null,
+        weeks: input.usageWeeks ?? [],
+        signal: input.signal,
+      });
+      if (read) out.set(input.player.id, read);
+    }
+    return out;
   }
 
   /**

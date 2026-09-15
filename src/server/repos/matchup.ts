@@ -56,6 +56,45 @@ export interface CalibrationBucket {
  */
 export const MIN_CALIBRATION_SAMPLE = 20;
 
+/**
+ * How the projected totals themselves have landed, against what was scored.
+ *
+ * A different question from the win probability above, and a cheaper one. A
+ * model can be perfectly calibrated on win probability while every projection
+ * it makes is four points high, because the bias cancels on both sides of one
+ * subtraction — and a projection that is four points high is wrong everywhere
+ * *else* it is used: the lineup optimiser, the waiver comparison, the trade
+ * value, all of which read one side only.
+ */
+export interface ProjectionAccuracy {
+  /** Settled weeks with both a pregame projection and a final score. */
+  sample: number;
+  /** Mean signed error, projected minus actual. Positive means over-projecting. */
+  bias: number | null;
+  /** Mean absolute error, in fantasy points. */
+  absoluteError: number | null;
+  /** Median absolute error — the typical week rather than the worst one. */
+  medianAbsoluteError: number | null;
+  /** The sentence a diagnostics screen prints, or null below the minimum sample. */
+  detail: string | null;
+}
+
+/**
+ * How many settled team-weeks before a bias figure is worth printing.
+ *
+ * Lower than {@link MIN_CALIBRATION_SAMPLE} and deliberately so: that one is
+ * estimating a *proportion* inside a ten-point band, which needs a band's worth
+ * of samples before the interval is narrower than the band. This is a mean over
+ * a continuous quantity with a standard deviation of roughly twenty points, so
+ * a dozen team-weeks already pin the bias to about ±6 — coarse, and coarse is
+ * enough to notice a systematic four-point lean, which is all this is for.
+ *
+ * Twelve is also reachable inside one week of one twelve-team league, which is
+ * the point: this is meant to say something by the end of the first Sunday it
+ * has data for, not by December.
+ */
+export const MIN_ACCURACY_SAMPLE = 12;
+
 export class MatchupRepo {
   constructor(private readonly db: Database) {}
 
@@ -286,6 +325,73 @@ export class MatchupRepo {
 
     return { buckets, sample: rows.results.length };
   }
+
+  /**
+   * Whether this app's projected totals have been running high or low.
+   *
+   * The cheapest calibration available, and it costs nothing to collect: both
+   * halves are already on the row. `first_projected_final` was written before
+   * anything was known and is never updated, and `final_score` is filled in
+   * when the week settles — so the comparison is pregame projection against
+   * result, with no lookahead available to flatter it.
+   *
+   * Pregame-first rows only, for the same reason `calibration` takes them:
+   * a forecast first seen at half-time already contains half the answer, and
+   * grading it would report that the model is excellent at predicting games it
+   * has watched.
+   *
+   * One indexed read over settled rows. Nothing is stored, nothing is written,
+   * and no new column exists for this — the table has carried both numbers
+   * since migration 0023 and nothing had asked them this question.
+   */
+  async projectionAccuracy(modelVersion?: string): Promise<ProjectionAccuracy> {
+    const rows = await this.db
+      .prepare(
+        `SELECT first_projected_final AS projected, final_score AS actual
+           FROM matchup_forecasts
+          WHERE won IS NOT NULL
+            AND first_phase = 'pregame'
+            AND first_projected_final IS NOT NULL
+            AND final_score IS NOT NULL
+            AND (? IS NULL OR model_version = ?)`,
+      )
+      .bind(modelVersion ?? null, modelVersion ?? null)
+      .all<{ projected: number; actual: number }>();
+
+    const errors = rows.results.map((r) => r.projected - r.actual).filter((e) => Number.isFinite(e));
+    const sample = errors.length;
+    if (sample < MIN_ACCURACY_SAMPLE) {
+      return { sample, bias: null, absoluteError: null, medianAbsoluteError: null, detail: null };
+    }
+
+    const bias = round2(errors.reduce((a, e) => a + e, 0) / sample);
+    const absolute = errors.map(Math.abs);
+    const absoluteError = round2(absolute.reduce((a, e) => a + e, 0) / sample);
+    const sorted = [...absolute].sort((a, b) => a - b);
+    const middle = sorted.length % 2 === 1
+      ? sorted[(sorted.length - 1) / 2]!
+      : (sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2;
+
+    /*
+     * The sentence, and the threshold it turns on.
+     *
+     * Two points is about a tenth of a team's week and well inside the noise of
+     * a dozen samples; saying "running 1.4 high" off that would be inventing a
+     * finding. Past two points it is worth a look, and the wording says which
+     * way rather than making the reader do the subtraction.
+     */
+    const direction = bias > 0 ? 'high' : 'low';
+    const detail =
+      Math.abs(bias) < 2
+        ? `Projected totals are landing within ${absoluteError} pts on average over ${sample} settled team-weeks, with no systematic lean.`
+        : `Projected totals are running ${Math.abs(bias)} pts ${direction} on average over ${sample} settled team-weeks (typical miss ${round2(middle)} pts).`;
+
+    return { sample, bias, absoluteError, medianAbsoluteError: round2(middle), detail };
+  }
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
 }
 
 function round3(v: number): number {

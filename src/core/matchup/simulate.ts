@@ -74,6 +74,31 @@ export interface SimulationInput {
    */
   seed: string | number;
   draws?: number;
+  /**
+   * Banked points Sleeper counts for a side that this app's starter list does
+   * not account for.
+   *
+   * Zero on a healthy matchup and the whole reason this field exists on an
+   * unhealthy one. `actual` is Sleeper's own team total and is authoritative;
+   * the totals below are summed from the starters this app could resolve, and
+   * the two are only equal while every starter mapped. A roster spot the player
+   * table could not resolve — the case the Team screen already counts as
+   * `unknownPlayers` — leaves points inside Sleeper's number and outside this
+   * one.
+   *
+   * Left out, the consequence is visible rather than subtle: with every game
+   * final the screen showed **92 points scored and a projected final of 78**, a
+   * team forecast to finish below what it had already banked. And the win
+   * probability was computed from the smaller number, so the manager with the
+   * unattributed points was quietly under-credited all afternoon.
+   *
+   * Added as a constant rather than modelled, because that is exactly what it
+   * is: Sleeper computed those points under the league's own scoring and they
+   * cannot change. Never negative — see `buildForecast`, which clamps at zero
+   * rather than subtracting modelled points on the strength of a disagreement
+   * it cannot explain.
+   */
+  unattributed?: { mine: number; theirs: number };
 }
 
 export interface SimulationResult {
@@ -146,8 +171,8 @@ export function simulateMatchup(input: SimulationInput): SimulationResult {
    * still playing. Nothing here is drawn for, which is §6's "actual points are
    * locked truth" expressed as arithmetic that cannot be got wrong.
    */
-  let settledMine = 0;
-  let settledTheirs = 0;
+  let settledMine = input.unattributed?.mine ?? 0;
+  let settledTheirs = input.unattributed?.theirs ?? 0;
   const settledById = new Map<string, number>();
   for (const distribution of ordered) {
     if (distribution.locked) settledById.set(distribution.playerId, distribution.settled);

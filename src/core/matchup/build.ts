@@ -57,6 +57,7 @@ import type { SlotSpec } from './decision.ts';
 import type { PreviousInsightState } from './insights.ts';
 import type { MatchupPlayerInput, MatchupSide } from './types.ts';
 import { resolveSeasonContext } from '../season/context.ts';
+import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
 import type { NflState } from '../sleeper/phase.ts';
 
 /** What the endpoint returns. The forecast, plus who and when. */
@@ -146,6 +147,45 @@ export interface MatchupSources {
      * pays six points for a passing touchdown.
      */
     positionOf(playerId: string): string | null;
+  }): Promise<ReadonlyMap<string, number>>;
+  /**
+   * This league's preseason **season totals**, for the last starter nobody
+   * else has a number for.
+   *
+   * The third and final tier, added on the owner's instruction of 15 September
+   * 2026: *a rough number beats a hard zero*. Market first, Rotowire's
+   * published week second, and this only where neither of those exists — which
+   * on an ordinary week is nobody, and on a bad one is the two or three players
+   * whose games are on Monday and whose feed has not landed.
+   *
+   * ## Why it is given the season total rather than a week
+   *
+   * Because the division is arithmetic and arithmetic belongs here, where a
+   * test can read it, rather than in a service wired to a database. The caller
+   * returns exactly what is stored — the preseason projection for the whole
+   * season, under this league's scoring — and `projectionFor` divides it by
+   * {@link EXPECTED_GAMES}.
+   *
+   * *Not* by games played. That was the obvious reading of "average ÷ games"
+   * and it is wrong in the direction that would have shipped: a season total
+   * over one game played is a week-one projection of three hundred points.
+   *
+   * ## What it must cost
+   *
+   * `playerIds` carries only the players who reached this tier, never the
+   * roster, and the bag is not called at all when that list is empty. This
+   * screen polls every thirty seconds while games are on, so the ordinary
+   * Sunday cost of the whole feature is zero reads, and the bad-Sunday cost is
+   * one indexed snapshot lookup plus one covering-index seek per unpriced
+   * player. See migration 0041, and `matchup.preseasonTier.test.ts`, which
+   * asserts the query plan rather than the number.
+   */
+  preseasonProjections?(opts: {
+    season: string;
+    /** Only the players still without a projection. Never the whole roster. */
+    playerIds: string[];
+    /** Identity, not metadata: a snapshot under other scoring is not an answer. */
+    profile: ScoringProfile;
   }): Promise<ReadonlyMap<string, number>>;
   /** The caller's memo of its own last response, for the fingerprint short-circuit. */
   cached(): { fingerprint: string; response: MatchupResponse } | null;
@@ -295,10 +335,47 @@ export async function buildMatchupResponse(
     }
   }
 
+  /*
+   * The third tier, asked for only where the first two came back empty.
+   *
+   * Deliberately a second round trip rather than a wider first one. The whole
+   * feature is a repair for a shortfall that is usually nobody: if every player
+   * has a market price or a published week, `unpriced` is empty, the bag is
+   * never called, and this costs nothing on a screen that polls every thirty
+   * seconds. Reading the snapshot for all thirty players unconditionally would
+   * have been one fewer statement and thirty-one rows a poll — which at a poll
+   * every thirty seconds is about ninety thousand rows a day to answer a
+   * question that on most Sundays has no askers.
+   *
+   * The whole roster and not just the starters, because a bench player's dash
+   * next to a starter's estimate would be this app disagreeing with itself
+   * about whether it can price a man.
+   *
+   * Swallowed on failure like the published read above, and for the same
+   * reason: this fills a blank, and a blank is a state the screen already says
+   * out loud.
+   */
+  const unpriced = allIds.filter(
+    (playerId) =>
+      marketProjection(evaluations.get(playerId)) == null && !Number.isFinite(published.get(playerId) ?? NaN),
+  );
+  let preseason: ReadonlyMap<string, number> = new Map();
+  if (sources.preseasonProjections && unpriced.length > 0) {
+    try {
+      preseason = await sources.preseasonProjections({
+        season: league.season,
+        playerIds: unpriced,
+        profile,
+      });
+    } catch {
+      preseason = new Map();
+    }
+  }
+
   const slots = buildSlotSpecs(league.rosterPositions);
   const players = [
-    ...toPlayers(mineRow, 'mine', evaluations, slots, published),
-    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published),
+    ...toPlayers(mineRow, 'mine', evaluations, slots, published, preseason),
+    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published, preseason),
   ];
 
   const forecastInput = {
@@ -501,6 +578,7 @@ function toPlayers(
   evaluations: Map<string, StartSitEvaluation>,
   slots: SlotSpec[],
   published: ReadonlyMap<string, number>,
+  preseason: ReadonlyMap<string, number>,
 ): MatchupPlayerInput[] {
   const starters = row.starters ?? [];
   const points = row.players_points ?? {};
@@ -511,12 +589,14 @@ function toPlayers(
   starters.forEach((playerId, index) => {
     if (!playerId || playerId === '0') return;
     const slot = slots[index];
-    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true, published));
+    out.push(
+      toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true, published, preseason),
+    );
   });
 
   for (const playerId of row.players ?? []) {
     if (startingIds.has(playerId)) continue;
-    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false, published));
+    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false, published, preseason));
   }
 
   return out;
@@ -597,26 +677,64 @@ function gameRemaining(kickoff: string | null, now: Date): number {
 
 
 
+/** Whose number a player ended up being simulated on. */
+type ProjectionTier = 'market' | 'published' | 'preseason' | 'none';
+
 /**
  * The one number a player is simulated on, and whose it is.
  *
- * Market first, always. The published figure is quoted exactly as it arrives —
- * no availability penalty taken off it and no adjustment added, for the reason
- * `core/startsit/projection.ts` gives about its own fallback: this app's
- * bounded nudges were fitted to this app's own base, and applying them to
- * somebody else's model would be arithmetic nobody has validated on a number
- * nobody here computed. Clamped at zero, because a projection below it is not a
- * statement anybody makes.
+ * Three sources, tried in order, and the order is a confidence ranking rather
+ * than a preference:
+ *
+ *  1. **Market.** This app's own figure, derived from the lines it buys, under
+ *     this league's scoring, for this week.
+ *  2. **Published.** Rotowire's week for the same player, via Sleeper. Somebody
+ *     else's model, but a weekly one, built with this Sunday in view.
+ *  3. **Preseason.** This league's imported season total over
+ *     {@link EXPECTED_GAMES}. Nobody's opinion of *this* week at all — it is
+ *     what the player was thought to be worth in August, flattened.
+ *
+ * The third tier was added on the owner's instruction of 15 September 2026, on
+ * the same reasoning that let the second one in: the alternative is not
+ * caution. `buildDistribution` settles an unprojected player as truth-only, so
+ * a null makes him contribute *zero* to his side's total, and a stale estimate
+ * beats a confident zero. What it may never do is wear a better tier's clothes,
+ * which is what {@link ProjectionTier} is for.
+ *
+ * Neither borrowed figure is adjusted on the way through — no availability
+ * penalty taken off and no nudge added — for the reason
+ * `core/startsit/projection.ts` gives about its own fallback: this app's bounded
+ * corrections were fitted to this app's own base, and applying them to somebody
+ * else's number would be arithmetic nobody has validated. Clamped at zero,
+ * because a projection below it is not a statement anybody makes.
  */
 function projectionFor(
   evaluation: StartSitEvaluation | undefined,
   published: number | null,
-): { points: number | null; borrowed: boolean } {
+  preseasonSeason: number | null,
+): { points: number | null; tier: ProjectionTier } {
   const market = marketProjection(evaluation);
-  if (market != null) return { points: market, borrowed: false };
-  if (published == null || !Number.isFinite(published)) return { points: null, borrowed: false };
-  return { points: Math.max(0, Math.round(published * 100) / 100), borrowed: true };
+  if (market != null) return { points: market, tier: 'market' };
+  if (published != null && Number.isFinite(published)) {
+    return { points: round2(Math.max(0, published)), tier: 'published' };
+  }
+  /*
+   * A season total over the games a healthy starter plays, and never over the
+   * games *this* one has played: the second reading of "average ÷ games" makes
+   * a week-one projection three hundred points and would have looked like a
+   * feature right up until somebody read the screen.
+   *
+   * Zero and negative totals are refused rather than clamped. A stored zero is
+   * a player the import could not price, not a player projected for nothing,
+   * and passing it on as 0.0 would relabel a gap as a forecast.
+   */
+  if (preseasonSeason != null && Number.isFinite(preseasonSeason) && preseasonSeason > 0) {
+    return { points: round2(preseasonSeason / EXPECTED_GAMES), tier: 'preseason' };
+  }
+  return { points: null, tier: 'none' };
 }
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 function toPlayer(
   playerId: string,
@@ -626,9 +744,14 @@ function toPlayer(
   slot: string | null,
   starting: boolean,
   published: ReadonlyMap<string, number>,
+  preseason: ReadonlyMap<string, number>,
 ): MatchupPlayerInput {
   const evaluation = evaluations.get(playerId);
-  const figure = projectionFor(evaluation, published.get(playerId) ?? null);
+  const figure = projectionFor(
+    evaluation,
+    published.get(playerId) ?? null,
+    preseason.get(playerId) ?? null,
+  );
   return {
     playerId,
     name: evaluation?.name ?? playerId,
@@ -667,7 +790,19 @@ function toPlayer(
      * is an estimate it reports.
      */
     projection: figure.points,
-    ...(figure.borrowed ? { projectionBorrowed: true } : {}),
+    /*
+     * Which of the three it was, as two mutually exclusive optional booleans.
+     *
+     * A single `projectionTier: 'market' | 'published' | 'preseason'` would be
+     * the better shape and is deliberately not what crosses the wire. This app
+     * caches its API responses offline, so a freshly deployed bundle routinely
+     * renders a body an older worker produced — which is exactly the failure
+     * the Trades sheet hit on 14 September, reading a field the payload did not
+     * carry. An added optional boolean is read as `undefined` by old code and
+     * absent by new code, and both are correct. A replaced discriminant is not.
+     */
+    ...(figure.tier === 'published' ? { projectionBorrowed: true } : {}),
+    ...(figure.tier === 'preseason' ? { projectionEstimated: true } : {}),
     actual: Number.isFinite(actual) ? actual : 0,
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',
