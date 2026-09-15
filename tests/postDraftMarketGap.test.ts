@@ -292,9 +292,21 @@ describe('discovery reaches the roster’s next fixture', () => {
       new Date(NOW).toISOString(),
       new Date(NOW + 60 * 86_400_000).toISOString(),
     );
-    // The second fixture of every team is left where it is until the week it
-    // becomes the next one.
-    expect(stored.every((row) => Date.parse(row.kickoff ?? '') < Date.parse('2026-09-15T00:00:00.000Z'))).toBe(true);
+    /*
+     * The second fixture of every team is left where it is until the week it
+     * becomes the next one.
+     *
+     * Named as the two second-fixture kickoffs this test's own provider
+     * offered, rather than as a date they both happen to fall after. The
+     * boundary used to be the literal 2026-09-15, which quietly also covered
+     * every unrelated row in the table — and `seedDemoData`, which this file's
+     * `beforeEach` runs, stores a Jacksonville fixture at `Date.now() + 3
+     * days`. That sat below the boundary while the calendar read the 11th and
+     * crossed it on the 12th, so this assertion began failing on a claim it was
+     * never making. It is about the rows the provider offered and no others.
+     */
+    const secondFixtures = ['2026-09-17T00:20:00.000Z', '2026-09-20T17:00:00.000Z'];
+    expect(stored.map((row) => row.kickoff).filter((k) => k != null && secondFixtures.includes(k))).toEqual([]);
 
     const snapshots = await new PropsRepo(db).freshness();
     expect(snapshots.events).toBeGreaterThan(0);

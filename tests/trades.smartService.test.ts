@@ -100,6 +100,25 @@ const THEIRS: [id: string, position: string, points: number][] = [
 /** The partner's Sleeper user id, used by every history assertion below. */
 const PARTNER_USER = 'partner-user';
 
+/**
+ * The fixture's clock, relative to whenever this is run.
+ *
+ * These two timestamps used to be literals — props fetched at 2026-09-10 for a
+ * game kicking off on 2026-09-13 — which made the whole file a test of the
+ * calendar. It passed on the day it was written and on every day until the
+ * 13th, and from the 14th onwards seven of its thirteen cases failed: a prop
+ * snapshot carries the game it belongs to, `kickoffsForPlayers` reads it as the
+ * player's kickoff, and a player whose game has started is locked out of the
+ * lineup and therefore out of every offer. `board.offers` came back empty and
+ * the assertions read as the trade engine having stopped producing offers.
+ *
+ * What the fixture means is "these lines were fetched recently, for a game that
+ * has not kicked off". That is what it says now. Nothing here is a claim about
+ * a date, so nothing here should name one.
+ */
+const FETCHED_AT = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+const GAME_START = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
 async function seedTradingLeague(db: NodeSqliteDatabase): Promise<string> {
   const all = [...MINE, ...THEIRS];
   await new PlayerRepo(db).upsertMany(
@@ -125,16 +144,16 @@ async function seedTradingLeague(db: NodeSqliteDatabase): Promise<string> {
   }));
 
   const propsRepo = new PropsRepo(db);
-  const fetchedAt = '2026-09-10T12:00:00.000Z';
+  const fetchedAt = FETCHED_AT;
   await propsRepo.put({
     provider: 'test',
     eventId: 'evt-1',
-    gameStart: '2026-09-13T17:00:00.000Z',
+    gameStart: GAME_START,
     fetchedAt,
     raw: {
       provider: 'test',
       eventId: 'evt-1',
-      gameStart: '2026-09-13T17:00:00.000Z',
+      gameStart: GAME_START,
       fetchedAt,
       quotes: [],
       raw: null,
@@ -154,7 +173,7 @@ async function seedTradingLeague(db: NodeSqliteDatabase): Promise<string> {
     rosterPositions: LEAGUE_POSITIONS,
     leagueSettings: { playoff_week_start: 15 },
     draftId: null,
-    lastSyncedAt: '2026-09-10T12:00:00.000Z',
+    lastSyncedAt: FETCHED_AT,
   });
   await leagues.selectLeague('trade-league');
   await leagues.replaceRosters('trade-league', [

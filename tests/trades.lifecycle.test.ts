@@ -167,13 +167,25 @@ async function seedWorld(db: NodeSqliteDatabase): Promise<void> {
   }));
 
   const repo = new PropsRepo(db);
-  const fetchedAt = '2026-09-10T12:00:00.000Z';
+  /*
+   * Relative to now, because neither date is a claim about a date.
+   *
+   * These were literals — fetched on 2026-09-10 for a game kicking off on the
+   * 13th — and a prop snapshot carries the game it belongs to, which
+   * `kickoffsForPlayers` reads as the player's kickoff. Once that kickoff was
+   * in the past every player here was locked, a locked player is in no lineup
+   * and therefore in no offer, and five cases in this file started failing on
+   * the 14th having passed every day before it. The fixture means "fetched
+   * recently, for a game that has not started".
+   */
+  const fetchedAt = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const gameStart = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
   await repo.put({
     provider: 'lifecycle',
     eventId: 'e1',
-    gameStart: '2026-09-13T17:00:00.000Z',
+    gameStart,
     fetchedAt,
-    raw: { provider: 'lifecycle', eventId: 'e1', gameStart: '2026-09-13T17:00:00.000Z', fetchedAt, quotes: [], raw: null },
+    raw: { provider: 'lifecycle', eventId: 'e1', gameStart, fetchedAt, quotes: [], raw: null },
   });
   const snapshotId = await repo.snapshotId('lifecycle', 'e1', fetchedAt);
   if (snapshotId != null) await repo.saveConsensus(snapshotId, props);

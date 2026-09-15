@@ -18,7 +18,19 @@ import { RepairService } from '../src/server/services/repairService.ts';
 import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
 
-const NOW = '2026-08-13T00:00:00.000Z';
+/**
+ * When all of this happens, relative to whenever the suite is run.
+ *
+ * A literal until 2026-09-15, and every assertion in this file threads it
+ * explicitly — except one. `EvidenceRepo.getSignals` computes its `last30`
+ * window against the real clock, so the tally this file's canonical case
+ * asserts stayed at 3 while the literal was inside thirty days of today and
+ * dropped to 0 once it was not. Written on the 13th of August, it aged out on
+ * the 12th of September and took the case with it.
+ *
+ * Two days ago, because the fixture means "recently" and never meant a date.
+ */
+const NOW = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 
 const review = (over: Partial<Parameters<typeof groupUnresolved>[0][number]> = {}) => ({
   id: 1,
