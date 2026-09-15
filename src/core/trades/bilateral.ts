@@ -45,7 +45,8 @@
  */
 
 import { MANAGER_FIT_CAP, managerFitFor, type ActivityClass, type ManagerFit, type ManagerFitInput } from './managerFit.ts';
-import type { ArbitrageKind, ArbitrageRead } from './arbitrage.ts';
+import type { ArbitrageRead } from './arbitrage.ts';
+import type { OfferCategory } from './category.ts';
 import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
 
 // ------------------------------------------------------------- the bounds --
@@ -126,22 +127,15 @@ export const MIN_USER_GAIN = 1;
  */
 export const MIN_ARBITRAGE_USER_GAIN = -0.5;
 
-/**
- * Which kind of reasoning produced an offer.
+/*
+ * The category and its label live in `./category.ts`, which imports nothing.
  *
- * `upgrade` is every offer the board has ever made: the lineup is short
- * somewhere and this fills it. The other two are value arbitrage, they are
- * ranked and labelled separately, and they exist because the two are genuinely
- * different decisions — a reader who cannot tell which logic produced a
- * suggestion cannot judge it.
+ * Re-exported here so this module stays the one place a caller needs, and
+ * defined there because the Trades screen needs the label and nothing else —
+ * and an import of this file from the render path drags the whole engine into
+ * the chunk every page load fetches. See that file's header for the 25KB.
  */
-export type OfferCategory = 'upgrade' | ArbitrageKind;
-
-export const CATEGORY_LABELS: Record<OfferCategory, string> = {
-  upgrade: 'Lineup upgrade',
-  buy_low: 'Buy low',
-  sell_high: 'Sell high',
-};
+export { CATEGORY_LABELS, type OfferCategory } from './category.ts';
 
 /**
  * Extra offers per partner, by how often that manager actually trades.

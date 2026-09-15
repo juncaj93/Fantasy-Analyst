@@ -344,10 +344,35 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * was built from. See `SimulationInput.seed`.
    */
   const seed = input.seed ?? hashString(fingerprint);
+  /*
+   * The gap between Sleeper's team total and the starters this app resolved.
+   *
+   * Both numbers are Sleeper's — one is the league's own scoreboard and the
+   * other is a sum of the per-player figures it published — so a difference is
+   * never a scoring disagreement. It is a player this app could not map, and
+   * his points are banked, settled and real. Carried into the simulation as a
+   * constant so the projected final can never sit below the score already on
+   * the board, and so the win probability is computed from the whole of a
+   * side's afternoon rather than from the part of it that resolved.
+   *
+   * Clamped at zero on purpose. A *negative* difference would mean this app is
+   * counting a starter Sleeper is not, which is a disagreement about the lineup
+   * rather than a gap in it — and subtracting modelled points to paper over
+   * that would hide the one case worth investigating. It goes to the freshness
+   * report instead, where an unresolved starter is already counted.
+   */
+  const settledStarters = (side: MatchupSide): number =>
+    startingDistributions.filter((d) => d.side === side).reduce((sum, d) => sum + d.settled, 0);
+  const unattributed = {
+    mine: round2(Math.max(0, input.actualScores.mine - settledStarters('mine'))),
+    theirs: round2(Math.max(0, input.actualScores.theirs - settledStarters('theirs'))),
+  };
+
   const result = simulateMatchup({
     players: input.players,
     distributions,
     seed,
+    unattributed,
     ...(input.draws === undefined ? {} : { draws: input.draws }),
   });
 

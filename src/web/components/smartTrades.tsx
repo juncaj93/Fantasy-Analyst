@@ -18,7 +18,7 @@
  * points of weekly lineup or a count of something.
  */
 
-import { CATEGORY_LABELS } from '../../core/trades/bilateral.ts';
+import { CATEGORY_LABELS } from '../../core/trades/category.ts';
 import type { OfferEvaluation } from '../api.ts';
 import { DetailLabel } from './common.tsx';
 import { ReasonList, withoutRepeats } from './decisions.tsx';
