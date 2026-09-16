@@ -41,6 +41,29 @@ import { LIMITED_MULTIPLIER, lognormalParameters, type PlayerDistribution } from
 import type { MatchupPlayerInput } from './types.ts';
 
 /**
+ * How wrong a side's projected total is, as a fraction of itself.
+ *
+ * Eight per cent, which on a 130-point lineup is about ten points. This is a
+ * calibration choice rather than a measured constant and is stated as one: the
+ * app has not yet scored enough of its own weeks to fit it, and the honest
+ * default is the one that stops the model claiming more certainty than a
+ * weekly projection can carry.
+ *
+ * What it is worth, on the lineup that prompted it (134.6 against 117.2):
+ *
+ *     none  -> 74.0%      the old behaviour, and the reported one
+ *     0.08  -> 71.6%
+ *
+ * The direction generalises: every probability moves toward 50%, and the
+ * further out it was the more it moves. A 95% reads nearer 88%. That is the
+ * point — the extremes were where the missing term cost the most.
+ *
+ * Raising it makes the app more cautious and lowering it more confident; nought
+ * restores exactly what this replaced.
+ */
+export const PROJECTION_ERROR_CV = 0.08;
+
+/**
  * How many afternoons are played out.
  *
  * Four thousand puts the standard error of a win probability at 0.79 points at
@@ -205,6 +228,49 @@ export function simulateMatchup(input: SimulationInput): SimulationResult {
   const random = mulberry32(typeof input.seed === 'number' ? input.seed : hashString(input.seed));
   const normal = normalStream(random);
 
+  /*
+   * The error in the projections themselves, which until now was nought.
+   *
+   * Every draw above answers "how much does this player's week vary around what
+   * we expect of him". None of it answers "and how wrong is what we expect".
+   * The model treated each projection as a known mean, so the only uncertainty
+   * it carried was the one it could see — and a model that is certain about its
+   * own centre is overconfident at exactly the moment a reader most wants to
+   * trust it.
+   *
+   * Reported on 16 September 2026 as a 17.4-point favourite reading 75%.
+   * Measured on that lineup, the simulation's spread on the difference was 27.3
+   * points and the arithmetic was internally consistent; what was missing is
+   * this. With it, the same matchup reads about 72%.
+   *
+   * ## Why it is one shock per side and not per player
+   *
+   * Projection error is mostly *common*. A week where the app's numbers run
+   * high runs high across the slate — a scoring environment, a set of game
+   * scripts, a model fitted to the wrong month — and independent per-player
+   * error would average away to almost nothing across ten starters, which is
+   * the same as not modelling it. One draw per side, applied to every player on
+   * that side, is the shape of the thing being modelled.
+   *
+   * Drawn separately for the two sides rather than shared, because a shared
+   * shock would cancel in the difference and change no win probability at all.
+   *
+   * ## Why it is multiplicative, and mean-preserving
+   *
+   * Multiplicative so it scales with how much football is left: a side with
+   * four players still to play carries less of it than one with ten, and a
+   * settled side carries none, which falls out of applying it to `remaining`
+   * and never to `settled`. Points already scored are truth and no forecast
+   * error applies to them.
+   *
+   * Mean-preserving (the `- sigma^2 / 2`) so the *projected final* on the card
+   * does not move. This widens the distribution; it does not re-forecast
+   * anybody, and a reader who compares the two totals sees the same two numbers
+   * they saw before.
+   */
+  const errorSigma = Math.sqrt(Math.log(1 + PROJECTION_ERROR_CV * PROJECTION_ERROR_CV));
+  const errorShift = (errorSigma * errorSigma) / 2;
+
   const teamDraws = new Float64Array(Math.max(factors.teamFactors, 1));
   const gameDraws = new Float64Array(Math.max(factors.gameFactors, 1));
   const rivalDraws = new Float64Array(Math.max(factors.rivalFactors, 1));
@@ -216,6 +282,10 @@ export function simulateMatchup(input: SimulationInput): SimulationResult {
     for (let i = 0; i < factors.teamFactors; i++) teamDraws[i] = normal();
     for (let i = 0; i < factors.gameFactors; i++) gameDraws[i] = normal();
     for (let i = 0; i < factors.rivalFactors; i++) rivalDraws[i] = normal();
+
+    /* How wrong this afternoon's projections turn out to be, per side. */
+    const mineError = Math.exp(errorSigma * normal() - errorShift);
+    const theirsError = Math.exp(errorSigma * normal() - errorShift);
 
     let mineTotal = settledMine;
     let theirsTotal = settledTheirs;
@@ -239,7 +309,15 @@ export function simulateMatchup(input: SimulationInput): SimulationResult {
       if (branch < entry.inactiveCut) scale = 0;
       else if (branch < entry.limitedCut) scale = LIMITED_MULTIPLIER;
 
-      const remaining = scale === 0 ? 0 : Math.exp(entry.mu + entry.sigma * z) * scale;
+      /*
+       * Applied per player rather than to the finished side total, so a
+       * player's own `samples` row carries the same afternoon his side's total
+       * does. `winProbabilityWithSwap` recombines those rows draw by draw, and
+       * a sample that had not seen the shock would answer a counterfactual
+       * about a different week from the one it is being compared against.
+       */
+      const error = entry.distribution.side === 'mine' ? mineError : theirsError;
+      const remaining = scale === 0 ? 0 : Math.exp(entry.mu + entry.sigma * z) * scale * error;
       const final = entry.distribution.settled + remaining;
       entry.samples[draw] = final;
 

@@ -36,7 +36,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { assessLineupDecision } from '../src/core/matchup/decision.ts';
+import { assessLineupDecision, MIN_WIN_PROBABILITY_GAIN } from '../src/core/matchup/decision.ts';
 import { BORROWED_RANKING_DISCOUNT } from '../src/core/startsit/lineup.ts';
 import { buildDistribution, resolveGameClock } from '../src/core/matchup/distribution.ts';
 import { simulateMatchup } from '../src/core/matchup/simulate.ts';
@@ -175,5 +175,75 @@ describe('what the variance trade keeps', () => {
     const withoutHim = priced(roster().filter((p) => p.playerId !== 'concepcion'));
     expect(withBorrowed).toEqual(withoutHim);
     expect(withBorrowed.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * And when this screen has nothing of its own to say.
+ *
+ * Removing Concepcion left the reported matchup with no move above the
+ * two-point win-probability bar, so the Matchup tab read `Hold your lineup`
+ * while the Team tab read `1 change to make`. Both were correct and the pair
+ * still reads as one app contradicting itself, because nothing on either screen
+ * says they are answers to different questions.
+ *
+ * `onProjection` is the projection's answer carried here to be labelled as the
+ * projection's answer. It is not a lowering of the bar: it appears only when
+ * `options` is empty, and a change this model believes in always wins.
+ */
+describe('the answer the Team screen would give', () => {
+  /* The real bar, not the -1 the tests above use to see every option. */
+  const atTheBar = (players: MatchupPlayerInput[]) =>
+    decide(players, MIN_WIN_PROBABILITY_GAIN).decision;
+
+  /**
+   * The reported shape, which `roster()` above is half a point away from.
+   *
+   * There, Harvey over Reed is worth 2.25 points of win probability and clears
+   * the bar on its own, so there is nothing to echo. The state this is about
+   * needs a change that is genuinely better on paper and genuinely too small to
+   * matter here — which is what production had, and what a FLEX incumbent
+   * within half a point of his challenger produces.
+   */
+  const level = () =>
+    roster().map((p) => (p.playerId === 'mine-6' ? { ...p, projection: 6.9 } : p));
+
+  it('names the same man the lineup names, when nothing clears the bar', () => {
+    const decision = atTheBar(level());
+    expect(decision.best).toBeNull();
+    expect(decision.onProjection?.inPlayerId).toBe('harvey');
+  });
+
+  it('is the man the app ranks highest, not the highest published figure', () => {
+    /* Concepcion's 8.28 is larger and his ranked 6.28 is not. */
+    const decision = atTheBar(level());
+    expect(decision.onProjection).not.toBeNull();
+    expect(decision.onProjection?.inPlayerId).not.toBe('concepcion');
+  });
+
+  it('never displaces a change this model does believe in', () => {
+    /*
+     * Give Harvey a figure big enough to clear the win-probability bar and the
+     * echo must stand down: `best` is the stronger claim and owns the row.
+     */
+    const strong = level().map((p) =>
+      p.playerId === 'harvey' ? { ...p, projection: 28 } : p,
+    );
+    const decision = decide(strong, 0.02).decision;
+    expect(decision.best).not.toBeNull();
+    expect(decision.onProjection).toBeNull();
+  });
+
+  it('says nothing at all when the lineup is already the best one', () => {
+    /* No bench player outranks a starter, so there is nothing to echo. */
+    const settled = level().filter((p) => p.playerId !== 'harvey' && p.playerId !== 'concepcion');
+    const decision = atTheBar(settled);
+    expect(decision.best).toBeNull();
+    expect(decision.onProjection).toBeNull();
+  });
+
+  it('carries a reason that does not overstate what it is worth', () => {
+    const decision = atTheBar(level());
+    expect(decision.onProjection?.reason).toMatch(/not enough to swing this matchup/i);
   });
 });

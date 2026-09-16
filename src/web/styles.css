@@ -10048,3 +10048,95 @@ div.matchup-result {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-dim) 32%, transparent);
   color: var(--text-dim);
 }
+
+/* ------------------------------------------------- the lineup change row */
+
+/*
+ * One change, said the way a settings row says a value.
+ *
+ * The card this belongs to used to run a third of the screen: the swap, the
+ * engine's own phrasing of why ("a positive recent signal (+1 net over 1
+ * item(s))"), a count of the smaller changes, the promise that the app never
+ * edits a lineup, and a disclosure headed `Recommended lineup in full`. All
+ * true, none of it the answer, and stacked as five left-aligned paragraphs it
+ * read as a wall rather than as a recommendation.
+ *
+ * So it is a row now, in the shape the rest of the app already uses and the
+ * shape a reader's own phone uses everywhere else: the sentence on the left,
+ * the number and the slot pinned right, one baseline, one line. The gain is the
+ * only thing on the card with colour, because it is the only thing on the card
+ * that is a quantity.
+ */
+.lineup-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  min-height: 28px;
+}
+
+/*
+ * The names run out of room before the number does.
+ *
+ * `minmax(0, 1fr)` against `auto` rather than two equal columns: `+1.37 FLEX`
+ * is four or five characters and is never the thing worth truncating, and a
+ * layout that shared the shortfall would clip the slot before the sentence had
+ * used its width.
+ */
+.lineup-change-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.94rem;
+  letter-spacing: -0.01em;
+  color: var(--text-dim);
+}
+
+.lineup-change-names > strong {
+  color: var(--text);
+  font-weight: 640;
+}
+
+.lineup-change-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+.lineup-change-gain {
+  font-size: 0.94rem;
+  font-weight: 660;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lineup-change-slot {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+/*
+ * A disclosure that is provenance rather than a second copy of the screen.
+ *
+ * Quieter than the ordinary one: what is behind it is why the numbers are what
+ * they are, which a reader wants available and almost never wants open. The
+ * rule above it goes, because the card is three lines now and a divider across
+ * two of them is furniture.
+ */
+.disclosure-quiet {
+  margin-top: var(--sp-2);
+  border-top: 0;
+  padding-top: 0;
+}
+
+.disclosure-quiet > summary {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  min-height: 28px;
+}

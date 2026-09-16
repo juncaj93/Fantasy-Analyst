@@ -137,41 +137,77 @@ export async function pastTheSettle(page: Page): Promise<void> {
    * it read 0.699 against a floor of 0.9, and the same commit's gesture code
    * had been green on the shard before. The animation was still running.
    *
-   * So the wait is now "700ms, and then until the layer is actually still".
    * Additive on purpose: nothing gets *faster* than it was, because a shorter
    * wait is a new race in every test that calls this, and a slow runner simply
-   * gets the time it needs. The layer being gone counts as still — a dismissal
-   * unmounts it, which is the other outcome these callers are checking for.
-   *
-   * Three consecutive frames of an unchanged `scrollTop`, because the scrim is
-   * painted from React state fed by the scroll handler, so the last frame of
-   * movement and the last paint are not the same frame.
+   * gets the time it needs.
    */
   await page.waitForTimeout(700);
 
-  await page
+  /*
+   * And then until the layer has *arrived*, which is not the same as until it
+   * has stopped moving.
+   *
+   * This used to wait for three consecutive frames of an unchanged `scrollTop`.
+   * That is a stillness heuristic, and a stillness heuristic cannot tell a
+   * finished animation from a starved one: when the runner drops frames, `rAF`
+   * fires with the compositor not having advanced the scroll, three times in a
+   * row, and the wait returns in the middle of the settle. Its 4-second cap
+   * then hid the other half of the problem, because the `.catch` swallowed a
+   * genuine timeout and returned as if all was well.
+   *
+   * It cost `sheet-interaction.spec.ts:222` on `webkit-iphone-430` on 16
+   * September, on a tree byte-identical to one that had passed the same shard
+   * fourteen minutes earlier — and that failure stood down a deploy, which is
+   * the second time in one day a frame-timing proxy in this file has done so.
+   *
+   * So the condition is now a *position*, which a dropped frame cannot forge.
+   * The settle has exactly three ends and each one is a fact about where the
+   * layer is rather than about how recently it moved:
+   *
+   *   - **gone** — the layer unmounted, which is what a dismissal does;
+   *   - **home** — `scrollTop` is at the detent, which is where a card that was
+   *     pulled and released comes to rest;
+   *   - **away** — `scrollTop` is at nought, the dismissed end, for the instant
+   *     before the unmount.
+   *
+   * A layer with no travel in it has not arrived anywhere and is still being
+   * laid out, so it waits rather than reading its `0` as the dismissed end —
+   * the same distinction `native.tsx` draws for the same reason.
+   *
+   * The comment this replaces also said the scrim is "painted from React state
+   * fed by the scroll handler". It is not: `paint()` writes `style.opacity`
+   * straight onto the node inside the scroll handler, so there is no React
+   * scheduling behind the reading, and a caller that sees the layer home sees
+   * the opacity that went with it.
+   */
+  const arrived = await page
     .waitForFunction(
       () => {
         const layer = document.querySelector('.sheet-scroller') as HTMLElement | null;
-        const state = window as unknown as { __settleAt?: number; __settleFor?: number };
         if (!layer) return true;
-        const top = Math.round(layer.scrollTop);
-        if (state.__settleAt === top) state.__settleFor = (state.__settleFor ?? 0) + 1;
-        else {
-          state.__settleAt = top;
-          state.__settleFor = 0;
-        }
-        return (state.__settleFor ?? 0) >= 3;
+        const detent = layer.scrollHeight - layer.clientHeight;
+        if (detent <= 0) return false;
+        const top = layer.scrollTop;
+        return top >= detent - 1 || top < 1;
       },
       undefined,
-      { timeout: 4_000, polling: 'raf' },
+      { timeout: 5_000, polling: 'raf' },
     )
-    /*
-     * A layer that never comes to rest is a real failure, and it is not this
-     * helper's to report: the assertion the caller is about to make says what
-     * was wrong far better than a timeout here would.
-     */
-    .catch(() => {});
+    .then(() => true)
+    .catch(() => false);
+
+  /*
+   * A layer that never arrives is a real failure and it is still not this
+   * helper's to report — the assertion the caller is about to make says what
+   * was wrong far better than a timeout here would. But it is no longer
+   * swallowed in silence: a run that hits this is a run whose next assertion is
+   * being made against a half-finished animation, and the reason belongs in the
+   * log beside it rather than nowhere.
+   */
+  if (!arrived) {
+    // eslint-disable-next-line no-console
+    console.warn('[pastTheSettle] the layer never reached the detent or the dismissed end');
+  }
 }
 
 /**

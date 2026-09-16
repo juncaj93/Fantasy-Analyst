@@ -335,6 +335,16 @@ export type BestMoveState =
    * it is drawn as one. See `BestMoveHoldRow`.
    */
   | { kind: 'hold' }
+  /**
+   * Nothing worth interrupting somebody for *here*, and a change on the Team
+   * screen all the same.
+   *
+   * Drawn as a move rather than as a hold, and labelled as the projection's
+   * answer, because the alternative is what was reported: `1 change to make`
+   * on one tab and `Hold your lineup` on the other, with nothing on either
+   * screen explaining that the two are answers to different questions.
+   */
+  | { kind: 'on_projection'; move: LineupImpact }
   /** No forecast, so no comparison — which is not the same as no move. */
   | { kind: 'unavailable' }
   /** Nothing left to decide, and nothing worth saying about it. */
@@ -360,6 +370,13 @@ export function bestMoveState(forecast: MatchupForecast): BestMoveState {
   if (forecast.degraded) return { kind: 'unavailable' };
   if (forecast.decision.best) return { kind: 'move', move: forecast.decision.best };
   if (forecast.phase === 'final') return { kind: 'silent' };
+  /*
+   * Read with `??` rather than assumed present: an older worker's cached body
+   * does not carry this field, and `undefined` has to fall through to `hold`
+   * exactly as it did before the field existed.
+   */
+  const echo = forecast.decision.onProjection ?? null;
+  if (echo) return { kind: 'on_projection', move: echo };
   return { kind: 'hold' };
 }
 
@@ -381,11 +398,21 @@ export function bestMoveState(forecast: MatchupForecast): BestMoveState {
 export function BestMoveRow({
   move,
   players,
+  onProjection = false,
   onOpen,
 }: {
   move: LineupImpact;
   /** Everybody on screen, so the swap can carry the same status marks the rows do. */
   players: Map<string, MatchupPlayerView>;
+  /**
+   * True when this is the Team screen's answer rather than this screen's own.
+   *
+   * It changes the label and nothing else. The row is the same control, the
+   * same target and the same sheet, because it is the same kind of thing to do
+   * — what differs is which question produced it, and saying so in the label is
+   * what stops two tabs reading as one app disagreeing with itself.
+   */
+  onProjection?: boolean;
   onOpen: () => void;
 }) {
   const incoming = players.get(move.inPlayerId) ?? null;
@@ -398,12 +425,14 @@ export function BestMoveRow({
       type="button"
       className="matchup-best-move"
       data-testid="matchup-best-move"
-      data-state="move"
+      data-state={onProjection ? 'on-projection' : 'move'}
       onClick={onOpen}
-      aria-label={bestMoveLabel(move, incoming, outgoing)}
+      aria-label={bestMoveLabel(move, incoming, outgoing, onProjection)}
     >
       <span className="matchup-best-move-body">
-        <span className="matchup-best-move-label">Best move</span>
+        <span className="matchup-best-move-label">
+          {onProjection ? 'Higher projection' : 'Best move'}
+        </span>
         <span className="matchup-best-move-swap">
           <span className="matchup-best-move-names">
             Start <StatusName name={inName} flag={incoming?.statusFlag ?? null} /> over{' '}
@@ -414,7 +443,9 @@ export function BestMoveRow({
           </span>
         </span>
         <span className="matchup-best-move-metrics" data-testid="best-move-metrics">
-          {pointsDeltaText(move.pointsDelta)} · {winShift(move)}
+          {onProjection
+            ? `${pointsDeltaText(move.pointsDelta)} · barely moves this matchup`
+            : `${pointsDeltaText(move.pointsDelta)} · ${winShift(move)}`}
         </span>
       </span>
       <span className="dense-chevron" aria-hidden="true">
@@ -562,6 +593,7 @@ function bestMoveLabel(
   move: LineupImpact,
   incoming: MatchupPlayerView | null,
   outgoing: MatchupPlayerView | null,
+  onProjection = false,
 ): string {
   /*
    * The full name, not the abbreviated one the row prints.
@@ -584,10 +616,16 @@ function bestMoveLabel(
         ? `${shown.toFixed(1)} more projected points`
         : `${Math.abs(shown).toFixed(1)} fewer projected points`;
 
+  const opening = onProjection
+    ? 'Higher projection: start'
+    : 'Best move: start';
+  const closing = onProjection
+    ? 'It barely moves this matchup. Show why.'
+    : `Win probability ${Math.round(move.winNow * 100)}% to ${Math.round(move.winAfter * 100)}%. Show why.`;
+
   return (
-    `Best move: start ${withStatus(move.inName, incoming)} over ${withStatus(move.outName, outgoing)}` +
-    ` in the ${move.slot} slot. ${points}. Win probability ${Math.round(move.winNow * 100)}%` +
-    ` to ${Math.round(move.winAfter * 100)}%. Show why.`
+    `${opening} ${withStatus(move.inName, incoming)} over ${withStatus(move.outName, outgoing)}` +
+    ` in the ${move.slot} slot. ${points}. ${closing}`
   );
 }
 

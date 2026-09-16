@@ -781,6 +781,8 @@ export function Sheet({
      */
     const SPRING = 700;
     let springUntil = 0;
+    /** The frame the spring's own repaint is scheduled on, so it can be stopped. */
+    let springFrame = 0;
     /** How far behind the scroll the resistance is currently holding the card. */
     let held = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
@@ -1076,6 +1078,55 @@ export function Sheet({
       window.setTimeout(() => onDismiss.current(), EXIT);
     };
 
+    /*
+     * The spring paints its own animation, rather than waiting to be told about it.
+     *
+     * The scrim was written only from the scroll handler, so the card's position
+     * and the screen behind it agreed exactly as often as the engine fired a
+     * scroll event. That is almost always, and *almost* is the whole bug: a
+     * `scrollTo({ behavior: 'smooth' })` that lands without dispatching a final
+     * event — which WebKit does under load, and which a reduced-motion setting
+     * can turn into an instant jump — leaves the layer at the card's position
+     * with the scrim still holding whatever the push had written.
+     *
+     * The reader sees a card that has come back to where it belongs over a
+     * screen that is still half uncovered, and nothing moves it again until
+     * they touch the layer. Measured on `webkit-small-360`: the card back and
+     * visible, the scrim resting at 0.699 — which is exactly the value the push
+     * itself wrote, not a frame of the animation caught in flight.
+     *
+     * So the settle drives its own presentation for as long as its own
+     * animation is running. The arithmetic is the same `show` the scroll
+     * handler uses, on the same `scrollTop`, so the two cannot disagree; this
+     * only guarantees that it happens. It stops the moment a second push clears
+     * the window, because the layer is the reader's again at that point.
+     */
+    const driveSpring = () => {
+      springFrame = 0;
+      if (leaving || springUntil === 0) return;
+      const detentTop = root.scrollHeight - root.clientHeight;
+      if (detentTop <= 0) return;
+
+      const top = root.scrollTop;
+      show(1 - top / detentTop, detentTop);
+
+      /* Home. The one place the scrim is written to full, and it is written. */
+      if (top >= detentTop - 1) {
+        springUntil = 0;
+        show(0, detentTop);
+        return;
+      }
+      /*
+       * The window closed without the layer arriving. Whatever it is showing is
+       * now the truth about where the card is, which is what `show` above just
+       * painted, so there is nothing left to correct.
+       */
+      if (stamp() >= springUntil) return;
+      if (typeof requestAnimationFrame === 'function') {
+        springFrame = requestAnimationFrame(driveSpring);
+      }
+    };
+
     const settle = () => {
       if (leaving) return;
       const detentTop = root.scrollHeight - root.clientHeight;
@@ -1093,6 +1144,7 @@ export function Sheet({
       }
       springUntil = stamp() + SPRING;
       root.scrollTo({ top: detentTop, behavior: 'smooth' });
+      driveSpring();
       // The push has been answered. What the spring-back does from here is the
       // layer's own movement, and the next push starts its speed from nothing.
       rewind();
@@ -1230,6 +1282,7 @@ export function Sheet({
     for (const [type, listener] of watched) root.addEventListener(type, listener, { passive: true });
     return () => {
       window.clearTimeout(timer);
+      if (springFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(springFrame);
       root.removeEventListener('scroll', onScroll);
       for (const [type, listener] of watched) root.removeEventListener(type, listener);
     };
