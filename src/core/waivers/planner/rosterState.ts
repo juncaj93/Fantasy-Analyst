@@ -186,6 +186,15 @@ export interface RosterSimulationInput {
   profile: ScoringProfile;
   /** Caller-supplied expendability signals, per player id. Optional. */
   held?: readonly HeldPlayer[];
+  /**
+   * Season totals from this league's preseason capture, by player id.
+   *
+   * Handed straight to `buildHeldPlayers` so a bench slot is valued over a
+   * horizon rather than over one Sunday — see `core/roster/durableValue.ts`.
+   * Ignored where `held` is supplied whole, because that caller has already
+   * done the valuation. Absent restores the previous behaviour exactly.
+   */
+  preseasonPoints?: ReadonlyMap<string, number>;
   reserveIds?: readonly string[];
   now?: string | Date;
 }
@@ -315,6 +324,7 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
     lineup: seedLineup,
     profile,
     reserveIds: [...reserveIds],
+    ...(input.preseasonPoints === undefined ? {} : { preseasonPoints: input.preseasonPoints }),
   });
   const heldOf = new Map<string, HeldPlayer>(derivedHeld.map((h) => [h.playerId, h]));
   for (const supplied of input.held ?? []) heldOf.set(supplied.playerId, supplied);

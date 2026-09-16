@@ -101,7 +101,26 @@ export function priceWaiverUpgrades(opts: {
    */
   const rivalsFor = (playerId: string): number | null => {
     const assessed = opts.competition?.get(playerId);
-    if (assessed) return assessed.effectiveBidders > 0 ? Math.min(assessed.effectiveBidders, 4) : null;
+    /*
+     * **Zero is an answer.** It used to be returned as `null`, and `null` in
+     * `demandLevel` means *no information*, which falls back to market heat
+     * alone. So the one case where the league-intelligence pass has the
+     * strongest reading it can ever have — nobody here needs this position —
+     * was the one case its reading was discarded.
+     *
+     * Measured on production on 16 September: a quarterback nobody in the
+     * league needed came out at `Expected $14-29`, the highest band on a board
+     * whose other four rows sat at $8-15, because his global trending heat was
+     * the only thing left in the average. The card then printed *Contested:
+     * several funded rosters can use him* directly above *Nobody else needs
+     * him - 0 of 9 teams need QB*.
+     *
+     * `effectiveBidders === 0` is exactly equivalent to `bidders.length === 0`
+     * in `core/league/competition.ts` — the weighting can never round a
+     * non-empty list to zero — so it means nobody with a hole and the money to
+     * fill it, and never "could not tell".
+     */
+    if (assessed) return Math.min(assessed.effectiveBidders, 4);
     return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
   };
 

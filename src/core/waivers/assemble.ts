@@ -124,6 +124,19 @@ export interface WaiverAssemblyRequest {
    * horizon, different source, and the one that can speak in week one.
    */
   seasonMarkets?: ReadonlyMap<string, { market: SeasonMarketKey; line: number | null }[]> | undefined;
+  /**
+   * Season totals from this league's own preseason capture, by player id.
+   *
+   * Reaches exactly one thing: the value of holding a bench player, which is
+   * what the claim plan's drop half rests on. In September it is the only
+   * durable reading that exists — a player's week-2 projection says nothing
+   * about whether cutting him is a mistake — and it hands over to actual
+   * production as games accumulate. See `core/roster/durableValue.ts`.
+   *
+   * Optional, and absent is the previous behaviour rather than a degraded one:
+   * a deployment with no capture values a bench exactly as it did before.
+   */
+  preseasonPoints?: ReadonlyMap<string, number> | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -433,6 +446,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids } },
         shape,
         profile,
+        ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
         reserveIds: request.reserveIds,
         budget: request.budgets,
         now: request.now,

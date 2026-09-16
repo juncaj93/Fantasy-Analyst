@@ -333,6 +333,14 @@ export interface WaiverPlannerInput {
    * bye coverage can say so here.
    */
   held?: HeldPlayer[];
+  /**
+   * Season totals from this league's preseason capture, by player id.
+   *
+   * Used only to value a bench slot over a horizon rather than over this
+   * Sunday — see `core/roster/durableValue.ts`. Absent leaves the valuation
+   * exactly where it was, so no caller has to supply it to keep working.
+   */
+  preseasonPoints?: ReadonlyMap<string, number>;
   /** Players on an injured-reserve slot, which is not a bench spot. */
   reserveIds?: string[];
   /**

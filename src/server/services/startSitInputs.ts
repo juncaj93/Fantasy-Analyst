@@ -41,7 +41,23 @@ import type { Database } from '../db.ts';
 export async function startSitInputsFor(
   db: Database,
   playerIds: string[],
-  opts: { mode?: StartSitMode; context?: StartSitContext } = {},
+  opts: {
+    mode?: StartSitMode;
+    context?: StartSitContext;
+    /**
+     * Reference time, so the slate window is testable.
+     *
+     * `buildStartSitContext` has taken one since it was written and this did
+     * not, which meant the two halves of one window could only ever be pinned
+     * on one side. A test that wants to stand at a fixed Tuesday and ask what
+     * counts as this week had to hardcode a wall-clock instant and then read
+     * the real one — which works for about fifteen hours and then starts
+     * failing for reasons that have nothing to do with the code.
+     *
+     * Defaults to now, so nothing in production changes.
+     */
+    now?: Date;
+  } = {},
 ): Promise<StartSitInput[]> {
   if (playerIds.length === 0) return [];
   const propsRepo = new PropsRepo(db);
@@ -59,7 +75,7 @@ export async function startSitInputsFor(
    * the newest `game_start` that had ever mentioned the player, whatever week
    * it belonged to.
    */
-  const slate = slateWindow();
+  const slate = slateWindow(opts.now ?? new Date());
   const [players, propsByPlayer, previousProps, pricedKickoffs, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
     propsRepo.latestForPlayers(playerIds, slate),
