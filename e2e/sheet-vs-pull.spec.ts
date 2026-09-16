@@ -39,11 +39,34 @@ import { exploreMarket, inSeason, pastTheSettle, swipeSheetAway } from './helper
 /**
  * What every pull surface on the page did while something else was happening.
  *
- * Sampled every frame rather than read at the end, because a pull that loses is
- * still a pull that started: the surface arms, translates, and springs back
+ * Recorded as it happens rather than read at the end, because a pull that loses
+ * is still a pull that started: the surface arms, translates, and springs back
  * when the finger goes, leaving nothing behind to assert on. The two readings
  * are the two ways it shows: the state the indicator paints, and how far the
  * content was actually moved.
+ *
+ * ## Why this watches mutations and does not only sample frames
+ *
+ * It used to be a bare `requestAnimationFrame` loop, and on 16 September 2026
+ * that cost a release: `webkit-iphone-430 (3/3)` failed `and pulls again after
+ * the sheet is closed by its Done control` four times running on main, with
+ * `the surface never took the gesture` — while the identical tree had passed
+ * the same shard on the pull request minutes earlier.
+ *
+ * Nothing was wrong with the app. A loaded runner starves frames, the whole
+ * gesture lands between two of them, and a sampler that only looks on a frame
+ * sees `idle`, `idle`, `idle`. {@link expectPulled} already carries the note
+ * from the *last* time this bit — "a sampler cannot depend on catching it, and
+ * a test that does is asserting the frame rate" — and that reasoning applies to
+ * the sampler itself, not only to which state it looked for.
+ *
+ * A `MutationObserver` is not sampled. Every write to `data-pull-state`, and
+ * every write to the content's inline transform, is delivered whatever the
+ * frame rate is doing. The frame loop is kept beside it because the two see
+ * different things — a transform driven by a stylesheet animation never writes
+ * the attribute the observer watches — and the readings are unioned, so this is
+ * strictly more sensitive than what it replaces and cannot pass anything the
+ * old one would have failed.
  */
 async function watchPulls(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -54,19 +77,49 @@ async function watchPulls(page: Page): Promise<void> {
     };
     (window as unknown as { __pulls: typeof store }).__pulls = store;
 
-    const tick = () => {
-      if (!store.running) return;
-      for (const surface of document.querySelectorAll<HTMLElement>('.pull-surface')) {
-        const state = surface.dataset['pullState'];
-        if (state && !store.states.includes(state)) store.states.push(state);
-        const content = surface.querySelector<HTMLElement>('.pull-content');
-        const transform = content ? getComputedStyle(content).transform : 'none';
-        if (transform !== 'none') {
-          // m42 is the vertical translation, whatever else the matrix carries.
-          const shift = new DOMMatrixReadOnly(transform).m42;
-          if (shift > store.maxShift) store.maxShift = shift;
-        }
+    /** One reading of one surface, from whichever source noticed it. */
+    const record = (surface: HTMLElement): void => {
+      const state = surface.dataset['pullState'];
+      if (state && !store.states.includes(state)) store.states.push(state);
+      const content = surface.querySelector<HTMLElement>('.pull-content');
+      const transform = content ? getComputedStyle(content).transform : 'none';
+      if (transform !== 'none') {
+        // m42 is the vertical translation, whatever else the matrix carries.
+        const shift = new DOMMatrixReadOnly(transform).m42;
+        if (shift > store.maxShift) store.maxShift = shift;
       }
+    };
+
+    const readAll = () => {
+      for (const surface of document.querySelectorAll<HTMLElement>('.pull-surface')) record(surface);
+    };
+
+    /*
+     * Every attribute write, delivered rather than sampled.
+     *
+     * Watched on the document with `subtree`, so a surface mounted *after* this
+     * is armed — a screen the test navigates to — is covered without a second
+     * call. `attributeFilter` keeps it to the two attributes that carry a pull:
+     * the state the surface paints and the inline transform the content is
+     * moved by.
+     */
+    const observer = new MutationObserver((records) => {
+      if (!store.running) return observer.disconnect();
+      for (const record_ of records) {
+        const target = record_.target as HTMLElement;
+        const surface = target.closest<HTMLElement>('.pull-surface');
+        if (surface) record(surface);
+      }
+    });
+    observer.observe(document.documentElement, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-pull-state', 'style'],
+    });
+
+    const tick = () => {
+      if (!store.running) return observer.disconnect();
+      readAll();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
