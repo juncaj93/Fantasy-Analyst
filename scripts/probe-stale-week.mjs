@@ -222,18 +222,44 @@ if (diag.status !== 200) {
 }
 
 // ------------------------------------------- 7. does the preseason tier exist
-console.log('\n=== 7. the preseason snapshot the third tier needs ===');
+console.log('\n=== 7. the preseason snapshot the arbitrage lane needs ===');
 const pre = await get('/api/preseason-projection');
 if (pre.status !== 200) {
   console.log(`  GET preseason-projection -> ${pre.status} ${pre.text ?? ''}`);
 } else {
-  const snaps = pre.json?.snapshots ?? pre.json?.all ?? [];
-  console.log(`  snapshots stored : ${snaps.length}`);
-  for (const sn of snaps.slice(0, 6)) {
-    console.log(`    id=${sn.id} season=${sn.season} key=${sn.scoringKey} label="${sn.scoringLabel}" players=${sn.players} captured=${sn.capturedAt}`);
+  /*
+   * `current` and `others`, which are the keys this route actually returns.
+   *
+   * The first two runs of this probe read `snapshots` / `all`, neither of
+   * which exists, and printed "snapshots stored: 0" — which reads exactly like
+   * an empty database and was in fact an empty question. That false negative
+   * was reported to Alex as "buy-low and sell-high shipped inert", so it is
+   * worth saying plainly: the probe was wrong, not necessarily the app.
+   */
+  const j = pre.json ?? {};
+  console.log(`  season           : ${j.season}`);
+  console.log(`  this league's key: ${j.scoringKey} ("${j.scoringLabel}")`);
+  console.log(`  current          : ${j.current ? `id=${j.current.id} captured=${j.current.capturedAt} players=${j.current.players} rows=${j.current.rows}` : '(none for this scoring)'}`);
+  console.log(`  others           : ${(j.others ?? []).length}`);
+  for (const o of j.others ?? []) {
+    console.log(`      id=${o.id} key=${o.scoringKey} label="${o.scoringLabel}" players=${o.players}`);
   }
-  console.log(`  --- the league's own scoring label is "${league.scoringLabel}"; a snapshot under`);
-  console.log('      a different scoring key is not a worse answer, it is no answer at all ---');
 }
+
+// -------------------------------------- 8. why the arbitrage lane is silent
+/*
+ * If a snapshot *is* present, "no buy-low or sell-high offers" has a much more
+ * likely explanation than a missing import: `ARBITRAGE.minGames` is 3, and in
+ * week 2 every player has played one game. The lane would then be correctly
+ * silent, and the honest message is "too early in the season", not "import
+ * something".
+ */
+console.log('\n=== 8. how many games the season has actually produced ===');
+const usage = await get('/api/data-health');
+for (const src of usage.json?.sources ?? []) {
+  if (!/usage|nfl-state/i.test(String(src.id ?? ''))) continue;
+  console.log(`  ${String(src.id).padEnd(12)} ${src.state}  ${src.technical?.lastOutcome ?? ''}  ${src.note ?? ''}`);
+}
+console.log('  (week 2 means one completed game per team; ARBITRAGE.minGames is 3)');
 
 console.log('\ndone. nothing was written.');
