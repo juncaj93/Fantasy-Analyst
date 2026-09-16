@@ -306,13 +306,25 @@ function unpricedRoster() {
   ];
 }
 
-describe('the lineup is ranked without it', () => {
+describe('the lineup is ranked with it, at a discount', () => {
   /**
-   * The published numbers are deliberately upside down.
+   * **This describe used to assert the opposite, and the reversal is the point.**
    *
-   * They rank the roster in the reverse of the order the engine chose, so a
-   * build that let them anywhere near the optimiser would not merely differ —
-   * it would differ visibly, in the assignment itself.
+   * The rule was that a borrowed figure is display-only and may not reach the
+   * optimiser at all. That was right about nearly everything and wrong about one
+   * case, which production found on 16 September 2026: a back Rotowire had at
+   * 10.89 and no book had priced carried a `score` of 2.53 — bounded nudges and
+   * nothing else — and was benched for a 7.16, on a card reading `+4.63 pts`,
+   * directly beneath the two figures that contradict it.
+   *
+   * Refusing to read the borrowed number did not make the app decline to rank
+   * him. It made it rank him on his news tally. So the number is admitted here,
+   * and only here, docked by {@link BORROWED_RANKING_DISCOUNT} because it comes
+   * from a model this app has never validated against its own.
+   *
+   * Everything else the wall protects is untouched, and the structural describe
+   * at the bottom of this file still proves it: the matchup simulation, the
+   * draft score and the trade engine read the market number or nothing.
    */
   const upsideDown = new Map([
     ['qb1', 4.1],
@@ -326,35 +338,73 @@ describe('the lineup is ranked without it', () => {
     recommendLineup(unpricedRoster(), SHAPE, HALF_PPR, { published: upsideDown, now: '2026-09-13T15:00:00Z' });
   const without = () => recommendLineup(unpricedRoster(), SHAPE, HALF_PPR, { now: '2026-09-13T15:00:00Z' });
 
-  it('assigns exactly the same players to exactly the same slots', () => {
-    const a = withFallback();
-    const b = without();
-    expect(a.slots.map((s) => [s.slot, s.playerId])).toEqual(b.slots.map((s) => [s.slot, s.playerId]));
+  it('ranks a player the market missed on the figure somebody did publish', () => {
+    /*
+     * These five have no market at all, and the published numbers are
+     * deliberately upside down against the news tallies that used to order
+     * them. A build still ranking on tallies would put `rb1` above `rb2`.
+     */
+    const ranked = withFallback().slots.filter((s) => s.playerId != null);
+    expect(ranked.length).toBeGreaterThan(0);
+    for (const slot of ranked) expect(slot.projectionSource).toBe('sleeper');
+
+    const flex = withFallback().slots.find((s) => s.slot === 'FLEX');
+    const bench = withFallback().bench.map((e) => e.playerId);
+    /* 30.3 is the biggest figure on the board and he is not on the bench. */
+    expect(bench).not.toContain('rb2');
+    void flex;
   });
 
-  it('leaves every ranking number identical', () => {
-    const a = withFallback();
-    const b = without();
-    expect(a.slots.map((s) => s.score)).toEqual(b.slots.map((s) => s.score));
-    expect(a.recommendedPoints).toBe(b.recommendedPoints);
-    expect(a.currentPoints).toBe(b.currentPoints);
-    expect(a.confidence).toBe(b.confidence);
-    expect(a.swaps).toEqual(b.swaps);
-    expect(a.bench.map((e) => [e.playerId, e.score])).toEqual(b.bench.map((e) => [e.playerId, e.score]));
+  it('orders them by the published figure rather than by the news tally', () => {
+    const order = withFallback()
+      .slots.filter((s) => s.playerId != null)
+      .map((s) => s.playerId);
+    const tallyOrder = without()
+      .slots.filter((s) => s.playerId != null)
+      .map((s) => s.playerId);
+
+    /* The whole claim: handing the figures over changes the lineup. */
+    expect(order).not.toEqual(tallyOrder);
   });
 
-  it('differs in the displayed projection and in nothing else', () => {
-    const a = withFallback();
-    const b = without();
-    const strip = (r: ReturnType<typeof withFallback>) =>
-      r.slots.map(({ projection, projectionSource, ...rest }) => rest);
-    expect(strip(a)).toEqual(strip(b));
+  it('leaves the score untouched, because the figure ranks and never scores', () => {
+    /*
+     * The discount and the ordering live in the assignment. Nothing borrowed is
+     * ever added to `score`, which is still this app's own number and still the
+     * only thing any other model is allowed to read.
+     */
+    const byId = new Map(withFallback().slots.map((s) => [s.playerId, s.score]));
+    for (const e of without().slots) {
+      if (e.playerId == null) continue;
+      const after = byId.get(e.playerId);
+      if (after === undefined) continue;
+      expect(after).toBe(e.score);
+    }
+  });
 
-    // …and the display really did change, so the comparison above is not vacuous.
-    const filled = a.slots.filter((s) => s.playerId);
-    expect(filled.length).toBeGreaterThan(0);
-    expect(filled.every((s) => s.projectionSource === 'sleeper')).toBe(true);
-    expect(b.slots.filter((s) => s.playerId).every((s) => s.projection == null)).toBe(true);
+  it('cannot displace a market number with a borrowed one for the same player', () => {
+    /*
+     * The tier order reads the market first, so a published figure for a player
+     * the books *have* quoted is never consulted at all — which is what keeps a
+     * fully-priced week identical to what it always was.
+     */
+    const priced = [
+      candidate('qb1', 'Jalen Hurts', 'QB', 22, { now: '2026-09-13T15:00:00Z' }),
+      candidate('rb1', 'Christian McCaffrey', 'RB', 18, { now: '2026-09-13T15:00:00Z' }),
+      candidate('rb2', 'RJ Harvey', 'RB', 7, { now: '2026-09-13T15:00:00Z' }),
+      candidate('wr1', 'Malik Nabers', 'WR', 15, { now: '2026-09-13T15:00:00Z' }),
+      candidate('te1', 'Sam LaPorta', 'TE', 11, { now: '2026-09-13T15:00:00Z' }),
+    ];
+    const bare = recommendLineup(priced, SHAPE, HALF_PPR, { now: '2026-09-13T15:00:00Z' });
+    const withMap = recommendLineup(priced, SHAPE, HALF_PPR, {
+      published: upsideDown,
+      now: '2026-09-13T15:00:00Z',
+    });
+
+    expect(withMap.slots.map((s) => [s.slot, s.playerId, s.score])).toEqual(
+      bare.slots.map((s) => [s.slot, s.playerId, s.score]),
+    );
+    expect(withMap.swaps).toEqual(bare.swaps);
   });
 
   it('still refuses to project a player the fallback does not cover', () => {

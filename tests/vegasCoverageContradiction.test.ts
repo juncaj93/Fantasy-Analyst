@@ -218,8 +218,17 @@ describe('a part-priced roster is not reordered on news tallies', () => {
   });
 
   it('says out loud that most of the lineup was not ranked', () => {
+    /*
+     * No published figures are passed here, so these seven are unrankable in
+     * the strict sense — nobody has a number for them from any source — and
+     * they keep the slots the reader had them in. That is the sentence they
+     * get. A player the market missed but Rotowire published is a different
+     * state and gets a different sentence; see
+     * `lineup.borrowedRanking.test.ts`.
+     */
     const out = recommendLineup(roster, SHAPE, HALF_PPR, { currentStarterIds: current });
-    expect(out.notes.join(' ')).toMatch(/no betting market has priced 7 of your 9 players/i);
+    expect(out.notes.join(' ')).toMatch(/7 of your 9 players have no figure from any source this week/i);
+    expect(out.notes.join(' ')).toMatch(/keep the slots you already had them in/i);
   });
 
   it('does not let Ceiling mode stack the unpriced remainder', () => {

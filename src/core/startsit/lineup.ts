@@ -421,7 +421,7 @@ export function recommendLineup(
    * which is most of them — stops ranking the unpriced remainder against
    * itself on news tallies.
    */
-  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec), currentStarters);
+  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec), currentStarters, opts.published);
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
   for (const [openIndex, player] of openAssignment) {
@@ -507,7 +507,7 @@ export function recommendLineup(
     [...assignment.values()].reduce((total, e) => total + (e.score ?? 0), 0),
   );
 
-  const swaps = buildSwaps(filled, bench, currentStarters, evaluations, minGain);
+  const swaps = buildSwaps(filled, bench, currentStarters, evaluations, minGain, opts.published);
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -521,17 +521,36 @@ export function recommendLineup(
    * declining to rank half his starters. Naming the count is what makes the
    * quiet card legible instead of merely quiet.
    */
-  const unrankable = scored.filter((e) => !hasMarket(e));
-  if (unpriced && scored.length > 0) {
+  /*
+   * Three states now, because there are three, and the middle one used to be
+   * told the last one's sentence.
+   *
+   * A player with no market but a published figure *is* ranked — that is the
+   * whole of this round's lineup fix — so telling the reader he "keeps the slot
+   * you already had him in" was a sentence the code had stopped honouring. The
+   * borrowed rows say whose number they are; the genuinely unrankable ones keep
+   * the older, stronger promise, which is still true of them.
+   */
+  const borrowed = scored.filter((e) => !hasMarket(e) && rankingPoints(e, opts.published) != null);
+  const unrankable = scored.filter((e) => rankingPoints(e, opts.published) == null);
+  if (unpriced && borrowed.length === 0 && scored.length > 0) {
     notes.push(
       'No betting market has priced this week yet, so there is nothing to rank these players against — ' +
         'your Sleeper lineup is left as it is rather than reordered on news and usage alone.',
     );
-  } else if (unrankable.length > 0) {
-    notes.push(
-      `No betting market has priced ${unrankable.length} of your ${scored.length} players yet, so they are not ranked ` +
-        'against each other — they keep the slots you already had them in rather than being reordered on news and usage alone.',
-    );
+  } else {
+    if (borrowed.length > 0) {
+      notes.push(
+        `No betting market has priced ${borrowed.length} of your ${scored.length} players yet, so ${borrowed.length === 1 ? 'that row uses' : 'those rows use'} ` +
+          'Rotowire’s published figure. It is ranked slightly below a number this app worked out itself, because the two come from different models.',
+      );
+    }
+    if (unrankable.length > 0) {
+      notes.push(
+        `${unrankable.length} of your ${scored.length} players ${unrankable.length === 1 ? 'has' : 'have'} no figure from any source this week, ` +
+          `so ${unrankable.length === 1 ? 'he keeps the slot' : 'they keep the slots'} you already had ${unrankable.length === 1 ? 'him' : 'them'} in rather than being reordered on news and usage alone.`,
+      );
+    }
   }
 
   // The current total is only meaningful when every current starter could be
@@ -1076,26 +1095,38 @@ function assignBest(
    * and the ordering is what it always was.
    */
   currentStarters: ReadonlySet<string> | null = null,
+  published?: ReadonlyMap<string, number>,
 ): Map<number, StartSitEvaluation> {
   /*
-   * Priced, then unpriced-and-starting, then unpriced-and-benched.
+   * Rankable, then unrankable-and-starting, then unrankable-and-benched.
    *
-   * The tier comes before the score, which is what makes this a fix rather
-   * than a tie-break: within a tier the score still decides, and between
-   * tiers it cannot. A player no book has quoted therefore competes only for
-   * the slots priced players did not take, and among *those* an incumbent is
-   * ahead of a challenger — so the reader's own lineup survives a week the
-   * market has not reached, and a news tally can still sort the bench.
+   * The tier comes before the number, which is what makes this a fix rather
+   * than a tie-break: within a tier the number still decides, and between
+   * tiers it cannot. A player nobody has put a figure on therefore competes
+   * only for the slots rankable players did not take, and among *those* an
+   * incumbent is ahead of a challenger — so the reader's own lineup survives a
+   * week nothing has reached, and a news tally can still sort the bench.
+   *
+   * **"Rankable" used to mean "a book has priced him", and that was the
+   * defect.** A player with a published figure and no betting market was sorted
+   * into the second tier and ranked on his nudges, which is how a 10.89 was
+   * benched for a 7.16 — see {@link rankingPoints}. He is first-tier now, at a
+   * discount, and the tier still catches the player nobody has any number for
+   * at all.
    *
    * Lexicographic on a per-player key rather than a pairwise rule, because a
    * comparator that changed criteria depending on which two players it was
    * handed would not be transitive and `sort` would be free to return
    * anything.
    */
+  const keyOf = new Map(players.map((e) => [e.playerId, rankingKey(e, published)]));
   const tier = (e: StartSitEvaluation): number =>
-    hasMarket(e) ? 0 : currentStarters?.has(e.playerId) ? 1 : 2;
+    keyOf.get(e.playerId) != null ? 0 : currentStarters?.has(e.playerId) ? 1 : 2;
   const order = [...players].sort(
-    (a, b) => tier(a) - tier(b) || (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name),
+    (a, b) =>
+      tier(a) - tier(b) ||
+      (keyOf.get(b.playerId) ?? b.score ?? 0) - (keyOf.get(a.playerId) ?? a.score ?? 0) ||
+      a.name.localeCompare(b.name),
   );
   // slot index -> player
   const bySlot = new Map<number, StartSitEvaluation>();
@@ -1142,14 +1173,27 @@ function tryAssign(
  * and only when the gain clears the threshold — a lineup churned for a tenth of
  * a point is worse advice than leaving it alone.
  *
- * And only when a market has priced the player being asked *in*. A gain
- * measured between two scores that are both sums of nudges is arithmetic over
- * noise, and printing it as `+1.6 pts` is the confident-wrong-answer failure
- * `projection.ts` was written to stop at the display layer. The rule is
- * deliberately one-sided: the outgoing player may be unpriced — a bye week is
- * exactly that, and replacing him with somebody the books have quoted is a real
- * comparison — but nobody is asked to bench a starter for a player nobody has
- * put a number on.
+ * And only when both players have a number of the same kind under them.
+ *
+ * **This rule used to be one-sided, and that was the bug.** It required a
+ * market on the incoming player and let the outgoing one be unpriced, on the
+ * reasoning that a bye week is exactly that and replacing a bye with a quoted
+ * player is a real comparison. True — but "unpriced" stopped meaning "has no
+ * number" the day the published fallback shipped, and the subtraction below
+ * then ran across two different scales:
+ *
+ *     gain = RJ Harvey 7.16 (market)  −  Rhamondre Stevenson 2.53 (nudges only)
+ *          = +4.63, printed beside Stevenson's projection of 10.89
+ *
+ * Both sides now come from {@link rankingPoints}, so the gain is measured
+ * between two weekly forecasts and the card cannot contradict the rows it sits
+ * above. The bye-week case is unaffected: a player on a bye has no figure from
+ * any source, so he is still `null` here and still replaceable.
+ *
+ * The discount is deliberately *not* applied to the printed gain. It exists to
+ * settle close calls in the ordering, and quoting a reader a number two points
+ * below the difference between the two figures on his screen would be a second
+ * contradiction in place of the first.
  */
 function buildSwaps(
   filled: LineupSlot[],
@@ -1157,6 +1201,7 @@ function buildSwaps(
   currentStarters: Set<string>,
   evaluations: StartSitEvaluation[],
   minGain: number,
+  published?: ReadonlyMap<string, number>,
 ): LineupSwap[] {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
@@ -1177,14 +1222,22 @@ function buildSwaps(
     if (slot.playerId == null || slot.alreadyStarting) continue;
     const incoming = byId.get(slot.playerId);
     if (!incoming) continue;
-    if (!hasMarket(incoming)) continue;
+    const incomingBasis = rankingPoints(incoming, published);
+    if (incomingBasis == null) continue;
 
     const outgoing = sitting.find(
       (e) => !used.has(e.playerId) && slot.accepts.includes(e.position),
     ) ?? sitting.find((e) => !used.has(e.playerId));
     if (!outgoing) continue;
 
-    const gain = round2((incoming.score ?? 0) - (outgoing.score ?? 0));
+    /*
+     * The outgoing player's own best figure, or nothing.
+     *
+     * Nothing is the bye week this rule was written to allow, and it is the
+     * only case where the gain is measured against a zero.
+     */
+    const outgoingBasis = rankingPoints(outgoing, published);
+    const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
     if (gain < minGain) continue;
     used.add(outgoing.playerId);
 
@@ -1230,6 +1283,78 @@ function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation):
  */
 function hasMarket(evaluation: StartSitEvaluation): boolean {
   return evaluation.expectation?.points != null;
+}
+
+/**
+ * What a borrowed weekly figure is docked before it may rank anybody.
+ *
+ * Two points. Rotowire's model and this app's are two different models, fitted
+ * on different data, and nothing here has ever validated that a 10.9 from one
+ * means the same thing as a 10.9 from the other. So the borrowed number enters
+ * the ranking at a discount: it is trusted enough to say *this player is a
+ * starter and that one is not*, and not enough to win a close call against a
+ * number this app computed itself.
+ *
+ * The size is set by what it has to be able to do. Measured on production on 16
+ * September, the two comparisons at stake were 10.89 against 7.16 — a gap of
+ * 3.7, which a reader can see is real and which this must not swallow — and
+ * 8.28 against 6.77, a gap of 1.5 between two different models, which is
+ * noise and which this must swallow. Two points sits between them.
+ */
+export const BORROWED_RANKING_DISCOUNT = 2;
+
+/**
+ * The number this player may be *ranked* on, and where it came from.
+ *
+ * ## Why this exists, and what it deliberately breaks
+ *
+ * `score` is the ranking number and the market expectation is the only part of
+ * it that forecasts a week of football; the rest are nudges measured in ones
+ * and twos. So a player no book has priced carries a score that is *only*
+ * nudges — and since the published fallback shipped, that same player carries a
+ * real weekly figure on screen.
+ *
+ * The optimiser could not see it. `recommendLineup`'s own docblock said the
+ * borrowed number is "a value this function prints and never one it reasons
+ * with", and that wall was right about the thing it was built to stop: nobody
+ * else's model may reach this app's simulations, its draft score or its trade
+ * engine, and it still cannot. It was wrong about one case, and production
+ * found it on 16 September:
+ *
+ *     Rhamondre Stevenson   score 2.53   projection 10.89   sleeper
+ *     RJ Harvey             score 7.16   projection  7.16   market
+ *     → Start RJ Harvey over Rhamondre Stevenson · +4.63 pts
+ *
+ * 7.16 minus 2.53 is 4.63, and the subtraction is the defect: one side of it
+ * contains a forecast and the other contains three nudges. The card was doing
+ * arithmetic across two scales and printing the result next to the two figures
+ * that contradict it.
+ *
+ * Ranking on nothing is not more honest than ranking on somebody else's
+ * number — it is the same guess with the evidence thrown away. So a borrowed
+ * figure is allowed to rank, at {@link BORROWED_RANKING_DISCOUNT}, and the tier
+ * below still keeps an unrankable player where the reader had him.
+ *
+ * Null means genuinely unrankable: no market, and nobody published him either.
+ */
+function rankingPoints(
+  evaluation: StartSitEvaluation,
+  published: ReadonlyMap<string, number> | undefined,
+): { points: number; borrowed: boolean } | null {
+  if (hasMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
+  const figure = published?.get(evaluation.playerId);
+  if (figure == null || !Number.isFinite(figure)) return null;
+  return { points: Math.max(0, figure), borrowed: true };
+}
+
+/** The same, already discounted, which is the form the ordering uses. */
+function rankingKey(
+  evaluation: StartSitEvaluation,
+  published: ReadonlyMap<string, number> | undefined,
+): number | null {
+  const basis = rankingPoints(evaluation, published);
+  if (basis == null) return null;
+  return basis.borrowed ? basis.points - BORROWED_RANKING_DISCOUNT : basis.points;
 }
 
 function worstConfidence(evaluations: StartSitEvaluation[]): 'high' | 'medium' | 'low' {
