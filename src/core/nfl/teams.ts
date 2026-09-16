@@ -136,3 +136,33 @@ export function nflTeamLogoUrl(input: string | null | undefined): string | null 
   const team = nflTeam(input);
   return team ? `/logos/nfl/${team.code.toLowerCase()}.webp` : null;
 }
+
+/**
+ * `vs BAL` or `@ BAL`, written once.
+ *
+ * A fixture is read from the point of view of the player whose row it is on,
+ * and the two halves of that sentence come from different places: the opponent
+ * from the schedule, the side from `home`. Spelling it out at each call site is
+ * how one screen ends up saying `@` for a home game — `vegas_events.home_team`
+ * means "a team we asked about" rather than "the home side", and that trap has
+ * already put every spread in this app the wrong way round once.
+ *
+ * Null when there is no opponent to name, which is a bye or a week the fixture
+ * list has not reached. The caller prints nothing rather than `vs —`.
+ */
+export function fixtureLabel(opponent: string | null, home: boolean | null): string | null {
+  if (!opponent) return null;
+  const team = nflTeamCode(opponent);
+  // Unknown side reads as the neutral form rather than guessing a venue: "BAL"
+  // alone is true, and "@ BAL" invents a road trip.
+  if (home == null) return team;
+  return home ? `vs ${team}` : `@ ${team}`;
+}
+
+/** The same fixture, spoken in full for a screen reader. */
+export function fixtureSpoken(opponent: string | null, home: boolean | null): string | null {
+  if (!opponent) return null;
+  const team = nflTeamName(opponent) ?? nflTeamCode(opponent);
+  if (home == null) return `against ${team}`;
+  return home ? `at home against ${team}` : `away against ${team}`;
+}

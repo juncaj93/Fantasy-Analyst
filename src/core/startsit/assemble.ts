@@ -28,11 +28,11 @@
  * own — the decision is what is here.
  */
 
-import { recommendLineup, type LineupRecommendation } from './lineup.ts';
+import { fixtureOf, recommendLineup, type LineupRecommendation, type SlotFixture } from './lineup.ts';
 import type { OpponentExposure } from './correlation.ts';
 import { weeklyProjection, type ProjectableEvaluation, type ProjectionSource } from './projection.ts';
 import { weeklyIntelligence, type WeeklyIntelligence } from '../contracts/integration.ts';
-import type { StartSitInput } from './engine.ts';
+import type { StartSitEvaluation, StartSitInput } from './engine.ts';
 import type { StartSitMode } from './mode.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 
@@ -41,6 +41,17 @@ export type AssembledEvaluation<T extends { playerId: string } & ProjectableEval
   Partial<WeeklyIntelligence> & {
     projection: number | null;
     projectionSource: ProjectionSource | null;
+    /**
+     * Who he plays, and what that defence gives up to his role.
+     *
+     * Attached here rather than to the lineup *slot*, for two reasons. Every
+     * player passes through `enrich` — starters, bench and the undecidable —
+     * so a bench row gets the same chip as a starting one from the same field.
+     * And a slot on a `swap` is about two men at once, so a fixture hanging off
+     * it would have to pick one and would pick the wrong one half the time.
+     * Hanging it off the player means the row shows whoever the row is about.
+     */
+    fixture: SlotFixture | null;
   };
 
 export interface LineupAssemblyRequest {
@@ -141,6 +152,7 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
         ...(extra ?? {}),
         projection: projected.points,
         projectionSource: projected.source,
+        fixture: fixtureOf(evaluation as unknown as StartSitEvaluation),
       };
     });
 

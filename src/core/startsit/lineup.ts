@@ -67,6 +67,26 @@ import { assessReplacement, type ReplacementAssessment } from './replacement.ts'
 import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { weeklyProjection, type ProjectionSource } from './projection.ts';
+import type { MatchupAssessment } from './defense.ts';
+import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
+
+/** One row's opponent, and what the defence model makes of it. */
+export interface SlotFixture {
+  /** `BAL`, canonical. Null is impossible here — a fixture with no opponent is not one. */
+  opponent: string;
+  /** True at home, false away, null when the fixture list did not say. */
+  home: boolean | null;
+  /** `vs BAL` / `@ BAL` / `BAL`, already written. */
+  label: string;
+  /** The same thing in words, for a screen reader. */
+  spoken: string;
+  /** `assessMatchup`'s verdict for this player's position and role. */
+  rating: MatchupAssessment['rating'];
+  /** Its own sentence about why, for the tooltip. Never paraphrased here. */
+  note: string;
+  /** Player-games behind the rating. Zero when nothing has been seen yet. */
+  sample: number;
+}
 
 export interface LineupSlot {
   /** Slot label as the league defines it: 'QB', 'RB', 'FLEX', 'SUPER_FLEX'. */
@@ -924,6 +944,31 @@ function buildSlots(shape: RosterShape): SlotSpec[] {
 }
 
 /**
+ * One player's fixture, or null when there is not one to describe.
+ *
+ * Null on a bye, on a week the fixture list has not reached, and for an empty
+ * slot — three different absences that all mean the same thing to a chip: do
+ * not draw one. The alternative, a chip reading `vs —`, is a row asserting
+ * that a game exists and declining to say which.
+ */
+export function fixtureOf(evaluation: StartSitEvaluation | null | undefined): SlotFixture | null {
+  const opponent = evaluation?.opponent ?? null;
+  if (!evaluation || !opponent) return null;
+  const label = fixtureLabel(opponent, evaluation.home);
+  const spoken = fixtureSpoken(opponent, evaluation.home);
+  if (!label || !spoken) return null;
+  return {
+    opponent,
+    home: evaluation.home,
+    label,
+    spoken,
+    rating: evaluation.matchup.rating,
+    note: evaluation.matchup.display,
+    sample: evaluation.matchup.sample,
+  };
+}
+
+/**
  * The rostered players an empty slot could have used, and why it did not.
  *
  * Ordered so the first one is the one worth printing: the player Sleeper
@@ -944,7 +989,7 @@ function vacanciesFor(
       playerId: e.playerId,
       name: e.name,
       position: e.position,
-      ...unscorableReason(e, lockedIds.has(e.playerId)),
+      ...unscorableReason(e, lockedIds.has(e.playerId), published?.get(e.playerId) ?? null),
       alreadyStarting: currentStarters.has(e.playerId),
       publishedProjection: published?.get(e.playerId) ?? null,
     }))
@@ -963,12 +1008,38 @@ function vacanciesFor(
 function unscorableReason(
   evaluation: StartSitEvaluation,
   locked: boolean,
+  publishedProjection: number | null,
 ): { reason: string; detail: string | null } {
   if (evaluation.ruledOut) {
     const designation = evaluation.injury.designation === 'ir' ? 'on injured reserve' : evaluation.injury.designation;
     return { reason: `is ${designation}, so he is not a playable starter`, detail: null };
   }
   if (locked) return { reason: 'has already kicked off', detail: null };
+
+  /*
+   * A figure is on the row, so the row may not say there is no figure.
+   *
+   * Reported on 15 September 2026: Jacksonville's line read `6.6` on the
+   * trailing edge and "can't be scored this week, no game line for this
+   * defense" underneath it, in the same row, at the same time. Both halves
+   * were locally true and together they were nonsense.
+   *
+   * They came from two different questions. `recommendLineup` ranks on this
+   * app's own market number and nothing else — that wall is the whole reason
+   * the borrowed feed is allowed on the screen at all — so a defence no book
+   * has priced genuinely cannot be *ranked*. The display layer, meanwhile,
+   * had Rotowire's number and printed it. The word "scored" was doing double
+   * duty for "ranked" and "given a number", which are not the same thing.
+   *
+   * So where a published figure exists the sentence explains it instead of
+   * denying it, and the model's own cause is still carried underneath.
+   */
+  if (publishedProjection != null && Number.isFinite(publishedProjection)) {
+    return {
+      reason: 'has no betting market this week, so the figure beside him is Rotowire’s',
+      detail: evaluation.dst?.reasons[0] ?? evaluation.expectation.notes[0] ?? null,
+    };
+  }
 
   /*
    * The model's own words, wherever it left any.

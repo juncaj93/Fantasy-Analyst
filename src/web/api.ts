@@ -1165,6 +1165,14 @@ export interface RosterPlayer {
 }
 
 export interface StartSitEvaluation {
+  /**
+   * Who he plays this week, and the defence model's verdict on it.
+   *
+   * Optional, so a body from an older worker still renders: this app caches
+   * responses offline and a fresh bundle routinely gets one. Absent means no
+   * fixture was sent, and the row draws no chip rather than an empty one.
+   */
+  fixture?: SlotFixture | null;
   playerId: string;
   name: string;
   position: string;
@@ -1338,6 +1346,31 @@ export interface LineupSlot {
    * nobody", which is the claim that made this field necessary.
    */
   vacancy?: SlotVacancy[];
+  /**
+   * Who he plays this week, and what that defence gives up to his role.
+   *
+   * Optional, so a body from an older worker still renders — this app caches
+   * responses offline and a fresh bundle routinely gets one. Absent is read as
+   * "no fixture was sent", and the row draws no chip rather than an empty one.
+   */
+  fixture?: SlotFixture | null;
+}
+
+/** One row's opponent, and the defence model's verdict on it. */
+export interface SlotFixture {
+  opponent: string;
+  home: boolean | null;
+  /** `vs BAL` / `@ BAL` / `BAL`, written by core so both screens agree. */
+  label: string;
+  spoken: string;
+  /**
+   * `assessMatchup`'s own rating, never a second scale invented for the screen.
+   * `insufficient_data` is the ordinary answer in September and means the chip
+   * carries no colour, because there is nothing to colour it with.
+   */
+  rating: 'soft' | 'neutral' | 'tough' | 'insufficient_data';
+  note: string;
+  sample: number;
 }
 
 /** One rostered player an empty slot could not use, and the reason. */

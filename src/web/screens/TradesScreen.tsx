@@ -322,13 +322,15 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         shipped switched off and were returning a board that looked exactly
         like a quiet market.
 
-        `warn` rather than `info` because it is actionable by exactly one
-        person, and printed whether or not there are offers — an upgrade board
-        with the arbitrage lane dark is still missing half of what it does.
+        The sentence arrives whole rather than being assembled here, because
+        the three reasons need different verbs: nothing imported, an import
+        that resolved nobody, and — the ordinary one in September — not enough
+        games played yet to measure anybody against their preseason number.
+        Only the first two are anyone's fault.
       */}
       {smart?.arbitrageOff ? (
         <StatusRow tone="warn" data-testid="smart-trades-arbitrage-off">
-          Buy-low and sell-high are switched off. {smart.arbitrageOff}
+          {smart.arbitrageOff}
         </StatusRow>
       ) : null}
 

@@ -231,11 +231,36 @@ export const MIN_PROJECTED_SHARE = 0.5;
  */
 export const MAX_COVERAGE_GAP = 0.2;
 
-/** The share of one side's starting slots the engine could actually score. */
-function coverage(starters: PlayerDistribution[], side: MatchupSide): number {
+/**
+ * How much of one side the engine could actually score, and how much there was.
+ *
+ * The count is carried beside the share because a share alone cannot tell two
+ * very different states apart. `starters: 0` divided into a share is 0, and a
+ * 0 share printed as a sentence reads "only 0% of your opponent's starters
+ * could be projected" — which is what the Matchup screen said on the Tuesday of
+ * week 2, when the truth was that the opponent had not picked a lineup yet.
+ *
+ * One of those is a gap in this app's data and the other is a gap in somebody
+ * else's team, and telling a reader the first when it is the second sends him
+ * looking for a fault that is not there.
+ */
+interface SideCoverage {
+  /** Starting slots on this side that Sleeper has a player in. */
+  starters: number;
+  /** How many of those the engine could put a number on. */
+  projected: number;
+  /** `projected / starters`, and 0 when there are no starters at all. */
+  share: number;
+}
+
+function coverageOf(starters: PlayerDistribution[], side: MatchupSide): SideCoverage {
   const ours = starters.filter((d) => d.side === side);
-  if (ours.length === 0) return 0;
-  return ours.filter((d) => !d.projectionUnknown).length / ours.length;
+  const projected = ours.filter((d) => !d.projectionUnknown).length;
+  return {
+    starters: ours.length,
+    projected,
+    share: ours.length === 0 ? 0 : projected / ours.length,
+  };
 }
 
 /**
@@ -330,8 +355,8 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
    * Do not "fix" it by lowering the threshold: the share is what stops a
    * confident wrong forecast, and the coverage is what is actually missing.
    */
-  const mineCoverage = coverage(startingDistributions, 'mine');
-  const theirsCoverage = coverage(startingDistributions, 'theirs');
+  const mineCoverage = coverageOf(startingDistributions, 'mine');
+  const theirsCoverage = coverageOf(startingDistributions, 'theirs');
   /*
    * …and the second test, which is about the comparison rather than the sides.
    *
@@ -487,18 +512,34 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
  * Written in slots rather than percentages. "6 of 10" is a thing on the screen
  * he can count; "60% coverage" is a statistic about it.
  */
-function coverageRefusal(mine: number, theirs: number): string | null {
+function coverageRefusal(mine: SideCoverage, theirs: SideCoverage): string | null {
   const thin = (share: number): string => `${Math.round(share * 100)}%`;
-  if (mine < MIN_PROJECTED_SHARE) {
-    return `Only ${thin(mine)} of your starters could be projected, which is too few to forecast from.`;
+
+  /*
+   * Nobody in the slots comes first, and is a different sentence entirely.
+   *
+   * Early in a week Sleeper reports a matchup before either manager has set a
+   * lineup, so the starting slots come back empty. That is not thin coverage —
+   * there is nothing to cover — and the share-based sentences below would
+   * report it as this app failing to price a roster that does not exist yet.
+   */
+  if (theirs.starters === 0) {
+    return 'Your opponent has not set a lineup for this week yet, so there is nothing to forecast against.';
   }
-  if (theirs < MIN_PROJECTED_SHARE) {
-    return `Only ${thin(theirs)} of your opponent's starters could be projected, which is too few to forecast from.`;
+  if (mine.starters === 0) {
+    return 'You have not set a lineup for this week yet, so there is nothing to forecast from.';
   }
-  if (Math.abs(mine - theirs) > MAX_COVERAGE_GAP) {
-    const behind = mine > theirs ? "your opponent's" : 'your';
+
+  if (mine.share < MIN_PROJECTED_SHARE) {
+    return `Only ${thin(mine.share)} of your starters could be projected, which is too few to forecast from.`;
+  }
+  if (theirs.share < MIN_PROJECTED_SHARE) {
+    return `Only ${thin(theirs.share)} of your opponent's starters could be projected, which is too few to forecast from.`;
+  }
+  if (Math.abs(mine.share - theirs.share) > MAX_COVERAGE_GAP) {
+    const behind = mine.share > theirs.share ? "your opponent's" : 'your';
     return (
-      `${thin(mine)} of your starters and ${thin(theirs)} of your opponent's could be projected. ` +
+      `${thin(mine.share)} of your starters and ${thin(theirs.share)} of your opponent's could be projected. ` +
       `An unprojected starter counts as zero, so ${behind} total would be understated and the two are not comparable.`
     );
   }
