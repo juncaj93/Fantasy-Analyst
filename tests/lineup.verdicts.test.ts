@@ -58,7 +58,7 @@ function verdictsFor(over: { starterIds?: string[]; starterSlotIds?: (string | n
     starterIds,
     ...(over.starterSlotIds ? { starterSlotIds: over.starterSlotIds } : {}),
     slots: lineup.slots,
-    suggestedSwapIns: new Set(lineup.swaps.map((s) => s.inPlayerId)),
+    suggestedSwaps: lineup.swaps,
     positionOf,
   });
 }
@@ -183,7 +183,7 @@ describe('a difference the optimiser would not suggest', () => {
       rosterPositions: POSITIONS,
       starterIds: starters,
       slots: lineup.slots,
-      suggestedSwapIns: new Set<string>(),
+      suggestedSwaps: [],
       positionOf,
     });
 
@@ -291,30 +291,52 @@ describe('placing a lineup by eligibility', () => {
  * already starting, `buildSwaps` proposes nothing, so both rows read `keep`
  * while carrying each other's id.
  *
- * So the property is stated about the crossed row itself: the verdict is `keep`,
- * the two ids genuinely differ, and the subject is still the man Sleeper has in
- * the slot — the one whose name is printed and whose card must open.
+ * Since the pairing was rewritten to bind on identity, `buildLineupVerdicts` no
+ * longer *produces* that shape — a man both lineups start is bound to his own
+ * row, so a `keep` row cannot carry somebody else's id. That is asserted below
+ * as the stronger statement it is. The rule itself is then exercised against a
+ * hand-built row, because a guard tested only through a shape the code can no
+ * longer make is a guard that has quietly stopped being tested.
  */
 describe('whose row it is', () => {
   /** Two flex men, in the opposite flexes from the way the optimiser ranks them. */
   const CROSSED = ['qb1', 'rb1', 'rb2', 'wr1', 'wr2', 'wr3', 'fx2', 'fx1', 'def1'];
 
-  it('crosses the two flex slots without calling either one a swap', () => {
+  it('no longer crosses the two flex slots at all', () => {
     const flexes = verdictsFor({ starterSlotIds: CROSSED }).filter((r) => r.slot === 'FLEX');
 
-    // The precondition for the defect, asserted so the test cannot quietly stop
-    // exercising it: two `keep` rows whose two ids are not the same player.
+    /*
+     * The old behaviour, for the record: `['keep','keep']` with
+     * currentPlayerId `['fx2','fx1']` against recommendedPlayerId
+     * `['fx1','fx2']` — each row holding the other man's numbers. Both rows now
+     * name one player, which is what makes the projection printed on a row that
+     * player's own.
+     */
     expect(flexes.map((r) => r.verdict)).toEqual(['keep', 'keep']);
     expect(flexes.map((r) => r.currentPlayerId)).toEqual(['fx2', 'fx1']);
-    expect(flexes.map((r) => r.recommendedPlayerId)).toEqual(['fx1', 'fx2']);
+    expect(flexes.map((r) => r.recommendedPlayerId)).toEqual(['fx2', 'fx1']);
   });
 
-  it('names Sleeper’s own man as the subject of each crossed row', () => {
+  it('carries the projection of the man whose row it is', () => {
     const flexes = verdictsFor({ starterSlotIds: CROSSED }).filter((r) => r.slot === 'FLEX');
+    const lineup = recommendLineup(roster(), SHAPE, PROFILE, { currentStarterIds: SLEEPER_LINEUP });
+    const projectionOf = new Map(lineup.slots.map((s) => [s.playerId, s.projection]));
 
-    // Before the fix the tap read `recommendedPlayerId ?? currentPlayerId` and
-    // this came back ['fx1', 'fx2'] — each row opening the other row's player.
-    expect(flexes.map(verdictSubjectId)).toEqual(['fx2', 'fx1']);
+    for (const row of flexes) {
+      expect(row.projection).toBe(projectionOf.get(row.currentPlayerId));
+    }
+  });
+
+  it('still leads a crossed row with Sleeper’s own man, wherever one comes from', () => {
+    // The rule itself, against the shape rather than against a lineup: before
+    // the fix the tap read `recommendedPlayerId ?? currentPlayerId` and opened
+    // the other row's player.
+    expect(
+      verdictSubjectId({ verdict: 'keep', currentPlayerId: 'fx2', recommendedPlayerId: 'fx1' }),
+    ).toBe('fx2');
+    expect(
+      verdictSubjectId({ verdict: 'swap', currentPlayerId: 'fx2', recommendedPlayerId: 'fx1' }),
+    ).toBe('fx2');
   });
 
   it('leads a fill with the recommendation, because there is no incumbent', () => {
