@@ -1263,4 +1263,42 @@ test.describe('the row and the card are about the same player', () => {
     const ids = await chosen.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
     expect(new Set(ids)).toEqual(new Set([incumbent, challenger]));
   });
+
+  test('answers the question it was opened with, without a second tap', async ({ page }) => {
+    /*
+     * Tapping `Start A over B` and then being asked to tap `Compare 2 players`
+     * is a step with nothing in it: the reader chose nobody, the sheet chose
+     * both, and the button's only job was to confirm a selection nobody made.
+     */
+    const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
+    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+    await swap.click();
+
+    const order = page.getByTestId('comparison-order');
+    await expect(order).toBeVisible();
+    await expect(order.locator('li')).toHaveCount(2);
+  });
+
+  test('hands the chips back the moment the reader changes one', async ({ page }) => {
+    /*
+     * Auto-running is a courtesy on open, not a mode. Removing a chip clears
+     * the answer and puts the button back, which is what lets a comparison be
+     * re-aimed without closing and re-opening the sheet.
+     */
+    const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
+    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+    await swap.click();
+    await expect(page.getByTestId('comparison-order')).toBeVisible();
+
+    await page.getByTestId('compare-chosen').first().click();
+    await expect(page.getByTestId('comparison-order')).toHaveCount(0);
+    await expect(page.getByTestId('compare-run')).toBeDisabled();
+  });
+
+  test('still waits to be asked when it was opened with nobody chosen', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    await expect(page.getByTestId('comparison-order')).toHaveCount(0);
+    await expect(page.getByTestId('compare-run')).toBeDisabled();
+  });
 });

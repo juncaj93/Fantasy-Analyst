@@ -56,6 +56,26 @@ import type { DropCost, ProtectionReason, WaiverReason } from './types.ts';
 export const PROTECTED_LINEUP_COST = 2;
 
 /**
+ * How early a player had to be drafted before a September waiver run may not cut him.
+ *
+ * The top eight rounds of a ten-team league — the players a room spent real
+ * draft capital on. Below that the pick is not evidence of much; above it, a
+ * manager who is about to cut one is nearly always reacting to one bad
+ * afternoon, which is the thing this exists to stop.
+ */
+export const EARLY_PICK_RANK = 80;
+
+/**
+ * The week the draft stops being the best thing known about a player.
+ *
+ * Six, the same count {@link DURABLE_FULL_WEIGHT_GAMES} uses for the same
+ * reason: by then a sixth of a season of real production says more than an
+ * August ranking does, and a player who is genuinely finished should be
+ * cuttable. Before then the draft is the steadier evidence and this holds.
+ */
+export const EARLY_PICK_WEEKS = 6;
+
+/**
  * Rank every rostered player by what cutting him would cost, given one add.
  *
  * Cheapest first — the drop the plan should prefer is `[0]`. Protected players
@@ -152,6 +172,8 @@ export function rankDropsFor(opts: {
 
     if (protection === 'in_lineup') {
       reasons.push({ code: 'protected_in_lineup', playerId: dropId, value: lineupCost });
+    } else if (protection === 'early_pick') {
+      reasons.push({ code: 'protected_early_pick', playerId: dropId, value: null });
     } else if (protection === 'reserve_slot') {
       reasons.push({ code: 'protected_reserve_slot', playerId: dropId, value: null });
     } else if (protection === 'core_value') {
@@ -198,7 +220,36 @@ export function rankDropsFor(opts: {
     });
   }
 
-  return costs.sort(compareDrops);
+  const ranked = costs.sort(compareDrops);
+
+  /*
+   * A protection that can cover the whole roster is not a protection.
+   *
+   * `early_pick` is the only one of the five that could plausibly apply to
+   * every rostered player at once — a room that drafted well has a board full
+   * of early picks — and when it does, the waiver lane goes silent with no
+   * cause a reader can see. That is a worse failure than the one it prevents:
+   * the point was never "never cut a good player", it was "do not cut a good
+   * player *ahead of a worse one*".
+   *
+   * So it yields when it is the only thing left standing, and the cheapest of
+   * them comes back onto the board. Nothing else yields: a man in the lineup,
+   * one on an injured-reserve slot and one nobody can score are all facts about
+   * the roster rather than judgements about a player, and none of them is
+   * negotiable because the alternative is inconvenient.
+   */
+  const anyEligible = ranked.some((c) => c.protection == null && c.cost != null);
+  if (!anyEligible) {
+    const released = ranked.find((c) => c.protection === 'early_pick' && c.cost != null);
+    if (released) {
+      released.protection = null;
+      released.reasons = released.reasons.filter((r) => r.code !== 'protected_early_pick');
+      released.reasons.push({ code: 'drop_outside_lineup', playerId: released.playerId, value: null });
+      return ranked.sort(compareDrops);
+    }
+  }
+
+  return ranked;
 }
 
 /**
@@ -239,6 +290,29 @@ function protectionFor(args: {
    */
   if (plannerExcluded(simulation.positionOf.get(dropId))) return 'core_value';
   if (inLineupAfterAdd) return 'in_lineup';
+  /*
+   * A player the room drafted early is not cut in September.
+   *
+   * The durable-value pass already exists to stop exactly this, and on 16
+   * September it did not fire for the two players reported — because this
+   * league's preseason capture has 154 rows and neither of them is in it:
+   *
+   *     Mark Andrews          draftRank 122.2   preseason NONE
+   *     Rhamondre Stevenson   draftRank  76.4   preseason NONE
+   *
+   * So `durableValue` fell through to in-season production, one game had been
+   * played, and a bench player's standing worth was one bad afternoon again.
+   * The capture is the better evidence where it exists and it is not going to
+   * cover everybody; the draft ranking covers the whole board and is the other
+   * half of what "preseason ADP or projection should carry real weight early"
+   * asks for.
+   *
+   * Categorical rather than a number, because converting a draft slot into
+   * points needs a curve nobody here has fitted — and "not yours to cut" is
+   * what the reader actually needs said. It expires; see
+   * {@link EARLY_PICK_WEEKS}.
+   */
+  if (simulation.earlyPick.has(dropId)) return 'early_pick';
   if (lineupCost >= PROTECTED_LINEUP_COST) return 'core_value';
   return null;
 }

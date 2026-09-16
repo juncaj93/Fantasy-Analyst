@@ -84,7 +84,7 @@ export {
   BARE_POSITION_COST,
   PLANNER_EXCLUDED_POSITIONS,
 } from './rosterState.ts';
-export { rankDropsFor, eligibleDrops, PROTECTED_LINEUP_COST } from './dropCost.ts';
+export { rankDropsFor, eligibleDrops, PROTECTED_LINEUP_COST, EARLY_PICK_RANK, EARLY_PICK_WEEKS } from './dropCost.ts';
 export { pairsForTarget, viablePairs } from './pairs.ts';
 export { planClaims, RELATION_BANDS } from './claimPlanner.ts';
 export { buildOutcomes } from './outcomes.ts';
@@ -131,6 +131,8 @@ export function planWaiverClaims(input: WaiverPlannerInput): WaiverPlan {
     profile: input.profile,
     held: input.held,
     ...(input.preseasonPoints === undefined ? {} : { preseasonPoints: input.preseasonPoints }),
+    ...(input.draftRankOf === undefined ? {} : { draftRankOf: input.draftRankOf }),
+    ...(input.week === undefined ? {} : { week: input.week }),
     reserveIds: input.reserveIds,
     now: input.now,
   });

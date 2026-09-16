@@ -260,6 +260,12 @@ export async function captureWaiverSnapshot(
         rosteredIds: [...input.request.rosteredIds],
         currentStarterIds: input.request.currentStarterIds,
         reserveIds: input.request.reserveIds,
+        ...(input.request.preseasonPoints === undefined
+          ? {}
+          : { preseasonPoints: Object.fromEntries(input.request.preseasonPoints) }),
+        ...(input.request.draftRankOf === undefined
+          ? {}
+          : { draftRankOf: Object.fromEntries(input.request.draftRankOf) }),
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -343,6 +349,12 @@ export async function replayWaiverSnapshot(
     rosteredIds: new Set(inputs.rosteredIds),
     currentStarterIds: inputs.currentStarterIds,
     reserveIds: inputs.reserveIds,
+    ...(inputs.preseasonPoints === undefined
+      ? {}
+      : { preseasonPoints: new Map(Object.entries(inputs.preseasonPoints)) }),
+    ...(inputs.draftRankOf === undefined
+      ? {}
+      : { draftRankOf: new Map(Object.entries(inputs.draftRankOf)) }),
     rosters: inputs.rosters,
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,

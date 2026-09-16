@@ -56,6 +56,7 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../
 import { recommendLineup } from '../../startsit/lineup.ts';
 import { valueOfSlot, type HeldPlayer } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
+import { EARLY_PICK_RANK, EARLY_PICK_WEEKS } from './dropCost.ts';
 import type { RosterShape, ScoringProfile } from '../../sleeper/scoring.ts';
 
 /**
@@ -195,6 +196,17 @@ export interface RosterSimulationInput {
    * done the valuation. Absent restores the previous behaviour exactly.
    */
   preseasonPoints?: ReadonlyMap<string, number>;
+  /**
+   * Where this room's draft took each player, by player id.
+   *
+   * Overall pick number or ADP — smaller is earlier. Read for one purpose: a
+   * player taken inside {@link EARLY_PICK_RANK} is not an ordinary waiver cut
+   * in the first weeks of a season. Absent leaves the cut order exactly as it
+   * was.
+   */
+  draftRankOf?: ReadonlyMap<string, number>;
+  /** 1-based. Decides whether the draft still outranks production. */
+  week?: number;
   reserveIds?: readonly string[];
   now?: string | Date;
 }
@@ -207,6 +219,15 @@ export interface RosterSimulation {
   valueOf: ReadonlyMap<string, number>;
   /** Players the engine could not score. Never cut, never counted as depth. */
   unscored: ReadonlySet<string>;
+  /**
+   * Players this room drafted early enough that a September claim may not cut them.
+   *
+   * Empty whenever no draft ranking has been imported, or once the season has
+   * accumulated enough weeks for production to be the better evidence — see
+   * `EARLY_PICK_RANK` and `EARLY_PICK_WEEKS` in `dropCost.ts`. Empty is the
+   * previous behaviour exactly.
+   */
+  earlyPick: ReadonlySet<string>;
   /** Standing worth of holding each player, from the existing bench model. */
   slotValueOf: ReadonlyMap<string, number>;
   reserveIds: ReadonlySet<string>;
@@ -262,6 +283,20 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
   }
 
   const reserveIds = new Set(input.reserveIds ?? []);
+
+  /*
+   * Who the draft still speaks for.
+   *
+   * Both halves have to hold: a ranking has to exist for him, and the season
+   * has to be young enough that it is still the better evidence. With no
+   * ranking imported this set is empty and nothing downstream changes.
+   */
+  const earlyPick = new Set<string>();
+  if (input.draftRankOf && (input.week ?? 1) <= EARLY_PICK_WEEKS) {
+    for (const [playerId, rank] of input.draftRankOf) {
+      if (Number.isFinite(rank) && rank <= EARLY_PICK_RANK) earlyPick.add(playerId);
+    }
+  }
 
   /*
    * The starting slots each position can legally occupy.
@@ -491,6 +526,7 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
     nameOf,
     valueOf,
     unscored,
+    earlyPick,
     slotValueOf,
     reserveIds,
     baseline,

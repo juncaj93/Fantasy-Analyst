@@ -38,7 +38,7 @@ import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
 import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION } from '../../core/roster/freeAgents.ts';
-import { AdpRepo } from '../repos/adp.ts';
+import { AdpRepo, type AdpValue } from '../repos/adp.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import {
@@ -449,10 +449,15 @@ export async function gatherWaiverInputs(
   for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
 
   const players = await new PlayerRepo(db).listAll();
-  const candidateIds = await boundedFreeAgents(db, {
+  /*
+   * Read once and used twice: to bound the wire scan, and to say who this room
+   * drafted early enough that a September claim may not cut him.
+   */
+  const ranks = await draftRanks(db);
+  const candidateIds = boundedFreeAgentIds(players, {
     rosteredIds,
     startable: startablePositions(shape),
-    players,
+    ranks,
   });
 
   /*
@@ -543,6 +548,7 @@ export async function gatherWaiverInputs(
       candidateInputs,
       rosteredIds,
       preseasonPoints,
+      draftRankOf: draftRankNumbers(ranks),
       currentStarterIds: mine.starterIds,
       reserveIds: mine.reserveIds,
       rosters,
@@ -605,11 +611,40 @@ export async function boundedFreeAgents(
   db: Database,
   opts: { rosteredIds: Set<string>; startable: Set<string>; players?: CanonicalPlayer[] },
 ): Promise<string[]> {
-  const adpRepo = new AdpRepo(db);
-  const snapshot = await adpRepo.latestPlatformSnapshot();
-  const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
+  const ranks = await draftRanks(db);
   const players = opts.players ?? (await new PlayerRepo(db).listAll());
   return boundedFreeAgentIds(players, { ...opts, ranks });
+}
+
+/**
+ * Where the imported ranking puts every player it covers.
+ *
+ * Two reads and a cache-free map, shared by the free-agent bound and the waiver
+ * cut order so the two cannot end up disagreeing about where a player went.
+ * Empty whenever nothing has been imported, which both callers treat as "no
+ * ranking known" rather than as "everybody went late".
+ */
+export async function draftRanks(db: Database): Promise<Map<string, AdpValue>> {
+  const adpRepo = new AdpRepo(db);
+  const snapshot = await adpRepo.latestPlatformSnapshot();
+  return snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map<string, AdpValue>();
+}
+
+/**
+ * The same ranking as one number per player, for the cut order.
+ *
+ * ADP first and the published rank behind it, because a board that carries both
+ * agrees with itself and one that carries only a rank still answers. Rows the
+ * import could not resolve to a player carry no number and are simply absent,
+ * which is the honest state: an unresolved row is not evidence about anybody.
+ */
+export function draftRankNumbers(ranks: ReadonlyMap<string, AdpValue>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [playerId, value] of ranks) {
+    const rank = value.adp ?? value.rank;
+    if (rank != null && Number.isFinite(rank)) out.set(playerId, rank);
+  }
+  return out;
 }
 
 /**
