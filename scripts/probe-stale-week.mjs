@@ -139,19 +139,44 @@ if (lineup.status !== 200) {
 }
 
 // ----------------------------------------------------------- 4. the matchup
+/*
+ * Alex, 16 September 2026: the opponent DOES have a full week 2 lineup, seen
+ * in Sleeper's own app for this exact matchup. So `theirs starters=0` is not
+ * the opponent being slow, it is this app losing him — and the sentence #269
+ * shipped ("your opponent has not set a lineup for this week yet") is a false
+ * claim stated confidently, which is worse than the confusing 0% it replaced.
+ *
+ * The discriminator printed below is bench-versus-starters. If the opponent's
+ * bench has players and his slots do not, the roster reached us and the
+ * *starting* flag or the slot mapping is wrong. If neither has anybody, he was
+ * lost earlier — the wrong matchup row, or a roster that did not resolve.
+ */
 console.log('\n=== 4. the matchup: coverage, phase and the three projection tiers ===');
 const matchup = await get(`/api/leagues/${league.id}/matchup`);
 if (matchup.status !== 200) {
   console.log(`  GET matchup -> ${matchup.status} ${matchup.text ?? ''}`);
 } else {
   const f = matchup.json?.forecast ?? null;
-  console.log(`  week             : ${matchup.json?.week}  found=${matchup.json?.found}`);
+  console.log(`  week             : ${matchup.json?.week}  found=${matchup.json?.found}  cached=${matchup.json?.cached}`);
   if (!f) {
     console.log(`  no forecast: ${matchup.json?.reason ?? '(no reason given)'}`);
   } else {
     console.log(`  degraded         : ${f.degraded}  reason=${f.degradedReason ?? '-'}`);
-    console.log(`  mine             : proj=${f.teams?.mine?.projectedFinal} win=${f.teams?.mine?.winProbability}`);
-    console.log(`  theirs           : proj=${f.teams?.theirs?.projectedFinal}`);
+    console.log(`  mine             : roster=${f.teams?.mine?.rosterId} "${f.teams?.mine?.name}" proj=${f.teams?.mine?.projectedFinal} actual=${f.teams?.mine?.actual}`);
+    console.log(`  theirs           : roster=${f.teams?.theirs?.rosterId} "${f.teams?.theirs?.name}" proj=${f.teams?.theirs?.projectedFinal} actual=${f.teams?.theirs?.actual}`);
+
+    console.log(`  slot rows        : ${(f.slots ?? []).length}`);
+    for (const row of f.slots ?? []) {
+      console.log(
+        `      ${String(row.slot ?? row.key ?? '?').padEnd(6)} mine=${String(row.mine?.name ?? '—').slice(0, 18).padEnd(19)} theirs=${String(row.theirs?.name ?? '—').slice(0, 18)}`,
+      );
+    }
+    console.log(`  bench mine       : ${(f.bench?.mine ?? []).length}`);
+    console.log(`  bench theirs     : ${(f.bench?.theirs ?? []).length}   <-- if this is >0 while the slots are empty, the roster arrived and the slot mapping lost him`);
+    for (const p of (f.bench?.theirs ?? []).slice(0, 6)) {
+      console.log(`      ${String(p.name).slice(0, 20).padEnd(21)} ${String(p.position ?? '').padEnd(4)} slot=${p.slot ?? 'null'} starting=${p.starting} proj=${p.projectedFinal ?? '—'}`);
+    }
+
     const all = [
       ...(f.slots ?? []).flatMap((r) => [r.mine, r.theirs]),
       ...(f.bench?.mine ?? []),
@@ -159,12 +184,12 @@ if (matchup.status !== 200) {
     ].filter(Boolean);
     const tier = (p) => (p.projectionEstimated ? 'preseason' : p.projectionBorrowed ? 'rotowire' : p.projectedFinal == null ? 'NONE' : 'market');
     for (const side of ['mine', 'theirs']) {
-      const rows = all.filter((p) => p.side === side && p.starting);
-      const counts = rows.reduce((acc, p) => ((acc[tier(p)] = (acc[tier(p)] ?? 0) + 1), acc), {});
-      const phases = rows.reduce((acc, p) => ((acc[p.phase] = (acc[p.phase] ?? 0) + 1), acc), {});
-      console.log(`  ${side.padEnd(7)} starters=${rows.length}  tiers=${JSON.stringify(counts)}  phases=${JSON.stringify(phases)}  locked=${rows.filter((p) => p.locked).length}`);
+      const rows = all.filter((p) => p.side === side);
+      const starting = rows.filter((p) => p.starting);
+      console.log(
+        `  ${side.padEnd(7)} players=${rows.length} starting=${starting.length}  tiers=${JSON.stringify(starting.reduce((a, p) => ((a[tier(p)] = (a[tier(p)] ?? 0) + 1), a), {}))}`,
+      );
     }
-    console.log('  --- tiers: "market" should be week 2 lines; "NONE" means all three missed ---');
   }
 }
 
@@ -183,17 +208,45 @@ if (waivers.status !== 200) {
    * lanes are `upgrades`, `valueAdds` and `unknowns`.
    */
   const w = waivers.json ?? {};
-  const lanes = ['upgrades', 'valueAdds', 'unknowns'];
-  for (const lane of lanes) {
-    const rows = w[lane] ?? [];
-    console.log(`  ${lane.padEnd(10)} : ${rows.length}`);
-    for (const c of rows.slice(0, 5)) {
+  /*
+   * `upgrades` is slot-shaped: each entry is a starting slot with a `candidates`
+   * list under it, not a player. Printing it as a player is how the first three
+   * runs of this probe reported `undefined` and I read it as an empty lane.
+   *
+   * The slot's `need` is the thing item 1 turns on. `unfilled` sets the upgrade
+   * bar to zero, so any free agent with a positive score clears it — which is
+   * how a quarterback gets recommended over a quarterback who is already there.
+   */
+  for (const u of w.upgrades ?? []) {
+    console.log(
+      `  upgrade slot=${String(u.slot).padEnd(5)} need=${String(u.need).padEnd(9)} bar=${u.bar}` +
+        `  incumbent=${u.currentName ?? 'NOBODY'} (${u.currentScore ?? '—'})`,
+    );
+    for (const c of u.candidates ?? []) {
       console.log(
-        `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
-          ` score=${c.score ?? '?'} proj=${c.projection ?? '—'} shelf=${c.shelfLife ?? '-'} role=${c.role ?? '-'}`,
+        `      -> ${String(c.name).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+          ` score=${c.score ?? '?'} gain=${c.gain ?? '?'} flag=${c.statusFlag ?? '-'}`,
       );
+      for (const r of c.reasons ?? []) console.log(`           · ${r}`);
     }
   }
+  console.log(`  valueAdds  : ${(w.valueAdds ?? []).length}`);
+  for (const c of (w.valueAdds ?? []).slice(0, 6)) {
+    console.log(
+      `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+        ` score=${c.score ?? '?'} role=${JSON.stringify(c.role ?? null)}`,
+    );
+  }
+  console.log(`  unknowns   : ${(w.unknowns ?? []).length}`);
+
+  /*
+   * And the money, which is item 1's other half. "0 of 9 teams need QB" is a
+   * statement about rivals, and a bid of $7 into a market with no rivals in it
+   * is a different defect from recommending the player at all.
+   */
+  const plan = w.claimPlan ?? null;
+  if (plan) console.log(`  claimPlan  : ${JSON.stringify(plan).slice(0, 700)}`);
+  if (w.faab) console.log(`  faab       : ${JSON.stringify(w.faab).slice(0, 400)}`);
   console.log(`  considered       : ${w.considered ?? '?'}   skipped: ${w.skipped ?? '?'}   threshold: ${JSON.stringify(w.threshold ?? null)}`);
   console.log(`  pool             : ${JSON.stringify(w.pool ?? null)}`);
   console.log(`  headline         : ${w.headline ?? '(none)'}`);

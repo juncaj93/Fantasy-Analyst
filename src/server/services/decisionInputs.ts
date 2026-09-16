@@ -39,6 +39,8 @@ import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
 import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION } from '../../core/roster/freeAgents.ts';
 import { AdpRepo } from '../repos/adp.ts';
+import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
+import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import {
   buildRosterShape,
   buildScoringProfile,
@@ -463,7 +465,7 @@ export async function gatherWaiverInputs(
   const context = await buildStartSitContext(db);
   const week = base.nflState?.week ?? 1;
 
-  const [rosterInputs, candidateInputs, seasonMarkets] = await Promise.all([
+  const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints] = await Promise.all([
     startSitInputsFor(db, mine.playerIds, { context }),
     startSitInputsFor(db, candidateIds, { context }),
     /*
@@ -478,6 +480,25 @@ export async function gatherWaiverInputs(
     new SeasonMarketsRepo(db)
       .latestForPlayers(base.league.season, candidateIds)
       .catch(() => new Map<string, { market: SeasonMarketKey; line: number | null }[]>()),
+    /*
+     * This league's own preseason capture, for the roster and nobody else.
+     *
+     * It answers one question — what a bench player is worth to *hold* — and
+     * only a player already on the roster can be dropped, so the wire is not
+     * asked about. That scoping is the whole of the cost control: sixteen ids
+     * through the covering index migration 0041 added, behind one indexed
+     * lookup for the snapshot id.
+     *
+     * `latestId` rather than `latest`, for the reason its own doc comment
+     * gives: `latest` is built on `list`, which counts every projection row in
+     * the season to fill in an Admin screen's totals.
+     *
+     * Scoped by scoring key first, so a capture taken under other rules is
+     * absent rather than converted — the same rule the matchup screen's third
+     * projection tier keeps. Swallowed to an empty map, which restores the
+     * previous valuation exactly rather than degrading it.
+     */
+    preseasonPointsFor(db, base.league.season, profile, mine.playerIds),
   ]);
 
   /*
@@ -521,6 +542,7 @@ export async function gatherWaiverInputs(
       rosterInputs,
       candidateInputs,
       rosteredIds,
+      preseasonPoints,
       currentStarterIds: mine.starterIds,
       reserveIds: mine.reserveIds,
       rosters,
@@ -588,4 +610,41 @@ export async function boundedFreeAgents(
   const ranks = snapshot ? await adpRepo.valuesByPlayer(snapshot.id) : new Map();
   const players = opts.players ?? (await new PlayerRepo(db).listAll());
   return boundedFreeAgentIds(players, { ...opts, ranks });
+}
+
+/**
+ * This league's own preseason capture, for a named set of players.
+ *
+ * Two indexed statements and no table scan. `latestId` reads one row from the
+ * covering index `idx_preseason_projection_lookup` and never opens the snapshot
+ * table; `pointsForSnapshot` seeks `(snapshot_id, player_id, points)`, which
+ * migration 0041 made covering for exactly this shape of question.
+ *
+ * Scoped by scoring key before anything else. A capture taken under other rules
+ * is not a worse number for this reader, it is the wrong one at a plausible
+ * size, and a league with no matching capture correctly gets nothing.
+ *
+ * Every failure is an empty map rather than an exception, because the caller's
+ * fallback — the behaviour this app had before a durable value existed — is a
+ * working answer and not a broken one.
+ *
+ * Exported for `waivers.preseasonReadCost.test.ts`, which asserts the statement
+ * count and the scoping rather than the answer — an assertion about the map
+ * would pass just as happily against a read of the whole capture.
+ */
+export async function preseasonPointsFor(
+  db: Database,
+  season: string,
+  profile: ScoringProfile,
+  playerIds: readonly string[],
+): Promise<ReadonlyMap<string, number>> {
+  if (playerIds.length === 0) return new Map<string, number>();
+  try {
+    const repo = new PreseasonProjectionsRepo(db);
+    const snapshotId = await repo.latestId(season, scoringKey(projectionScoringFrom(profile)));
+    if (snapshotId == null) return new Map<string, number>();
+    return await repo.pointsForSnapshot(snapshotId, [...playerIds]);
+  } catch {
+    return new Map<string, number>();
+  }
 }

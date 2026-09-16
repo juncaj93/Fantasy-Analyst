@@ -130,6 +130,7 @@ export function planWaiverClaims(input: WaiverPlannerInput): WaiverPlan {
     shape: input.shape,
     profile: input.profile,
     held: input.held,
+    ...(input.preseasonPoints === undefined ? {} : { preseasonPoints: input.preseasonPoints }),
     reserveIds: input.reserveIds,
     now: input.now,
   });

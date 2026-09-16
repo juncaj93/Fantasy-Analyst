@@ -169,6 +169,15 @@ export interface WaiverClaimPlanInput {
   advice: WaiverAdviceLike;
   shape: RosterShape;
   profile: ScoringProfile;
+  /**
+   * Season totals from this league's preseason capture, by player id.
+   *
+   * Reaches the drop half of the plan and nothing else: it is what lets a bench
+   * slot be valued over a horizon instead of over one Sunday, so a hurt
+   * second-round pick is not the cheapest cut on the roster. See
+   * `core/roster/durableValue.ts`. Absent is the previous behaviour.
+   */
+  preseasonPoints?: ReadonlyMap<string, number>;
   reserveIds?: string[];
   budget?: LeagueBudgetState | null;
   now?: string | Date;
@@ -245,6 +254,7 @@ export function planWaiversFor(opts: WaiverClaimPlanInput): { plan: WaiverPlan |
       targets,
       shape: opts.shape,
       profile: opts.profile,
+      ...(opts.preseasonPoints === undefined ? {} : { preseasonPoints: opts.preseasonPoints }),
       reserveIds: opts.reserveIds,
       budget: opts.budget
         ? { remaining: myBudget(opts.budget)?.remaining ?? null, usesFaab: opts.budget.rule.usesFaab }

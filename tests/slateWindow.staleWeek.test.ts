@@ -107,7 +107,15 @@ async function storeProps(db: Database, eventId: string, gameStart: string, fetc
     .run();
 }
 
-const inputFor = async (db: Database) => (await startSitInputsFor(db, [QB]))[0]!;
+/*
+ * Standing at {@link TUESDAY}, not at whenever this suite happens to run.
+ *
+ * The window under test reaches twelve hours back, and these fixtures are
+ * written relative to a fixed Tuesday — so reading the real clock made the
+ * in-progress case pass for about fifteen hours after it was written and then
+ * fail, for a reason that had nothing to do with the window.
+ */
+const inputFor = async (db: Database) => (await startSitInputsFor(db, [QB], { now: TUESDAY }))[0]!;
 
 describe('a week that is over stops being this week', () => {
   it('refuses last Sunday’s line once Sleeper has turned the week over', async () => {

@@ -14,6 +14,7 @@ import { evaluatePlayer, type StartSitInput } from '../startsit/engine.ts';
 import type { LineupRecommendation } from '../startsit/lineup.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import type { HeldPlayer } from './bench.ts';
+import { durableValue } from './durableValue.ts';
 
 export function buildHeldPlayers(opts: {
   rosterInputs: StartSitInput[];
@@ -21,6 +22,16 @@ export function buildHeldPlayers(opts: {
   lineup: LineupRecommendation;
   profile: ScoringProfile;
   reserveIds: string[];
+  /**
+   * Season totals from this league's own preseason capture, by player id.
+   *
+   * Optional, and its absence restores this function's previous behaviour
+   * exactly: with no capture and no stored weeks, {@link durableValue} falls
+   * back to the week projection, which is what both horizon fields used to
+   * hold. So a caller that has not been taught to supply it — Demo Mode, a
+   * test, a league with no import — is not silently degraded, it is unchanged.
+   */
+  preseasonPoints?: ReadonlyMap<string, number>;
 }): HeldPlayer[] {
   const starters = new Set(opts.lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
   const reserve = new Set(opts.reserveIds);
@@ -37,13 +48,33 @@ export function buildHeldPlayers(opts: {
   return opts.rosterInputs.map((input) => {
     const evaluation = evaluatePlayer(input, opts.profile);
     const rising = evaluation.role.trend === 'rising_high' || evaluation.role.trend === 'rising_moderate';
+    const durable = durableValue({
+      preseasonSeasonPoints: opts.preseasonPoints?.get(evaluation.playerId) ?? null,
+      weeks: input.usageWeeks ?? [],
+      profile: opts.profile,
+      weekProjection: evaluation.score,
+    });
     return {
       playerId: evaluation.playerId,
       name: evaluation.name,
       position: evaluation.position,
       role: reserve.has(evaluation.playerId) ? 'reserve' : starters.has(evaluation.playerId) ? 'starter' : 'bench',
-      restOfSeasonValue: evaluation.score,
-      fourWeekValue: evaluation.score,
+      /*
+       * A horizon, rather than this week wearing a horizon's name.
+       *
+       * Both of these used to be `evaluation.score` — the week's projection,
+       * under two field names that promise a season and a month. That is how a
+       * second-round pick who is questionable for one Sunday became the
+       * cheapest drop on a roster: his week is nearly nothing, so his standing
+       * worth was nearly nothing, so cutting him cost nearly nothing.
+       *
+       * `durableValue` blends this league's own preseason capture with points
+       * actually scored, sliding from the first to the second as games
+       * accumulate. See the module header for why that ordering and not the
+       * reverse.
+       */
+      restOfSeasonValue: durable.restOfSeason,
+      fourWeekValue: durable.fourWeek,
       /*
        * Insurance is left unmeasured rather than guessed.
        *

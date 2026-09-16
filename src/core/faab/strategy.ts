@@ -51,6 +51,15 @@ export const ELITE_WEEKLY_GAIN = 6;
 /** How far above your own valuation you may go before winning is a loss. */
 const OVERPAY_TOLERANCE = 1.2;
 
+/**
+ * What to bid when the league has been measured and nobody else wants him.
+ *
+ * The smallest bid that beats a $0 one. There is no auction to win, so every
+ * dollar above this is spent against nobody, and the budget it preserves is
+ * what answers an injury in week nine.
+ */
+export const UNCONTESTED_BID = 1;
+
 export type RoleStability = 'rising' | 'stable' | 'volatile' | 'unknown';
 /** How long the reason this player is available is expected to last. */
 export type ShelfLife = 'season' | 'multi_week' | 'one_week' | 'unknown';
@@ -332,7 +341,31 @@ export function recommendBid(opts: {
    * not advice.
    */
   const disciplined = Math.min(worth, spendableNow(remaining, season));
-  const recommended = Math.max(worth > 0 ? 1 : 0, Math.min(disciplined, remaining));
+  const valued = Math.max(worth > 0 ? 1 : 0, Math.min(disciplined, remaining));
+
+  /*
+   * An uncontested claim is won at the minimum, whatever he is worth.
+   *
+   * `worth` answers *how much is he worth to this roster*, and until now that
+   * was the whole recommendation — demand reached the expected price and never
+   * reached the bid. So a player the league-intelligence pass had established
+   * nobody else could use was still advised at his full private valuation,
+   * which is money spent beating nobody.
+   *
+   * `rivalsWithNeed === 0` is a measured zero and only ever arrives from the
+   * competition pass (see `core/waivers/pricing.ts`): no rival has a hole at
+   * the position and the budget to fill it. A blunt roster count answers `null`
+   * instead, so a league with no intelligence behind it is untouched here.
+   *
+   * A dollar rather than nothing. Sleeper allows a $0 bid and this league sets
+   * `waiver_bid_min: 0`, but the zero is a model's reading of nine other
+   * managers rather than a fact about them — and the cost of that reading being
+   * wrong by one is a dollar, against {@link UNCONTESTED_BID} being the price
+   * of being right. The ceiling below is untouched and still reflects the full
+   * valuation, so a reader who disagrees can see exactly how far they may go.
+   */
+  const uncontested = inputs.rivalsWithNeed === 0 && valued > UNCONTESTED_BID;
+  const recommended = uncontested ? Math.min(UNCONTESTED_BID, valued) : valued;
 
   /*
    * The ceiling is your own valuation plus a bounded tolerance, capped by the
@@ -410,8 +443,26 @@ function buildReasons(
   if (inputs.shelfLife === 'one_week') reasons.push('A one-week rental — the window closes when the starter returns.');
   if (inputs.shelfLife === 'season') reasons.push('The role looks like it holds for the rest of the season.');
   if (inputs.roleStability === 'volatile') reasons.push('The role has moved around, which is priced in.');
-  if (demand >= 0.66) reasons.push('Contested: several funded rosters can use him.');
-  if (demand <= 0.2) reasons.push('Barely contested in this league, whatever the wider market is doing.');
+  /*
+   * A measured zero gets its own sentence, ahead of the band readings.
+   *
+   * `demand <= 0.2` is "barely contested", which is a different and weaker
+   * claim: it averages a local reading with global heat and can be reached by
+   * a player two rivals want in a league nobody is watching. Nought rivals with
+   * a hole and the money to fill it is a fact about this league, and it is the
+   * reason the bid below is a dollar.
+   */
+  if (inputs.rivalsWithNeed === 0) {
+    reasons.push(
+      recommended <= UNCONTESTED_BID
+        ? 'Nobody else in this league needs the position, so the minimum wins him. Every dollar above it is spent against nobody.'
+        : 'Nobody else in this league needs the position.',
+    );
+  } else if (demand >= 0.66) {
+    reasons.push('Contested: several funded rosters can use him.');
+  } else if (demand <= 0.2) {
+    reasons.push('Barely contested in this league, whatever the wider market is doing.');
+  }
   if (season.week >= season.finalWeek - 2 && worth > 0) {
     reasons.push('Late enough that unspent budget has almost no remaining use.');
   }
