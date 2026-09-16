@@ -173,7 +173,16 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 
   /** What the slot between the score and the lineup is currently saying. */
   const moveState = forecast ? bestMoveState(forecast) : null;
-  const move = moveState?.kind === 'move' ? moveState.move : null;
+  /*
+   * Both moods of "there is a change" draw the same row.
+   *
+   * `on_projection` is the Team screen's answer shown here because this screen
+   * had none of its own; it is a change either way, so it is the same control
+   * with the same target and the same sheet, marked so the row can say which
+   * question it is answering.
+   */
+  const move =
+    moveState?.kind === 'move' || moveState?.kind === 'on_projection' ? moveState.move : null;
 
   /*
    * A sheet cannot outlive the recommendation it explains.
@@ -243,7 +252,12 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             footnote — see `BestMoveNote`.
           */}
           {move ? (
-            <BestMoveRow move={move} players={players} onOpen={() => setBestMoveOpen(true)} />
+            <BestMoveRow
+              move={move}
+              players={players}
+              onProjection={moveState?.kind === 'on_projection'}
+              onOpen={() => setBestMoveOpen(true)}
+            />
           ) : moveState?.kind === 'hold' ? (
             <BestMoveHoldRow onOpen={() => setBestMoveOpen(true)} />
           ) : null}

@@ -74,6 +74,26 @@ export interface LineupDecision {
   best: LineupImpact | null;
   /** Every legal change worth more than the threshold, best first. */
   options: LineupImpact[];
+  /**
+   * What the Team screen would say, for the weeks this screen would say nothing.
+   *
+   * Two tabs answering two questions is the design and it stays the design —
+   * but a reader looking at `1 change to make` on one tab and `hold` on the
+   * other cannot see that, and reasonably reads it as the app contradicting
+   * itself. This is the projection's answer, carried here so the matchup card
+   * can show it *as* the projection's answer rather than leaving a gap the
+   * reader has to reconcile.
+   *
+   * Ranked on the app's own basis, borrowed figures docked, so the man named is
+   * the same man the lineup names. Present only when `options` is empty: a
+   * change this model believes in always wins, and a lineup with nothing to
+   * change has nothing to echo either.
+   *
+   * Optional on the wire rather than replacing anything, because this app
+   * caches its API responses offline and a fresh bundle routinely renders a
+   * body an older worker produced.
+   */
+  onProjection?: LineupImpact | null;
   /** How many bench players were legal candidates at all. */
   considered: number;
   /** Why no change is offered, when none is. */
@@ -136,6 +156,16 @@ export function assessLineupDecision(opts: {
   const movableStarters = starters.filter((p) => notKickedOff(p.playerId));
 
   const options: LineupImpact[] = [];
+  /** Every change the projection would make, whatever the win-probability bar says. */
+  const byProjection: {
+    starter: MatchupPlayerInput;
+    candidate: MatchupPlayerInput;
+    slot: string;
+    winNow: number;
+    winAfter: number;
+    gain: number;
+    pointsDelta: number;
+  }[] = [];
   for (const starter of movableStarters) {
     const starterDistribution = distributionById.get(starter.playerId)!;
     const slot = opts.slots.find((s) => s.key === starter.slot);
@@ -147,9 +177,19 @@ export function assessLineupDecision(opts: {
       if (outrankedByAPricedRival(candidate, legal)) continue;
       const winAfter = winProbabilityWithSwap(opts.result, starter.playerId, candidate.playerId);
       const gain = winAfter - winNow;
+      const pointsDelta = round2((candidate.projection ?? 0) - (starter.projection ?? 0));
+
+      /*
+       * Kept even when the win-probability bar refuses it — see `onProjection`.
+       * Ranked on the app's own basis so the man named here is the man the Team
+       * screen names, rather than a second opinion arrived at independently.
+       */
+      if (rankedPoints(candidate) > rankedPoints(starter)) {
+        byProjection.push({ starter, candidate, slot: slot.slot, winNow, winAfter, gain, pointsDelta });
+      }
+
       if (gain < minGain) continue;
 
-      const pointsDelta = round2((candidate.projection ?? 0) - (starter.projection ?? 0));
       options.push({
         slot: slot.slot,
         outPlayerId: starter.playerId,
@@ -176,9 +216,37 @@ export function assessLineupDecision(opts: {
 
   options.sort((a, b) => b.gain - a.gain || a.inName.localeCompare(b.inName));
 
+  /*
+   * What the Team screen would say, when this screen has nothing of its own.
+   *
+   * Only when `options` is empty, so it can never displace a change this model
+   * actually believes in, and never when the lineup is already the best one.
+   */
+  byProjection.sort(
+    (a, b) =>
+      rankedPoints(b.candidate) - rankedPoints(b.starter) -
+        (rankedPoints(a.candidate) - rankedPoints(a.starter)) ||
+      a.candidate.name.localeCompare(b.candidate.name),
+  );
+  const echo = options.length === 0 ? byProjection[0] : undefined;
+
   return {
     best: options[0] ?? null,
     options,
+    onProjection: echo
+      ? {
+          slot: echo.slot,
+          outPlayerId: echo.starter.playerId,
+          outName: echo.starter.name,
+          inPlayerId: echo.candidate.playerId,
+          inName: echo.candidate.name,
+          winNow: round4(echo.winNow),
+          winAfter: round4(echo.winAfter),
+          gain: round4(echo.gain),
+          pointsDelta: echo.pointsDelta,
+          reason: 'Worth a little more on paper, and not enough to swing this matchup.',
+        }
+      : null,
     considered: movableBench.length,
     /*
      * Why there is nothing to offer, told apart properly.
@@ -265,11 +333,13 @@ function outrankedByAPricedRival(
   legal: readonly MatchupPlayerInput[],
 ): boolean {
   if (!candidate.projectionBorrowed) return false;
-  /* The same arithmetic `rankingKey` does in `lineup.ts`, on the same figures. */
-  const ranked = (p: MatchupPlayerInput) =>
-    (p.projection ?? 0) - (p.projectionBorrowed ? BORROWED_RANKING_DISCOUNT : 0);
-  const mine = ranked(candidate);
-  return legal.some((rival) => rival.playerId !== candidate.playerId && ranked(rival) > mine);
+  const mine = rankedPoints(candidate);
+  return legal.some((rival) => rival.playerId !== candidate.playerId && rankedPoints(rival) > mine);
+}
+
+/** The same arithmetic `rankingKey` does in `lineup.ts`, on the same figures. */
+function rankedPoints(player: MatchupPlayerInput): number {
+  return (player.projection ?? 0) - (player.projectionBorrowed ? BORROWED_RANKING_DISCOUNT : 0);
 }
 
 /**
