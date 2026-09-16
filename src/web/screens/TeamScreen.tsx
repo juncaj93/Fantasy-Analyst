@@ -1074,7 +1074,24 @@ function VerdictCard({
           <span className="verdict-arrow" aria-hidden="true">→</span> This slot is empty in Sleeper
         </div>
       ) : null}
-      {row.verdict === 'no_pick' ? (
+      {/*
+        Why there is no recommendation — but only when the row cannot show it.
+
+        This used to draw under every `no_pick`, and under the defence it read
+        `is projected 10.22 by Rotowire, but no betting market has priced him,
+        so this app will not rank him`: a sentence the length of the row it was
+        explaining, saying what the dotted rule on the figure beside it already
+        says, and what the figure's own title and the row's `aria-label` say
+        again. Three places was two too many.
+
+        So it is drawn only where nothing else can carry it. A borrowed figure
+        marks itself, and `borrowed != null` is exactly that case. A player on
+        injured reserve has no figure to mark and no other way to say it — his
+        row would otherwise be a name, a dash and no reason — so his line
+        stays, which is the distinction the first attempt at this missed and
+        `never highlights a player who cannot play` caught.
+      */}
+      {row.verdict === 'no_pick' && borrowed == null ? (
         <div className="faint verdict-line" data-testid="verdict-no-pick">
           {blocked ? `${blocked.reason}${blocked.detail ? ` — ${blocked.detail}` : ''}` : 'Cannot be scored this week'}
         </div>
@@ -1686,6 +1703,43 @@ function availabilityLabel(availability: PickerPlayer['availability']): string {
  * from. Nothing here can alter a lineup: Sleeper is still where a change is
  * made.
  */
+/**
+ * How well sourced this answer is, as a count rather than as an adjective.
+ *
+ * The chip said `low confidence` and nothing else, and the owner's question
+ * about it was the right one: low compared to what, and decided by whom? The
+ * word is `worstConfidence` — the *worst* single player in the lineup — so one
+ * unpriced defence takes the whole card to `low` while the other fourteen rows
+ * are fine. True, and unreadable as a summary.
+ *
+ * The fact underneath it is a count: how many of the players this answer was
+ * built from carry a betting market, against how many there are. That is what
+ * "confidence" has always meant here, said in the terms that produced it, and
+ * it moves for a reason a reader can see — a market arrives on Thursday and the
+ * number goes up.
+ *
+ * The adjective is not thrown away. It stays in the title and the accessible
+ * name, where a reader who wants the app's own judgement can still find it, and
+ * where a screen reader announces both.
+ */
+function LineupSourcing({ lineup }: { lineup: LineupRecommendation }) {
+  const filled = lineup.slots.filter((slot) => slot.playerId);
+  const priced = filled.filter((slot) => slot.projectionSource === 'market').length;
+  if (filled.length === 0) return <Confidence level={lineup.confidence} />;
+
+  return (
+    <span
+      className={`badge badge-confidence${lineup.confidence === 'low' ? ' badge-confidence-low' : ''}`}
+      data-testid="lineup-sourcing"
+      data-confidence={lineup.confidence}
+      title={`${lineup.confidence} confidence — ${priced} of ${filled.length} starters have a betting market`}
+      aria-label={`${lineup.confidence} confidence. ${priced} of ${filled.length} starters priced by a betting market.`}
+    >
+      {priced}/{filled.length} priced
+    </span>
+  );
+}
+
 function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   /*
    * The change worth making, and everything else.
@@ -1696,19 +1750,12 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   const [best = null] = lineup.swaps;
   const risks = lineup.lateSwapRisks ?? [];
   const material = risks.filter((r) => r.starting);
-  const quiet = risks.filter((r) => !r.starting);
-  const hasDetail =
-    lineup.notes.length > 0 ||
-    lineup.warnings.length > 0 ||
-    quiet.length > 0 ||
-    lineup.undecidable.length > 0 ||
-    lineup.modeSuggestion?.auto === true;
 
   return (
     <div className="card lineup-card" data-testid="lineup-card">
       <div className="header-row">
         <strong>Changes to consider</strong>
-        <Confidence level={lineup.confidence} />
+        <LineupSourcing lineup={lineup} />
       </div>
 
       {best == null ? (
@@ -1761,47 +1808,26 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
       ))}
 
       {/*
-        What is left, once the duplication is gone: the provenance.
-        
-        Not `Recommended lineup in full` any more, because that is the screen
-        below. What genuinely lives nowhere else is why the numbers are what
-        they are — whose projection a borrowed figure is, which players could
-        not be ranked, what the app could not read this week. That is worth
-        keeping and is worth keeping *shut*, which is what a disclosure is for.
-        Drawn only when there is something in it.
+        And nothing else on the card.
+
+        `How this was worked out` was a disclosure of the lineup's notes, and
+        the notes are about the *lineup* while the card is about one change.
+        Opened under `Start RJ Harvey over Jayden Reed` it read: Tampa Bay
+        could not be scored, Kenneth Walker is in FLEX rather than RB, three of
+        fifteen players use Rotowire's figure, one projection below is
+        Rotowire's, no published projection is quoted for QB. Five true
+        sentences, none of them about RJ Harvey, under a heading promising to
+        explain him.
+
+        The provenance they carry has a better home and already has it: a
+        borrowed figure is drawn with a dotted rule on the row it belongs to,
+        with the source in that figure's own title and in the row's
+        `aria-label`. That is the claim made *beside the number it is about*,
+        which is what the disclosure was reaching for and could not do from up
+        here.
+
+        So the card is the header and the change, and nothing else.
       */}
-      {hasDetail ? (
-        <details className="disclosure disclosure-quiet" data-testid="lineup-details">
-          <summary>How this was worked out</summary>
-
-          {lineup.modeSuggestion?.auto ? (
-            <div className="faint" data-testid="lineup-mode" data-mode={lineup.modeSuggestion.mode}>
-              {lineup.modeSuggestion.detail}
-            </div>
-          ) : null}
-
-          {lineup.warnings.map((w) => (
-            <div className="hint hint-caution" key={w}>
-              {w}
-            </div>
-          ))}
-          {quiet.map((risk) => (
-            <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk-quiet">
-              {risk.name} — {risk.detail}
-            </div>
-          ))}
-          {lineup.undecidable.length > 0 ? (
-            <div className="faint" style={{ marginTop: 6 }}>
-              Not enough data to rank: {lineup.undecidable.map((e) => e.name).join(', ')}
-            </div>
-          ) : null}
-          {lineup.notes.map((n) => (
-            <div className="faint" key={n}>
-              {n}
-            </div>
-          ))}
-        </details>
-      ) : null}
     </div>
   );
 }
