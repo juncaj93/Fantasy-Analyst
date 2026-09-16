@@ -1052,10 +1052,23 @@ function unscorableReason(
    *
    * So where a published figure exists the sentence explains it instead of
    * denying it, and the model's own cause is still carried underneath.
+   *
+   * **And it names the figure, because "the figure beside him" was not always
+   * beside him.** This sentence appears on a *vacancy*, which is a slot nobody
+   * filled — so there is frequently no row and no number next to it at all.
+   * Production on 16 September: an empty DEF slot carrying
+   *
+   *     Tampa Bay Buccaneers · has no betting market this week, so the figure
+   *     beside him is Rotowire's
+   *
+   * with the slot's own projection showing a dash, and Tampa Bay in the
+   * reader's Sleeper lineup the whole time. The figure existed — 10.22, this
+   * app's own scoring of the feed's defensive counts — and the one place it was
+   * not was beside him.
    */
   if (publishedProjection != null && Number.isFinite(publishedProjection)) {
     return {
-      reason: 'has no betting market this week, so the figure beside him is Rotowire’s',
+      reason: `is projected ${round2(publishedProjection)} by Rotowire, but no betting market has priced him, so this app will not rank him`,
       detail: evaluation.dst?.reasons[0] ?? evaluation.expectation.notes[0] ?? null,
     };
   }

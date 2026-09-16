@@ -137,6 +137,16 @@ export interface WaiverAssemblyRequest {
    * a deployment with no capture values a bench exactly as it did before.
    */
   preseasonPoints?: ReadonlyMap<string, number> | undefined;
+  /**
+   * Where this room's draft took each player, by player id. Smaller is earlier.
+   *
+   * Reaches the cut order and nothing else. The preseason capture above is the
+   * better evidence about a player's *value*; this is the broader one about the
+   * room's *conviction*, and it covers the board where the capture does not —
+   * which on 16 September was the whole of why two well-drafted players were
+   * offered as cuts. Optional, and absent is the previous behaviour.
+   */
+  draftRankOf?: ReadonlyMap<string, number> | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -447,6 +457,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         shape,
         profile,
         ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
+        ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
+        week: request.week,
         reserveIds: request.reserveIds,
         budget: request.budgets,
         now: request.now,

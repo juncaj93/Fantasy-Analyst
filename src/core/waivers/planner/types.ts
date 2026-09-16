@@ -58,6 +58,7 @@ export type WaiverReasonCode =
   | 'protected_reserve_slot'
   | 'protected_core_value'
   | 'protected_unscorable'
+  | 'protected_early_pick'
   /* Why the pair was or was not worth it. */
   | 'net_gain_below_bar'
   | 'pair_opens_starting_slot'
@@ -111,7 +112,8 @@ export type ProtectionReason =
   | 'in_lineup'
   | 'reserve_slot'
   | 'core_value'
-  | 'unscorable';
+  | 'unscorable'
+  | 'early_pick';
 
 /**
  * What removing one rostered player costs, given one specific incoming player.
@@ -341,6 +343,15 @@ export interface WaiverPlannerInput {
    * exactly where it was, so no caller has to supply it to keep working.
    */
   preseasonPoints?: ReadonlyMap<string, number>;
+  /**
+   * Where this room's draft took each player. Smaller is earlier.
+   *
+   * Reaches the cut order and nothing else: an early pick is not an ordinary
+   * waiver drop in September. Absent is the previous behaviour.
+   */
+  draftRankOf?: ReadonlyMap<string, number>;
+  /** 1-based, so the draft's say can expire as production accumulates. */
+  week?: number;
   /** Players on an injured-reserve slot, which is not a bench spot. */
   reserveIds?: string[];
   /**

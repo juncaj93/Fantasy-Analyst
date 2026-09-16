@@ -23,7 +23,7 @@
  * every one of these is a sentence the user acts on in Sleeper, by hand.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -1519,14 +1519,14 @@ function CompareSheet({
     });
   };
 
-  const compare = async () => {
+  const compare = async (playerIds: string[] = ids) => {
     setBusy(true);
     setError(null);
     try {
       setComparison(
         await api.post<StartSitComparison>('/api/startsit/compare', {
           leagueId,
-          playerIds: ids,
+          playerIds,
           slot,
         }),
       );
@@ -1536,6 +1536,29 @@ function CompareSheet({
       setBusy(false);
     }
   };
+
+  /**
+   * Opened from a swap, the answer is already the question.
+   *
+   * Tapping `Start A over B` and then being asked to tap `Compare 2 players` is
+   * a step with nothing in it: the reader chose nobody, the sheet chose both,
+   * and the button's only job is to confirm a selection that was not made by
+   * hand. So a sheet that opens with a full pair runs itself and shows the
+   * comparison.
+   *
+   * Mount only, and deliberately so. Once the sheet is open the chips are the
+   * reader's again — adding or removing one clears the result and puts the
+   * button back, which is the behaviour that lets a comparison be re-aimed
+   * without re-opening anything.
+   */
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    seeded.current = true;
+    const pair = [...new Set(seed)].slice(0, MAX_COMPARE);
+    if (pair.length >= 2) void compare(pair);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Sheet title={slot ? `Compare for ${slot}` : 'Compare players'} onClose={onClose} testId="compare-sheet">

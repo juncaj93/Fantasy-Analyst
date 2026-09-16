@@ -178,6 +178,10 @@ export interface WaiverClaimPlanInput {
    * `core/roster/durableValue.ts`. Absent is the previous behaviour.
    */
   preseasonPoints?: ReadonlyMap<string, number>;
+  /** Where this room's draft took each player, for the cut order. */
+  draftRankOf?: ReadonlyMap<string, number>;
+  /** 1-based, so the draft's say expires as production accumulates. */
+  week?: number;
   reserveIds?: string[];
   budget?: LeagueBudgetState | null;
   now?: string | Date;
@@ -255,6 +259,8 @@ export function planWaiversFor(opts: WaiverClaimPlanInput): { plan: WaiverPlan |
       shape: opts.shape,
       profile: opts.profile,
       ...(opts.preseasonPoints === undefined ? {} : { preseasonPoints: opts.preseasonPoints }),
+      ...(opts.draftRankOf === undefined ? {} : { draftRankOf: opts.draftRankOf }),
+      ...(opts.week === undefined ? {} : { week: opts.week }),
       reserveIds: opts.reserveIds,
       budget: opts.budget
         ? { remaining: myBudget(opts.budget)?.remaining ?? null, usesFaab: opts.budget.rule.usesFaab }
@@ -758,6 +764,10 @@ function protectedLines(plan: WaiverPlan): string[] {
       take: (p) => p.reason === 'core_value' && isDefence(p.playerId),
     },
     { lead: 'Not scorable yet, so never named as a cut', take: (p) => p.reason === 'unscorable' },
+    {
+      lead: 'Drafted early enough that one quiet week is not a reason to cut him',
+      take: (p) => p.reason === 'early_pick',
+    },
   ];
 
   const lines: string[] = [];

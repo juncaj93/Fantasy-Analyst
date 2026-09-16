@@ -228,6 +228,18 @@ export interface WaiverPlanInputs {
   rosteredIds: string[];
   currentStarterIds: string[];
   reserveIds: string[];
+  /**
+   * This league's preseason capture and its draft ranking, as plain objects.
+   *
+   * Both reach the drop half of the plan — the first as a bench player's
+   * standing worth over a horizon, the second as "the room drafted him early
+   * enough that a September claim may not cut him" — so a replay without them
+   * reproduces a different cut order. Optional because a file captured before
+   * they existed has neither, and an absent one replays as the empty map it
+   * would have been.
+   */
+  preseasonPoints?: Record<string, number>;
+  draftRankOf?: Record<string, number>;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.
