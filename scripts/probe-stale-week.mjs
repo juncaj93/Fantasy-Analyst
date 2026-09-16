@@ -102,9 +102,12 @@ console.log('\n=== 2b. the fixture list, which is where kickoffs come from ===')
 const rollover = await get('/api/diagnostics/rollover');
 console.log(`  GET /api/diagnostics/rollover -> ${rollover.status}`);
 if (rollover.json) {
-  const text = JSON.stringify(rollover.json);
-  const hit = text.match(/"schedule"\s*:\s*\{[^}]*\}/);
-  console.log(`  ${hit ? hit[0] : text.slice(0, 700)}`);
+  for (const c of rollover.json.checks ?? []) {
+    console.log(`  ${String(c.name).padEnd(26)} ${String(c.status).padEnd(10)} found=${c.found ?? '-'}  ${c.detail ?? ''}`);
+  }
+  if (!(rollover.json.checks ?? []).some((c) => /schedule|fixture/i.test(String(c.name)))) {
+    console.log('  (no schedule/fixture check in this list — coverage is not reported here)');
+  }
 }
 
 // ------------------------------------------------------------ 3. the lineup
@@ -171,14 +174,30 @@ const waivers = await get(`/api/leagues/${league.id}/waivers`);
 if (waivers.status !== 200) {
   console.log(`  GET waivers -> ${waivers.status} ${waivers.text ?? ''}`);
 } else {
+  /*
+   * The board's own vocabulary, not a guess at it.
+   *
+   * The first run of this probe read `candidates` / `recommendations` / `rows`,
+   * none of which this endpoint has, and printed "returned: 0" — which reads
+   * exactly like an empty board and was in fact an empty question. The real
+   * lanes are `upgrades`, `valueAdds` and `unknowns`.
+   */
   const w = waivers.json ?? {};
-  const list = w.candidates ?? w.recommendations ?? w.rows ?? [];
-  console.log(`  returned         : ${list.length}`);
-  console.log(`  keys             : ${Object.keys(w).join(', ')}`);
-  for (const c of list.slice(0, 8)) {
-    console.log(`    ${String(c.name ?? c.playerId).slice(0, 24).padEnd(25)} ${c.position ?? ''} score=${c.score ?? '?'} proj=${c.projection ?? '—'} role=${c.role ?? '-'}`);
+  const lanes = ['upgrades', 'valueAdds', 'unknowns'];
+  for (const lane of lanes) {
+    const rows = w[lane] ?? [];
+    console.log(`  ${lane.padEnd(10)} : ${rows.length}`);
+    for (const c of rows.slice(0, 5)) {
+      console.log(
+        `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+          ` score=${c.score ?? '?'} proj=${c.projection ?? '—'} shelf=${c.shelfLife ?? '-'} role=${c.role ?? '-'}`,
+      );
+    }
   }
-  if (w.note || w.reason) console.log(`  note             : ${w.note ?? w.reason}`);
+  console.log(`  considered       : ${w.considered ?? '?'}   skipped: ${w.skipped ?? '?'}   threshold: ${JSON.stringify(w.threshold ?? null)}`);
+  console.log(`  pool             : ${JSON.stringify(w.pool ?? null)}`);
+  console.log(`  headline         : ${w.headline ?? '(none)'}`);
+  for (const n of w.notes ?? []) console.log(`  note             : ${n}`);
 }
 
 // ------------------------------------------------------------ 6. the trades
@@ -189,22 +208,58 @@ if (diag.status !== 200) {
 } else {
   const d = diag.json ?? {};
   console.log(`  keys             : ${Object.keys(d).join(', ')}`);
-  console.log(`  ${JSON.stringify(d).slice(0, 1800)}`);
+  /*
+   * The field added in #268, checked rather than assumed present. An empty
+   * board because the market is quiet and an empty board because nobody has
+   * imported the preseason snapshot are different states, and if this comes
+   * back absent while section 7 reports zero snapshots then the warning is
+   * not reaching the screen and the reader is still being left to infer.
+   */
+  console.log(`  arbitrageOff     : ${d.arbitrageOff ?? '(absent)'}`);
+  console.log(`  warnings         : ${JSON.stringify(d.warnings ?? [])}`);
+  console.log(`  search           : ${JSON.stringify(d.search ?? null)}`);
+  console.log(`  notes            : ${JSON.stringify(d.notes ?? [])}`);
 }
 
 // ------------------------------------------- 7. does the preseason tier exist
-console.log('\n=== 7. the preseason snapshot the third tier needs ===');
+console.log('\n=== 7. the preseason snapshot the arbitrage lane needs ===');
 const pre = await get('/api/preseason-projection');
 if (pre.status !== 200) {
   console.log(`  GET preseason-projection -> ${pre.status} ${pre.text ?? ''}`);
 } else {
-  const snaps = pre.json?.snapshots ?? pre.json?.all ?? [];
-  console.log(`  snapshots stored : ${snaps.length}`);
-  for (const sn of snaps.slice(0, 6)) {
-    console.log(`    id=${sn.id} season=${sn.season} key=${sn.scoringKey} label="${sn.scoringLabel}" players=${sn.players} captured=${sn.capturedAt}`);
+  /*
+   * `current` and `others`, which are the keys this route actually returns.
+   *
+   * The first two runs of this probe read `snapshots` / `all`, neither of
+   * which exists, and printed "snapshots stored: 0" — which reads exactly like
+   * an empty database and was in fact an empty question. That false negative
+   * was reported to Alex as "buy-low and sell-high shipped inert", so it is
+   * worth saying plainly: the probe was wrong, not necessarily the app.
+   */
+  const j = pre.json ?? {};
+  console.log(`  season           : ${j.season}`);
+  console.log(`  this league's key: ${j.scoringKey} ("${j.scoringLabel}")`);
+  console.log(`  current          : ${j.current ? `id=${j.current.id} captured=${j.current.capturedAt} players=${j.current.players} rows=${j.current.rows}` : '(none for this scoring)'}`);
+  console.log(`  others           : ${(j.others ?? []).length}`);
+  for (const o of j.others ?? []) {
+    console.log(`      id=${o.id} key=${o.scoringKey} label="${o.scoringLabel}" players=${o.players}`);
   }
-  console.log(`  --- the league's own scoring label is "${league.scoringLabel}"; a snapshot under`);
-  console.log('      a different scoring key is not a worse answer, it is no answer at all ---');
 }
+
+// -------------------------------------- 8. why the arbitrage lane is silent
+/*
+ * If a snapshot *is* present, "no buy-low or sell-high offers" has a much more
+ * likely explanation than a missing import: `ARBITRAGE.minGames` is 3, and in
+ * week 2 every player has played one game. The lane would then be correctly
+ * silent, and the honest message is "too early in the season", not "import
+ * something".
+ */
+console.log('\n=== 8. how many games the season has actually produced ===');
+const usage = await get('/api/data-health');
+for (const src of usage.json?.sources ?? []) {
+  if (!/usage|nfl-state/i.test(String(src.id ?? ''))) continue;
+  console.log(`  ${String(src.id).padEnd(12)} ${src.state}  ${src.technical?.lastOutcome ?? ''}  ${src.note ?? ''}`);
+}
+console.log('  (week 2 means one completed game per team; ARBITRAGE.minGames is 3)');
 
 console.log('\ndone. nothing was written.');

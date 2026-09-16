@@ -168,6 +168,16 @@ export interface StartSitEvaluation {
   lock: LockState;
   /** The defence he faces, when the schedule is known. */
   opponent: string | null;
+  /**
+   * True at home, false on the road, null when the fixture is unknown.
+   *
+   * Already an input — the defence model reads it — and now carried out again
+   * so a screen can print `vs BAL` or `@ BAL` without re-deriving which it is
+   * from a source that means something subtly different. `vegas_events`'
+   * `home_team` means "a team we asked about" rather than "the home side",
+   * which is the vocabulary trap that had every spread backwards once already.
+   */
+  home: boolean | null;
   /** How the market has moved since the previous snapshot. */
   movement: MovementSummary;
   /** Whether the player's opportunity is actually changing. */
@@ -567,6 +577,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     ruledOut: availability.gate,
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
+    home: input.home ?? null,
     movement,
     role,
     mode,
@@ -729,6 +740,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     ruledOut: availability.gate,
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
+    home: input.home ?? null,
     movement: compareMarkets([], []),
     role: assessRole([]),
     mode,

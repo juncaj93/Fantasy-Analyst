@@ -287,13 +287,32 @@ describe('the wire can fill an empty DEF slot, and cannot yet stream one', () =>
  * evaluated without it, field for field.
  */
 describe('the home flag reaches the defence model and nothing else', () => {
-  it('leaves a skill player byte-identical', () => {
+  it('leaves a skill player’s every judgement identical', () => {
     const receiver = candidate('wr9', 'Receiver Nine', 'WR', 14);
 
     const without = evaluatePlayer(receiver, PROFILE);
     const withHome = evaluatePlayer({ ...receiver, home: true }, PROFILE);
 
-    expect(withHome).toEqual(without);
+    /*
+     * `home` is now reported back on the evaluation as well as read by the
+     * defence model, so the two objects differ by exactly that one field and a
+     * whole-object comparison would fail on the reporting rather than on any
+     * judgement. It is carried out so a lineup row can print `vs BAL` or
+     * `@ BAL` without re-deriving which it is from `vegas_events.home_team`,
+     * whose `home` means "a team we asked about" and has had every spread in
+     * this app backwards once already.
+     *
+     * The claim being held is unchanged and is the one that matters: the flag
+     * reaches no *decision* about a player who is not a defence. So everything
+     * except the echo is compared, field for field, and the score explicitly.
+     */
+    const { home: echoedWith, ...judgementWith } = withHome;
+    const { home: echoedWithout, ...judgementWithout } = without;
+
+    expect(judgementWith).toEqual(judgementWithout);
+    expect(withHome.score).toBe(without.score);
+    expect(echoedWith).toBe(true);
+    expect(echoedWithout).toBeNull();
   });
 
   it('does move a defence, by the small amount it is capped at', () => {
@@ -387,7 +406,42 @@ describe('an empty slot says who it could not use, and why', () => {
     // a borrowed number is shown, never ranked on.
     expect(slot?.playerId).toBeNull();
     expect(slot?.projection).toBeNull();
-    expect(slot?.vacancy[0]?.reason).toContain('scored this week');
+
+    /*
+     * The sentence names the figure instead of denying it.
+     *
+     * This assertion used to read `toContain('scored this week')`, on the same
+     * row as a `publishedProjection` of 8.57 — so the test was holding the
+     * defect in place rather than catching it. Alex reported it from the live
+     * app on 15 September: "Jacksonville 6.6" with "can't be scored this week"
+     * printed underneath.
+     *
+     * Both halves were locally true. `recommendLineup` ranks on this app's own
+     * market number alone, so an unpriced defence genuinely cannot be ranked;
+     * the display layer had Rotowire's number and printed it. "Scored" was
+     * doing double duty for "ranked" and "given a number".
+     */
+    expect(slot?.vacancy[0]?.reason).toContain('no betting market');
+    expect(slot?.vacancy[0]?.reason).toContain('Rotowire');
+    expect(slot?.vacancy[0]?.reason).not.toContain('scored this week');
+    // The model's own cause still rides underneath, unparaphrased.
+    expect(slot?.vacancy[0]?.detail).toContain('game line');
+  });
+
+  it('still says he cannot be scored when there is genuinely no figure', () => {
+    /*
+     * The other side of the branch, so the softened sentence cannot leak into
+     * the case it was never about. No published number means the app really
+     * does have nothing to show, and the row must keep saying so.
+     */
+    const lineup = recommendLineup([...field(), noLine()], SHAPE, PROFILE, {
+      currentStarterIds: [...STARTERS, 'def_jax'],
+    });
+    const vacancy = lineup.slots.find((s) => s.slot === 'DEF')?.vacancy[0];
+
+    expect(vacancy?.publishedProjection).toBeNull();
+    expect(vacancy?.reason).toContain('scored this week');
+    expect(vacancy?.reason).not.toContain('Rotowire');
   });
 
   it('leaves the figure null when nobody published one for him', () => {

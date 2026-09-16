@@ -245,7 +245,7 @@ describe('placing a lineup by eligibility', () => {
     { slot: 'RB', accepts: ['RB'] },
     { slot: 'RB', accepts: ['RB'] },
     { slot: 'FLEX', accepts: ['RB', 'WR', 'TE'] },
-  ].map((s) => ({ ...s, playerId: null, name: null, position: null, score: null, projection: null, projectionSource: null, alreadyStarting: false, locked: false, drivers: [], conflicts: [], vacancy: [] }));
+  ].map((s) => ({ ...s, playerId: null, name: null, position: null, score: null, projection: null, projectionSource: null, alreadyStarting: false, locked: false, drivers: [], conflicts: [], vacancy: [], fixture: null }));
 
   it('does not strand a player whose only slot is already taken', () => {
     /*

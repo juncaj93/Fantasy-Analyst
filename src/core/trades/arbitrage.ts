@@ -305,6 +305,18 @@ export function productionOf(week: UsageWeek): number {
   return yards + tds;
 }
 
+/**
+ * How many games this player has actually produced in, by this module's rules.
+ *
+ * Exported so the service can say *why* the lane is silent rather than only
+ * that it is. In week 2 every player has one game, {@link ARBITRAGE.minGames}
+ * is three, and so every read correctly returns null — a state that is
+ * indistinguishable from "the market is quiet" unless somebody counts.
+ */
+export function playedGames(weeks: UsageWeek[]): number {
+  return regularWeeks(weeks).length;
+}
+
 /** Regular-season weeks only, oldest first, bounded to the recency window. */
 function regularWeeks(weeks: UsageWeek[]): UsageWeek[] {
   return weeks

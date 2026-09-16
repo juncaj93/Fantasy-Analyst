@@ -42,7 +42,7 @@ import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
-import { readArbitrage, type ArbitrageRead } from '../../core/trades/arbitrage.ts';
+import { ARBITRAGE, playedGames, readArbitrage, type ArbitrageRead } from '../../core/trades/arbitrage.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
@@ -318,8 +318,9 @@ export class SmartTradeService {
      */
     if (!snapshot) {
       const sentence =
-        `No preseason projection has been imported for ${profile.label} ${season}, so there is nothing ` +
-        `to measure this season's production against. Import one in Setup to switch buy-low and sell-high on.`;
+        `Buy-low and sell-high are switched off: no preseason projection has been imported for ` +
+        `${profile.label} ${season}, so there is nothing to measure this season's production against. ` +
+        `Import one in Setup.`;
       warnings.push(`arbitrage lane inert: ${sentence}`);
       off.push(sentence);
       return out;
@@ -329,7 +330,22 @@ export class SmartTradeService {
       snapshot.id,
       inputs.map((input) => input.player.id),
     );
-    if (points.size === 0) return out;
+    /*
+     * A snapshot that covers none of this league's players.
+     *
+     * The second silent exit, and it used to look exactly like the first from
+     * outside: an empty board. An import under the right scoring key that
+     * resolved none of its names is a different problem from no import at all,
+     * and the person who can fix it needs to be told which.
+     */
+    if (points.size === 0) {
+      const sentence =
+        `Buy-low and sell-high are switched off: the imported preseason projection (${snapshot.label}) ` +
+        `resolved none of the players in this league. Re-import it, or repair the unresolved rows in Setup.`;
+      warnings.push(`arbitrage lane inert: ${sentence}`);
+      off.push(sentence);
+      return out;
+    }
 
     for (const input of inputs) {
       const read = readArbitrage({
@@ -341,6 +357,29 @@ export class SmartTradeService {
         signal: input.signal,
       });
       if (read) out.set(input.player.id, read);
+    }
+
+    /*
+     * Nothing read, and the likeliest reason is the calendar.
+     *
+     * `ARBITRAGE.minGames` is three, because two games is one hot afternoon and
+     * one quiet one. In week 2 every player has played once, so every read
+     * returns null and the board is correctly empty — which from outside is
+     * indistinguishable from a quiet market, and was reported on 15 September
+     * as a broken feature by somebody (me) who had not counted the games.
+     *
+     * Said only when it is actually true. Past the threshold, an empty lane is
+     * a real finding about the league and needs no excuse printed beside it.
+     */
+    if (out.size === 0) {
+      const most = Math.max(0, ...inputs.map((input) => playedGames(input.usageWeeks ?? [])));
+      if (most < ARBITRAGE.minGames) {
+        off.push(
+          `Buy-low and sell-high need ${ARBITRAGE.minGames} games of production to measure against a ` +
+            `player's preseason expectation. The season has produced ${most === 1 ? '1 so far' : `${most} so far`}, ` +
+            `so this lane switches on in week ${ARBITRAGE.minGames + 1}.`,
+        );
+      }
     }
     return out;
   }

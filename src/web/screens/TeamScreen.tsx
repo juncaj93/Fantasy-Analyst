@@ -31,6 +31,7 @@ import {
   type RosterPlayer,
   type StartSitComparison,
   type StartSitEvaluation,
+  type SlotFixture,
   type StartSitRefreshReport,
   type WaiverAdvice,
 } from '../api.ts';
@@ -607,6 +608,15 @@ export function TeamScreen({
                           : null,
                       }}
                       /*
+                       * The fixture of whoever leads the row, looked up the
+                       * same way the projection beside it is, so the chip and
+                       * the number are always about the same man.
+                       */
+                      fixture={(() => {
+                        const id = verdictSubjectId(row);
+                        return id ? (evaluations.get(id)?.fixture ?? null) : null;
+                      })()}
+                      /*
                        * A swap opens the comparison, seeded with both men.
                        *
                        * That is the decision the row is actually about, and the
@@ -673,6 +683,7 @@ export function TeamScreen({
                     points: evaluations.get(playerId)?.projection ?? null,
                     source: evaluations.get(playerId)?.projectionSource ?? null,
                   })}
+                  fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
                   summary={benchSummary}
                   onOpen={(playerId) => openPlayer(playerId, { starting: false })}
                 />
@@ -823,6 +834,7 @@ function VerdictCard({
   current,
   recommended,
   currentProjection,
+  fixture,
   onOpen,
 }: {
   row: LineupVerdictRow;
@@ -838,6 +850,8 @@ function VerdictCard({
    * row that could print Rotowire's model as this app's.
    */
   currentProjection: { points: number | null; source: RowProjectionSource };
+  /** The row subject's fixture, resolved by the caller from the same map. */
+  fixture: SlotFixture | null;
   onOpen: () => void;
 }) {
   /*
@@ -911,9 +925,13 @@ function VerdictCard({
             * read as "nothing is known about Jacksonville" when what was true
             * was "this app cannot rank him and Rotowire projects 8.6". The
             * figure sits in the same field, at the same width, wearing the same
-            * borrowed styling every other published number wears — and the
-            * sentence beneath it still says this app has no opinion, because
-            * that has not changed and is the thing the reader is owed.
+            * borrowed styling every other published number wears.
+            *
+            * The sentence beside it names the figure rather than denying it.
+            * It used to read "can't be scored this week" while 6.6 sat on the
+            * same row, which was two true halves adding up to nonsense: the
+            * word "scored" meant "ranked" to the optimiser and "given a
+            * number" to the reader. `unscorableReason` now says which.
             */}
           {borrowed != null ? (
             <span className="row-value">
@@ -1007,6 +1025,12 @@ function VerdictCard({
               Locked
             </span>
           ) : null}
+          {/*
+            Last in the cluster, so it is the first thing to wrap on a narrow
+            screen rather than pushing `Locked` off the row. The slot and the
+            lock change what the reader can *do*; the fixture is context.
+          */}
+          <FixtureChip fixture={fixture} />
         </span>
         <span className="row-value">
           {/*
@@ -1056,6 +1080,43 @@ function VerdictCard({
 }
 
 /**
+ * `vs BAL · soft` — who he plays, and what that defence gives up to his role.
+ *
+ * The rating is not this screen's opinion. It is `assessMatchup`'s, which is
+ * the same read that already moved the number on the right of this row, so the
+ * chip and the projection cannot tell the reader two different stories. A
+ * second difficulty scale invented for display is the one thing this must not
+ * be.
+ *
+ * **The word is the signal; the colour agrees with it.** `soft` and `tough`
+ * are printed, not merely tinted, so the distinction survives greyscale, a
+ * colour-blind reader, and a screenshot pasted into a group chat. In September
+ * the honest answer is usually `insufficient_data` — the defence has not faced
+ * enough of his role to be described — and then the chip names the fixture and
+ * says nothing else, which is a grey chip and no word.
+ */
+function FixtureChip({ fixture }: { fixture: SlotFixture | null | undefined }) {
+  if (!fixture) return null;
+  const verdict = fixture.rating === 'soft' || fixture.rating === 'tough' ? fixture.rating : null;
+  return (
+    <span
+      className="fixture-chip"
+      data-testid="fixture-chip"
+      data-rating={fixture.rating}
+      title={fixture.note}
+      aria-label={verdict ? `${fixture.spoken}, a ${verdict} matchup. ${fixture.note}` : `${fixture.spoken}. ${fixture.note}`}
+    >
+      <span>{fixture.label}</span>
+      {verdict ? (
+        <span className="fixture-chip-verdict" aria-hidden="true">
+          · {verdict}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
  * A backup: the same row, on the ordinary surface.
  *
  * No card tint, and that absence is the whole point — it is what makes the
@@ -1069,11 +1130,14 @@ function VerdictCard({
  */
 function BenchCard({
   player,
+  fixture,
   projection,
   projectionSource,
   onOpen,
 }: {
   player: RosterPlayer;
+  /** His fixture, resolved by the caller from the evaluation map. */
+  fixture: SlotFixture | null;
   /** The weekly projection, never the ranking score — see `StarterCard`. */
   projection: number | null;
   /** Whose projection it is. Travels with the number, always — see `projectionTitle`. */
@@ -1109,6 +1173,15 @@ function BenchCard({
         */}
         <PlayerIdentity position={position} team={player.team ?? ''} />
         <span className="player-name">{player.name}</span>
+        {/*
+          The same chip the starters carry, for the same reason.
+
+          A bench decision is a comparison against a starter, and "who does he
+          play" is half of it. Leaving it off down here would mean the reader
+          has to open two cards to compare two fixtures that both already fit
+          on the rows.
+        */}
+        <FixtureChip fixture={fixture} />
         {/*
           Against the name, exactly as on a starter — a direct child of the row
           rather than wrapped, so the seam either side of it is the row's own gap
@@ -1155,6 +1228,7 @@ function BenchCard({
 function BenchSection({
   players,
   projectionOf,
+  fixtureOf,
   summary,
   onOpen,
 }: {
@@ -1167,6 +1241,7 @@ function BenchSection({
    * print somebody else's model as this app's.
    */
   projectionOf: (playerId: string) => { points: number | null; source: RowProjectionSource };
+  fixtureOf: (playerId: string) => SlotFixture | null;
   /** `1 strong alternative` / `No better option`, or nothing worth saying. */
   summary: string | null;
   onOpen: (playerId: string) => void;
@@ -1195,6 +1270,7 @@ function BenchSection({
             <BenchCard
               key={p.playerId}
               player={p}
+              fixture={fixtureOf(p.playerId)}
               projection={projectionOf(p.playerId).points}
               projectionSource={projectionOf(p.playerId).source}
               onOpen={() => onOpen(p.playerId)}
