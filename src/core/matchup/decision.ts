@@ -31,6 +31,7 @@
 import { winProbabilityWithSwap, type SimulationResult } from './simulate.ts';
 import type { PlayerDistribution } from './distribution.ts';
 import type { MatchupPlayerInput } from './types.ts';
+import { BORROWED_RANKING_DISCOUNT } from '../startsit/lineup.ts';
 
 /**
  * How much win probability a swap has to be worth before it is *offered*.
@@ -141,8 +142,9 @@ export function assessLineupDecision(opts: {
     // A slot the app does not understand is not a slot it may reassign.
     if (!slot) continue;
 
-    for (const candidate of movableBench) {
-      if (!slot.accepts.includes(candidate.position)) continue;
+    const legal = movableBench.filter((c) => slot.accepts.includes(c.position));
+    for (const candidate of legal) {
+      if (outrankedByAPricedRival(candidate, legal)) continue;
       const winAfter = winProbabilityWithSwap(opts.result, starter.playerId, candidate.playerId);
       const gain = winAfter - winNow;
       if (gain < minGain) continue;
@@ -197,6 +199,77 @@ export function assessLineupDecision(opts: {
             ? 'Nobody on your bench could legally take a starting slot.'
             : 'No legal change improves your chance of winning this matchup.',
   };
+}
+
+/**
+ * A borrowed figure may not outrank a priced one for the same slot.
+ *
+ * Reported 16 September 2026, two tabs of the same app, the same FLEX slot:
+ *
+ *     Matchup   Best move: Start K. Concepcion over J. Reed   +2.5 projected pts
+ *     Team      Start RJ Harvey over Jayden Reed              +1.37 pts
+ *
+ * Measured on production, the two screens held identical data and priced one
+ * player differently:
+ *
+ *     K. Concepcion   matchup 8.28 (published)   lineup ranks him 8.28 − 2 = 6.28
+ *     RJ Harvey       matchup 7.16 (market)      lineup ranks him 7.16
+ *     Jayden Reed     matchup 5.79 (market)      lineup ranks him 5.79
+ *
+ * 8.28 − 5.79 = 2.49, which is the `+2.5` on the card.
+ *
+ * ## What the disagreement actually was
+ *
+ * Not whether to change the FLEX — both screens wanted to. **Who to change it
+ * to.** Both Concepcion and Harvey beat Reed on either screen's arithmetic; the
+ * screens picked different winners because they ranked the two candidates
+ * against each other on different numbers:
+ *
+ *     lineup    Harvey 7.16  >  Concepcion 6.28 (8.28 docked)   -> Harvey
+ *     matchup   Concepcion 8.28  >  Harvey 7.16 (undocked)      -> Concepcion
+ *
+ * So the rule is about *candidates competing for one slot*, and a gate on each
+ * swap in isolation does not express it: Concepcion's docked 6.28 does clear
+ * Reed's 5.79, so asked one swap at a time he is a perfectly good answer. He is
+ * only the wrong answer next to Harvey.
+ *
+ * ## Why the forecast keeps the undocked figure
+ *
+ * `build.ts` is right about its own question. A mean wants the best available
+ * estimate of what a player will score, and Rotowire's number is a real if
+ * lower-confidence one — the alternative is a confident zero, which is how an
+ * opponent priced 4 of 7 came back as a 93.8% loss on what is really a coin
+ * flip. This changes no distribution and no draw. It is forecast-neutral by
+ * construction as well as by intent: `simulate.ts` skips a non-starting
+ * distribution when it totals a side, so a bench candidate's standing cannot
+ * reach the projected final or the win probability at all.
+ *
+ * ## What this deliberately does not touch
+ *
+ * Only a candidate priced on a **borrowed** figure, and only when a rival for
+ * the same slot outranks him. A contest between two market-priced players is
+ * left entirely alone, including one that gives up projected points for a
+ * narrower distribution — that is the divergence this module exists for and it
+ * is documented at the top of this file.
+ *
+ * **The asymmetry it leaves, stated rather than hidden.** A borrowed figure is
+ * docked when it competes to come *in* and not when it defends a slot from
+ * going *out*, because the outgoing man's figure is the one the forecast is
+ * built on and docking it there would move the projected final. The direction
+ * of that gap is conservative — it offers fewer changes against a borrowed
+ * starter, never more — and closing it properly means giving the decision its
+ * own means rather than borrowing the forecast's.
+ */
+function outrankedByAPricedRival(
+  candidate: MatchupPlayerInput,
+  legal: readonly MatchupPlayerInput[],
+): boolean {
+  if (!candidate.projectionBorrowed) return false;
+  /* The same arithmetic `rankingKey` does in `lineup.ts`, on the same figures. */
+  const ranked = (p: MatchupPlayerInput) =>
+    (p.projection ?? 0) - (p.projectionBorrowed ? BORROWED_RANKING_DISCOUNT : 0);
+  const mine = ranked(candidate);
+  return legal.some((rival) => rival.playerId !== candidate.playerId && ranked(rival) > mine);
 }
 
 /**
