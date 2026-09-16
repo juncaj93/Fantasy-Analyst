@@ -1390,20 +1390,19 @@ function WaiverSection({
         beside the numbers it qualifies rather than under two of them.
       */}
       {/*
-        Only the part that changes a reading.
+        And nothing under them.
 
-        The count of free agents considered and the never-transacts promise both
-        left this footer: Team shows the strongest two upgrades as a teaser, and
-        a teaser that spends two of its four lines on the engine's bookkeeping
-        is not a teaser. What is left is the one clause that qualifies the
-        numbers above it — a field that is not known yet, said so a blank is not
-        read as a zero.
+        This closed with `Expected cost, likely competition, multi-week value is
+        not known yet.` — the engine's own bookkeeping, in the engine's own
+        vocabulary, at the foot of a screen about a roster. The rows it
+        qualifies already say it where it matters: an unknown field draws as a
+        dash with its reason attached (see `UnknownField` in
+        `components/waivers.tsx`), which is the same claim made once, beside the
+        blank it is about, instead of restated as a sentence nobody asked for.
+
+        The full board on Waivers still carries the sentence, because that page
+        is where the fields are read as a set.
       */}
-      {board && board.pending.length > 0 ? (
-        <div className="faint" style={{ margin: '2px 4px 12px' }}>
-          {capitalise(board.pending.join(', '))} is not known yet.
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1415,14 +1414,8 @@ function WaiverSection({
  * strongest two answer "is there anything I should be doing", and the whole
  * board — every position, every filter — is one tab away. It was three, which
  * is a third of a phone screen spent reproducing a tab that already exists.
- * The cut is stated in the line under the rows rather than left as a silent
- * truncation.
  */
 const TEAM_WAIVER_ROWS = 2;
-
-function capitalise(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
 
 /**
  * Pick two to four players and rank them for one lineup spot.
@@ -1694,47 +1687,29 @@ function availabilityLabel(availability: PickerPlayer['availability']): string {
  * made.
  */
 function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
-  const gain =
-    lineup.currentPoints == null ? null : Math.round((lineup.recommendedPoints - lineup.currentPoints) * 10) / 10;
-
   /*
    * The change worth making, and everything else.
    *
    * The optimiser already sorts its swaps biggest-gain-first, so "the best one"
    * is the first one rather than a new judgement made here.
    */
-  const [best = null, ...rest] = lineup.swaps;
+  const [best = null] = lineup.swaps;
   const risks = lineup.lateSwapRisks ?? [];
   const material = risks.filter((r) => r.starting);
   const quiet = risks.filter((r) => !r.starting);
+  const hasDetail =
+    lineup.notes.length > 0 ||
+    lineup.warnings.length > 0 ||
+    quiet.length > 0 ||
+    lineup.undecidable.length > 0 ||
+    lineup.modeSuggestion?.auto === true;
 
   return (
-    <div className="card" data-testid="lineup-card">
+    <div className="card lineup-card" data-testid="lineup-card">
       <div className="header-row">
         <strong>Changes to consider</strong>
         <Confidence level={lineup.confidence} />
       </div>
-
-      {/*
-        The posture this answer was computed under, and why.
-
-        This line is what replaced the Balanced / Floor / Ceiling control. The
-        control was at least honest about which question was being answered, and
-        an app that quietly switched between protecting a lead and chasing one
-        would be changing its advice for reasons the reader cannot see. So the
-        choice is stated, in the suggestion's own sentence, at the top of the
-        card whose recommendation it governs.
-
-        Nothing is drawn when the app defaulted rather than chose: `auto` is
-        false when there was no opponent to read or too little priced to call
-        the matchup, and "Balanced, because we could not tell" is a sentence
-        about the app rather than about the week.
-      */}
-      {lineup.modeSuggestion?.auto ? (
-        <div className="faint" data-testid="lineup-mode" data-mode={lineup.modeSuggestion.mode}>
-          {lineup.modeSuggestion.detail}
-        </div>
-      ) : null}
 
       {best == null ? (
         <div className="faint" data-testid="lineup-verdict">
@@ -1743,33 +1718,31 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
             : 'Your lineup already matches the recommendation.'}
         </div>
       ) : (
-        <>
-          {/*
-            The best change, and only the best change.
-
-            Three suggestions stacked on a phone is a list to work through; the
-            biggest one is a thing to do. The others have not gone anywhere —
-            they are named under it and spelled out in the disclosure — but the
-            card's first line is now a single action with a number on it.
-          */}
-          <div className="swap" data-testid="lineup-swap">
-            <div>
-              <strong>Start {best.inName}</strong> over {best.outName} <span className="faint">({best.slot})</span>
-            </div>
-            <div className="faint">
-              +{best.gain} pts · {best.reason}
-            </div>
-          </div>
-          {rest.length > 0 ? (
-            <div className="faint" data-testid="lineup-verdict">
-              {rest.length} smaller change{rest.length === 1 ? '' : 's'} below
-              {gain != null && gain > 0 ? ` · ${gain} pts in total` : ''}
-            </div>
-          ) : null}
-          <div className="faint" style={{ margin: '4px 2px 0' }}>
-            Make changes in Sleeper — this app never edits a lineup.
-          </div>
-        </>
+        /*
+         * One change, one line, one number.
+         *
+         * This card used to run to a third of the screen: the swap, its
+         * engine-side reason ("a positive recent signal (+1 net over 1
+         * item(s))"), a count of the smaller changes, a promise that the app
+         * never edits a lineup, and a disclosure headed `Recommended lineup in
+         * full`. Every one of those was true and none of them was what the
+         * reader came for, which is *what to change*.
+         *
+         * The smaller changes are not lost and were never only here: every slot
+         * row below carries its own verdict, so a swap the app wants appears
+         * under the man it replaces — which is the same list, in the place it is
+         * actually actionable. The full recommended lineup is that list of rows.
+         * Repeating both above them was the card competing with the screen.
+         */
+        <div className="lineup-change" data-testid="lineup-swap">
+          <span className="lineup-change-names">
+            Start <strong>{best.inName}</strong> over {best.outName}
+          </span>
+          <span className="lineup-change-meta">
+            <span className="lineup-change-gain">+{best.gain}</span>
+            <span className="lineup-change-slot">{best.slot}</span>
+          </span>
+        </div>
       )}
 
       {/*
@@ -1787,74 +1760,48 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         </div>
       ))}
 
-      <details className="disclosure" data-testid="lineup-details">
-        <summary>Recommended lineup in full</summary>
+      {/*
+        What is left, once the duplication is gone: the provenance.
+        
+        Not `Recommended lineup in full` any more, because that is the screen
+        below. What genuinely lives nowhere else is why the numbers are what
+        they are — whose projection a borrowed figure is, which players could
+        not be ranked, what the app could not read this week. That is worth
+        keeping and is worth keeping *shut*, which is what a disclosure is for.
+        Drawn only when there is something in it.
+      */}
+      {hasDetail ? (
+        <details className="disclosure disclosure-quiet" data-testid="lineup-details">
+          <summary>How this was worked out</summary>
 
-        {rest.length > 0 ? (
-          <div data-testid="lineup-rest">
-            {rest.map((s) => (
-              <div className="swap" key={`${s.inPlayerId}-${s.outPlayerId}`} data-testid="lineup-swap-more">
-                <div>
-                  <strong>Start {s.inName}</strong> over {s.outName} <span className="faint">({s.slot})</span>
-                </div>
-                <div className="faint">
-                  +{s.gain} pts · {s.reason}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+          {lineup.modeSuggestion?.auto ? (
+            <div className="faint" data-testid="lineup-mode" data-mode={lineup.modeSuggestion.mode}>
+              {lineup.modeSuggestion.detail}
+            </div>
+          ) : null}
 
-        {lineup.warnings.map((w) => (
-          <div className="hint hint-caution" key={w}>
-            {w}
-          </div>
-        ))}
-        {quiet.map((risk) => (
-          <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk-quiet">
-            {risk.name} — {risk.detail}
-          </div>
-        ))}
-
-        <table className="compact">
-          <thead>
-            <tr>
-              <th>Slot</th>
-              <th>Player</th>
-              <th>Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineup.slots.map((s, i) => (
-              <tr key={`${s.slot}-${i}`}>
-                <td>{s.slot}</td>
-                <td>
-                  {s.name ?? <Unknown what="nobody eligible" />}
-                  {/* A locked slot is settled, so it never carries a change arrow. */}
-                  {s.locked ? <span className="tag tag-calm" data-testid="locked-tag"> 🔒 Locked</span> : null}
-                  {s.name && !s.alreadyStarting && !s.locked ? ' ←' : ''}
-                </td>
-                <td>{s.score == null ? <Unknown what="score" /> : s.score.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {lineup.bench.length > 0 ? (
-          <div className="faint" style={{ marginTop: 6 }}>
-            Bench: {lineup.bench.map((e) => `${e.name} (${e.score?.toFixed(1) ?? '—'})`).join(', ')}
-          </div>
-        ) : null}
-        {lineup.undecidable.length > 0 ? (
-          <div className="faint" style={{ marginTop: 6 }}>
-            Not enough data to rank: {lineup.undecidable.map((e) => e.name).join(', ')}
-          </div>
-        ) : null}
-        {lineup.notes.map((n) => (
-          <div className="faint" key={n}>
-            {n}
-          </div>
-        ))}
-      </details>
+          {lineup.warnings.map((w) => (
+            <div className="hint hint-caution" key={w}>
+              {w}
+            </div>
+          ))}
+          {quiet.map((risk) => (
+            <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk-quiet">
+              {risk.name} — {risk.detail}
+            </div>
+          ))}
+          {lineup.undecidable.length > 0 ? (
+            <div className="faint" style={{ marginTop: 6 }}>
+              Not enough data to rank: {lineup.undecidable.map((e) => e.name).join(', ')}
+            </div>
+          ) : null}
+          {lineup.notes.map((n) => (
+            <div className="faint" key={n}>
+              {n}
+            </div>
+          ))}
+        </details>
+      ) : null}
     </div>
   );
 }

@@ -1310,3 +1310,93 @@ test.describe('the row and the card are about the same player', () => {
     await expect(page.getByTestId('compare-run')).toBeDisabled();
   });
 });
+
+
+/**
+ * The card is a recommendation, not a page of prose.
+ *
+ * Reported 16 September 2026, with a screenshot: `Changes to consider` ran to
+ * roughly a third of the screen. It carried the swap, the engine's own phrasing
+ * of why it wanted it (`a positive recent signal (+1 net over 1 item(s))`), a
+ * count of the smaller changes, a promise that the app never edits a lineup,
+ * and a disclosure headed `Recommended lineup in full`. Every line was true.
+ * None of them was what a reader opens the screen for, and the full recommended
+ * lineup was already the list of rows underneath it.
+ *
+ * The property is held as a *fraction of the viewport* rather than in pixels,
+ * because the complaint was about how much of the screen it takes and that is
+ * what a fraction measures on every device this app runs on.
+ */
+test.describe('the size of the recommendation', () => {
+  /** A swap, so the card is drawn in its fullest ordinary state. */
+  async function withASwap(page: Page) {
+    await page.route('**/api/leagues/*/lineup*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.swaps = [
+        {
+          inPlayerId: 'x1',
+          inName: 'RJ Harvey',
+          outPlayerId: 'x2',
+          outName: 'Jayden Reed',
+          slot: 'FLEX',
+          gain: 1.37,
+          reason: 'RJ Harvey has a positive recent signal (+1 net over 1 item(s))',
+        },
+      ];
+      await route.fulfill({ response, body: JSON.stringify(body) });
+    });
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await withASwap(page);
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('lineup-card')).toBeVisible();
+  });
+
+  test('takes a fifth of the screen at most, where it used to take a third', async ({ page }) => {
+    const box = await page.getByTestId('lineup-card').boundingBox();
+    const viewport = page.viewportSize();
+    expect(box, 'the card is drawn').not.toBeNull();
+    expect(viewport, 'the viewport is known').not.toBeNull();
+    const share = box!.height / viewport!.height;
+    expect(share, `the card is ${(share * 100).toFixed(1)}% of the screen`).toBeLessThan(0.2);
+  });
+
+  test('says what to change and what it is worth, and stops', async ({ page }) => {
+    const text = await page.getByTestId('lineup-swap').innerText();
+    expect(text).toContain('RJ Harvey');
+    expect(text).toContain('Jayden Reed');
+    expect(text).toContain('1.37');
+    /* The engine's own vocabulary, which was never plain English on a screen. */
+    expect(text).not.toMatch(/net over|item\(s\)|recent signal/i);
+  });
+
+  test('does not repeat the lineup it is sitting on top of', async ({ page }) => {
+    const card = page.getByTestId('lineup-card');
+    await expect(card.getByText('Recommended lineup in full')).toHaveCount(0);
+    await expect(card.getByRole('columnheader', { name: 'Slot' })).toHaveCount(0);
+  });
+
+  test('does not explain that the app cannot edit a lineup', async ({ page }) => {
+    /*
+     * True, and said once where it belongs rather than under every
+     * recommendation: a screen that has never had an Apply button does not need
+     * a line saying so.
+     */
+    await expect(page.getByTestId('lineup-card')).not.toContainText(/never edits a lineup/i);
+  });
+
+  test('keeps the provenance, shut', async ({ page }) => {
+    /*
+     * The one thing the old disclosure held that lives nowhere else. It stays,
+     * and it stays closed — cutting it would have traded a wall of text for a
+     * screen that quotes somebody else's projection without saying so.
+     */
+    const details = page.getByTestId('lineup-details');
+    await expect(details).toHaveCount(1);
+    expect(await details.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+  });
+});

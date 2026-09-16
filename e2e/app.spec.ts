@@ -1595,11 +1595,18 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(card).toBeVisible();
     await expect(page.getByTestId('lineup-verdict')).toBeVisible();
 
-    await card.getByRole('group').getByText('Recommended lineup in full').click();
-    await expect(card.getByRole('columnheader', { name: 'Slot' })).toBeVisible();
-
-    // Recommendation only: there is no control here that changes a lineup.
-    const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    /*
+     * The recommended lineup is the rows, not a table inside the card.
+     *
+     * This used to open `Recommended lineup in full` and look for a `Slot`
+     * column. That disclosure was a second copy of the screen below it and was
+     * removed; what it held that lived nowhere else — the provenance — is
+     * behind `How this was worked out`. The property the test is named for
+     * never depended on either, so it is asserted directly, and against every
+     * control on the screen rather than only the ones inside the card, which is
+     * where an `Apply` would actually be tempting to put.
+     */
+    const buttons = (await page.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
     expect(buttons).not.toContain('apply');
     expect(buttons).not.toContain('set lineup');
     expect(buttons).not.toContain('save lineup');
