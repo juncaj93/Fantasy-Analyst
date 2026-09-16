@@ -82,10 +82,32 @@ for (const p of [...mine, ...(f.bench?.mine ?? [])]) {
 }
 
 console.log('\n--- the two recommendations, side by side ---');
-const move = f.bestMove ?? f.move ?? null;
-console.log(`  matchup best move: ${move ? JSON.stringify(move) : '(none)'}`);
+/* `decision`, which is what the card is drawn from — not a guessed field name. */
+const best = f.decision?.best ?? null;
+console.log(
+  best
+    ? `  matchup best move: start ${best.inName} over ${best.outName} (${best.slot}), ${best.pointsDelta > 0 ? '+' : ''}${best.pointsDelta} pts, ${(best.winNow * 100).toFixed(0)}% -> ${(best.winAfter * 100).toFixed(0)}%`
+    : `  matchup best move: (none) — ${f.decision?.note ?? 'no note'}`,
+);
+for (const o of f.decision?.options ?? []) {
+  console.log(`    option: ${o.inName} over ${o.outName} (${o.slot}) gain=${(o.gain * 100).toFixed(1)}pp`);
+}
 for (const s of lineup.json?.swaps ?? []) {
-  console.log(`  lineup swap:       out=${s.outPlayerId} in=${s.inPlayerId} gain=${s.gain}`);
+  console.log(`  lineup swap:       in=${s.inPlayerId} out=${s.outPlayerId} gain=${s.gain}`);
+}
+
+/* The property the report was about: do the two screens name the same man? */
+const lineupIn = (lineup.json?.swaps ?? [])[0]?.inPlayerId ?? null;
+const matchupIn = best?.inPlayerId ?? null;
+console.log('\n--- the property, checked ---');
+if (lineupIn && matchupIn) {
+  console.log(
+    lineupIn === matchupIn
+      ? `  OK   both tabs name the same man (${best.inName})`
+      : `  FAIL Team names ${lineupIn}, Matchup names ${matchupIn}`,
+  );
+} else {
+  console.log(`  only one tab is proposing a change: lineup=${lineupIn ?? 'none'} matchup=${matchupIn ?? 'none'}`);
 }
 
 /*
