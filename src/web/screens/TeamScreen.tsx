@@ -298,8 +298,12 @@ export function TeamScreen({
        * The changes the optimiser would actually stand behind, and only those.
        * Without this the rows would propose swaps the card above them declines
        * to make — one screen answering to two rules.
+       *
+       * Passed as pairs rather than as incoming ids: the rows need to know who
+       * each change is *instead of*, or `→ Start X instead` prints on whichever
+       * row the slot ordering put it beside.
        */
-      suggestedSwapIns: new Set((lineup.swaps ?? []).map((s) => s.inPlayerId)),
+      suggestedSwaps: lineup.swaps ?? [],
       positionOf: (id) => byId.get(id)?.position ?? null,
     });
   }, [roster, lineup, byId]);

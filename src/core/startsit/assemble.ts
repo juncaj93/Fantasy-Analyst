@@ -204,11 +204,21 @@ function notesFor(
    * A screen quoting Rotowire under a heading this app owns is the failure the
    * whole provenance chain exists to prevent, and the row-level marks are
    * deliberately subtle. This is the one place the claim is made in a sentence.
+   *
+   * It used to end "They are not used to rank the lineup", which was true when
+   * it was written and stopped being true the day a borrowed figure started
+   * ranking players — docked by `BORROWED_RANKING_DISCOUNT`, but ranking them.
+   * A sentence that outlives the behaviour it describes is worse than no
+   * sentence: the reader has no way to tell which of the two is stale.
+   *
+   * How a borrowed figure is ranked is now said once, by `recommendLineup`,
+   * which is the code that does it — so this says only whose number it is and
+   * stops there, rather than making a second claim about a rule it does not own.
    */
   const borrowed = filledSlots.filter((slot) => slot.projectionSource === 'sleeper').length;
   if (borrowed > 0) {
     notes.push(
-      `${borrowed} projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.`,
+      `${borrowed} projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players.`,
     );
   }
 

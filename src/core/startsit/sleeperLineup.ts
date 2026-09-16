@@ -142,14 +142,49 @@ export function startingSlotLabels(rosterPositions: readonly string[]): string[]
 }
 
 /**
- * Pair each of Sleeper's slots with the app's recommendation for the same slot.
+ * Pair each of Sleeper's slots with the app's recommendation for that slot.
  *
- * Matched by label and consumed in order, which is what makes three WR slots
- * line up with three WR slots rather than all three finding the first one. The
- * two lists come from the same `roster_positions`, so the labels match as
- * multisets; a label with no partner left is still drawn, carrying whichever
- * half of the pair exists, because dropping it would silently shorten the
- * lineup.
+ * ## Why this is not "the Nth WR against the Nth WR"
+ *
+ * It was, and that was a bug on the screen for a fortnight. The two lineups are
+ * two different assignments of *mostly the same players*, and the app's order
+ * is its own: it fills slots by what it decided, not by what Sleeper displays.
+ * Consuming each label's bucket in order therefore pairs row N with whoever the
+ * app happened to put N'th under that label, which is very often somebody else.
+ *
+ * Measured on this league on 16 September 2026:
+ *
+ *     Sleeper   FLEX #1 Jayden Reed      FLEX #2 Kenneth Walker
+ *     app       FLEX #1 Kenneth Walker   FLEX #2 RJ Harvey
+ *     the swap the optimiser made:  out Jayden Reed, in RJ Harvey, +1.37
+ *
+ * Positionally, Reed's row paired with Walker (no swap, reads `keep`) and
+ * Walker's row paired with Harvey — so the screen printed `→ Start RJ Harvey
+ * instead · 7.2` on **Kenneth Walker's** row, advising a reader to bench a 16.4
+ * for a 7.2 while the change the app actually wanted went unmentioned. The same
+ * crossing ran quietly through the two RB rows, where both verdicts were `keep`
+ * and each row carried the *other* man's projection: Rhamondre Stevenson's row
+ * showed Bijan Robinson's 18.98.
+ *
+ * ## What it pairs on instead
+ *
+ * Identity, then the optimiser's own swap list, then — only for what neither
+ * can speak to — the label.
+ *
+ *  1. **A player both lineups start keeps his own row.** His numbers are his,
+ *     wherever either lineup happens to file him, so a `keep` row can no longer
+ *     quote somebody else's projection.
+ *  2. **A row the app would change is paired by the swap the app made.** The
+ *     optimiser already decided who comes out and who goes in; this reads that
+ *     decision rather than re-deriving it from two orderings. `→ Start X
+ *     instead` therefore lands on the row holding the man X replaces, which is
+ *     the only row where that sentence is true.
+ *  3. **Everything left falls back to the label, in order** — an empty Sleeper
+ *     slot, a caller that passed no swap list. This is the old rule, kept for
+ *     the rows where there is nothing better to go on.
+ *
+ * A label with no partner left is still drawn, carrying whichever half of the
+ * pair exists, because dropping it would silently shorten the lineup.
  */
 export function buildLineupVerdicts(input: {
   /** The league's roster positions, in Sleeper's order. */
@@ -161,13 +196,13 @@ export function buildLineupVerdicts(input: {
   /** What `recommendLineup` decided, in its own order. */
   slots: readonly RecommendedSlot[];
   /**
-   * The changes the optimiser was actually prepared to suggest, by incoming id.
+   * The changes the optimiser was actually prepared to suggest, in full.
    *
-   * Load-bearing, and the reason is written out in `lineup.ts`'s own docblock:
-   * the recommended lineup and the swap list are computed under *different*
-   * rules, and a screen that reads only the first will show a reordering the
-   * app deliberately refused to explain. That is the defect of 8 September in a
-   * new costume.
+   * Load-bearing twice over, and the first reason is written out in
+   * `lineup.ts`'s own docblock: the recommended lineup and the swap list are
+   * computed under *different* rules, and a screen that reads only the first
+   * will show a reordering the app deliberately refused to explain. That is the
+   * defect of 8 September in a new costume.
    *
    * `recommendLineup` withholds a swap whose gain is under
    * {@link MIN_SWAP_GAIN}, and its assignment separately protects an incumbent
@@ -176,8 +211,14 @@ export function buildLineupVerdicts(input: {
    * for. Absent means "no swap list was passed", and every difference is then
    * reported — the older behaviour, kept only so a caller without one is not
    * silently given a lineup with no advice in it.
+   *
+   * The second reason is the pairing above: this used to be a set of incoming
+   * ids, which answers "may this change be suggested?" but not "*instead of
+   * whom?*" — and without the second answer the sentence lands on whichever row
+   * the label ordering put it next to. The pairs are what make `→ Start X
+   * instead` a statement about the row it is printed on.
    */
-  suggestedSwapIns?: ReadonlySet<string> | undefined;
+  suggestedSwaps?: readonly { outPlayerId: string; inPlayerId: string }[] | undefined;
   /** A player's position, for the eligibility fallback. */
   positionOf: (playerId: string) => string | null;
 }): LineupVerdictRow[] {
@@ -198,27 +239,83 @@ export function buildLineupVerdicts(input: {
     positionOf: input.positionOf,
   });
 
-  /* The app's slots, consumed by label so repeats pair up in order. */
+  /*
+   * What each label accepts, read from the label and never from the occupant.
+   *
+   * A row headed `RB` says what an RB slot takes even when the man bound to it
+   * is filed under FLEX by the optimiser — which pass 1 below makes routine.
+   * Taking `accepts` off the bound slot would have a Sleeper RB row announce
+   * that it accepts receivers.
+   */
+  const acceptsOf = new Map<string, string[]>();
+  for (const slot of input.slots) {
+    const key = slot.slot.toUpperCase();
+    if (!acceptsOf.has(key)) acceptsOf.set(key, slot.accepts);
+  }
+
+  /* Where the app put each player it starts, so a kept man carries his own numbers. */
+  const appSlotOf = new Map<string, RecommendedSlot>();
+  for (const slot of input.slots) if (slot.playerId) appSlotOf.set(slot.playerId, slot);
+
+  const pairedWith: (RecommendedSlot | null)[] = slotLabels.map(() => null);
+  const claimed = new Set<RecommendedSlot>();
+  const bind = (index: number, slot: RecommendedSlot | null | undefined): void => {
+    if (!slot || claimed.has(slot)) return;
+    pairedWith[index] = slot;
+    claimed.add(slot);
+  };
+
+  /* 1. A man both lineups start keeps his own row, wherever either files him. */
+  slotLabels.forEach((_, index) => {
+    const playerId = current[index];
+    if (playerId) bind(index, appSlotOf.get(playerId));
+  });
+
+  /* 2. A row the app would change is paired by the swap the app actually made. */
+  const swapInFor = new Map<string, string>();
+  for (const swap of input.suggestedSwaps ?? []) swapInFor.set(swap.outPlayerId, swap.inPlayerId);
+  slotLabels.forEach((_, index) => {
+    if (pairedWith[index]) return;
+    const playerId = current[index];
+    if (!playerId) return;
+    const incoming = swapInFor.get(playerId);
+    if (incoming) bind(index, appSlotOf.get(incoming));
+  });
+
+  /*
+   * 3. Whatever is left, by label and in order — the old rule, for the rows
+   * neither pass can speak to: an empty Sleeper slot, a slot the app declined
+   * to fill, a caller that passed no swap list at all.
+   */
   const remaining = new Map<string, RecommendedSlot[]>();
   for (const slot of input.slots) {
+    if (claimed.has(slot)) continue;
     const key = slot.slot.toUpperCase();
     const bucket = remaining.get(key);
     if (bucket) bucket.push(slot);
     else remaining.set(key, [slot]);
   }
+  slotLabels.forEach((label, index) => {
+    if (pairedWith[index]) return;
+    bind(index, remaining.get(label)?.shift());
+  });
+
+  const suggestedIns = input.suggestedSwaps
+    ? new Set(input.suggestedSwaps.map((swap) => swap.inPlayerId))
+    : undefined;
 
   return slotLabels.map((label, index) => {
-    const recommended = remaining.get(label)?.shift() ?? null;
+    const recommended = pairedWith[index];
     const currentPlayerId = current[index] ?? null;
     return {
       slot: label,
-      accepts: recommended?.accepts ?? [label],
+      accepts: acceptsOf.get(label) ?? recommended?.accepts ?? [label],
       currentPlayerId,
       recommendedPlayerId: recommended?.playerId ?? null,
       recommendedName: recommended?.name ?? null,
       projection: recommended?.projection ?? null,
       projectionSource: recommended?.projectionSource ?? null,
-      verdict: verdictFor(currentPlayerId, recommended?.playerId ?? null, input.suggestedSwapIns),
+      verdict: verdictFor(currentPlayerId, recommended?.playerId ?? null, suggestedIns),
       locked: recommended?.locked ?? false,
       vacancy: recommended?.vacancy ?? [],
       drivers: recommended?.drivers ?? [],

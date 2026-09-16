@@ -1130,7 +1130,7 @@ test.describe('a borrowed projection says whose it is', () => {
       }
       body.notes = [
         ...(body.notes ?? []),
-        "1 projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players. They are not used to rank the lineup.",
+        "1 projection(s) below are Rotowire's published weekly figures, by way of Sleeper, shown because no betting market has priced those players.",
       ];
       await route.fulfill({ response, body: JSON.stringify(body) });
     });
@@ -1177,7 +1177,14 @@ test.describe('a borrowed projection says whose it is', () => {
     const provenance = page.getByTestId('weekly-projection-source');
     await expect(provenance).toBeVisible();
     await expect(provenance).toContainText(/rotowire/i);
-    await expect(provenance).toContainText(/not used to rank/i);
+    /*
+     * "Ranked a little below", not "not used to rank": a borrowed figure does
+     * rank its man, docked by `BORROWED_RANKING_DISCOUNT`. The older wording
+     * survived the change that made it false, which is the whole reason this
+     * assertion names the rule rather than the source alone.
+     */
+    await expect(provenance).toContainText(/ranked a little below/i);
+    await expect(provenance).not.toContainText(/not used to rank/i);
   });
 
   test('and once more, in the notes the lineup carries', async ({ page }) => {
@@ -1191,7 +1198,8 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(details).toHaveCount(1);
     await details.locator('summary').click();
     await expect(details).toContainText(/rotowire/i);
-    await expect(details).toContainText(/not used to rank/i);
+    await expect(details).toContainText(/no betting market has priced those players/i);
+    await expect(details).not.toContainText(/not used to rank/i);
   });
 });
 
