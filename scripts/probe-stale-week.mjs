@@ -208,17 +208,45 @@ if (waivers.status !== 200) {
    * lanes are `upgrades`, `valueAdds` and `unknowns`.
    */
   const w = waivers.json ?? {};
-  const lanes = ['upgrades', 'valueAdds', 'unknowns'];
-  for (const lane of lanes) {
-    const rows = w[lane] ?? [];
-    console.log(`  ${lane.padEnd(10)} : ${rows.length}`);
-    for (const c of rows.slice(0, 5)) {
+  /*
+   * `upgrades` is slot-shaped: each entry is a starting slot with a `candidates`
+   * list under it, not a player. Printing it as a player is how the first three
+   * runs of this probe reported `undefined` and I read it as an empty lane.
+   *
+   * The slot's `need` is the thing item 1 turns on. `unfilled` sets the upgrade
+   * bar to zero, so any free agent with a positive score clears it — which is
+   * how a quarterback gets recommended over a quarterback who is already there.
+   */
+  for (const u of w.upgrades ?? []) {
+    console.log(
+      `  upgrade slot=${String(u.slot).padEnd(5)} need=${String(u.need).padEnd(9)} bar=${u.bar}` +
+        `  incumbent=${u.currentName ?? 'NOBODY'} (${u.currentScore ?? '—'})`,
+    );
+    for (const c of u.candidates ?? []) {
       console.log(
-        `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
-          ` score=${c.score ?? '?'} proj=${c.projection ?? '—'} shelf=${c.shelfLife ?? '-'} role=${c.role ?? '-'}`,
+        `      -> ${String(c.name).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+          ` score=${c.score ?? '?'} gain=${c.gain ?? '?'} flag=${c.statusFlag ?? '-'}`,
       );
+      for (const r of c.reasons ?? []) console.log(`           · ${r}`);
     }
   }
+  console.log(`  valueAdds  : ${(w.valueAdds ?? []).length}`);
+  for (const c of (w.valueAdds ?? []).slice(0, 6)) {
+    console.log(
+      `      ${String(c.name ?? c.playerId).slice(0, 22).padEnd(23)} ${String(c.position ?? '').padEnd(4)}` +
+        ` score=${c.score ?? '?'} role=${JSON.stringify(c.role ?? null)}`,
+    );
+  }
+  console.log(`  unknowns   : ${(w.unknowns ?? []).length}`);
+
+  /*
+   * And the money, which is item 1's other half. "0 of 9 teams need QB" is a
+   * statement about rivals, and a bid of $7 into a market with no rivals in it
+   * is a different defect from recommending the player at all.
+   */
+  const plan = w.claimPlan ?? null;
+  if (plan) console.log(`  claimPlan  : ${JSON.stringify(plan).slice(0, 700)}`);
+  if (w.faab) console.log(`  faab       : ${JSON.stringify(w.faab).slice(0, 400)}`);
   console.log(`  considered       : ${w.considered ?? '?'}   skipped: ${w.skipped ?? '?'}   threshold: ${JSON.stringify(w.threshold ?? null)}`);
   console.log(`  pool             : ${JSON.stringify(w.pool ?? null)}`);
   console.log(`  headline         : ${w.headline ?? '(none)'}`);

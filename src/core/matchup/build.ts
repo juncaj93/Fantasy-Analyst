@@ -373,9 +373,10 @@ export async function buildMatchupResponse(
   }
 
   const slots = buildSlotSpecs(league.rosterPositions);
+  const theirs = rosters.find((r) => r.rosterId === theirsRow.roster_id) ?? null;
   const players = [
-    ...toPlayers(mineRow, 'mine', evaluations, slots, published, preseason),
-    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published, preseason),
+    ...toPlayers(mineRow, 'mine', evaluations, slots, published, preseason, mine),
+    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published, preseason, theirs),
   ];
 
   const forecastInput = {
@@ -565,6 +566,39 @@ function labelOf(key: string): string {
 }
 
 /**
+ * The lineup for this week, from whichever of Sleeper's two answers has one.
+ *
+ * `/matchups/:week` is the authority once a week is under way, because it is
+ * the lineup as it *locked* — the roster keeps changing afterwards and the
+ * matchup row does not. Before a week is played, though, Sleeper returns
+ * `starters: null` on that row for any team that has not touched its lineup
+ * since the week rolled over, and the current lineup lives on `/rosters`
+ * instead. Measured on 16 September 2026, week 2, this league:
+ *
+ *     roster=4  matchup=2  players=16  starters=NULL
+ *         roster.starters: ["6904","9226", … ,"BAL"]
+ *     roster=5  matchup=3  players=16  starters=NULL     <- the opponent
+ *         roster.starters: ["11560","6813", … ,"PHI"]
+ *
+ * Sleeper's own app shows those lineups, because it reads the roster. This app
+ * read only the matchup row, found nothing, put all sixteen players on the
+ * bench, and then — after #269 taught it to say so plainly — told the reader
+ * "your opponent has not set a lineup for this week yet". A confident false
+ * statement, and worse than the confusing 0% it replaced.
+ *
+ * `starterSlotIds` is preferred over `starterIds` because this function
+ * assigns slots by position: it is the lineup with its gaps kept, so an empty
+ * slot stays an empty slot instead of shifting everybody below it up one.
+ */
+function startersFor(row: SleeperMatchup, roster: RosterRecord | null): (string | null)[] {
+  const fromRow = row.starters ?? [];
+  if (fromRow.some((id) => id && id !== '0')) return fromRow;
+  const slotAligned = roster?.starterSlotIds ?? [];
+  if (slotAligned.some((id) => id && id !== '0')) return slotAligned;
+  return roster?.starterIds ?? [];
+}
+
+/**
  * Turn one Sleeper matchup row into the model's players.
  *
  * The slot assignment is positional against the league's starting slots, and an
@@ -579,8 +613,9 @@ function toPlayers(
   slots: SlotSpec[],
   published: ReadonlyMap<string, number>,
   preseason: ReadonlyMap<string, number>,
+  roster: RosterRecord | null,
 ): MatchupPlayerInput[] {
-  const starters = row.starters ?? [];
+  const starters = startersFor(row, roster);
   const points = row.players_points ?? {};
   const startingIds = new Set(starters.filter((id) => id && id !== '0'));
 
