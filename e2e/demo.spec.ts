@@ -300,12 +300,32 @@ test.describe('the scenarios render the production screens', () => {
   });
 
   test('the pregame matchup recommends holding, and the injury scenario recommends a swap', async ({ page }) => {
+    /*
+     * `sunday-pregame` holds a live flex argument on purpose — see
+     * `MY_ROSTER` in `fixtures/season.ts`, where Kwame Boateng is described as
+     * "the other half of the flex argument". He is worth about a point and a
+     * third more than the man starting, which is real on paper and nowhere near
+     * the two points of win probability this screen interrupts somebody for.
+     *
+     * That used to read `Hold your lineup`, and the Team tab read `1 change to
+     * make` at the same moment — reported on 16 September 2026 as the two tabs
+     * disagreeing. It now says whose answer it is showing, so this scenario
+     * demonstrates the echo rather than the bare hold.
+     *
+     * `hold` itself is not asserted here and does not need to be: demo mode
+     * answers these calls inside the app rather than over HTTP, so a route
+     * cannot compose the state, and `matchup.spec.ts` already holds that row
+     * five times over against a league it can intercept.
+     */
     await openScenario(page, 'sunday-pregame');
     await tab(page, 'matchup');
-    const hold = page.getByTestId('matchup-best-move');
-    await expect(hold).toBeVisible();
-    await expect(hold).toHaveAttribute('data-state', 'hold');
-    await expect(hold).toContainText(/hold your lineup/i);
+    const echo = page.getByTestId('matchup-best-move');
+    await expect(echo).toBeVisible();
+    await expect(echo).toHaveAttribute('data-state', 'on-projection');
+    await expect(echo).toContainText(/start .+ over .+/i);
+    await expect(page.getByTestId('best-move-metrics')).toContainText(/barely moves this matchup/i);
+    /* The claim it must never make: this is not a win-probability shift. */
+    await expect(page.getByTestId('best-move-metrics')).not.toContainText('%');
 
     await openScenario(page, 'matchup-injury-swing');
     await tab(page, 'matchup');
