@@ -114,7 +114,7 @@ console.log('\n--- the property, checked ---');
 if (lineupIn && matchupIn) {
   console.log(
     lineupIn === matchupIn
-      ? `  OK   both tabs name the same man (${best.inName})`
+      ? `  OK   both tabs name the same man (${(best ?? echo).inName})`
       : `  FAIL Team names ${lineupIn}, Matchup names ${matchupIn}`,
   );
 } else {
