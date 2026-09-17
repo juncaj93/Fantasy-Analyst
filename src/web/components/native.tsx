@@ -815,6 +815,18 @@ export function Sheet({
      * new direction, so both ways a hand can come off the card arm this instead.
      */
     /*
+     * A movement with nothing behind it yet is left to the debounce.
+     *
+     * The timer is cancellable and the immediate path is not, and that is the
+     * whole reason both exist: a scroll nobody made clears this on its way past,
+     * so a tap that the browser answers by revealing something — a focus ring, a
+     * candidate brought into view before a click — never becomes a dismissal.
+     */
+    const decideSoon = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(settle, SETTLE);
+    };
+    /*
      * A hand leaving the card settles it **now**, and this is the whole of the
      * defect three rounds of tuning could not reach.
      *
@@ -915,6 +927,22 @@ export function Sheet({
      * speed may only ever *withhold* a dismissal it has actually watched being
      * slow.
      */
+    /*
+     * Whether this movement has actually moved the layer.
+     *
+     * The lift is only allowed to decide on the spot for a movement that was
+     * one: a tap lifts too, and a tap is how the browser's own scroll-to-reveal
+     * arrives — a candidate brought into view before a click, a focus ring, a
+     * keyboard opening. Deciding synchronously there took the compare sheet
+     * apart under Playwright's own click, because an immediate answer is the one
+     * thing the stray-scroll correction below cannot reach in time to cancel.
+     *
+     * So a push that never moved anything falls back to the debounce, where the
+     * correction can still clear it, and only a real push gets the instant
+     * answer this round is about. Set where the reader's own scrolls are
+     * sampled, and cleared by {@link rewind} with the rest of the movement.
+     */
+    let pushed = false;
     const recent: Sample[] = [];
     /** Enough readings to fill the window at any frame rate, and no history. */
     const KEEP = 12;
@@ -923,6 +951,7 @@ export function Sheet({
     let lifted = false;
     /** Begin reading a fresh movement, from wherever the layer is now. */
     const rewind = () => {
+      pushed = false;
       recent.length = 0;
       flick = 0;
       measured = false;
@@ -1037,7 +1066,8 @@ export function Sheet({
        * all of them.
        */
       lifted = true;
-      decideNow();
+      if (pushed) decideNow();
+      else decideSoon();
     };
     const onTaken = (event: Event) => {
       // `touchcancel` reports what is left on the screen; `pointercancel` says
@@ -1060,7 +1090,10 @@ export function Sheet({
        * *start* of a touch drag — and a mouse's own cancel has no push behind it
        * to answer.
        */
-      if ('touches' in event && touching === 0) decideNow();
+      if ('touches' in event && touching === 0) {
+        if (pushed) decideNow();
+        else decideSoon();
+      }
     };
     const onWheel = () => gestured();
     const onKey = (event: Event) => {
@@ -1430,6 +1463,7 @@ export function Sheet({
         // A movement already under way, which keeps its window open as it goes.
         refresh();
         sample(top);
+        pushed = true;
       } else {
         /*
          * A scroll nobody made: put the card back where it belongs and decide
