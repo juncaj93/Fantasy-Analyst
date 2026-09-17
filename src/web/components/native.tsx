@@ -684,8 +684,40 @@ export function Sheet({
   useEffect(() => {
     const root = scroller.current;
     if (!root) return;
-    /** How long the card takes to finish leaving once the outcome is settled. */
-    const EXIT = 180;
+    /*
+     * How fast the card leaves, in px/ms, once the outcome is settled.
+     *
+     * **A speed, not a duration, and the difference is the reader's last
+     * complaint.** This was a fixed 180ms for whatever distance was left, on the
+     * reasoning that an exit should take the time an exit takes rather than
+     * inheriting the duration of the reader's own momentum. That is right about
+     * momentum and wrong about distance: a *deliberate* push goes a long way
+     * before the hand leaves, so there is very little left to cover, and a fixed
+     * duration spends the whole of it on a short trip. Measured on the widest
+     * phone, a push to nine tenths leaves 82px to travel and 180ms to do it in —
+     * 0.46px/ms, a card creeping the last inch in plain view. An unhurried push
+     * is exactly the push that lands there, which is why the reader has said
+     * "slowed down at the bottom" through four rounds of this.
+     *
+     * So the card leaves at one speed, whatever the distance, and the clock
+     * follows from it. 3px/ms is a brisk thumb — measured against the readings
+     * in `gestures.ts`, above an unhurried pull and below a flick — so the exit
+     * reads as the movement carrying on rather than as an animation taking over.
+     */
+    const EXIT_SPEED = 3;
+    /*
+     * …and the bounds, because a speed alone gives the two ends away.
+     *
+     * The floor keeps a card that is nearly gone from vanishing in a single
+     * frame, which reads as a glitch rather than as a dismissal. The ceiling
+     * keeps the longest trip — a card pushed barely past the line on the tallest
+     * phone — from being a journey. Between them the speed decides.
+     */
+    const EXIT_MIN = 90;
+    const EXIT_MAX = 220;
+    /** How long the card needs to cover `px` at that speed, within the bounds. */
+    const exitFor = (px: number) =>
+      Math.round(Math.min(EXIT_MAX, Math.max(EXIT_MIN, px / EXIT_SPEED)));
     /*
      * How long a stillness counts as the movement having ended.
      *
@@ -1188,7 +1220,7 @@ export function Sheet({
      * decision but an exit, and an exit should take the time an exit takes.
      *
      * So the layer stops taking input and the card covers whatever distance is
-     * left under a transform, in `EXIT` milliseconds whatever that distance is.
+     * left under a transform, at {@link EXIT_SPEED} however far that is.
      * `scrollTop` is exactly that distance: the card sits one screen down the
      * layer's content, so the amount it is still short of gone is how far the
      * layer is still scrolled.
@@ -1221,6 +1253,7 @@ export function Sheet({
         onDismiss.current();
         return;
       }
+      const exit = exitFor(remaining);
       root.style.pointerEvents = 'none';
       /*
        * The card moves, not its detent — and that distinction is the one this
@@ -1232,7 +1265,7 @@ export function Sheet({
        */
       const card = surface.current;
       if (card) {
-        card.style.transition = `transform ${EXIT}ms var(--ease)`;
+        card.style.transition = `transform ${exit}ms var(--ease-exit)`;
         card.style.transform = `translate3d(0, ${remaining}px, 0)`;
       }
       /*
@@ -1247,16 +1280,16 @@ export function Sheet({
        */
       const box = detent.current;
       if (box && heldBack > 0.5) {
-        box.style.transition = `transform ${EXIT}ms var(--ease)`;
+        box.style.transition = `transform ${exit}ms var(--ease-exit)`;
         box.style.transform = '';
       }
       const back = backdrop.current;
-      if (back) back.style.transition = `opacity ${EXIT}ms var(--ease)`;
+      if (back) back.style.transition = `opacity ${exit}ms var(--ease-exit)`;
       paint(0);
       window.setTimeout(() => {
         say('GONE');
         onDismiss.current();
-      }, EXIT);
+      }, exit);
     };
 
     /*
