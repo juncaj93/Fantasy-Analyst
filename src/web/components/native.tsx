@@ -22,6 +22,7 @@ import {
   velocityOver,
   type Sample,
 } from '../gestures.ts';
+import { trace, traceReset, tracing } from '../gestureTrace.ts';
 import { useOverlay } from '../overlay.ts';
 import { useKeyboardInset } from '../viewport.ts';
 import { BackChevronIcon, ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
@@ -790,6 +791,17 @@ export function Sheet({
       if ('touches' in event) touching = (event as TouchEvent).touches.length;
     };
     /*
+     * One line in the on-device reading, when one has been asked for.
+     *
+     * Behind `tracing()`, which is a boolean read once per page: with no trace
+     * asked for this is a branch not taken, which is what lets it sit in the
+     * scroll handler at all. See `gestureTrace.ts` for why the reading has to
+     * be taken on the phone rather than inferred from a Chromium trace.
+     */
+    const say = (what: string, note?: string) => {
+      if (tracing()) trace(what, touching, root.scrollTop, note);
+    };
+    /*
      * Ask the question, once the hand is off.
      *
      * Every settle this layer has ever run was armed by a *scroll*, and that was
@@ -931,6 +943,7 @@ export function Sheet({
     };
     const onDown = (event: Event) => {
       countTouches(event);
+      say(event.type);
       pointerAt = pointOf(event);
       dragging = false;
       // A hand arriving on the layer starts a movement, and a movement's speed
@@ -940,6 +953,7 @@ export function Sheet({
     };
     const onMove = (event: Event) => {
       countTouches(event);
+      say(event.type);
       const at = pointOf(event);
       if (!pointerAt || !at) return;
       if (Math.abs(at.x - pointerAt.x) + Math.abs(at.y - pointerAt.y) < SLOP) return;
@@ -948,6 +962,7 @@ export function Sheet({
     };
     const onUp = (event: Event) => {
       countTouches(event);
+      say(event.type);
       pointerAt = null;
       // The momentum this left behind is still the reader's; the window says
       // for how long, and each scroll it covers renews it.
@@ -973,6 +988,7 @@ export function Sheet({
       // nothing about fingers at all and must not be read as saying they have
       // gone — it is sent *while* the reader is still dragging.
       countTouches(event);
+      say(event.type);
       gestured();
       dragging = false;
       pointerAt = null;
@@ -1093,6 +1109,7 @@ export function Sheet({
      */
     const leave = () => {
       if (leaving) return;
+      say('EXIT');
       leaving = true;
       springUntil = 0;
       window.clearTimeout(timer);
@@ -1147,7 +1164,10 @@ export function Sheet({
       const back = backdrop.current;
       if (back) back.style.transition = `opacity ${EXIT}ms var(--ease)`;
       paint(0);
-      window.setTimeout(() => onDismiss.current(), EXIT);
+      window.setTimeout(() => {
+        say('GONE');
+        onDismiss.current();
+      }, EXIT);
     };
 
     /*
@@ -1232,20 +1252,27 @@ export function Sheet({
        * this timer anyway, while `onUp` arms it once the last finger goes. The
        * question gets asked again the moment there is a point in asking it.
        */
-      if (touching > 0) return;
+      if (touching > 0) {
+        say('settle-held', 'a finger is still down');
+        return;
+      }
       const detentTop = root.scrollHeight - root.clientHeight;
       if (detentTop <= 0) return;
       // How much of the push was given, and whether it was ever given quickly.
-      if (dismissesSheet(1 - root.scrollTop / detentTop, flick, measured)) {
+      const given = 1 - root.scrollTop / detentTop;
+      if (dismissesSheet(given, flick, measured)) {
+        say('DECIDE', `dismiss given=${given.toFixed(2)} v=${flick.toFixed(2)}`);
         leave();
         return;
       }
+      say('DECIDE', `stay given=${given.toFixed(2)} v=${flick.toFixed(2)}`);
       // Already where it belongs. A pixel of tolerance because a smooth scroll
       // lands on a fraction and `scrollTop` is not obliged to be an integer.
       if (root.scrollTop >= detentTop - 1) {
         rewind();
         return;
       }
+      say('SPRING');
       springUntil = stamp() + SPRING;
       root.scrollTo({ top: detentTop, behavior: 'smooth' });
       driveSpring();
@@ -1279,6 +1306,7 @@ export function Sheet({
      */
     const onScroll = () => {
       if (leaving) return;
+      say('scroll');
       const detentTop = root.scrollHeight - root.clientHeight;
       const top = root.scrollTop;
       if (stamp() < springUntil) {
@@ -1365,6 +1393,7 @@ export function Sheet({
       timer = window.setTimeout(settle, SETTLE);
     };
     rewind();
+    traceReset();
     root.addEventListener('scroll', onScroll, { passive: true });
     /*
      * The input listeners sit on the layer, which every part of a sheet is
