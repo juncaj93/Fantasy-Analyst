@@ -1187,19 +1187,25 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(provenance).not.toContainText(/not used to rank/i);
   });
 
-  test('and once more, in the notes the lineup carries', async ({ page }) => {
+  test('and nowhere else, because the row is where the claim belongs', async ({ page }) => {
     /*
-     * The `details` disclosure, which is the surface the product decision names
-     * for provenance: subtle on the row, spelled out where somebody has gone
-     * looking. Asserted rather than skipped when absent — a test that returns
-     * early on a missing element is a test that stops running without saying so.
+     * This used to open `How this was worked out` on the card and look for the
+     * same sentence there. That disclosure was the lineup's notes, and the
+     * lineup's notes are about the lineup: opened under a swap about one player
+     * it listed a defence that could not be scored, a flex placement and a
+     * count of borrowed figures. Five true sentences, none about the man in the
+     * heading.
+     *
+     * So the claim is made once, beside the number it is about — the dotted
+     * rule, the title and the accessible name, all asserted above — and the
+     * card no longer restates it from a distance.
      */
-    const details = page.getByTestId('lineup-details');
-    await expect(details).toHaveCount(1);
-    await details.locator('summary').click();
-    await expect(details).toContainText(/rotowire/i);
-    await expect(details).toContainText(/no betting market has priced those players/i);
-    await expect(details).not.toContainText(/not used to rank/i);
+    await expect(page.getByTestId('lineup-details')).toHaveCount(0);
+    await expect(page.getByTestId('lineup-card')).not.toContainText(/rotowire/i);
+
+    /* Still reachable, on the row, which is the half that must not be lost. */
+    const borrowed = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
+    await expect(borrowed).toHaveAttribute('title', /rotowire/i);
   });
 });
 
@@ -1389,14 +1395,50 @@ test.describe('the size of the recommendation', () => {
     await expect(page.getByTestId('lineup-card')).not.toContainText(/never edits a lineup/i);
   });
 
-  test('keeps the provenance, shut', async ({ page }) => {
+  test('carries no disclosure at all', async ({ page }) => {
     /*
-     * The one thing the old disclosure held that lives nowhere else. It stays,
-     * and it stays closed — cutting it would have traded a wall of text for a
-     * screen that quotes somebody else's projection without saying so.
+     * The disclosure's contents were the lineup's notes, which are about the
+     * lineup: opened under a swap about one player they listed a defence that
+     * could not be scored, a flex placement and a count of borrowed figures.
+     * The card is the header and the change now; the marks on the rows carry
+     * the provenance.
      */
-    const details = page.getByTestId('lineup-details');
-    await expect(details).toHaveCount(1);
-    expect(await details.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+    await expect(page.getByTestId('lineup-details')).toHaveCount(0);
+    await expect(page.getByTestId('lineup-card')).not.toContainText(/how this was worked out/i);
+  });
+
+  test('says how many of the lineup a market has actually priced', async ({ page }) => {
+    /*
+     * `low confidence` was `worstConfidence` — the worst single player — so one
+     * unpriced defence took the whole card to `low` while fourteen rows were
+     * fine. True, and unreadable as a summary. The count is the fact underneath
+     * it, and it moves for a reason a reader can see.
+     */
+    const chip = page.getByTestId('lineup-sourcing');
+    await expect(chip).toHaveText(/^\d+\/\d+ priced$/);
+    /* The app's own judgement is kept, where somebody listening still hears it. */
+    await expect(chip).toHaveAttribute('aria-label', /confidence/i);
+  });
+
+  test('puts no prose under a slot it will not fill', async ({ page }) => {
+    /*
+     * The defence row drew `is projected 10.22 by Rotowire, but no betting
+     * market has priced him, so this app will not rank him` — a sentence the
+     * length of the row it explained, on the one row with nothing to do. The
+     * figure above it already wears the dotted rule, and the same words are in
+     * its title and the row's accessible name.
+     */
+    /*
+     * Only where the row can carry the reason itself. A borrowed figure wears
+     * the dotted rule and says the rest in its title; a man on injured reserve
+     * has no figure to mark, so his line stays — see `never highlights a player
+     * who cannot play`.
+     */
+    const marked = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
+    for (const proj of await marked.all()) {
+      const rowOf = page.locator('[data-testid="starter-row"]', { has: proj });
+      await expect(rowOf.getByTestId('verdict-no-pick')).toHaveCount(0);
+    }
+    await expect(page.getByTestId('starters-title')).toBeVisible();
   });
 });

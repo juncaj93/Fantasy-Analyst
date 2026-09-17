@@ -110,13 +110,49 @@ describe('a projection requires a market', () => {
     expect(marketProjection({ score: 4, components: [] })).toBeNull();
   });
 
-  it('projects once a market exists, with the availability charge taken back out', () => {
+  it('projects the market expectation once a market exists', () => {
     const priced = evaluation({ score: 12.4, expectation: { points: 13.9, coverage: 1 } });
-    // 12.4 minus the -1.5 availability charge.
     expect(marketProjection(priced)).toBeCloseTo(13.9, 5);
   });
 
-  it('leaves an unknown availability charge alone', () => {
+  it('is the expectation and not the score, whatever the nudges did', () => {
+    /*
+     * The reported defect. `score` is the expectation plus every bounded nudge
+     * the engine applies, and printing it under the word "projected" put a
+     * fifth on top of a betting line: measured on production, Mark Andrews
+     * 5.40 -> 6.77 and Bijan Robinson 15.9 -> 19.0.
+     *
+     * Asserted with the score *above* the expectation and again *below* it, so
+     * this cannot pass by the two happening to agree.
+     */
+    const boosted = evaluation({
+      score: 19.0,
+      expectation: { points: 15.9, coverage: 1 },
+      components: [
+        { key: 'vegas', value: 15.9, unknown: false },
+        { key: 'usage_level', value: 1.5, unknown: false },
+        { key: 'game_script', value: 1.6, unknown: false },
+      ],
+    });
+    expect(marketProjection(boosted)).toBeCloseTo(15.9, 5);
+
+    const dragged = evaluation({
+      score: 3.2,
+      expectation: { points: 9.4, coverage: 1 },
+      components: [
+        { key: 'vegas', value: 9.4, unknown: false },
+        { key: 'uncertainty', value: -6.2, unknown: false },
+      ],
+    });
+    expect(marketProjection(dragged)).toBeCloseTo(9.4, 5);
+  });
+
+  it('does not unwind an availability charge, because there is none in it', () => {
+    /*
+     * The charge lives in `score` and never in the expectation, so the old
+     * subtraction has nothing left to do. A Questionable player's designation
+     * is on his own row either way, which is the reason it was unwound.
+     */
     const priced = evaluation({
       score: 12.4,
       expectation: { points: 13.9, coverage: 1 },
@@ -125,7 +161,7 @@ describe('a projection requires a market', () => {
         { key: 'status', value: -1.5, unknown: true },
       ],
     });
-    expect(marketProjection(priced)).toBeCloseTo(12.4, 5);
+    expect(marketProjection(priced)).toBeCloseTo(13.9, 5);
   });
 });
 

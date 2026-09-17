@@ -91,10 +91,22 @@ export const OPPONENT_STARTERS = ['p011', 'p004', 'p006', 'p002', 'p005', 'p024'
  */
 type Scores = Record<string, number>;
 
-/** One point in it, with the reader's night game still to come. */
+/**
+ * One point in it, with the reader's night game still to come.
+ *
+ * Retuned on 16 September 2026, when the projection stopped being the engine's
+ * nudged score and became the market expectation it had always claimed to be.
+ * Every projected final fell, and they fell by different amounts on the two
+ * sides — a side with more football left loses more — so a fixture built to
+ * land level landed 6.4 apart. The opponent's two finished games come down by
+ * that much, which is the smallest edit that restores what the scenario is for.
+ *
+ * The name is a claim the numbers have to keep;
+ * `demo.scenarios.test.ts` is what makes it one.
+ */
 const CLOSE: Scores = {
   p001: 22.1, p003: 12.6, p016: 12.7, p023: 8.1, p009: 8.7, p025: 4.9,
-  p004: 17.0, p002: 22.1, p017: 6.4, p011: 14.7, p006: 7.2, p005: 9.3, p021: 4.8,
+  p004: 14.6, p002: 18.1, p017: 6.4, p011: 14.7, p006: 7.2, p005: 9.3, p021: 4.8,
 };
 
 /** The finished games went the reader's way, and the live ones are following. */

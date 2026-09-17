@@ -130,14 +130,43 @@ const UNKNOWN: WeeklyProjection = { points: null, source: null };
  * refuses to publish an expectation it cannot stand behind — it returns
  * `points: null` when the markets it needs are missing — so this reads that
  * decision rather than inventing a second threshold that could disagree with it.
+ *
+ * ## It is the market expectation, and nothing added to it
+ *
+ * This used to return `score` with the availability penalty taken back out,
+ * which is a different number: `score` is the market expectation **plus every
+ * bounded nudge the engine applies** — news, usage, role, game script, weather,
+ * the matchup, uncertainty. Measured on production on 16 September 2026:
+ *
+ *     Mark Andrews   market 5.40  ->  printed 6.77   (+25%)
+ *     Jayden Reed    market 4.81  ->  printed 5.79   (+20%)
+ *     Bijan Robinson market 15.9  ->  printed 19.0   (+19%)
+ *
+ * The owner reported it from the other end: the Team row said 19.0 and the
+ * player's own card said 15.9, and the gap looked enough like an average of
+ * this app's number and Rotowire's to be worth asking about. It was not an
+ * average — nothing here has ever read Rotowire — it was this app quietly
+ * adding a fifth to a betting line and printing the result as a forecast.
+ *
+ * The nudges are a *ranking* device. They are bounded, they are measured in
+ * ones and twos, and they exist so two players a market prices alike can still
+ * be told apart. None of them was fitted to predict points. Adding them to a
+ * market line and printing the total is precisely the unvalidated arithmetic
+ * this same file refuses to perform on Rotowire's number, done to our own.
+ *
+ * So the projection is the expectation. `score` keeps the nudges and keeps
+ * doing the ranking, which is what it was built for; the two numbers now answer
+ * the two different questions they were always meant to.
+ *
+ * The availability penalty needs no unwinding any more — it was never in the
+ * expectation — and the reasoning behind removing it still holds: a
+ * Questionable player's designation is on his own row, so charging him for it
+ * inside the projection too would say it twice.
  */
 export function marketProjection(evaluation: ProjectableEvaluation | null | undefined): number | null {
-  if (!evaluation || evaluation.score == null) return null;
-  if (evaluation.expectation?.points == null) return null;
-
-  const availability = (evaluation.components ?? []).find((c) => c.key === 'status');
-  const penalty = availability && !availability.unknown ? availability.value : 0;
-  return Math.max(0, Math.round((evaluation.score - penalty) * 100) / 100);
+  const points = evaluation?.expectation?.points;
+  if (points == null || !Number.isFinite(points)) return null;
+  return Math.max(0, Math.round(points * 100) / 100);
 }
 
 /**

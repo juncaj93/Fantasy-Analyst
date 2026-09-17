@@ -92,18 +92,29 @@ console.log(
 for (const o of f.decision?.options ?? []) {
   console.log(`    option: ${o.inName} over ${o.outName} (${o.slot}) gain=${(o.gain * 100).toFixed(1)}pp`);
 }
+/*
+ * The echo, which the first version of this script could not see because it
+ * was written before the field existed. A probe that predates the behaviour it
+ * is asked about reports the old answer whatever is deployed - twice now.
+ */
+const echo = f.decision?.onProjection ?? null;
+console.log(
+  echo
+    ? `  matchup onProjection: start ${echo.inName} over ${echo.outName} (${echo.slot}), ${echo.pointsDelta > 0 ? '+' : ''}${echo.pointsDelta} pts`
+    : '  matchup onProjection: (none)',
+);
 for (const s of lineup.json?.swaps ?? []) {
   console.log(`  lineup swap:       in=${s.inPlayerId} out=${s.outPlayerId} gain=${s.gain}`);
 }
 
 /* The property the report was about: do the two screens name the same man? */
 const lineupIn = (lineup.json?.swaps ?? [])[0]?.inPlayerId ?? null;
-const matchupIn = best?.inPlayerId ?? null;
+const matchupIn = best?.inPlayerId ?? echo?.inPlayerId ?? null;
 console.log('\n--- the property, checked ---');
 if (lineupIn && matchupIn) {
   console.log(
     lineupIn === matchupIn
-      ? `  OK   both tabs name the same man (${best.inName})`
+      ? `  OK   both tabs name the same man (${(best ?? echo).inName})`
       : `  FAIL Team names ${lineupIn}, Matchup names ${matchupIn}`,
   );
 } else {
