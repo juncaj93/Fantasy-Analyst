@@ -621,6 +621,165 @@ test.describe('pushing a sheet away', () => {
   });
 });
 
+/**
+ * The card waits for the hand, which is the defect two rounds of complaints
+ * were both about.
+ *
+ * The dismissal is decided by a debounce — seventy milliseconds of stillness
+ * and the layer calls the movement over — and that debounce had no way to ask
+ * whether a finger was still on the glass. It could not: on a touch drag WebKit
+ * sends a single `pointercancel` at the *start* of the push, when the engine
+ * takes the pan for itself, and no pointer event after it, so the layer's
+ * pointer bookkeeping goes quiet a tenth of a second into a gesture that runs
+ * for two seconds. Touch events keep arriving throughout, and counting those is
+ * the fix.
+ *
+ * A deliberate push breaks the debounce's bet twice, and each break is one of
+ * the two complaints:
+ *
+ *  - **paused past the threshold, the card left under the thumb.** Traced on
+ *    Chromium with real touch points: the drag's last scroll at +1700ms, the
+ *    exit armed at +1771ms — one debounce later, to the millisecond — the card
+ *    unmounted by +1958ms, and the finger not off the glass until +2734ms. The
+ *    card was taken away 963ms before the hand that was holding it left. That is
+ *    the jitter at the bottom of a close;
+ *
+ *  - **paused short of the threshold, the card sprang home under the thumb**,
+ *    arriving back at its detent at +1655ms while the reader was still pushing
+ *    it. They then went on pushing a card that had quietly reset, so 616 pixels
+ *    of travel counted as 336, and a 3.3-second gesture dismissed nothing. That
+ *    is the close that takes about a second.
+ *
+ * **Real touch points through the DevTools protocol, so Chromium only** — the
+ * protocol is Chromium's. That is a real limit and it is stated rather than
+ * worked around: what these hold is the decision logic, under an input that is
+ * genuinely a finger rather than a wheel or a synthetic mouse, and the WebKit
+ * shards and the phone remain the gate for whether iOS agrees. A wheel cannot
+ * express this defect at all, because a wheel has no finger to still be down.
+ */
+test.describe('a deliberate push, with the finger still on the card', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'real touch injection is a Chromium DevTools protocol capability');
+
+  /** A thumb on the grip, moved down in steps, with the pauses a real one has. */
+  async function thumb(page: Page) {
+    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
+    const port = (await page.locator('.sheet-scroller').boundingBox())!;
+    const x = Math.round(port.x + port.width / 2);
+    const from = Math.round(grip.y + grip.height / 2);
+    const at = (y: number) => [{ x, y: Math.round(y), id: 1, radiusX: 14, radiusY: 14, force: 1 }];
+    const cdp = await page.context().newCDPSession(page);
+    let step = 0;
+    return {
+      down: () => cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(from) }),
+      /*
+       * `px` further down the screen, in 14px notches 50ms apart.
+       *
+       * About 0.28px/ms, which is an unhurried push rather than a flick, and
+       * the distance is asked for in pixels rather than notches because the
+       * thresholds it has to straddle are fractions of a detent — and the
+       * detent is a different number on each of the four widths this runs at.
+       */
+      push: async (px: number) => {
+        const notches = Math.ceil(px / 14);
+        for (let i = 0; i < notches; i++) {
+          step += 1;
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(from + step * 14) });
+          await page.waitForTimeout(50);
+        }
+      },
+      /** Still, with the finger down — which is all it takes to trip the debounce. */
+      hold: (ms: number) => page.waitForTimeout(ms),
+      up: () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }).catch(() => {}),
+    };
+  }
+
+  /**
+   * Past the point of no return, then a pause — and the card stays put until
+   * the hand goes.
+   *
+   * The assertion is made *during* the pause, which is the only place it can
+   * be: the whole defect lasts as long as a thumb rests, and by the time the
+   * finger lifts the card is supposed to be leaving anyway.
+   */
+  test('does not take the card away while the thumb is still on it', async ({ page }) => {
+    await openPlayerCard(page);
+    const opened = await sheetScroll(page);
+    const hand = await thumb(page);
+
+    await hand.down();
+    // Four fifths of the layer: past `DISMISS_COMMIT`, so the outcome no longer
+    // depends on how fast the push was.
+    await hand.push(opened.max * 0.8);
+    const pushed = await sheetScroll(page);
+    expect(pushed.top, 'the thumb did not move the card past its commit threshold').toBeLessThan(opened.max * 0.25);
+
+    // Three and a half debounces of stillness, finger down throughout.
+    await hand.hold(250);
+    expect(
+      await page.getByTestId('player-sheet').count(),
+      'the card left while a thumb was still on it — the exit fired on the debounce, not on the lift',
+    ).toBe(1);
+    expect(
+      (await sheetScroll(page)).top,
+      'the card moved under the thumb during the pause',
+    ).toBe(pushed.top);
+
+    // And the lift is what finishes it.
+    await hand.up();
+    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
+  });
+
+  /**
+   * Short of the threshold, then a pause — and the card does not spring home
+   * out from under the push that is still happening.
+   *
+   * This is the one that cost the reader a whole gesture. The spring is the
+   * right answer to a push that has *ended* short; making it to a push that has
+   * merely paused resets the travel, and the reader's second half is spent
+   * re-covering ground they had already covered.
+   */
+  test('does not spring the card home while the push is still going', async ({ page }) => {
+    await openPlayerCard(page);
+    const opened = await sheetScroll(page);
+    const hand = await thumb(page);
+
+    await hand.down();
+    // Under half the layer: past `DISMISS_HOLD` and well short of
+    // `DISMISS_COMMIT`, which is the band a pause used to be answered in.
+    await hand.push(opened.max * 0.45);
+    const paused = await sheetScroll(page);
+    expect(paused.top, 'the first half of the push moved nothing').toBeLessThan(opened.top);
+    expect(paused.top, 'the first half of the push already passed the commit threshold').toBeGreaterThan(opened.max * 0.25);
+
+    await hand.hold(300);
+    /*
+     * Exactly where it was left, which is the assertion that holds whichever
+     * way the old debounce fell. A pause in this band was answered either by a
+     * spring home — the layer running *up* to its detent under the finger — or,
+     * where the push read as quick enough, by the exit; a card that has neither
+     * moved nor gone is the only reading that means the layer waited.
+     */
+    expect(
+      await page.getByTestId('player-sheet').count(),
+      'the card left during a pause it should have sat through',
+    ).toBe(1);
+    expect(
+      (await sheetScroll(page)).top,
+      'the card sprang back toward its detent while the reader was still pushing it',
+    ).toBe(paused.top);
+
+    // The second half of the same push, from where the first half left off —
+    // which is the whole point: it has to still count. Together they clear
+    // `DISMISS_COMMIT`; separately neither does.
+    await hand.push(opened.max * 0.4);
+    await hand.up();
+    await expect(
+      page.getByTestId('player-sheet'),
+      'the two halves of one deliberate push did not add up to a dismissal',
+    ).toHaveCount(0);
+  });
+});
+
 test.describe('focus, while a sheet is open', () => {
   test('enters the dialog itself rather than its first control', async ({ page }) => {
     await openScoringKey(page);
