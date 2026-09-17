@@ -759,6 +759,54 @@ export function Sheet({
     let pointerAt: { x: number; y: number } | null = null;
     let dragging = false;
     /*
+     * How many fingers are on the layer — the one thing the settle could not
+     * previously find out, and the whole of this round's defect.
+     *
+     * **The pointer bookkeeping above cannot answer it, by design.** On a touch
+     * drag WebKit sends one `pointercancel` at the *start* of the push, when the
+     * engine takes the pan for itself, and no pointer event after it. `onTaken`
+     * then does the right thing for what it knows — clears `pointerAt`, drops
+     * `dragging` — and from that moment the layer has no idea the reader is
+     * still holding the card. Measured on Chromium, a 1.8s deliberate drag:
+     * `pointercancel` at +102ms, `touchmove` still arriving at +1717ms,
+     * `touchend` not until +1783ms. Nothing between those two numbers told the
+     * layer a hand was there.
+     *
+     * Touch events are not withdrawn when the engine claims the pan — they are
+     * the half of the input the engine keeps delivering — so the count is read
+     * off them. Read off `TouchEvent.touches` rather than kept as a tally of
+     * downs and ups, because that list is the live truth about the screen and a
+     * tally is a bet on never missing an event: a dropped `touchend` would leave
+     * a tally standing for ever, and a card that waits for ever on a finger that
+     * has gone is the invisible modal this file already spends a page avoiding.
+     *
+     * Pointer events are not counted at all — `'touches' in event` is what keeps
+     * them out. A mouse has no equivalent of a hand resting on the glass while
+     * momentum runs, and the wheel and mouse-drag paths that the rest of this
+     * suite is driven by must go on behaving exactly as they did.
+     */
+    let touching = 0;
+    const countTouches = (event: Event) => {
+      if ('touches' in event) touching = (event as TouchEvent).touches.length;
+    };
+    /*
+     * Ask the question, once the hand is off.
+     *
+     * Every settle this layer has ever run was armed by a *scroll*, and that was
+     * enough only while the timer decided whatever it found. Now that it declines
+     * to decide under a finger, the last scroll of a drag can arm a timer that
+     * fires, looks at a hand still on the card, and goes away leaving nothing
+     * behind it — so a hand that then leaves without moving the layer again would
+     * never be answered, and the card would sit where it was let go of: open,
+     * halfway down the screen, holding the page behind it still. That is the
+     * invisible modal this file already spends a page avoiding, arrived at from a
+     * new direction, so both ways a hand can come off the card arm this instead.
+     */
+    const decideSoon = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(settle, SETTLE);
+    };
+    /*
      * When the reader last did something the layer could act on.
      *
      * Minus infinity rather than nought, and that is not decoration: `stamp()`
@@ -882,6 +930,7 @@ export function Sheet({
       return touch ? { x: touch.clientX, y: touch.clientY } : null;
     };
     const onDown = (event: Event) => {
+      countTouches(event);
       pointerAt = pointOf(event);
       dragging = false;
       // A hand arriving on the layer starts a movement, and a movement's speed
@@ -890,18 +939,23 @@ export function Sheet({
       rewind();
     };
     const onMove = (event: Event) => {
+      countTouches(event);
       const at = pointOf(event);
       if (!pointerAt || !at) return;
       if (Math.abs(at.x - pointerAt.x) + Math.abs(at.y - pointerAt.y) < SLOP) return;
       dragging = true;
       gestured();
     };
-    const onUp = () => {
+    const onUp = (event: Event) => {
+      countTouches(event);
       pointerAt = null;
       // The momentum this left behind is still the reader's; the window says
       // for how long, and each scroll it covers renews it.
       if (dragging) gestured();
       dragging = false;
+      // A second finger leaving is not the push ending. Only the last one is,
+      // and for a mouse — which is never counted — that is every `pointerup`.
+      if (touching > 0) return;
       /*
        * And the speed reading closes here, with whatever the movement had.
        *
@@ -912,11 +966,29 @@ export function Sheet({
        * all of them.
        */
       lifted = true;
+      decideSoon();
     };
-    const onTaken = () => {
+    const onTaken = (event: Event) => {
+      // `touchcancel` reports what is left on the screen; `pointercancel` says
+      // nothing about fingers at all and must not be read as saying they have
+      // gone — it is sent *while* the reader is still dragging.
+      countTouches(event);
       gestured();
       dragging = false;
       pointerAt = null;
+      /*
+       * A `touchcancel` that took the last finger is a hand off the card, and
+       * the layer is owed a decision exactly as it is after a lift. The speed
+       * reading is *not* closed here, which is the distinction `onUp` above
+       * records: a cancel is the engine claiming the pan, not the reader
+       * finishing, and freezing on it would read nought for every touch drag.
+       *
+       * `'touches' in event` is what keeps a mouse out of this. A
+       * `pointercancel` says nothing about fingers — on WebKit it is sent at the
+       * *start* of a touch drag — and a mouse's own cancel has no push behind it
+       * to answer.
+       */
+      if ('touches' in event && touching === 0) decideSoon();
     };
     const onWheel = () => gestured();
     const onKey = (event: Event) => {
@@ -1129,6 +1201,38 @@ export function Sheet({
 
     const settle = () => {
       if (leaving) return;
+      /*
+       * A finger still on the glass has not finished its push.
+       *
+       * **This is the defect two rounds of complaints were both about.** The
+       * debounce below is a bet that seventy milliseconds of stillness means the
+       * movement is over, and a deliberate push breaks that bet twice: an
+       * unhurried drag has natural pauses in it, and it ends with the reader
+       * holding the card where they meant to put it before letting go. Both are
+       * stillness with a hand still on the card, and the settle answered them
+       * the same way it answers a movement that has genuinely ended.
+       *
+       * What the reader got, measured on Chromium with real touch points:
+       *
+       *  - a push past the commit threshold, paused for a quarter of a second
+       *    at +1751ms — the card armed its exit at +1771ms, exactly one debounce
+       *    later, and had unmounted by +1958ms. The finger did not leave the
+       *    glass until +2734ms. The card was taken out from under a thumb that
+       *    was still on it, which is the jitter at the end of a close;
+       *
+       *  - a push short of the threshold, paused the same way — the card sprang
+       *    home under the finger and arrived there at +1655ms, so the reader
+       *    resumed pushing a card that had quietly gone back to the top. Their
+       *    616 pixels of travel counted as 336, and a gesture that ran 3.3
+       *    seconds dismissed nothing at all. That is the close that takes about
+       *    a second, and it is this same timer.
+       *
+       * So the decision waits for the hand. Nothing is re-armed here: a finger
+       * that is still moving produces scrolls, and every one of those re-arms
+       * this timer anyway, while `onUp` arms it once the last finger goes. The
+       * question gets asked again the moment there is a point in asking it.
+       */
+      if (touching > 0) return;
       const detentTop = root.scrollHeight - root.clientHeight;
       if (detentTop <= 0) return;
       // How much of the push was given, and whether it was ever given quickly.
