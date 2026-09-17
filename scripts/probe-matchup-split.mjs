@@ -33,7 +33,9 @@ async function get(path) {
 }
 
 const health = await get('/api/health');
-console.log(`gitSha=${health.json?.gitSha ?? '(none)'}\n`);
+/* `/api/health` carries it under `release`, which is why reading the top
+ * level alone printed `(none)` against a deploy that had plainly landed. */
+console.log(`gitSha=${health.json?.gitSha ?? health.json?.release?.gitSha ?? '(none)'}\n`);
 
 const leagues = await get('/api/leagues');
 const league =
