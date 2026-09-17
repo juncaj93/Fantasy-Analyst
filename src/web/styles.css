@@ -523,6 +523,28 @@
   --dur: 220ms;
   --dur-slow: 320ms;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /*
+   * The curve for something on its way *off* the screen, which is not the curve
+   * above.
+   *
+   * `--ease` is iOS's sheet curve and it is right for anything coming to rest:
+   * the control point at `0, 1` drags out a long flat tail, so a card settling
+   * home eases into place instead of arriving with a thump. Measured on a
+   * dismissal, that same tail is the defect — the card covered 82% of its
+   * travel in the first 66ms and then spent 117ms on the last 18%, with the
+   * final tenth alone taking 100ms. Because the exit's distance is very nearly
+   * the distance to clear the screen, all of that crawl happens in the last
+   * visible pixels, at the bottom edge, in full view. The reader's words across
+   * four rounds: it "spazzes at the bottom of their closure", it "still gets
+   * slowed down at the bottom".
+   *
+   * Nothing is settling here. The card is leaving, the pixels it finishes on are
+   * off the screen, and what a reader should see is a movement that carries on
+   * at the speed their thumb gave it. So the exit is linear: no tail to crawl
+   * through, and no slow start either — an ease-in would put a hitch at the
+   * moment of the lift, when the card is already moving.
+   */
+  --ease-exit: linear;
   --motion: var(--dur-fast);
 
   /* Material: one blur, used on the two bars and the sheet, and nowhere else. */
