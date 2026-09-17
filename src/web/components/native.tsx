@@ -814,9 +814,29 @@ export function Sheet({
      * invisible modal this file already spends a page avoiding, arrived at from a
      * new direction, so both ways a hand can come off the card arm this instead.
      */
-    const decideSoon = () => {
+    /*
+     * A hand leaving the card settles it **now**, and this is the whole of the
+     * defect three rounds of tuning could not reach.
+     *
+     * The debounce below is a guess at when a movement ended, and it is the only
+     * answer a scroller can give for a wheel, which has no beginning or end to
+     * report. A finger has both. It says so, in a `touchend`, and every version
+     * of this file until now threw that away and went on guessing — arming a
+     * seventy-millisecond timer that `onScroll` then re-armed on every scroll the
+     * coast delivered. So the outcome could not be reached until the card had
+     * finished drifting, and what the reader got for an unhurried push was the
+     * card sliding on under its own momentum, a pause, and then the fixed exit
+     * snatching it the rest of the way. A hard flick escaped it by reaching the
+     * layer's far end inside a single scroll, which is the one short circuit
+     * `onScroll` has — and is exactly why a fast swipe was always fine and a
+     * slow one never was.
+     *
+     * There is nothing to wait for. The hand is off; where the card is, is where
+     * the reader put it.
+     */
+    const decideNow = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(settle, SETTLE);
+      settle();
     };
     /*
      * When the reader last did something the layer could act on.
@@ -829,20 +849,37 @@ export function Sheet({
      */
     let handsOn = Number.NEGATIVE_INFINITY;
     /*
-     * Until when the settle's own smooth scroll is expected to still be running.
+     * How long the card takes to come back when the push was not enough.
      *
-     * A deadline rather than a flag, and the difference matters: a flag left
-     * standing by an animation that was interrupted rather than finished would
-     * make every later stray scroll look like this one's, and the correction
-     * below would stop happening — which is the invisible-modal outcome the note
-     * on re-arming calls worse than any amount of redundant work. A smooth
-     * scroll across this layer takes a few hundred milliseconds; past the
-     * deadline, whatever is moving the layer is somebody else's.
+     * A duration this file owns, and that is the change. The spring used to be
+     * `scrollTo({ behavior: 'smooth' })` — the browser's animation, over a
+     * distance the browser chose a duration for, which on a near-full push is
+     * several hundred milliseconds of the card wandering home. The reader asked
+     * for the opposite: "smoothly and quickly springs back up if you don't go
+     * far enough." A number cannot be asked of a smooth scroll, so the spring is
+     * drawn here instead, on the same kind of transform the exit already uses.
      */
-    const SPRING = 700;
-    let springUntil = 0;
-    /** The frame the spring's own repaint is scheduled on, so it can be stopped. */
-    let springFrame = 0;
+    const SPRING_BACK = 220;
+    /*
+     * Until when the movement just answered is still coasting.
+     *
+     * The coast after a lift must not re-open a decision already taken: every
+     * one of its scrolls used to re-arm the debounce, which is how the answer
+     * ended up waiting for the card to stop drifting.
+     *
+     * **A deadline rather than a flag, and this file has already paid for the
+     * difference once.** A flag was tried here first and it broke two rules at
+     * once, both of them the same rule seen from different ends: a tap answers
+     * the layer where it already is, so a flag set there stands for ever, and
+     * the stray-scroll correction below — the one that stops a screen reader's
+     * own `scrollIntoView` throwing a card away — never runs again. The same
+     * flag also disowned a push the engine delivered nine hundred milliseconds
+     * late, because it could not tell that scroll from the coast of the last
+     * one. A deadline can: a coast is continuous with what caused it, and
+     * anything arriving after the window is a new movement by definition.
+     */
+    const ANSWERED = 700;
+    let settledUntil = 0;
     /** How far behind the scroll the resistance is currently holding the card. */
     let held = 0;
     const stamp = () => (typeof performance === 'undefined' ? Date.now() : performance.now());
@@ -928,7 +965,26 @@ export function Sheet({
       // A movement that begins out of stillness is a new one, and starts its
       // speed over. One already under way keeps the peak it has earned.
       if (!hands()) rewind();
-      springUntil = 0;
+      /*
+       * A push is a new question, whatever was answered a moment ago — which is
+       * how a reader catches a springing card and sends it the rest of the way.
+       *
+       * **And the spring's own transitions must not outlive it.** They are what
+       * make the card and the scrim ease home over a duration this file chose,
+       * and they stay on the elements afterwards: a transition applies to every
+       * later change of the property it names, and the scrim's opacity is
+       * written once per scroll event for the whole of the next drag. Left
+       * alone, the screen behind would trail the thumb by a fifth of a second —
+       * the scrim and the card coming apart, which is the defect this file has
+       * already been taken apart for twice, arrived at from a third direction.
+       */
+      if (settledUntil && !leaving) {
+        settledUntil = 0;
+        const card = surface.current;
+        if (card) card.style.transition = '';
+        const back = backdrop.current;
+        if (back) back.style.transition = '';
+      }
       handsOn = stamp();
     };
     /** A scroll that belongs to a movement already under way. */
@@ -981,7 +1037,7 @@ export function Sheet({
        * all of them.
        */
       lifted = true;
-      decideSoon();
+      decideNow();
     };
     const onTaken = (event: Event) => {
       // `touchcancel` reports what is left on the screen; `pointercancel` says
@@ -1004,7 +1060,7 @@ export function Sheet({
        * *start* of a touch drag — and a mouse's own cancel has no push behind it
        * to answer.
        */
-      if ('touches' in event && touching === 0) decideSoon();
+      if ('touches' in event && touching === 0) decideNow();
     };
     const onWheel = () => gestured();
     const onKey = (event: Event) => {
@@ -1111,7 +1167,7 @@ export function Sheet({
       if (leaving) return;
       say('EXIT');
       leaving = true;
-      springUntil = 0;
+      settledUntil = stamp() + ANSWERED;
       window.clearTimeout(timer);
       /*
        * How far the card still is from gone — the scroll, *plus* whatever the
@@ -1171,52 +1227,79 @@ export function Sheet({
     };
 
     /*
-     * The spring paints its own animation, rather than waiting to be told about it.
+     * The card comes home on its own clock, and the layer is put back underneath
+     * it in one frame.
      *
-     * The scrim was written only from the scroll handler, so the card's position
-     * and the screen behind it agreed exactly as often as the engine fired a
-     * scroll event. That is almost always, and *almost* is the whole bug: a
-     * `scrollTo({ behavior: 'smooth' })` that lands without dispatching a final
-     * event — which WebKit does under load, and which a reduced-motion setting
-     * can turn into an instant jump — leaves the layer at the card's position
-     * with the scrim still holding whatever the push had written.
+     * **Why the scroll is snapped rather than animated.** Two things were wrong
+     * with asking the engine to scroll the layer home smoothly. The reader's
+     * half: the browser picks the duration from the distance, so the further the
+     * card had been pushed the longer it took to come back, which is the reverse
+     * of what a spring should do and is the "takes long" half of the complaint
+     * for every push that did not dismiss. The mechanical half: a fling is still
+     * running when the hand comes off, and a smooth scroll issued into one is
+     * two animations arguing over the same scroll position.
      *
-     * The reader sees a card that has come back to where it belongs over a
-     * screen that is still half uncovered, and nothing moves it again until
-     * they touch the layer. Measured on `webkit-small-360`: the card back and
-     * visible, the scrim resting at 0.699 — which is exactly the value the push
-     * itself wrote, not a frame of the animation caught in flight.
+     * Writing `scrollTop` settles both. It cancels the fling — that is what an
+     * assignment to a scroller mid-coast does — and it puts the layer exactly
+     * where a card at rest belongs, immediately, with nothing left to converge.
      *
-     * So the settle drives its own presentation for as long as its own
-     * animation is running. The arithmetic is the same `show` the scroll
-     * handler uses, on the same `scrollTop`, so the two cannot disagree; this
-     * only guarantees that it happens. It stops the moment a second push clears
-     * the window, because the layer is the reader's again at that point.
+     * **And the card does not move when that happens**, which is the whole
+     * trick. Its offset from home is measured first, applied as a transform in
+     * the same frame the scroll is snapped, and then released over
+     * {@link SPRING_BACK}. The reader sees one movement: the card easing back up
+     * from wherever their thumb left it. The scrim rides the same clock, because
+     * it is the pair coming apart that this file has already paid for twice.
      */
-    const driveSpring = () => {
-      springFrame = 0;
-      if (leaving || springUntil === 0) return;
-      const detentTop = root.scrollHeight - root.clientHeight;
-      if (detentTop <= 0) return;
+    const springHome = (detentTop: number) => {
+      const card = surface.current;
+      const box = detent.current;
+      /*
+       * Where the card *appears*, in pixels below where it belongs: the scroll
+       * still to be given back, less whatever the resistance was holding it
+       * short of. The same sum the exit makes, in the other direction.
+       */
+      const offset = detentTop - root.scrollTop - held;
 
-      const top = root.scrollTop;
-      show(1 - top / detentTop, detentTop);
+      // The layer, home and still, before anything is drawn.
+      root.scrollTop = detentTop;
+      held = 0;
+      if (box) {
+        box.style.transition = 'none';
+        box.style.transform = '';
+      }
 
-      /* Home. The one place the scrim is written to full, and it is written. */
-      if (top >= detentTop - 1) {
-        springUntil = 0;
-        show(0, detentTop);
+      const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      if (!card || still || offset <= 0.5) {
+        if (card) {
+          card.style.transition = '';
+          card.style.transform = '';
+        }
+        paint(1);
         return;
       }
+
+      // Held where the thumb left it…
+      card.style.transition = 'none';
+      card.style.transform = `translate3d(0, ${offset}px, 0)`;
+      const back = backdrop.current;
+      if (back) back.style.transition = `opacity ${SPRING_BACK}ms var(--ease)`;
       /*
-       * The window closed without the layer arriving. Whatever it is showing is
-       * now the truth about where the card is, which is what `show` above just
-       * painted, so there is nothing left to correct.
+       * …and let go on the next frame. The gap is not decoration: a transform
+       * and the transition that animates it, written in one frame, are one
+       * computed style and the browser has nothing to animate *from*. The card
+       * would arrive home without ever appearing to travel.
        */
-      if (stamp() >= springUntil) return;
       if (typeof requestAnimationFrame === 'function') {
-        springFrame = requestAnimationFrame(driveSpring);
+        requestAnimationFrame(() => {
+          if (leaving) return;
+          card.style.transition = `transform ${SPRING_BACK}ms var(--ease)`;
+          card.style.transform = '';
+        });
+      } else {
+        card.style.transition = '';
+        card.style.transform = '';
       }
+      paint(1);
     };
 
     const settle = () => {
@@ -1266,16 +1349,32 @@ export function Sheet({
         return;
       }
       say('DECIDE', `stay given=${given.toFixed(2)} v=${flick.toFixed(2)}`);
-      // Already where it belongs. A pixel of tolerance because a smooth scroll
-      // lands on a fraction and `scrollTop` is not obliged to be an integer.
+      /*
+       * Answered, either way, and the coast that follows is nobody's question.
+       *
+       * Set before the spring rather than after it, because putting the layer
+       * home writes `scrollTop`, and that write arrives back here as a scroll
+       * event of its own.
+       */
+      /*
+       * Already where it belongs, and nothing to answer.
+       *
+       * No window is opened here, deliberately: there is no coast to ignore
+       * when nothing moved, and a window opened on a tap is the flag this file
+       * just finished arguing against. A pixel of tolerance because `scrollTop`
+       * is not obliged to be an integer.
+       */
       if (root.scrollTop >= detentTop - 1) {
         rewind();
         return;
       }
+      /*
+       * The spring is about to write `scrollTop`, and the coast it interrupts
+       * may still deliver a scroll or two behind it. Neither is a question.
+       */
+      settledUntil = stamp() + ANSWERED;
       say('SPRING');
-      springUntil = stamp() + SPRING;
-      root.scrollTo({ top: detentTop, behavior: 'smooth' });
-      driveSpring();
+      springHome(detentTop);
       // The push has been answered. What the spring-back does from here is the
       // layer's own movement, and the next push starts its speed from nothing.
       rewind();
@@ -1309,26 +1408,23 @@ export function Sheet({
       say('scroll');
       const detentTop = root.scrollHeight - root.clientHeight;
       const top = root.scrollTop;
-      if (stamp() < springUntil) {
+      if (stamp() < settledUntil) {
         /*
-         * The settle's own smooth scroll, on its way back to the card's
-         * position. Neither a gesture to act on nor a stray to correct — the
-         * scrim tracks it home and nothing else here touches it, least of all
-         * another `scrollTo`.
+         * The outcome is already taken, and this scroll is the coast that
+         * outlived the hand.
          *
-         * **Asked first, and not last.** A reader who pushes again mid-flight is
-         * still watched, because pushing is input and input clears `springUntil`
-         * before the scroll it causes ever arrives here. What this order stops
-         * is the animation being mistaken for that second push by nothing more
-         * than its own scroll events landing inside the reader's window.
+         * **Asked first, and not last, and that order is the fix.** These
+         * scrolls used to fall through to the bottom of this handler and re-arm
+         * the debounce, one after another, so the answer could not be reached
+         * until the drifting stopped — which for an unhurried push is most of a
+         * second of the card sliding on with nothing deciding anything. Nothing
+         * here decides, samples or re-arms: the card's position was settled at
+         * the lift and the spring has already put the layer where it belongs.
+         *
+         * A reader who catches the card and pushes again is untouched by this,
+         * because pushing is input and {@link gestured} clears the window before
+         * the scroll it causes ever arrives.
          */
-        if (detentTop > 0) {
-          show(1 - top / detentTop, detentTop);
-        }
-        if (detentTop <= 0 || top >= detentTop - 1) springUntil = 0;
-        // Not the reader's movement, so it earns no speed: nothing here is
-        // sampled, and the settle that started this spring emptied the readings
-        // on its way out. There is no stale position left to correct for.
         return;
       } else if (hands()) {
         // A movement already under way, which keeps its window open as it goes.
@@ -1415,7 +1511,6 @@ export function Sheet({
     for (const [type, listener] of watched) root.addEventListener(type, listener, { passive: true });
     return () => {
       window.clearTimeout(timer);
-      if (springFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(springFrame);
       root.removeEventListener('scroll', onScroll);
       for (const [type, listener] of watched) root.removeEventListener(type, listener);
     };

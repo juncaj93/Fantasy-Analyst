@@ -707,8 +707,8 @@ test.describe('a deliberate push, with the finger still on the card', () => {
     const hand = await thumb(page);
 
     await hand.down();
-    // Four fifths of the layer: past `DISMISS_COMMIT`, so the outcome no longer
-    // depends on how fast the push was.
+    // Four fifths of the layer, which is well past `DISMISS_HOLD` — the one
+    // line the outcome turns on, whatever speed the push was released at.
     await hand.push(opened.max * 0.8);
     const pushed = await sheetScroll(page);
     expect(pushed.top, 'the thumb did not move the card past its commit threshold').toBeLessThan(opened.max * 0.25);
@@ -744,8 +744,8 @@ test.describe('a deliberate push, with the finger still on the card', () => {
     const hand = await thumb(page);
 
     await hand.down();
-    // Under half the layer: past `DISMISS_HOLD` and well short of
-    // `DISMISS_COMMIT`, which is the band a pause used to be answered in.
+    // Just past `DISMISS_HOLD`, which is where a pause used to be answered by
+    // springing the card home out from under the thumb that was still pushing.
     await hand.push(opened.max * 0.45);
     const paused = await sheetScroll(page);
     expect(paused.top, 'the first half of the push moved nothing').toBeLessThan(opened.top);
@@ -769,8 +769,8 @@ test.describe('a deliberate push, with the finger still on the card', () => {
     ).toBe(paused.top);
 
     // The second half of the same push, from where the first half left off —
-    // which is the whole point: it has to still count. Together they clear
-    // `DISMISS_COMMIT`; separately neither does.
+    // which is the whole point: it has to still count, rather than being spent
+    // re-covering ground a spring-back had quietly taken away.
     await hand.push(opened.max * 0.4);
     await hand.up();
     await expect(
