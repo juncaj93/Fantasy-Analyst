@@ -70,8 +70,18 @@ export const COMPLETE_VELOCITY = 0.45;
 /** How much of the push has to be given before a sheet counts it at all. */
 export const DISMISS_HOLD = 0.4;
 
-/** …and how much of it makes the distance the whole of the answer. */
-export const DISMISS_COMMIT = 0.75;
+/**
+ * How far a *flick* has to have gone before its speed is allowed to count.
+ *
+ * Half the hold line, and it exists so that "a nudge comes back however fast it
+ * was" survives the decision moving to the lift. While the outcome was read
+ * after the coast, a real flick had already been carried most of the way down
+ * the layer by the time anybody asked, so distance alone could separate a flick
+ * from a nudge. Read *at* the lift there is no coast in the number yet, and a
+ * genuine flick is a short distance and a large speed — indistinguishable, on
+ * distance, from the nudge this floor is here to refuse.
+ */
+export const DISMISS_FLICK = 0.2;
 
 /**
  * The speed, in px/ms, that settles the band between those two.
@@ -150,9 +160,38 @@ export function resistedTravel(
  * catch exactly that push.
  */
 export function dismissesSheet(given: number, velocity: number, measured: boolean): boolean {
-  if (given >= DISMISS_COMMIT) return true;
-  if (given < DISMISS_HOLD) return false;
-  return !measured || velocity >= DISMISS_VELOCITY;
+  /*
+   * **One line, and past it the card goes.** This used to have three bands: a
+   * distance that refused, a distance that committed, and between them a
+   * verdict handed to the speed. That middle band is gone, and losing it is the
+   * point rather than a simplification.
+   *
+   * The band only ever worked because the answer was read *after* the layer had
+   * finished coasting. A deliberate push released at rest sat inside it — 0.532
+   * given at 0.02px/ms, measured — so the rule refused it, and what actually
+   * dismissed the card was the momentum carrying it past the commit line while
+   * nobody was looking. The reader's word for that: "if I swipe down but not
+   * quickly it spazzes and takes long to go down." They were watching the card
+   * drift the rest of the way to a threshold, and then be answered.
+   *
+   * Now that the outcome is settled the moment the hand leaves, that drift is
+   * not available to carry anything, and a rule that needs it would refuse every
+   * unhurried push. So the distance is the whole answer, and it is the same
+   * distance the card starts resisting at — the reader is told where the line is
+   * by the card getting heavier as they cross it, which is the only honest way
+   * to publish a threshold you cannot draw.
+   */
+  if (given >= DISMISS_HOLD) return true;
+  /*
+   * …and a flick that plainly meant it still goes, short of the line.
+   *
+   * Speed can only ever *grant* a dismissal here, never withhold one, which is
+   * the reverse of what it did before and the safer direction: the two mistakes
+   * do not cost the same. A card wrongly kept springs back and the reader tries
+   * again; a card wrongly thrown away is gone. The floor is what keeps a nudge a
+   * nudge — no amount of speed dismisses a card that never really moved.
+   */
+  return measured && given >= DISMISS_FLICK && velocity >= DISMISS_VELOCITY;
 }
 
 /* ------------------------------------------------------- pull to refresh */

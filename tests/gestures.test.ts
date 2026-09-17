@@ -19,7 +19,7 @@ import {
   COMPLETE_FRACTION,
   COMPLETE_VELOCITY,
   DIRECTION_RATIO,
-  DISMISS_COMMIT,
+  DISMISS_FLICK,
   DISMISS_HOLD,
   DISMISS_RESISTANCE,
   DISMISS_VELOCITY,
@@ -195,44 +195,86 @@ describe('the screen behind a half-completed push', () => {
  * and were all dismissed as flicks.
  */
 describe('when a push takes a sheet away', () => {
-  it('lets a card go when it was pushed far and was still moving at the lift', () => {
-    // The measured brisk push, and the measured flick.
+  /*
+   * **The band between the two distances is gone, and this is where it went.**
+   *
+   * The rule used to hand the middle to the speed at the lift, and the tests
+   * below used to hold that a deliberate push released at rest came back. They
+   * were right about the reading and wrong about what it meant, because the
+   * answer was not taken at the lift at all: it was taken once the layer
+   * stopped coasting, by which time the momentum had carried the same push past
+   * the commit line and it was dismissed anyway — slowly, and with the card
+   * drifting the whole way there. The reader's report, three fixes in: "if I
+   * swipe down but not quickly it spazzes and takes long to go down. If I swipe
+   * it down super fast then not much of an issue."
+   *
+   * The decision is taken at the lift now, so there is no coast left to carry
+   * anything and a rule that refused an unhurried push would simply refuse it.
+   * One distance decides, and the card publishes where that distance is by
+   * getting heavier as the reader crosses it — the resistance knee and the
+   * dismissal line are the same number.
+   */
+  it('lets a card go once it has been pushed past the line, at any speed', () => {
+    // The measured brisk push and the measured flick, as before.
     expect(dismissesSheet(0.59, 0.48, true)).toBe(true);
     expect(dismissesSheet(0.84, 1.04, true)).toBe(true);
     expect(dismissesSheet(DISMISS_HOLD, DISMISS_VELOCITY, true)).toBe(true);
+    // And the three measured deliberate pushes — past the line, released at
+    // rest — which this rule used to refuse and the coast used to dismiss.
+    expect(dismissesSheet(0.532, 0.02, true)).toBe(true);
+    expect(dismissesSheet(0.53, 0.015, true)).toBe(true);
+    expect(dismissesSheet(0.528, 0.02, true)).toBe(true);
+    // Released at a speed that is neither here nor there, which no longer has
+    // to be judged at all.
+    expect(dismissesSheet(0.538, 0.18, true)).toBe(true);
+    expect(dismissesSheet(0.74, 0.24, true)).toBe(true);
   });
 
-  it('brings back a push that had eased to a halt before the hand left it', () => {
-    // The three measured deliberate pushes: past the distance, released at rest.
-    expect(dismissesSheet(0.532, 0.02, true)).toBe(false);
-    expect(dismissesSheet(0.53, 0.015, true)).toBe(false);
-    expect(dismissesSheet(0.528, 0.02, true)).toBe(false);
-    // And one that was still moving, but only just: 0.18 is not a dismissal.
-    expect(dismissesSheet(0.538, 0.18, true)).toBe(false);
-    expect(dismissesSheet(0.74, 0.24, true)).toBe(false);
-  });
-
-  it('lets a slow push go once it has gone far enough to only be meant', () => {
+  it('still lets the slowest push go, which is what keeps it usable', () => {
     // Nothing here may become the only way out: a reader who cannot flick, or
-    // would rather place the card, must still be able to finish. The measured
-    // case: a deliberate push to 93%, released at 0.026px/ms, still leaves.
-    expect(dismissesSheet(DISMISS_COMMIT, 0, true)).toBe(true);
+    // would rather place the card, must still be able to finish.
     expect(dismissesSheet(0.932, 0.026, true)).toBe(true);
     expect(dismissesSheet(0.95, 0.01, true)).toBe(true);
+    expect(dismissesSheet(1, 0, true)).toBe(true);
+  });
+
+  it('brings back a push that stopped short of the line, at any speed', () => {
+    // Short and slow is the ordinary case: a nudge, or a mind changed.
+    expect(dismissesSheet(0.39, 0.02, true)).toBe(false);
+    expect(dismissesSheet(0.3, 0.2, true)).toBe(false);
+    // A push cannot be refused for being slow now, only for being short — so
+    // the only way back is distance, and that is the reader's to see.
+    expect(dismissesSheet(DISMISS_HOLD - 0.001, 0, true)).toBe(false);
+  });
+
+  /*
+   * Speed may grant a dismissal and may no longer withhold one, and the two
+   * mistakes are why: a card wrongly kept springs back and the reader pushes
+   * again, and a card wrongly thrown away is gone.
+   */
+  it('lets a flick that plainly meant it go, short of the line', () => {
+    // The distance a real flick covers before the hand leaves is small — the
+    // coast that used to carry it the rest of the way is no longer counted.
+    expect(dismissesSheet(0.274, 0.55, true)).toBe(true);
+    expect(dismissesSheet(DISMISS_FLICK, DISMISS_VELOCITY, true)).toBe(true);
   });
 
   it('brings back a nudge however fast it was', () => {
-    // The measured flick that went nowhere: quick, but only a quarter out.
-    expect(dismissesSheet(0.274, 0.55, true)).toBe(false);
-    expect(dismissesSheet(0.2, 5, true)).toBe(false);
+    // The floor is what keeps a nudge a nudge: no speed dismisses a card that
+    // never really moved, which is the brush-past this whole rule exists for.
+    expect(dismissesSheet(0.19, 5, true)).toBe(false);
+    expect(dismissesSheet(0.1, 5, true)).toBe(false);
     expect(dismissesSheet(0, 5, true)).toBe(false);
   });
 
   it('judges an unmeasured push on distance, rather than guessing it was slow', () => {
-    // A movement delivered as one jump has a distance and no speed. Withholding
-    // a dismissal there would be a guess about evidence never collected.
+    // A movement delivered as one jump has a distance and no speed. Distance is
+    // the whole rule now, so an unmeasured push is not a special case at all —
+    // it is simply a push, and only its distance was ever going to answer it.
     expect(dismissesSheet(0.55, 0, false)).toBe(true);
     expect(dismissesSheet(0.2, 0, false)).toBe(false);
+    // …and speed it never had cannot grant it one below the line.
+    expect(dismissesSheet(0.3, 5, false)).toBe(false);
   });
 });
 
