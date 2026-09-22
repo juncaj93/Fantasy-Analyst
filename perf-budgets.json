@@ -108,6 +108,7 @@
       "src/core/health/model.ts",
       "src/core/http/readShaped.ts",
       "src/core/identity/normalize.ts",
+      "src/core/nfl/expectedGames.ts",
       "src/core/nfl/teams.ts",
       "src/core/players/headshot.ts",
     "src/core/roster/ownership.ts",

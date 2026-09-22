@@ -2366,32 +2366,23 @@ function CompareProjection({ evaluation }: { evaluation: StartSitEvaluation }) {
     );
   }
 
-  const title =
-    source === 'sleeper'
-      ? "Rotowire's published weekly projection, by way of Sleeper — no betting market has priced him."
-      : source === 'preseason'
-        ? 'A rough number: this league’s imported preseason projection for the whole season, divided by a full season of games. It takes no account of who he plays.'
-        : 'This app’s own projection, derived from betting lines under this league’s scoring.';
-  const spoken =
-    source === 'sleeper'
-      ? `${points.toFixed(1)} projected, Rotowire's published figure via Sleeper`
-      : source === 'preseason'
-        ? `roughly ${points.toFixed(1)} projected, estimated from his preseason season projection`
-        : `${points.toFixed(1)} projected, from betting markets`;
-
+  /*
+   * The words come from the two helpers the Team rows already use.
+   *
+   * They said the same three things in slightly different sentences, which is
+   * two vocabularies for one idea on one screen — and the reader can have both
+   * open at once, because Compare is a sheet over the Team screen. One set of
+   * strings, said the same way in the row and in the grid.
+   */
   return (
     <span
-      className={
-        source === 'preseason'
-          ? 'compare-proj compare-proj-borrowed compare-proj-preseason'
-          : source === 'sleeper'
-            ? 'compare-proj compare-proj-borrowed'
-            : 'compare-proj'
-      }
+      className={`compare-proj${source === 'market' || source == null ? '' : ' compare-proj-borrowed'}${
+        source === 'preseason' ? ' compare-proj-preseason' : ''
+      }`}
       data-testid="compare-projection"
       data-projection-source={source ?? 'none'}
-      title={title}
-      aria-label={`Projected points for ${evaluation.name}: ${spoken}.`}
+      title={projectionTitle(points, source)}
+      aria-label={`${evaluation.name}${spokenProjection(points, source)}.`}
     >
       {source === 'preseason' ? '~' : ''}
       {points.toFixed(1)}
