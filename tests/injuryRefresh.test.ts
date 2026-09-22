@@ -493,6 +493,55 @@ describe('a tick of the five-minute check', () => {
     expect(stored.get('p0')!.reportStatus).toBe('Questionable');
   });
 
+  /*
+   * The week turning over is not an anomaly.
+   *
+   * The file carries every week of the season and the ingest keeps each
+   * player's latest row, so the first report of a new week makes every row a
+   * first sighting at once. Measured against the whole season's store, that
+   * read as "67 of 67 players changed at once" and was refused on every tick
+   * from 16 September — and a refused week is never stored, so it was refused
+   * for ever. Only rows the ingest would *overwrite* can be anomalous.
+   */
+  it('accepts the first report of a new week, and keeps doing so the week after', async () => {
+    const db = await createTestDb();
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+    const names = Array.from(
+      { length: 60 },
+      (_, i) => `${alphabet[i % 26]!.toUpperCase()}${alphabet[(i * 7) % 26]}${alphabet[i % 5]} Oak${alphabet[Math.floor(i / 26)]}`,
+    );
+    await seedPlayers(db, names);
+    const week = (n: number) =>
+      names.map((name, i) => ({
+        name,
+        week: n,
+        status: i % 2 === 0 ? 'Questionable' : 'Out',
+        injury: 'Knee',
+        practice: 'Limited Participation in Practice',
+      }));
+
+    const source = origin({ body: csv(week(1)), etag: '"v1"' });
+    const service = new InjuryService(db, { fetch: source.fetch, log: () => {} });
+    expect((await service.refresh(SEASON)).outcome).toBe('ok');
+
+    // Week 2's first report, republished beside week 1 as the real file is.
+    source.publish(csv([...week(1), ...week(2)]), '"v2"');
+    const second = await service.refresh(SEASON);
+    expect(second.note ?? '').not.toContain('changed at once');
+    expect(second.outcome).toBe('ok');
+    expect(await new InjuryRepo(db).coverage(SEASON)).toMatchObject({ latestWeek: 2 });
+
+    source.publish(csv([...week(1), ...week(2), ...week(3)]), '"v3"');
+    expect((await service.refresh(SEASON)).outcome).toBe('ok');
+    expect(await new InjuryRepo(db).coverage(SEASON)).toMatchObject({ latestWeek: 3 });
+
+    // And the guard still stands inside a week: a parser break mid-week is refused.
+    source.publish(csv([...week(1), ...week(2), ...week(3).map((r) => ({ ...r, status: '', injury: '', practice: '' }))]), '"v4"');
+    const broken = await service.refresh(SEASON);
+    expect(broken.outcome).toBe('failed');
+    expect(broken.note).toContain('looks like a source or parser change');
+  });
+
   it('stops writing before it can eat the day’s database budget', async () => {
     const db = await setup();
     const repo = new InjurySourceRepo(db);
