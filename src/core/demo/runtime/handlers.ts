@@ -42,7 +42,7 @@ import { bestMove } from '../../draft/bestMove.ts';
 import { computeNeed } from '../../draft/need.ts';
 import { compareStartSit } from '../../startsit/engine.ts';
 import { recommendLineup } from '../../startsit/lineup.ts';
-import { assembleLineup } from '../../startsit/assemble.ts';
+import { assembleComparison, assembleLineup } from '../../startsit/assemble.ts';
 import { assembleWaiverPlan } from '../../waivers/assemble.ts';
 import { normalizeMode } from '../../startsit/mode.ts';
 import { demoManagerHistory } from './history.ts';
@@ -848,11 +848,28 @@ function compare(data: ScenarioData, body: unknown): DemoResponse {
   if (inputs.length !== requested.length) return fail('player not found', 404);
 
   const slot = resolveComparisonSlot(inputs.map((i) => i.player.position), shape, input.slot ?? null);
+  const comparison = compareStartSit(inputs, profile, { mode });
+
+  /*
+   * Through the same display pass the live route runs, and with no borrowed
+   * figures to hand it.
+   *
+   * A scenario carries neither a Rotowire feed nor an imported preseason
+   * snapshot, so both maps are absent and every projection here is the market's
+   * own number or nothing — which is what a fixture league genuinely has. The
+   * call is made anyway for the reason `assembleLineup` is: the grid reads
+   * `projection` and `projectionSource`, and a demo that omitted those fields
+   * would render a different screen from the one it is demonstrating.
+   */
+  const projected = assembleComparison({ evaluations: comparison.evaluations });
+
   return ok({
     league: { id: data.league.id, name: data.league.name, scoringLabel: profile.label },
     dataFreshness: freshness(data),
     slot,
-    ...compareStartSit(inputs, profile, { mode }),
+    ...comparison,
+    evaluations: projected.evaluations,
+    ...(projected.projectionNotes.length > 0 ? { projectionNotes: projected.projectionNotes } : {}),
   });
 }
 

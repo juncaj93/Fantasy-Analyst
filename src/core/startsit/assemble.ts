@@ -243,3 +243,137 @@ function notesFor(
   }
   return notes;
 }
+
+/* ==================================================================== compare */
+
+/**
+ * What a head-to-head comparison shows, beside what it decided.
+ *
+ * ## Why this exists at all
+ *
+ * Because the Compare sheet was the one screen in the app with no projection
+ * fallback of any kind, and on 22 September 2026 the owner photographed the
+ * result: a FLEX comparison reporting Trey McBride as `unknown` Vegas, 0%
+ * coverage and "no Vegas data for Trey McBride — compared on news and
+ * availability only", while this league's own imported snapshot held 183.7
+ * preseason points for him under exactly its own scoring key. Eleven and a half
+ * points a week, in the database, on a screen that said it knew nothing.
+ *
+ * It was not McBride and it was not tight ends. A probe of production the same
+ * morning found eight of the owner's ten starters carrying no market
+ * expectation at all — a quarterback, four running backs, three receivers, a
+ * tight end — because in week 2 the book had priced two players on the roster.
+ * The Matchup screen showed every one of them a number, the Team screen showed
+ * seven of them a number, and Compare showed none of them a number, for the
+ * same players in the same session. Three ladders, one of them empty.
+ *
+ * ## What it does and does not touch
+ *
+ * It attaches a **display** projection and its provenance to each evaluation,
+ * from the one ladder in `projection.ts`. It does not re-rank anything:
+ * `compareStartSit` has already chosen, on `score`, which is built on the
+ * market expectation and this app's own bounded nudges and reaches neither
+ * borrowed tier. A comparison whose verdict moved because somebody else's
+ * model was consulted would be a different feature, and not one anybody asked
+ * for — the screen's job here is to stop showing a reader nothing when it holds
+ * something.
+ *
+ * Pure, like `assembleLineup` above it: every figure arrives as a value, so the
+ * same function serves the route, Demo Mode and a replayed support snapshot.
+ */
+export interface ComparisonAssemblyRequest<T extends { playerId: string } & ProjectableEvaluation> {
+  evaluations: T[];
+  /** Rotowire's published weekly figures, by player id. Tier 2. */
+  published?: ReadonlyMap<string, number>;
+  /** This league's imported preseason **season totals**, by player id. Tier 3. */
+  preseason?: ReadonlyMap<string, number>;
+  /** Why a position here is refused a published total, composed by the caller. */
+  publishedRefusal?: string | null;
+}
+
+/** An evaluation with the display projection, its provenance and the fixture attached. */
+export type ProjectedEvaluation<T extends { playerId: string } & ProjectableEvaluation> = T & {
+  projection: number | null;
+  projectionSource: ProjectionSource | null;
+  /**
+   * Who he plays, already written as `vs BAL` / `@ BAL` / `BAL`.
+   *
+   * From the same `fixtureOf` the lineup rows use, rather than re-derived in the
+   * grid from `opponent` and `home`. The second derivation is where `vs` and `@`
+   * get swapped: `vegas_events.home_team` means "a team we asked about" and not
+   * "the home side", which is the vocabulary trap that had every spread
+   * backwards once already. One function writes the label; screens print it.
+   */
+  fixture: SlotFixture | null;
+};
+
+export interface ComparisonAssembly<T extends { playerId: string } & ProjectableEvaluation> {
+  evaluations: ProjectedEvaluation<T>[];
+  /**
+   * The sentences that are about the *column* rather than about a player.
+   *
+   * Same argument as `notesFor`: a cell that is empty, or that holds somebody
+   * else's number, has to say so once rather than eleven times down a grid.
+   */
+  projectionNotes: string[];
+}
+
+export function assembleComparison<T extends { playerId: string } & ProjectableEvaluation>(
+  request: ComparisonAssemblyRequest<T>,
+): ComparisonAssembly<T> {
+  const published = request.published ?? new Map<string, number>();
+  const preseason = request.preseason ?? new Map<string, number>();
+
+  const evaluations = request.evaluations.map((evaluation) => {
+    const projected = weeklyProjection(
+      evaluation,
+      published.get(evaluation.playerId) ?? null,
+      preseason.get(evaluation.playerId) ?? null,
+    );
+    return {
+      ...evaluation,
+      projection: projected.points,
+      projectionSource: projected.source,
+      fixture: fixtureOf(evaluation as unknown as StartSitEvaluation),
+    };
+  });
+
+  const projectionNotes: string[] = [];
+  const borrowed = evaluations.filter((e) => e.projectionSource === 'sleeper').length;
+  const estimated = evaluations.filter((e) => e.projectionSource === 'preseason').length;
+  const none = evaluations.filter((e) => e.projection == null).length;
+
+  if (borrowed > 0) {
+    projectionNotes.push(
+      `${borrowed} projection(s) here are Rotowire's published weekly figures, by way of Sleeper, ` +
+        `shown because no betting market has priced those players.`,
+    );
+  }
+  /*
+   * The third tier names itself in full, every time, because it is the weakest
+   * claim the app makes and the tilde in front of the figure is not enough on
+   * its own. "Preseason" without "divided by a season of games" invites a
+   * reader to take 183.7 for a Sunday.
+   */
+  if (estimated > 0) {
+    projectionNotes.push(
+      `${estimated} projection(s) here are marked ~ : this league's imported preseason total for the ` +
+        `whole season, divided by a full season of games. No betting market and no weekly projection ` +
+        `has priced those players, so the figure takes no account of who they face.`,
+    );
+  }
+  if (none > 0 && none === evaluations.length) {
+    projectionNotes.push(
+      'Nobody here has a projection from any source, so the ranking below is built on news, usage and ' +
+        'availability alone.',
+    );
+  }
+  /*
+   * Only said when the fallback is otherwise working, for the reason `notesFor`
+   * gives: with nothing borrowed anywhere the sentence above has explained the
+   * whole column already.
+   */
+  if (request.publishedRefusal && borrowed > 0) projectionNotes.push(request.publishedRefusal);
+
+  return { evaluations, projectionNotes };
+}

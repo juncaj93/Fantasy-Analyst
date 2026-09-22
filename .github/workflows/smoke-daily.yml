@@ -83,6 +83,19 @@ jobs:
     needs: recent
     if: ${{ needs.recent.outputs.ran_today == 'no' }}
     uses: ./.github/workflows/smoke.yml
+    # The one secret the sweep needs, and only that one.
+    #
+    # Without this the budget guard inside `smoke.yml` saw an empty token and
+    # declined every morning from 2026-09-03: a called workflow is given no
+    # secrets at all unless its caller passes them, which is easy to miss
+    # precisely because `secrets.CLOUDFLARE_API_TOKEN` is spelled the same in
+    # both files and is perfectly valid in one of them.
+    #
+    # Named rather than `secrets: inherit`: this sweep runs unattended against
+    # the live site every morning, and there is no reason for it to be holding
+    # the passphrase or the odds key to count database rows.
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     with:
       # The whole point of this workflow. Without it this would be the deploy
       # gate again, on a timer, checking eight specs it already checked.

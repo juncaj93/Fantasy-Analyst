@@ -1583,8 +1583,23 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(comparison).toBeVisible();
     await expect(page.getByTestId('comparison-verdict')).toContainText('Start');
     await expect(comparison).toContainText('confidence');
-    await expect(comparison.getByRole('columnheader', { name: 'Vegas' })).toBeVisible();
-    await expect(comparison.getByRole('columnheader', { name: 'Coverage' })).toBeVisible();
+
+    /*
+     * The axes swapped on 22 September 2026 and the assertion follows them.
+     *
+     * This used to look for `Vegas` and `Coverage` as *column* headers, which
+     * they were when the card carried a four-row summary table with one row per
+     * player. The grid puts the players across the top and the factors down the
+     * side, so those two are row headers now — and asserting them by ARIA role
+     * is the part worth keeping, because it is what proves the grid is a real
+     * table a screen reader can navigate rather than a pile of divs that looks
+     * like one.
+     */
+    await expect(comparison.getByRole('rowheader', { name: 'Projected' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Market coverage' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Vegas market expectation' })).toBeVisible();
+    // And the players are the columns.
+    await expect(page.getByTestId('compare-column')).toHaveCount(2);
   });
 
   test('recommends a whole lineup and never offers to apply it', async ({ page }) => {
@@ -1677,7 +1692,24 @@ test.describe('team, ADP import and start/sit', () => {
 
     const comparison = page.getByTestId('comparison');
     await expect(comparison).toContainText('no Vegas data for');
-    await expect(comparison).toContainText('unknown');
+
+    /*
+     * The honest state is a dash and a 0%, not the word "unknown".
+     *
+     * This asserted `toContainText('unknown')`, which the old summary table
+     * printed in its Vegas cell. The grid draws `—` there instead, for the
+     * reason the whole 22 September pass exists: a reader cannot tell a bold
+     * `0.00` from a real zero, and "unknown" spelled out in every cell of a
+     * grid is the paragraph of grey caveat text this replaced.
+     *
+     * The assertion is aimed at the two cells that carry the claim rather than
+     * at the card's text, so it cannot be satisfied by the word turning up in a
+     * collapsed disclosure somewhere below — which is what it would have been
+     * doing had it kept passing.
+     */
+    const vegas = comparison.locator('tr[data-factor="vegas"] td[data-player-id="1011"]');
+    await expect(vegas.getByTestId('compare-missing')).toBeVisible();
+    await expect(comparison.locator('tr[data-row="coverage"] td[data-player-id="1011"]')).toHaveText('0%');
   });
 });
 

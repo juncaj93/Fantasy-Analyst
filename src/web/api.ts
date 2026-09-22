@@ -1203,14 +1203,18 @@ export interface StartSitEvaluation {
    */
   projection?: number | null;
   /**
-   * Where {@link projection} came from: this app's betting-market model, or
-   * Rotowire's published weekly figure by way of Sleeper.
+   * Where {@link projection} came from: this app's betting-market model,
+   * Rotowire's published weekly figure by way of Sleeper, or this league's
+   * imported preseason season total over a full season of games.
    *
    * Optional and absent on an older server, which is read as "not stated"
    * rather than as "ours" — a number whose provenance nobody sent is a number
-   * this app must not claim.
+   * this app must not claim. `'preseason'` arrived on 22 September 2026 with
+   * the Compare grid; a bundle older than that reads it as an unrecognised
+   * string and draws the figure with no provenance mark, which is wrong but
+   * not a lie, and is the reason the word travels rather than a boolean.
    */
-  projectionSource?: 'market' | 'sleeper' | null;
+  projectionSource?: 'market' | 'sleeper' | 'preseason' | null;
   confidence: string;
   confidenceReasons: string[];
   /** `Questionable · hamstring · practised fully`, or null when healthy. */
@@ -1305,6 +1309,15 @@ export interface StartSitComparison {
     marketMargin: number | null;
     material: boolean;
   };
+  /**
+   * The sentences about the projection *column*, rather than about the decision.
+   *
+   * `warnings` is about the comparison — a kickoff already gone, players who
+   * cannot share a slot — and prints above the numbers. These say whose numbers
+   * the column is made of, and print under it. Absent on an older server, which
+   * is read as "nothing to say".
+   */
+  projectionNotes?: string[];
 }
 
 export interface LineupSlot {
