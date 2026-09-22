@@ -2133,22 +2133,35 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
             groups is structural rather than a class on a row.
           */}
           <tbody className="compare-headline">
-            <tr>
+            {/*
+              `data-row` and `data-player-id` are the grid's coordinates.
+
+              A cell in a table of players has to be addressable by *which
+              factor* and *which player*, and until this pass neither was
+              recoverable from the markup: a test looking for a player's score
+              found the row with his name in it, which worked exactly as long
+              as players were rows. They are columns now, and the first CI run
+              on this branch failed on precisely that. Positional selectors
+              (`td:nth-child(2)`) would work and are the wrong answer — they
+              silently read the wrong player the day the column order changes,
+              which is a thing the ranking is allowed to do.
+            */}
+            <tr data-row="projection">
               <th scope="row" className="compare-label">
                 Projected
               </th>
               {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell compare-cell-lead">
+                <td key={e.playerId} className="compare-cell compare-cell-lead" data-player-id={e.playerId}>
                   <CompareProjection evaluation={e} />
                 </td>
               ))}
             </tr>
-            <tr>
+            <tr data-row="score">
               <th scope="row" className="compare-label">
                 Start/sit score
               </th>
               {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell compare-cell-lead">
+                <td key={e.playerId} className="compare-cell compare-cell-lead" data-player-id={e.playerId}>
                   {e.score == null ? (
                     <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
                   ) : (
@@ -2159,12 +2172,12 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
                 </td>
               ))}
             </tr>
-            <tr>
+            <tr data-row="coverage">
               <th scope="row" className="compare-label">
                 Market coverage
               </th>
               {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell">
+                <td key={e.playerId} className="compare-cell" data-player-id={e.playerId}>
                   <span
                     className={e.expectation.coverage > 0 ? undefined : 'compare-zero-coverage'}
                     title={
@@ -2189,7 +2202,12 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
                 {columns.map((e) => {
                   const component = componentOf(e.playerId, factor.key);
                   return (
-                    <td key={e.playerId} className="compare-cell" data-testid="compare-cell">
+                    <td
+                      key={e.playerId}
+                      className="compare-cell"
+                      data-testid="compare-cell"
+                      data-player-id={e.playerId}
+                    >
                       {component == null ? (
                         <CompareMissing
                           reason={`${factor.label.toLowerCase()} is not part of how he is scored`}

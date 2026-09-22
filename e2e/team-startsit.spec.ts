@@ -825,8 +825,23 @@ test.describe('the comparison tool', () => {
     await choose(page, '1001');
     await page.getByTestId('compare-run').click();
 
-    const row = page.getByTestId('comparison').locator('tbody tr', { hasText: 'Andre Sotelo' });
-    await expect(row).toContainText(te.score!.toFixed(1));
+    /*
+     * The cell, by factor and by player.
+     *
+     * This used to be "the row containing Andre Sotelo", which worked for
+     * exactly as long as players were rows — the grid makes them columns, and
+     * this was the one assertion that caught it on the first CI run. Addressed
+     * by `data-row` and `data-player-id` rather than by position, because the
+     * column order *is* the ranking and a `nth-child` would quietly start
+     * reading the other player the first time the verdict changed.
+     *
+     * It is also a stronger claim than it was: the old one passed if the score
+     * appeared anywhere in the row, including inside another number.
+     */
+    const cell = page
+      .getByTestId('comparison')
+      .locator(`tr[data-row="score"] td[data-player-id="${te.playerId}"]`);
+    await expect(cell).toHaveText(te.score!.toFixed(1));
   });
 });
 
