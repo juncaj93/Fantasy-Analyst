@@ -547,15 +547,23 @@ export class InjuryService {
     const stored = await this.source
       .comparableFor(comparable.map((r) => ({ playerId: r.playerId, week: r.week })), season)
       .catch(() => new Map());
-    const storedCount = await this.source.storedCount(season).catch(() => 0);
     const diff = diffInjuries(comparable, stored);
 
     /*
      * A parser that breaks does not fail loudly — it reads every field as empty
      * and reports that all four hundred players simultaneously became healthy.
      * That is indistinguishable from a real mass update except by its size.
+     *
+     * Measured against the rows this ingest would overwrite, not the season.
+     * The ingest keeps each player's latest week, so the first report of a new
+     * week is a first sighting for everybody on it — and against the season's
+     * store that read as "67 of 67 changed at once", was refused, was therefore
+     * never stored, and was refused again on every tick from 16 September. A
+     * week nobody has stored yet has nothing to be anomalous against; a stored
+     * week being rewritten wholesale is the thing worth refusing. The usage
+     * pipeline learned this first and makes the same comparison.
      */
-    if (looksAnomalous(diff, storedCount)) {
+    if (looksAnomalous(diff, stored.size)) {
       const note =
         `refused: ${diff.changed.length} of ${diff.examined} players changed at once, ` +
         'which looks like a source or parser change rather than news';
