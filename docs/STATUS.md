@@ -3744,11 +3744,13 @@ Per component, on the live roster:
 | `role_trend`, `td_dependency`, `weather`, `matchup_role`, `explosiveness` | 9 each | 0 | 0 |
 | `game_script` | 8 | 1 | 1 |
 
-So the screenshot's six zeroes were not all the same kind of thing.
-`Availability 0.00 · no designation` and `Uncertainty penalty 0.00 · none` are
-**readings**: checked, and he costs nothing. The other four were gaps. Unknown
-cells carry `—` now, with the engine's own sentence in the cell's title and in
-its accessible name; a computed zero still reads `0.00`.
+So the seven bold `0.00`s across the two screenshots were not all the same kind
+of thing. Five carry `(unknown)` in their label and were gaps: `Vegas market
+expectation`, `Role trend`, `Touchdown dependency`, `Opponent by role`,
+`Explosive role`. Two do not, and are **readings**: `Availability · no
+designation` and `Uncertainty penalty · none` both mean checked, and he costs
+nothing. Unknown cells carry `—` now, with the engine's own sentence in the
+cell's title and in its accessible name; a computed zero still reads `0.00`.
 
 `status` is the instructive case, because it is both depending on what was read,
 which is why the fix reads the flag the engine already sets rather than
