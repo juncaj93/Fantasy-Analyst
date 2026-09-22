@@ -45,7 +45,6 @@ import {
   PlayerIdentity,
   PositionBadge,
   TeamLogo,
-  Unknown,
   positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
@@ -788,16 +787,33 @@ export function TeamScreen({
  * tooltip, in the accessible name, in the sheet the row opens and in the note
  * above the list. See `core/startsit/projection.ts`.
  */
-type RowProjectionSource = 'market' | 'sleeper' | null | undefined;
+/*
+ * `preseason` is in the union because the ladder has three tiers, not because
+ * the lineup pass serves one. `assembleLineup` passes `weeklyProjection` a
+ * published figure and no preseason total, deliberately: a lineup is a
+ * recommendation this app makes, a borrowed weekly figure is already ranked at
+ * a discount there, and an August season total flattened over sixteen games is
+ * not a claim about Sunday that a *starting* decision should turn on. The
+ * Compare sheet and the Matchup screen do serve it, and this row would draw it
+ * correctly the day that changes rather than falling through to "from betting
+ * markets", which is what an unhandled third case would have printed.
+ */
+type RowProjectionSource = 'market' | 'sleeper' | 'preseason' | null | undefined;
 
 function projectionTitle(projection: number | null | undefined, source: RowProjectionSource): string {
   if (projection == null) return 'No projection yet — no betting market has priced him';
   if (source === 'sleeper') return "Projected points · Rotowire's published figure, via Sleeper";
+  if (source === 'preseason') {
+    return 'Projected points · a rough estimate — his preseason season total over a full season of games';
+  }
   return 'Projected points · from betting markets';
 }
 
 function spokenProjection(projection: number | null | undefined, source: RowProjectionSource): string {
   if (projection == null) return ', projection unavailable';
+  if (source === 'preseason') {
+    return `, roughly ${projection.toFixed(1)} points, estimated from his preseason season projection`;
+  }
   const whose = source === 'sleeper' ? ", Rotowire's published figure via Sleeper" : '';
   return `, projected ${projection.toFixed(1)} points${whose}`;
 }
@@ -1880,6 +1896,52 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   );
 }
 
+/**
+ * Two to four players, side by side, in one grid.
+ *
+ * ## What this replaced, and why
+ *
+ * One vertical list. The verdict, then the ranking, then a four-column summary
+ * table, then one accordion per player holding twelve rows of breakdown. To
+ * compare rush yards between two men the reader scrolled through the whole of
+ * the first player's profile and then the whole of the second one's, and held a
+ * number in their head across the gap. The owner sent two screenshots of it on
+ * 22 September 2026 and asked for exactly the thing a table is for: the same
+ * factor on one row, both players' readings beside each other.
+ *
+ * So the default view is the grid and the long view is behind a tap, which is
+ * the inversion of what shipped before — the accordions are still here,
+ * unchanged in content, underneath.
+ *
+ * ## Why a `<table>` and not a grid of divs
+ *
+ * Because this *is* a table: every cell is the value of one named factor for
+ * one named player, and that is the one structure a screen reader can already
+ * navigate two-dimensionally. `scope="col"` and `scope="row"` mean "Rush yards,
+ * Trey McBride, no data" is announced without the reader having to count
+ * columns. A CSS grid would look the same and say nothing.
+ *
+ * The left column is sticky and the rest scrolls, so three and four players fit
+ * a 360px phone without the labels leaving the screen. Two players need no
+ * scroll at all, which is the common case.
+ *
+ * ## A dash is not a zero
+ *
+ * The whole reason this pass happened alongside the layout. `evaluatePlayer`
+ * sums only the components it marks `unknown: false` — a probe of production on
+ * 22 September 2026 found every `unknown` component in the league sitting at
+ * exactly 0, and `sum(known)` equal to `sum(all)` for every player on the
+ * roster — so an unknown component's number contributes nothing to the score
+ * and never did. It was printed as a bold `0.00` anyway, which is the single
+ * most misleading thing a data screen can do: "this factor does not help you"
+ * and "we cannot tell you anything about this factor" are opposite statements
+ * about a start/sit decision and they looked identical.
+ *
+ * Unknown cells now carry `—`. The row stays, because *which* factor is unread
+ * is worth knowing, and the reason is in the cell's title and accessible name.
+ * A genuinely computed zero — an uncharged availability, a zero uncertainty
+ * penalty — still prints `0.00`, because that is a real reading.
+ */
 function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
   const winner = comparison.evaluations.find((e) => e.playerId === comparison.recommendedPlayerId);
   /*
@@ -1892,15 +1954,46 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
   const comparable = comparison.slot?.comparable ?? true;
   const ranked = [...comparison.evaluations].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
 
+  /*
+   * Column order is the ranking when there is one, and the reader's own order
+   * when there is not.
+   *
+   * Best-first matters more here than it did in a list: the eye starts at the
+   * first data column, and on a grid that scrolls the recommended player should
+   * be the one that never needs scrolling to. With no legal shared slot there
+   * is no ranking to honour, so the chips' order stands.
+   */
+  const columns = comparable ? ranked : comparison.evaluations;
+
+  /*
+   * The factor rows, as the union of every player's components in engine order.
+   *
+   * Taken from the evaluations rather than written down here, because the engine
+   * owns which factors exist and a hardcoded list would quietly drop a new one.
+   * A defence is scored by a different model and carries a different, shorter
+   * set — see `evaluateDefence` — so comparing a defence against a skill player
+   * produces rows that are populated for one column and dashed for the other,
+   * which is the honest drawing of that comparison.
+   */
+  const factors: { key: string; label: string }[] = [];
+  for (const evaluation of columns) {
+    for (const component of evaluation.components) {
+      if (!factors.some((f) => f.key === component.key)) {
+        factors.push({ key: component.key, label: component.label });
+      }
+    }
+  }
+
+  const componentOf = (playerId: string, key: string) =>
+    comparison.evaluations.find((e) => e.playerId === playerId)?.components.find((c) => c.key === key) ?? null;
+
   return (
     <div className="card" data-testid="comparison">
       {/*
         The recommendation, first and loudest.
 
         A start/sit screen is one question with one answer, and everything under
-        it is why. The answer used to be a line of bold text among six other
-        lines of bold text; it is now the only thing on the card that looks like
-        a conclusion. Nothing about how it is reached has changed.
+        it is why. Nothing about how it is reached has changed.
       */}
       <div className={winner && comparable ? 'verdict verdict-take' : 'verdict verdict-calm'}>
         <div className="verdict-label" data-testid="comparison-verdict">
@@ -1923,26 +2016,19 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       ) : null}
 
       {/*
-        The order, said plainly. The brief asks for a ranking rather than only a
-        winner, and with four players a table alone buries it.
+        The ranking as a sentence is gone, and the grid's column order carries it.
+
+        It was an `<ol>` repeating every name and score directly above a table
+        holding the same names and the same scores. On a phone that is a third of
+        the sheet spent saying one thing twice. The order is in the columns, the
+        winner is starred in its header, and the margin — the part the list never
+        said — is the line under the grid.
       */}
-      {comparable && ranked.length > 0 ? (
-        <ol className="reason-list" data-testid="comparison-order" style={{ margin: '8px 0' }}>
-          {/* The list numbers itself; printing the position again reads "2. 2." */}
-          {ranked.map((e, i) => (
-            <li key={e.playerId}>
-              {i === 0 ? <strong>Start: {e.name}</strong> : e.name}
-              {e.score == null ? ' — not enough data to rank' : ` — ${e.score.toFixed(1)}`}
-            </li>
-          ))}
-        </ol>
-      ) : null}
 
       {/*
-        Compact tags for the two things a projection cannot express: whether
-        kickoff timing is a problem, and whether the market has moved since the
-        last look. The numbers behind them are in the reasons and warnings
-        below rather than repeated here.
+        Compact tags for the things a projection cannot express: whether kickoff
+        timing is a problem, and whether the market has moved since the last
+        look.
       */}
       <div className="tag-row">
         {comparison.lateSwap && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown' ? (
@@ -1975,11 +2061,193 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
           ))}
       </div>
 
+      {comparison.warnings.map((w) => (
+        <div className="hint hint-caution" key={w}>
+          {w}
+        </div>
+      ))}
+
+      {/*
+        The grid.
+
+        Wrapped in its own scroller rather than letting the sheet scroll
+        sideways: a horizontal scroll that moves the whole sheet takes the
+        heading and the verdict off screen, and the reader loses the answer
+        while reading the working.
+      */}
+      <div className="compare-scroll" data-testid="compare-grid-scroll">
+        <table className="compare-grid" data-testid="compare-grid" data-columns={columns.length}>
+          <caption className="sr-only">
+            {`Factor-by-factor comparison of ${columns.map((e) => e.name).join(', ')}. A dash means the factor could not be read for that player.`}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" className="compare-corner">
+                <span className="sr-only">Factor</span>
+              </th>
+              {columns.map((e) => (
+                <th
+                  scope="col"
+                  key={e.playerId}
+                  className={
+                    comparable && e.playerId === comparison.recommendedPlayerId
+                      ? 'compare-head compare-head-pick'
+                      : 'compare-head'
+                  }
+                  data-player-id={e.playerId}
+                  data-testid="compare-column"
+                >
+                  <span className="compare-head-name">
+                    {comparable && e.playerId === comparison.recommendedPlayerId ? (
+                      <span className="compare-pick-mark" aria-label="recommended">
+                        ★
+                      </span>
+                    ) : null}
+                    {e.name}
+                  </span>
+                  <span className="compare-head-meta">
+                    {e.position}
+                    {e.team ? ` · ${e.team}` : ''}
+                    {e.fixture?.opponent ? ` · ${e.fixture.home === false ? '@' : 'vs'} ${e.fixture.opponent}` : ''}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          {/*
+            Three headline rows, in their own group and drawn heavier.
+
+            `Projected` is the number the reader came for and the only one on the
+            grid that is a forecast of a week of football; `Start/sit score` is
+            the comparable figure the verdict was actually made on; `Coverage` is
+            how much of a market is behind the first two. Everything below is the
+            working. They are a separate `<tbody>` so the rule between the two
+            groups is structural rather than a class on a row.
+          */}
+          <tbody className="compare-headline">
+            <tr>
+              <th scope="row" className="compare-label">
+                Projected
+              </th>
+              {columns.map((e) => (
+                <td key={e.playerId} className="compare-cell compare-cell-lead">
+                  <CompareProjection evaluation={e} />
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th scope="row" className="compare-label">
+                Start/sit score
+              </th>
+              {columns.map((e) => (
+                <td key={e.playerId} className="compare-cell compare-cell-lead">
+                  {e.score == null ? (
+                    <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
+                  ) : (
+                    <span title="The comparable figure this verdict was made on: the market expectation plus this app's own bounded adjustments. Not a forecast.">
+                      {e.score.toFixed(1)}
+                    </span>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th scope="row" className="compare-label">
+                Market coverage
+              </th>
+              {columns.map((e) => (
+                <td key={e.playerId} className="compare-cell">
+                  <span
+                    className={e.expectation.coverage > 0 ? undefined : 'compare-zero-coverage'}
+                    title={
+                      e.expectation.missingMarkets.length > 0
+                        ? `No line for: ${e.expectation.missingMarkets.join(', ')}`
+                        : 'Every market this position is priced on has a line'
+                    }
+                  >
+                    {Math.round(e.expectation.coverage * 100)}%
+                  </span>
+                </td>
+              ))}
+            </tr>
+          </tbody>
+
+          <tbody>
+            {factors.map((factor) => (
+              <tr key={factor.key} data-factor={factor.key}>
+                <th scope="row" className="compare-label">
+                  {factor.label}
+                </th>
+                {columns.map((e) => {
+                  const component = componentOf(e.playerId, factor.key);
+                  return (
+                    <td key={e.playerId} className="compare-cell" data-testid="compare-cell">
+                      {component == null ? (
+                        <CompareMissing
+                          reason={`${factor.label.toLowerCase()} is not part of how he is scored`}
+                          label={factor.label}
+                          name={e.name}
+                        />
+                      ) : component.unknown ? (
+                        /*
+                         * The reason the engine gave, verbatim, as the title —
+                         * `no opponent tendency data`, `role not classified`,
+                         * `insufficient data`. It used to be printed as grey
+                         * prose under a bold 0.00 on every single row, which is
+                         * where most of the old sheet's height went.
+                         */
+                        <CompareMissing reason={component.display} label={factor.label} name={e.name} />
+                      ) : (
+                        <span title={component.display}>{component.value.toFixed(2)}</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/*
+        The margin, which the deleted ranking list never actually said.
+
+        "Start him by 2.4" is the part of a close call that decides whether the
+        reader bothers, and it was derivable from the old list only by
+        subtracting two numbers by hand.
+      */}
+      {comparable && winner && comparison.margin != null ? (
+        <div className="faint compare-margin" data-testid="comparison-margin">
+          {comparison.margin === 0
+            ? 'Level on the score — the tie is broken by the reasons below.'
+            : `${winner.name} is ahead by ${comparison.margin.toFixed(1)} on the start/sit score.`}
+        </div>
+      ) : null}
+
+      {comparison.reasons.length > 0 ? (
+        <ul className="reason-list" style={{ margin: '8px 0' }}>
+          {comparison.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/*
+        Whose numbers the `Projected` row is made of, said once under the column
+        rather than per cell. Composed on the server, where the published feed's
+        own assumptions are legible. See `assembleComparison`.
+      */}
+      {(comparison.projectionNotes ?? []).map((note) => (
+        <div className="faint compare-provenance" key={note} data-testid="compare-projection-note">
+          {note}
+        </div>
+      ))}
+
       {/*
         Availability, per player, in the terms a lineup decision is made in.
         `Q · hamstring · limited → full` is the whole difference between two
-        players who are both "Questionable", and it is where the injury report
-        earns its place. Nothing shows for anybody healthy.
+        players who are both "Questionable". Nothing shows for anybody healthy.
       */}
       {comparison.evaluations
         .filter((e) => e.statusFlag)
@@ -1990,44 +2258,15 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
           </div>
         ))}
 
-      {comparison.warnings.map((w) => (
-        <div className="hint hint-caution" key={w}>
-          {w}
-        </div>
-      ))}
+      {/*
+        The long view, kept and moved.
 
-      {comparison.reasons.length > 0 ? (
-        <ul className="reason-list" style={{ margin: '8px 0' }}>
-          {comparison.reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      <table className="compact">
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th>Vegas</th>
-            <th>Score</th>
-            <th>Coverage</th>
-          </tr>
-        </thead>
-        <tbody>
-          {comparison.evaluations.map((e) => (
-            <tr key={e.playerId}>
-              <td>
-                {comparable && e.playerId === comparison.recommendedPlayerId ? '★ ' : ''}
-                {e.name}
-              </td>
-              <td>{e.expectation.points == null ? <Unknown what="Vegas expectation" /> : e.expectation.points.toFixed(1)}</td>
-              <td>{e.score == null ? <Unknown what="score" /> : e.score.toFixed(1)}</td>
-              <td>{Math.round(e.expectation.coverage * 100)}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
+        Same content as before — every component with the engine's own sentence
+        beside it, the market contributions, the expectation's notes — and it is
+        no longer the only way to see anything. A reader who wants one player's
+        whole profile still has it; a reader comparing two numbers no longer has
+        to open two of these to do it.
+      */}
       {comparison.evaluations.map((e) => (
         <details className="disclosure" key={e.playerId}>
           <summary>{e.name} breakdown</summary>
@@ -2038,7 +2277,13 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
                   {c.label}
                   {c.unknown ? ' (unknown)' : ''}
                 </span>
-                <span className="component-value">{c.value.toFixed(2)}</span>
+                {/*
+                  A dash here too, for the same reason as in the grid: this
+                  disclosure is the place the old bold `0.00` was photographed,
+                  and a breakdown that contradicts the grid above it would be
+                  worse than either one alone.
+                */}
+                <span className="component-value">{c.unknown ? '—' : c.value.toFixed(2)}</span>
                 <span className="component-detail">{c.display}</span>
               </div>
             ))}
@@ -2062,6 +2307,88 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
         </details>
       ))}
     </div>
+  );
+}
+
+/**
+ * A cell with nothing in it, and the reason why.
+ *
+ * Not `0.00`, and not an empty cell either: an empty cell in a grid reads as a
+ * rendering fault, and the reader cannot tell it from a column that failed to
+ * load. The dash is a mark that means "asked, and there is no answer", the
+ * reason is in the title for a pointer and in the accessible name for a screen
+ * reader, and the two are the same sentence the engine wrote.
+ */
+function CompareMissing({ reason, label, name }: { reason: string; label: string; name: string }) {
+  return (
+    <span
+      className="compare-missing"
+      data-testid="compare-missing"
+      title={`${label} — ${reason}. No value is being invented.`}
+      aria-label={`${label} for ${name}: no data. ${reason}.`}
+    >
+      —
+    </span>
+  );
+}
+
+/**
+ * The projection, with the tier it came from marked on it.
+ *
+ * Three tiers and three treatments, and the vocabulary is deliberately the one
+ * the Matchup screen already uses rather than a second one invented here: plain
+ * for this app's own market-derived figure, a dotted rule for Rotowire's
+ * published week, a dashed rule and a leading `~` for a preseason season total
+ * over a full season of games. See `core/startsit/projection.ts` for the ladder
+ * and `.matchup-player-proj-estimated` for where the marks came from.
+ *
+ * The mark is the corroboration; the title and the accessible name are the
+ * claim. Neither the rule nor the tilde is carrying the meaning on its own,
+ * which is the rule this app keeps everywhere colour or ornament says something.
+ */
+function CompareProjection({ evaluation }: { evaluation: StartSitEvaluation }) {
+  const points = evaluation.projection;
+  const source = evaluation.projectionSource ?? null;
+  if (points == null) {
+    return (
+      <CompareMissing
+        reason="no betting market, no published weekly figure and no preseason projection for him"
+        label="Projected points"
+        name={evaluation.name}
+      />
+    );
+  }
+
+  const title =
+    source === 'sleeper'
+      ? "Rotowire's published weekly projection, by way of Sleeper — no betting market has priced him."
+      : source === 'preseason'
+        ? 'A rough number: this league’s imported preseason projection for the whole season, divided by a full season of games. It takes no account of who he plays.'
+        : 'This app’s own projection, derived from betting lines under this league’s scoring.';
+  const spoken =
+    source === 'sleeper'
+      ? `${points.toFixed(1)} projected, Rotowire's published figure via Sleeper`
+      : source === 'preseason'
+        ? `roughly ${points.toFixed(1)} projected, estimated from his preseason season projection`
+        : `${points.toFixed(1)} projected, from betting markets`;
+
+  return (
+    <span
+      className={
+        source === 'preseason'
+          ? 'compare-proj compare-proj-borrowed compare-proj-preseason'
+          : source === 'sleeper'
+            ? 'compare-proj compare-proj-borrowed'
+            : 'compare-proj'
+      }
+      data-testid="compare-projection"
+      data-projection-source={source ?? 'none'}
+      title={title}
+      aria-label={`Projected points for ${evaluation.name}: ${spoken}.`}
+    >
+      {source === 'preseason' ? '~' : ''}
+      {points.toFixed(1)}
+    </span>
   );
 }
 

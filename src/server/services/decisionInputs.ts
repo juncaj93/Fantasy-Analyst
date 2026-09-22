@@ -393,7 +393,7 @@ function suggestLineupMode(opts: {
  * Only positions actually on the roster are named. A rule about tight ends is
  * not worth a sentence to somebody who does not have one.
  */
-function publishedRefusalNote(
+export function publishedRefusalNote(
   profile: ScoringProfile,
   positions: ReadonlyMap<string, string | null>,
 ): string | null {
@@ -415,6 +415,72 @@ function publishedRefusalNote(
   return `Published projections are not quoted for ${refused
     .map((r) => r.position)
     .join(', ')} in this league: its scoring for those positions differs from what the published feed assumes.`;
+}
+
+// ------------------------------------------------------------------ compare
+
+/** The two borrowed figures a comparison may print, and the sentence about them. */
+export interface ComparisonDisplayInputs {
+  /** Rotowire's published weekly figures, by player id. Tier 2. */
+  published: ReadonlyMap<string, number>;
+  /** This league's imported preseason **season totals**, by player id. Tier 3. */
+  preseason: ReadonlyMap<string, number>;
+  /** Why a position in this comparison is refused a published total, if one is. */
+  publishedRefusal: string | null;
+}
+
+/**
+ * The fallback figures for a named handful of players, for the Compare sheet.
+ *
+ * Its own function rather than a reuse of `gatherLineupInputs`, because the two
+ * ask about different sets: the lineup asks about a roster and both sides of a
+ * matchup, and this asks about the two to four players somebody typed into a
+ * picker — who need not be on any roster in the league, which is the whole
+ * point of that picker.
+ *
+ * It lives here, beside `gatherLineupInputs`, because this file is one of the
+ * few sanctioned to import the published feed at all, and because keeping the
+ * read here is what lets `assembleComparison` stay a pure function of values —
+ * the same property that makes the lineup assembly replayable from a support
+ * file. See `tests/sleeperProjectionFallback.test.ts` for the boundary.
+ *
+ * ## Cost
+ *
+ * Two indexed reads and one feed lookup, for at most four ids. `preseasonPointsFor`
+ * is `latestId` off a covering index plus one covering seek per player (migration
+ * 0041); `publishedFor` reads the stored feed and never calls Sleeper — the fetch
+ * is on the crons, so opening Compare never waits on a provider. Both failures
+ * are swallowed to an empty map, because the state they degrade to is the state
+ * this screen was in before today and it is a state the screen says out loud.
+ */
+export async function gatherComparisonDisplay(
+  db: Database,
+  sleeper: SleeperClient,
+  opts: {
+    league: LeagueRecord;
+    profile: ReturnType<typeof buildScoringProfile>;
+    nflState: NflState | null;
+    /** Which position each id plays; the published feed answers nothing without it. */
+    positions: ReadonlyMap<string, string | null>;
+  },
+): Promise<ComparisonDisplayInputs> {
+  const playerIds = [...opts.positions.keys()];
+  const week = resolveWeek(null, opts.nflState?.week ?? null, opts.nflState?.seasonType ?? null);
+
+  const [published, preseason] = await Promise.all([
+    new SleeperProjectionService(db, sleeper)
+      .publishedFor({
+        season: opts.league.season,
+        week,
+        playerIds,
+        profile: opts.profile,
+        positionOf: (id) => opts.positions.get(id) ?? null,
+      })
+      .catch((): ReadonlyMap<string, number> => new Map<string, number>()),
+    preseasonPointsFor(db, opts.league.season, opts.profile, playerIds),
+  ]);
+
+  return { published, preseason, publishedRefusal: publishedRefusalNote(opts.profile, opts.positions) };
 }
 
 // ------------------------------------------------------------------ waivers

@@ -10182,3 +10182,234 @@ div.matchup-result {
   color: var(--text-faint);
   min-height: 28px;
 }
+
+/* ========================================= the compare grid (Team → Compare) */
+/*
+ * Two to four players on one set of rows, on a phone, one-handed.
+ *
+ * The sheet this replaced was a single column: one player's twelve-row
+ * breakdown, then the next player's, and a reader comparing rush yards
+ * scrolled past everything else twice. What a comparison wants is the shape
+ * every other comparison in the world has — the factor on the left, the
+ * subjects across the top — and the only real constraint is that the left
+ * column must not leave the screen when the subjects do.
+ *
+ * So: the table scrolls inside its own box and the label column is sticky.
+ * Nothing else about it is clever, deliberately. The measurements below are
+ * from a 360px viewport, the narrowest this app supports.
+ */
+
+.compare-scroll {
+  /*
+   * The scroller is the table's own box, not the sheet.
+   *
+   * A sideways scroll on the sheet takes the verdict and the heading off screen
+   * — the reader loses the answer while reading the working. Bounded here, the
+   * heading stays put and only the columns move.
+   *
+   * Bled to the card's edges so the first and last columns can use the full
+   * width: a scroller inset by the card's padding wastes 24px of a 360px
+   * screen on empty gutter at both ends of every row.
+   */
+  margin: var(--sp-3) calc(-1 * var(--sp-3)) var(--sp-2);
+  padding: 0 var(--sp-3);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  /*
+   * Columns land on their own edges rather than halfway across a number.
+   * `proximity` and not `mandatory`: a two-player grid needs no scroll at all
+   * and must not be nudged by one.
+   */
+  scroll-snap-type: x proximity;
+}
+
+.compare-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The label column: fixed, sticky, and opaque.
+ *
+ * `min-width` on the cells rather than a `<col>`, because the sticky offset has
+ * to be the same number and one declaration is one number. 104px fits
+ * `Touchdown dependency` on two lines and `Market coverage` on one, which is
+ * the pair that sets the width.
+ *
+ * The background is the card's own surface and not a transparency: a column
+ * that scrolls underneath a translucent label is a column the reader reads
+ * through the label.
+ */
+.compare-label,
+.compare-corner {
+  position: sticky;
+  left: calc(-1 * var(--sp-3));
+  z-index: 1;
+  min-width: 104px;
+  max-width: 104px;
+  background: var(--surface);
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  border-bottom: 1px solid var(--separator-soft);
+  /*
+   * The hairline that separates the frozen column from the moving ones. A
+   * shadow would be the native idiom and is wrong here: it falls on the first
+   * data column's numbers at this type size.
+   */
+  box-shadow: 1px 0 0 0 var(--separator-soft);
+  line-height: 1.25;
+  font-size: 0.74rem;
+}
+
+.compare-corner {
+  border-bottom: 1px solid var(--separator);
+}
+
+/*
+ * A column header: the name, then who he is and who he plays.
+ *
+ * `min-width` sized so two columns fill a 360px screen without scrolling
+ * (104 + 2 × 116 = 336, inside the card's content box) and three or four
+ * scroll. Names wrap rather than truncate — a comparison whose subject is
+ * abbreviated to `Rhamondre S…` is a comparison the reader has to guess at.
+ */
+.compare-head {
+  min-width: 116px;
+  scroll-snap-align: end;
+  text-align: right;
+  vertical-align: bottom;
+  padding: 0 0 var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--separator);
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.compare-head-name {
+  display: block;
+  font-size: 0.8rem;
+}
+
+.compare-head-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/*
+ * The recommended column, marked on the column rather than on a row.
+ *
+ * The accent is on the name and the star sits before it, so the cue is a word
+ * and a glyph and a colour rather than a colour alone — the rule this app
+ * keeps everywhere. There is no tint behind the column: a full-height wash
+ * behind one of four columns in a scroller reads as a selection state the
+ * reader cannot dismiss.
+ */
+.compare-head-pick .compare-head-name {
+  color: var(--accent-text, var(--accent));
+}
+
+.compare-pick-mark {
+  margin-right: 3px;
+  color: var(--accent);
+}
+
+.compare-cell {
+  text-align: right;
+  padding: var(--sp-2) 0 var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--separator-soft);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/*
+ * The three rows the reader came for, drawn heavier than the working below
+ * them. A tenth of a rem and 700 rather than a rule or a tint: the group is
+ * already separated by its own `<tbody>` border.
+ */
+.compare-headline .compare-cell-lead {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.compare-headline tr:last-child .compare-label,
+.compare-headline tr:last-child .compare-cell {
+  border-bottom: 1px solid var(--separator);
+}
+
+.compare-grid tbody:last-child tr:last-child .compare-label,
+.compare-grid tbody:last-child tr:last-child .compare-cell {
+  border-bottom: none;
+}
+
+/*
+ * Nothing to report, as a mark rather than as a number.
+ *
+ * The whole point of this pass. A bold `0.00` under `Vegas market expectation
+ * (unknown)` is a real number and a real zero to anybody reading it, and the
+ * engine never summed it — `evaluatePlayer` filters `unknown` components out of
+ * the score, so those cells were always cosmetic. Measured on production on 22
+ * September 2026: every unknown component on the owner's roster sat at exactly
+ * 0, and `sum(known)` equalled `sum(all)` for all ten players.
+ *
+ * Quieter than a value and wider than a hyphen, and it must not be mistaken for
+ * a minus sign — hence the em dash and the centring inside a right-aligned
+ * cell, which is what stops `—` and `-1.50` reading as the same kind of thing
+ * at a glance.
+ */
+.compare-missing {
+  display: inline-block;
+  min-width: 1.4em;
+  text-align: center;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* A coverage of 0% is a fact about the book, not a fault, but it earns a look. */
+.compare-zero-coverage {
+  color: var(--text-faint);
+}
+
+/*
+ * The projection and its provenance, in the same vocabulary the Matchup screen
+ * uses. Dotted for Rotowire's week, dashed plus a leading `~` for an August
+ * season total over sixteen games. See `.matchup-player-proj-borrowed` — this
+ * is deliberately the same two marks rather than a second language for one
+ * idea, and at this larger type size they are legible without the opacity step
+ * that row needs.
+ */
+.compare-proj {
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-proj-borrowed {
+  font-style: italic;
+  color: var(--text-dim);
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.compare-proj-preseason {
+  text-decoration-style: dashed;
+}
+
+.compare-margin {
+  margin: var(--sp-1) 2px var(--sp-2);
+}
+
+.compare-provenance {
+  margin: var(--sp-1) 2px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}

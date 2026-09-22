@@ -21,7 +21,7 @@ import { computeNeed } from '../core/draft/need.ts';
 import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
-import { assembleLineup } from '../core/startsit/assemble.ts';
+import { assembleComparison, assembleLineup } from '../core/startsit/assemble.ts';
 import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
 import { SnapshotLossyError } from '../core/support/lossless.ts';
 import { SnapshotUnavailable } from '../core/support/emit.ts';
@@ -33,6 +33,7 @@ import {
 import {
   NoDecision,
   boundedFreeAgents,
+  gatherComparisonDisplay,
   gatherLineupInputs,
   gatherWaiverInputs,
 } from './services/decisionInputs.ts';
@@ -3212,11 +3213,56 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     );
 
     const comparison = compareStartSit(inputs, profile, { mode });
+
+    /*
+     * The verdict is decided; now say what each man is actually worth.
+     *
+     * Two separate acts, in that order, and the order is the design. `compareStartSit`
+     * has already ranked on `score`, which is the market expectation plus this app's
+     * own bounded nudges and reaches no borrowed number — so nothing below can move
+     * the recommendation, and `startsit.compareProjection.test.ts` holds that.
+     *
+     * What it can do is stop the sheet printing nothing. Until today this route
+     * was the only place a player got priced with no fallback at all: the Matchup
+     * screen read three tiers and the Team screen two, and Compare read the market
+     * or gave up. A probe of production on 22 September 2026 found eight of ten
+     * starters with no market expectation in week 2, which is what the owner was
+     * looking at when a FLEX comparison reported Trey McBride as `unknown` while
+     * this league's snapshot held 183.7 preseason points for him.
+     *
+     * The reads are swallowed inside the gatherer, so a cold feed costs the extra
+     * column and never the comparison.
+     */
+    const positions = new Map(inputs.map((input) => [input.player.id, input.player.position ?? null]));
+    const display = await gatherComparisonDisplay(db, ctx.env.sleeper, {
+      league,
+      profile,
+      nflState: await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
+      positions,
+    }).catch(() => null);
+
+    const projected = assembleComparison({
+      evaluations: comparison.evaluations,
+      ...(display ? { published: display.published, preseason: display.preseason } : {}),
+      ...(display?.publishedRefusal ? { publishedRefusal: display.publishedRefusal } : {}),
+    });
+
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       dataFreshness: freshness,
       slot,
       ...comparison,
+      evaluations: projected.evaluations,
+      /*
+       * Its own field rather than folded into `warnings`.
+       *
+       * `warnings` is about the *decision* — a locked kickoff, a comparison
+       * between players who cannot share a slot — and the grid prints those
+       * above the numbers. These are about the projection column and belong
+       * under it. Optional on the wire like every other addition here, because
+       * this app serves cached responses from older workers.
+       */
+      ...(projected.projectionNotes.length > 0 ? { projectionNotes: projected.projectionNotes } : {}),
     });
   });
 

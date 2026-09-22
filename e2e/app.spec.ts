@@ -1583,8 +1583,23 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(comparison).toBeVisible();
     await expect(page.getByTestId('comparison-verdict')).toContainText('Start');
     await expect(comparison).toContainText('confidence');
-    await expect(comparison.getByRole('columnheader', { name: 'Vegas' })).toBeVisible();
-    await expect(comparison.getByRole('columnheader', { name: 'Coverage' })).toBeVisible();
+
+    /*
+     * The axes swapped on 22 September 2026 and the assertion follows them.
+     *
+     * This used to look for `Vegas` and `Coverage` as *column* headers, which
+     * they were when the card carried a four-row summary table with one row per
+     * player. The grid puts the players across the top and the factors down the
+     * side, so those two are row headers now — and asserting them by ARIA role
+     * is the part worth keeping, because it is what proves the grid is a real
+     * table a screen reader can navigate rather than a pile of divs that looks
+     * like one.
+     */
+    await expect(comparison.getByRole('rowheader', { name: 'Projected' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Market coverage' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Vegas market expectation' })).toBeVisible();
+    // And the players are the columns.
+    await expect(page.getByTestId('compare-column')).toHaveCount(2);
   });
 
   test('recommends a whole lineup and never offers to apply it', async ({ page }) => {

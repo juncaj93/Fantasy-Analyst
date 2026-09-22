@@ -112,6 +112,52 @@ const SCREENS = {
       };
     },
   },
+  /*
+   * The compare grid, which is the whole point of the 22 September 2026 pass.
+   *
+   * Two variants because the layout's one real constraint is the number of
+   * columns: two fit a 360px screen with no horizontal scroll, three and four
+   * scroll with the label column frozen. Anything that breaks the sticky column
+   * breaks at three, so both are worth a picture.
+   */
+  ...Object.fromEntries(
+    [2, 3].map((count) => [
+      count === 2 ? 'compare' : `compare${count}`,
+      {
+        async go(page) {
+          await page.goto(`${BASE}/`);
+          await page.getByTestId('tab-team').click();
+          await page.getByTestId('compare-open').click();
+          await page.getByTestId('compare-sheet').waitFor({ state: 'visible' });
+          for (const id of ['1001', '1005', '1008'].slice(0, count)) {
+            await page.locator(`[data-testid="compare-candidate"][data-player-id="${id}"]`).click();
+          }
+          await page.getByTestId('compare-run').click();
+          await page.getByTestId('compare-grid').waitFor({ state: 'visible' });
+        },
+        measure: () => {
+          const grid = document.querySelector('[data-testid="compare-grid"]');
+          const scroll = document.querySelector('[data-testid="compare-grid-scroll"]');
+          const label = grid?.querySelector('.compare-label');
+          const cells = [...document.querySelectorAll('[data-testid="compare-cell"]')];
+          const missing = [...document.querySelectorAll('[data-testid="compare-missing"]')];
+          return {
+            columns: grid ? Number(grid.getAttribute('data-columns')) : null,
+            gridWidth: grid ? Math.round(grid.getBoundingClientRect().width) : null,
+            scrollWidth: scroll ? scroll.scrollWidth : null,
+            scrollBox: scroll ? Math.round(scroll.clientWidth) : null,
+            scrolls: scroll ? scroll.scrollWidth > scroll.clientWidth + 1 : null,
+            labelWidth: label ? Math.round(label.getBoundingClientRect().width) : null,
+            factorRows: document.querySelectorAll('[data-factor]').length,
+            cells: cells.length,
+            dashes: missing.length,
+            zeroes: cells.filter((c) => c.textContent.trim() === '0.00').length,
+            pageOverflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+          };
+        },
+      },
+    ]),
+  ),
   waivers: {
     async go(page) {
       await page.goto(`${BASE}/?demo=waivers-tuesday-active`);

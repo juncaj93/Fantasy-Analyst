@@ -704,10 +704,20 @@ test.describe('the comparison tool', () => {
       for (const id of ['1001', '1005', '1008', '1012'].slice(0, count)) await choose(page, id);
       await page.getByTestId('compare-run').click();
 
-      const order = page.getByTestId('comparison-order');
-      await expect(order).toBeVisible();
-      await expect(order.locator('li')).toHaveCount(count);
-      await expect(order.locator('li').first()).toContainText('Start:');
+      /*
+       * The ranking is the column order now, not a list above the table.
+       *
+       * It used to be an `<ol>` repeating every name and score directly above a
+       * table holding the same names and the same scores — a third of a phone
+       * sheet spent saying one thing twice. The grid puts the recommended
+       * player in the first data column and stars his header, so this asserts
+       * the thing that replaced the list rather than the list.
+       */
+      const grid = page.getByTestId('compare-grid');
+      await expect(grid).toBeVisible();
+      await expect(grid).toHaveAttribute('data-columns', String(count));
+      await expect(page.getByTestId('compare-column')).toHaveCount(count);
+      await expect(page.getByTestId('compare-column').first()).toContainText('★');
     });
   }
 
@@ -1288,9 +1298,9 @@ test.describe('the row and the card are about the same player', () => {
     if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
     await swap.click();
 
-    const order = page.getByTestId('comparison-order');
-    await expect(order).toBeVisible();
-    await expect(order.locator('li')).toHaveCount(2);
+    const grid = page.getByTestId('compare-grid');
+    await expect(grid).toBeVisible();
+    await expect(grid).toHaveAttribute('data-columns', '2');
   });
 
   test('hands the chips back the moment the reader changes one', async ({ page }) => {
@@ -1302,17 +1312,17 @@ test.describe('the row and the card are about the same player', () => {
     const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
     if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
     await swap.click();
-    await expect(page.getByTestId('comparison-order')).toBeVisible();
+    await expect(page.getByTestId('compare-grid')).toBeVisible();
 
     await page.getByTestId('compare-chosen').first().click();
-    await expect(page.getByTestId('comparison-order')).toHaveCount(0);
+    await expect(page.getByTestId('compare-grid')).toHaveCount(0);
     await expect(page.getByTestId('compare-run')).toBeDisabled();
   });
 
   test('still waits to be asked when it was opened with nobody chosen', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
-    await expect(page.getByTestId('comparison-order')).toHaveCount(0);
+    await expect(page.getByTestId('compare-grid')).toHaveCount(0);
     await expect(page.getByTestId('compare-run')).toBeDisabled();
   });
 });
