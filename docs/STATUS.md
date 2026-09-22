@@ -3655,3 +3655,169 @@ was added to `chunkOwnership.renderPath`: `core/roster/ownership.ts` is a
 dependency-free leaf that the Players screen genuinely needs on the render
 path — it builds the picker's options and the request URL — so it is declared
 rather than split.
+
+## Compare: one projection ladder, a grid, and a dash where there is no reading
+
+Reported with two screenshots on 22 September 2026: a FLEX comparison showing
+Jahmyr Gibbs at 16.7 with a real market number of 12.3, and Trey McBride at 3.9
+with `unknown` Vegas, **0% coverage** and `no Vegas data for Trey McBride —
+compared on news and availability only`. Under it, a column of bold `0.00`s:
+`Opponent by role (unknown)`, `Explosive role (unknown)`, `Vegas market
+expectation (unknown)`, `Role trend (unknown)`, `Touchdown dependency
+(unknown)`.
+
+Everything below was measured against production before anything was changed.
+`scripts/probe-compare-quality.mjs` and `scripts/probe-trade-waiver-strings.mjs`
+are those readings, and they run through the existing Probe workflow, which is
+the only thing in this project that can reach Cloudflare.
+
+### There were three projection ladders, and Compare had the empty one
+
+McBride is not missing from the snapshot. The **StartWho · Aug 30** capture
+holds 154 players, 0 unresolved, under this league's exact scoring key
+(`ppr0.5_passtd6_…`), and his row reads **183.7** season points — 11.5 a week.
+Gibbs reads 292.5. Both were sitting in the database while the sheet said it
+knew nothing.
+
+It is also not a tight-end problem, and not McBride's. Of the owner's ten
+evaluated players in week 2, **eight carry no market expectation at all** —
+Burrow, Bijan Robinson, Kenneth Walker, Egbuka, Garrett Wilson, Jayden Reed,
+Mark Andrews and Stevenson, every one of them `missing: rush_yards,
+receiving_yards, receptions, anytime_td`. Only Sam LaPorta (33%) and the Tampa
+Bay defence (100%) are priced. The book has not written those markets yet; that
+is an ordinary September state and not a fault.
+
+What was a fault is that the app answered the same question three different
+ways depending on which screen asked it:
+
+| screen | tiers it could read | what McBride showed |
+|---|---|---|
+| Matchup | market → published → preseason ÷ 16 | a number |
+| Team (`assembleLineup`) | market → published | a number, where the feed allows it |
+| **Compare (`/api/startsit/compare`)** | **market only** | **nothing** |
+
+`core/matchup/build.ts` held a private `projectionFor` with the third tier in
+it, written when Matchup was the only screen that wanted one. The ladder is one
+function now: `weeklyProjection` grew the preseason tier, `projectionFor` is
+reduced to mapping a source onto the tier name the matchup payload has always
+carried, and the Compare route reads it through a new `assembleComparison`.
+`EXPECTED_GAMES` — sixteen, the games a healthy starter plays — was already a
+shared leaf and is the only import the ladder took on.
+
+**The display pass cannot move a verdict.** `compareStartSit` has finished
+ranking, on `score`, before `assembleComparison` is called, and
+`tests/startsit.compareProjection.test.ts` holds that as a difference which must
+be empty: the same comparison run with and without the borrowed figures
+recommends the same player, by the same margin, at the same confidence, with
+every score identical. A test that merely checked the projection appeared would
+pass just as happily on a build that had wired Rotowire into the ranking.
+
+**The lineup pass deliberately still stops at tier 2**, and there is now a test
+saying so rather than a comment. A starting decision is a recommendation this
+app makes; a borrowed weekly figure is already ranked there at a discount, and
+an August season total flattened over sixteen games is not a claim about Sunday
+that one should turn on. The structural assertion in
+`sleeperProjectionFallback.test.ts` changed shape for the same reason — it used
+to grep the whole Team screen for the word `preseason`, which stopped being the
+right test the moment the Compare grid moved into that file and legitimately
+began serving the tier. It now asserts the thing that actually decides it: that
+`assembleLineup` calls the ladder with a published figure and no third argument.
+
+### A bold 0.00 for data that was never read
+
+`evaluatePlayer` sums only the components it marks `unknown: false`. The probe
+confirms the consequence across the whole roster: **every unknown component in
+the league sits at exactly 0**, and `sum(known) === sum(all)` for all ten
+players. Those numbers were never in the score. They were cosmetic, and they
+looked identical to the real zeroes beside them.
+
+Per component, on the live roster:
+
+| component | unknown | computed | non-zero |
+|---|---|---|---|
+| `vegas` | 8 | 2 | 2 |
+| `usage_level` | 0 | 9 | 9 |
+| `news_raw` | 0 | 9 | 8 |
+| `news_recent` | 2 | 7 | 7 |
+| `status` | 1 | 9 | 1 |
+| `uncertainty` | 0 | 10 | 2 |
+| `role_trend`, `td_dependency`, `weather`, `matchup_role`, `explosiveness` | 9 each | 0 | 0 |
+| `game_script` | 8 | 1 | 1 |
+
+So the screenshot's six zeroes were not all the same kind of thing.
+`Availability 0.00 · no designation` and `Uncertainty penalty 0.00 · none` are
+**readings**: checked, and he costs nothing. The other four were gaps. Unknown
+cells carry `—` now, with the engine's own sentence in the cell's title and in
+its accessible name; a computed zero still reads `0.00`.
+
+`status` is the instructive case, because it is both depending on what was read,
+which is why the fix reads the flag the engine already sets rather than
+pattern-matching the word "unknown" in a label.
+
+### The sheet is a grid
+
+Factors down the side, players across the top. A real `<table>` with `scope` on
+both axes — "Rush yards, Trey McBride, no data" is announced without the reader
+counting columns, which a grid of divs cannot do. The label column is sticky and
+the rest scrolls inside its own box rather than the sheet's, so the verdict does
+not leave the screen while the working is being read. Two columns fit 360px
+with no scroll; three and four scroll with the labels frozen. Comparing 3 and 4
+players was already supported on both sides (`MAX_COMPARE = 4`) and now has a
+layout that suits it.
+
+The ranking `<ol>` above the old table is gone. It repeated every name and every
+score from the table directly beneath it — a third of a phone sheet spent saying
+one thing twice. The column order carries the ranking, the winner's header is
+starred and accented, and **the margin** — which that list never actually said —
+is one line under the grid. The per-player breakdowns are unchanged and still
+open on a tap; the long view is no longer the only view.
+
+Provenance uses the vocabulary the Matchup screen already has rather than a
+second one: plain for this app's own figure, a dotted rule for Rotowire's
+published week, a dashed rule and a leading `~` for a preseason total. The mark
+corroborates; the title and the accessible name carry the claim.
+
+### What was verified and left alone
+
+**Buy-low / sell-high is switched off, correctly, and says so.** The board
+returns zero suggestions and `/api/trades/smart` carries the reason in its own
+words: *"Buy-low and sell-high need 3 games of production to measure against a
+player's preseason expectation. The season has produced 2 so far, so this lane
+switches on in week 4."* The preseason snapshot it needs is present and
+resolves; `ARBITRAGE.minGames` is three and the league has played two. Nothing
+to fix.
+
+**The third tier is live in production.** The Matchup screen's week-2 forecast
+carries 20 rows: 16 borrowed from Rotowire, **2 estimated from the preseason
+snapshot** — J. Burrow at 20.18 and C. Williams at 7.72 — and none without a
+number. Both are quarterbacks, which is the tier working exactly as designed:
+this league pays six points for a passing touchdown and the published feed
+assumes four, so QBs are refused tier 2 and fall through to tier 3.
+
+### Not fixed here, and why
+
+**The trade engine values players on `score`.** `core/trades/ladderInputs.ts`
+and `rosterUtility.ts` both read `evaluation.score`, which with no market is the
+sum of this app's bounded nudges and nothing else. On the live roster that means
+the board currently values Sam LaPorta at 6.54 above Bijan Robinson at 4.6, and
+the Tampa Bay defence at 8.25 above every skill player on the team. The 84
+candidates rejected as `value_gap_outside_range` — "objective values are 57%
+apart", "70% apart" — are measuring that noise rather than the players.
+
+This is the same failure `core/startsit/projection.ts` documents for the Team
+screen in August (`Jalen Hurts 3.15`, `Christian McCaffrey 1.35`), in a lane
+that was never fixed. It is left for the owner because the fix is a product
+decision he has already made the other way once: the wall says a recommendation
+may not be built on a borrowed number, and the alternative here is a
+recommendation built on a number that is not a projection of anything.
+
+**The waiver board is empty for a data reason, not a feature one.** 68 free
+agents scanned, 0 rows, headline *"No free agent could be scored: 16 free agents
+have no market, usage or news to read."* The only thing on that screen labelled
+a trend is the FAAB bid's `trending` line, built from Sleeper's global
+adds/drops leaderboard — `core/market/trending.ts`, captured to
+`trending_snapshots`, used to price a bid and raise a question and explicitly
+never to move a projection. It cannot render today because there are no bid rows
+to hang it on. Its last capture was 2026-09-19T09:02Z, and `roster`, `players`,
+`usage`, `schedule`, `nflverse`, `nfl-state` and `trending` are all `degraded`
+at the same timestamp — roughly 66 hours stale.
