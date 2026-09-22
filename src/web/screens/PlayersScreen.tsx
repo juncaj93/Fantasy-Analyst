@@ -38,6 +38,7 @@ import {
   ALL_FILTER,
   ownerButtonLabel,
   ownerFilterOptions,
+  ownerPillLabel,
   playerFilterChips,
   playersEmptyLine,
   teamLabel,
@@ -68,6 +69,16 @@ interface PlayerListItem {
   signal: PlayerSignal | null;
   /** The user's own flag. Absent on responses from an older deployment. */
   myGuy?: MyGuyFlag;
+  /**
+   * The roster holding him, or null for a free agent.
+   *
+   * Absent — as opposed to null — when no league was named or on a deployment
+   * that predates the field, and the two are different: null is "nobody has
+   * him", absent is "this app was not asked about a league". `ownerPillLabel`
+   * draws nothing for the second, because `Available` in no league at all is
+   * a claim nobody can make.
+   */
+  ownerRosterId?: number | null;
 }
 
 /** One page of the response, plus what it says about the rest of the list. */
@@ -105,6 +116,59 @@ const PAGE_SIZE = 100;
  * them — a spinner they actually see is a page that was requested too late.
  */
 const LOAD_MORE_MARGIN = '600px';
+
+/**
+ * Who holds him, where the heart used to be.
+ *
+ * ## Why the heart left
+ *
+ * `MyGuyControl` sat in this slot — ♡ → ♥ → ♥♥ → ♥♥♥, an opinion that nudges
+ * a player up the **draft board**. That was the right control for August. The
+ * draft is months behind this league now, and a control whose only effect is
+ * on a board nobody will open again is a thumb-sized target on the busiest
+ * corner of the card, doing nothing, next to Done.
+ *
+ * What a reader actually asks of a player's card in October is the question
+ * this replaces it with: *can I have him?* The answer is one word and it is
+ * already on the wire — the ownership filter on the list behind this card is
+ * computed from the same map — so this is a display of a fact the response
+ * already carried rather than a new question asked of the server.
+ *
+ * ## What did not change
+ *
+ * The heart's **data** is untouched. `/api/players/:id/my-guy` still exists,
+ * the stored levels are still stored, `myGuy` still rides on every row of the
+ * list, and the control itself is still on the list row — see
+ * `CompactPlayerRow`'s `action`. Nothing was migrated and nothing was dropped,
+ * so a future draft finds its board exactly as this one left it. This is a
+ * screen putting a better answer in a scarce place, not a feature being
+ * removed.
+ *
+ * ## Why it is not a button
+ *
+ * Ownership is not the reader's to change from here — this app never acts on
+ * Alex's behalf, and a tappable owner would imply it could. It is a `span`
+ * with no handler and no focus stop, which is also what keeps the header's
+ * tab order down to Back and Done.
+ */
+function OwnerPill({ label }: { label: string | null }) {
+  /*
+   * No league, no pill. See `ownerPillLabel`: an empty pill in that state
+   * would read as "owned by nobody", which is `Available`, which is a claim
+   * this app cannot make without a league to make it about.
+   */
+  if (!label) return null;
+  return (
+    <span
+      className={label === 'Available' ? 'tag tag-take' : 'tag'}
+      data-testid="owner-pill"
+      data-owner={label}
+      title={label === 'Available' ? 'No manager in this league holds him' : `Rostered by ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const [query, setQuery] = useState('');
@@ -399,11 +463,7 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         backLabel="Players"
         onBack={() => setFull(false)}
         trailing={
-          <MyGuyControl
-            myGuy={open.myGuy ?? EMPTY_MY_GUY}
-            busy={flagging === open.id}
-            onChange={(level) => void setMyGuy(open.id, level)}
-          />
+          <OwnerPill label={ownerPillLabel(open.ownerRosterId, teams)} />
         }
       />
     );
@@ -562,13 +622,7 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 restoreScroll.current = pageScrollTop();
                 setFull(true);
               }}
-              trailing={
-                <MyGuyControl
-                  myGuy={open.myGuy ?? EMPTY_MY_GUY}
-                  busy={flagging === open.id}
-                  onChange={(level) => void setMyGuy(open.id, level)}
-                />
-              }
+              trailing={<OwnerPill label={ownerPillLabel(open.ownerRosterId, teams)} />}
             />
           ) : null}
 

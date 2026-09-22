@@ -283,6 +283,39 @@ export default {
       } catch (err) {
         console.error('injury history backfill failed', err);
       }
+
+      /*
+       * And the fixture list, when it is due — which is four times a day, or
+       * eight on a Sunday, instead of the once it used to get.
+       *
+       * It moved here from the 09:00 tick, and the reason is the alarm rather
+       * than the data. Data Health calls a daily feed unhealthy after 36 hours
+       * without an *attempt*, so a feed checked once every 24 had twelve hours
+       * of slack: one tick that did not land and the source reads degraded.
+       * That is exactly what was reported — 37+ hours — on a fixture list that
+       * was perfectly correct the whole time.
+       *
+       * `refreshIfDue` owns the decision and is careful about what it reads to
+       * make it: one state row on every tick, and this week's kickoffs only on
+       * the handful where the answer could differ. About 816 rows a day
+       * against an allowance of five million.
+       *
+       * **It is not here to make Sunday's numbers fresher, and it cannot.**
+       * Nothing this feed stores moves during a game — season, week, team,
+       * opponent, home, kickoff, roof — and no live read path touches it. The
+       * things that do move on a Sunday are the injury check above and the
+       * Vegas lines, which are on their own clocks.
+       *
+       * Separately caught, like everything else on this tick, and last: a
+       * planning input that fails must never take down the check that decides
+       * whether somebody plays today.
+       */
+      try {
+        const schedule = await new ScheduleService(env.DB).refreshIfDue(usageSeason());
+        if (schedule?.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
+      } catch (err) {
+        console.error('schedule check failed', err);
+      }
       return;
     }
 
@@ -538,7 +571,25 @@ export default {
        * failure leaves the stored schedule exactly where it is.
        */
       await run.step('schedule', 'NFL schedule', async () => {
-        const schedule = await new ScheduleService(env.DB, { fetch: meteredRedirectingFetch }).refresh(usageSeason());
+        /*
+         * Still on this tick, and now almost always free.
+         *
+         * The check itself moved to the five-minute tick, where it can run
+         * four to eight times a day instead of once — see the note there for
+         * why an alarm, not the data, set that number. This call stays as the
+         * floor under it: if the five-minute trigger is ever removed the way it was
+         * during the quota incident, the fixture list still gets asked daily.
+         *
+         * It asks `refreshIfDue` rather than `refresh`, so on an ordinary
+         * morning the five-minute tick has already been inside the interval
+         * and this costs one state row and no subrequests at all. That is a
+         * gain on a tick measured at 46 of its 48: the two it used to spend
+         * here are now the backfill's.
+         */
+        const schedule = await new ScheduleService(env.DB, { fetch: meteredRedirectingFetch }).refreshIfDue(
+          usageSeason(),
+        );
+        if (schedule == null) return { outcome: 'succeeded' as const, note: 'checked recently on the frequent tick' };
         if (schedule.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
         return {
           outcome: stepOutcomeFrom(schedule.outcome),

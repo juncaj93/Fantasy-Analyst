@@ -425,7 +425,7 @@ export function TeamScreen({
      * to be told about it. It is also why there is no longer a refresh control
      * anywhere on this screen — see the note on the navigation bar.
      */
-    <PullToRefresh onRefresh={refreshAll} label="Team" testId="team-pull">
+    <PullToRefresh onRefresh={refreshAll} label="Team" testId="team-pull" live={lineup?.gameWindow?.live ?? false}>
       {/*
         The league is the page's identity, so it is the page's title — and only
         the title.
@@ -874,13 +874,53 @@ function VerdictCard({
   const subjectId = verdictSubjectId(row);
   const subject = (subjectId != null && subjectId === recommended?.playerId ? recommended : current) ?? current ?? recommended;
   const position = subject?.position ?? '';
-  const blocked = row.vacancy[0] ?? null;
+  /*
+   * The row's own vacancy, and not simply the first one in the slot's list.
+   *
+   * `vacancy` describes every rostered player the slot could have used, best
+   * candidate first, and on a one-player slot the first of them is the row's
+   * subject. On a league with **two FLEX slots** it is not: both empty flexes
+   * are handed the same list, ordered incumbent-first and then by name, so
+   * both rows took the alphabetically-first player's reason and one of them
+   * was about somebody else.
+   *
+   * Reproduced in `tests/lineup.vacancy.test.ts` on a two-FLEX roster holding
+   * `Aaron Unpriced` (no figure at all) and `Zach Unpriced` (9.4 from
+   * Rotowire): Zach's row drew 9.4 from his own evaluation and took Aaron's
+   * `can't be scored this week` for its note, which is the 15 September report
+   * reappearing through a second door after the first was shut in #271.
+   *
+   * So the row looks up the man it is actually about, and falls back to the
+   * ordered first only where there is nobody to look up — the empty-slot
+   * branch below, which is the case that ordering was written for.
+   */
+  const blocked = (subject ? row.vacancy.find((v) => v.playerId === subject.playerId) : null) ?? row.vacancy[0] ?? null;
   const borrowed = blocked?.publishedProjection ?? null;
   /* The figure belonging to whoever leads the row — see the trailing field. */
   const shown =
     row.verdict === 'fill'
       ? { points: row.projection, source: row.projectionSource }
       : currentProjection;
+
+  /*
+   * A row may not say there is no figure while a figure is on it.
+   *
+   * The rule #271 established, applied to the figure the row *draws* rather
+   * than to one of the two tiers it could have come from. That fix keyed on
+   * `borrowed` — Rotowire's number, carried on the vacancy — because that was
+   * the tier in the report. But `.proj` above renders `shown.points`, which is
+   * `weeklyProjection`'s answer: this app's own market number when a book has
+   * priced him, and Rotowire's only when none has. A row holding the *first*
+   * of those, with no borrowed figure on its vacancy, passed the old guard and
+   * printed `can't be scored this week` underneath a number all the same.
+   *
+   * Only an `unscorable` vacancy makes that claim. An availability note is not
+   * contradicted by a figure and must survive beside one — a player on injured
+   * reserve whose row said nothing but his name and a number is the regression
+   * `never highlights a player who cannot play` was written to catch, and
+   * suppressing on the presence of a number alone would reintroduce it.
+   */
+  const denialBesideAFigure = (blocked?.kind ?? 'unscorable') === 'unscorable' && shown.points != null;
 
   if (!subject) {
     /*
@@ -989,7 +1029,15 @@ function VerdictCard({
         (row.verdict === 'keep' ? ', keep him' : '') +
         (row.verdict === 'swap' ? `, start ${row.recommendedName} instead` : '') +
         (row.verdict === 'fill' ? ', this slot is empty in Sleeper' : '') +
-        (row.verdict === 'no_pick' ? `, ${blocked?.reason ?? 'cannot be scored this week'}` : '') +
+        /*
+         * The same rule the visible line follows, because a listener is read
+         * the projection a sighted reader can see: without this the label was
+         * "Jacksonville, can't be scored this week, projected 9.4 by Rotowire",
+         * which is the contradiction in one breath instead of two lines.
+         */
+        (row.verdict === 'no_pick' && !denialBesideAFigure
+          ? `, ${blocked?.reason ?? 'cannot be scored this week'}`
+          : '') +
         spokenProjection(shown.points, shown.source) +
         (row.locked ? ', locked' : '') +
         (subject.status ? `, ${subject.status}` : '')
@@ -1091,7 +1139,7 @@ function VerdictCard({
         stays, which is the distinction the first attempt at this missed and
         `never highlights a player who cannot play` caught.
       */}
-      {row.verdict === 'no_pick' && borrowed == null ? (
+      {row.verdict === 'no_pick' && !denialBesideAFigure && borrowed == null ? (
         <div className="faint verdict-line" data-testid="verdict-no-pick">
           {blocked ? `${blocked.reason}${blocked.detail ? ` — ${blocked.detail}` : ''}` : 'Cannot be scored this week'}
         </div>

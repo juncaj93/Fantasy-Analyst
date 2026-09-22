@@ -740,6 +740,8 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
       signal: data.signals.get(row.player.id) ?? null,
       myGuy: myGuy(data.flags.get(row.player.id)?.level ?? 0),
       ...(leagueId ? { availability: availability.get(row.player.id) ?? ('available' as const) } : {}),
+      /* The owner pill's seat, from the same map the filter above uses. */
+      ...(leagueId ? { ownerRosterId: owned.get(row.player.id) ?? null } : {}),
     })),
   };
 }

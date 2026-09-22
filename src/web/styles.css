@@ -6500,6 +6500,26 @@ table.compact tr:last-child td {
   animation: pull-spin 0.8s linear infinite;
 }
 
+/*
+ * The same spinner, while football is actually being played.
+ *
+ * A whole quadrant in the live hue rather than the accent, so the difference
+ * is legible in the first frame of the pull: on a Sunday afternoon the numbers
+ * under this screen genuinely are moving, and on a Tuesday they are not, and
+ * the gesture should not feel identical in both.
+ *
+ * A tint and nothing else. The gesture does the same thing, the request is the
+ * same request, and there is no timer anywhere near this — the daily row
+ * allowance is spent by reads nobody asked for, and three screens quietly
+ * polling would be precisely that. It is also not the only way the fact is
+ * carried: the keyboard control beside it says it in words, because a hue is
+ * not information to a reader who cannot see it.
+ */
+.pull-surface[data-live='true'] .pull-spinner {
+  border-top-color: var(--pos);
+  border-right-color: color-mix(in srgb, var(--pos) 45%, transparent);
+}
+
 @keyframes pull-spin {
   to {
     transform: rotate(360deg);

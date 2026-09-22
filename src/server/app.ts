@@ -13,6 +13,7 @@
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
 import { nflTeam } from '../core/nfl/teams.ts';
+import { gameWindowFrom } from '../core/nfl/gameWindow.ts';
 import { reorderQueue } from '../core/draft/queueOrder.ts';
 import { myGuy, toMyGuyLevel } from '../core/draft/decisions.ts';
 import { buildLiveRoster } from '../core/draft/liveRoster.ts';
@@ -917,6 +918,14 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: props,
+      /*
+       * Whether football is on, so the screen can say whether pulling helps.
+       *
+       * Off the kickoffs already on the inputs — no extra read, and the same
+       * `gameWindowFrom` the schedule ingest uses, so the backend's idea of a
+       * game window and the screen's cannot drift apart.
+       */
+      gameWindow: gameWindowFrom(inputs.map((i) => i.kickoff)),
       ...decision,
       /*
        * Which posture this answer was computed under, and why.
@@ -983,6 +992,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
       dataFreshness: props,
+      /* The same window the Team screen gets, from the same kickoffs. */
+      gameWindow: gameWindowFrom(request.rosterInputs.map((i) => i.kickoff)),
       ...board,
       /** How the pool was bounded, so a thin answer is never a mystery. */
       pool,
@@ -2210,6 +2221,24 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         signal: signals.get(row.player.id) ?? null,
         myGuy: myGuy(flags.get(row.player.id)?.level ?? 0),
         ...(leagueId ? { availability: availability.get(row.player.id) ?? ('available' as const) } : {}),
+        /*
+         * Which seat holds him, as a roster id rather than a name.
+         *
+         * `availability` beside it already says mine / rostered / available,
+         * which is the right shape for a tag and the wrong one for a pill
+         * that has to read `Joe` — "rostered" does not tell the reader *who*,
+         * and after a draft that is the only part of the question worth
+         * asking. The `owned` map is already built for the filter above, so
+         * this costs nothing that was not already read.
+         *
+         * The id and not the name, because `teams` on this same response
+         * already carries the names and sending each one again on every
+         * player would be the same twelve strings a hundred times a page.
+         * Null is a free agent, and it is the same null for a league whose
+         * seat Sleeper has never named — the screen decides what to print
+         * for a nameless seat, exactly as `OwnerTeam` says.
+         */
+        ...(leagueId ? { ownerRosterId: owned.get(row.player.id) ?? null } : {}),
       })),
     });
   });
