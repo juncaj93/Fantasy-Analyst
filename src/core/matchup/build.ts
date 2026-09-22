@@ -48,7 +48,7 @@ import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY, type ScoringPr
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
-import { marketProjection } from '../startsit/projection.ts';
+import { marketProjection, weeklyProjection } from '../startsit/projection.ts';
 import { gameWindowFrom, type GameWindow } from '../nfl/gameWindow.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
@@ -58,7 +58,6 @@ import type { SlotSpec } from './decision.ts';
 import type { PreviousInsightState } from './insights.ts';
 import type { MatchupPlayerInput, MatchupSide } from './types.ts';
 import { resolveSeasonContext } from '../season/context.ts';
-import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
 import type { NflState } from '../sleeper/phase.ts';
 
 /** What the endpoint returns. The forecast, plus who and when. */
@@ -174,7 +173,7 @@ export interface MatchupSources {
    * test can read it, rather than in a service wired to a database. The caller
    * returns exactly what is stored — the preseason projection for the whole
    * season, under this league's scoring — and `projectionFor` divides it by
-   * {@link EXPECTED_GAMES}.
+   * `EXPECTED_GAMES`.
    *
    * *Not* by games played. That was the obvious reading of "average ÷ games"
    * and it is wrong in the direction that would have shipped: a season total
@@ -749,7 +748,7 @@ type ProjectionTier = 'market' | 'published' | 'preseason' | 'none';
  *  2. **Published.** Rotowire's week for the same player, via Sleeper. Somebody
  *     else's model, but a weekly one, built with this Sunday in view.
  *  3. **Preseason.** This league's imported season total over
- *     {@link EXPECTED_GAMES}. Nobody's opinion of *this* week at all — it is
+ *     `EXPECTED_GAMES`. Nobody's opinion of *this* week at all — it is
  *     what the player was thought to be worth in August, flattened.
  *
  * The third tier was added on the owner's instruction of 15 September 2026, on
@@ -771,28 +770,25 @@ function projectionFor(
   published: number | null,
   preseasonSeason: number | null,
 ): { points: number | null; tier: ProjectionTier } {
-  const market = marketProjection(evaluation);
-  if (market != null) return { points: market, tier: 'market' };
-  if (published != null && Number.isFinite(published)) {
-    return { points: round2(Math.max(0, published)), tier: 'published' };
-  }
   /*
-   * A season total over the games a healthy starter plays, and never over the
-   * games *this* one has played: the second reading of "average ÷ games" makes
-   * a week-one projection three hundred points and would have looked like a
-   * feature right up until somebody read the screen.
+   * The arithmetic is not here any more, and that is the fix rather than a
+   * tidy-up.
    *
-   * Zero and negative totals are refused rather than clamped. A stored zero is
-   * a player the import could not price, not a player projected for nothing,
-   * and passing it on as 0.0 would relabel a gap as a forecast.
+   * This function held its own copy of the ladder for a week, which is how the
+   * app ended up answering the same question three ways at once: Matchup had
+   * three tiers, the Team screen's `assembleLineup` had two, and the Compare
+   * sheet had one — so on 22 September 2026 a Compare sheet reported Trey
+   * McBride as `unknown` Vegas with 0% coverage while this league's own
+   * snapshot held 183.7 preseason points for him. One ladder, in the module
+   * that owns what a projection is, and this function is now only the mapping
+   * from its provenance to the tier name the matchup payload has always used.
    */
-  if (preseasonSeason != null && Number.isFinite(preseasonSeason) && preseasonSeason > 0) {
-    return { points: round2(preseasonSeason / EXPECTED_GAMES), tier: 'preseason' };
-  }
+  const projected = weeklyProjection(evaluation, published, preseasonSeason);
+  if (projected.source === 'market') return { points: projected.points, tier: 'market' };
+  if (projected.source === 'sleeper') return { points: projected.points, tier: 'published' };
+  if (projected.source === 'preseason') return { points: projected.points, tier: 'preseason' };
   return { points: null, tier: 'none' };
 }
-
-const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 function toPlayer(
   playerId: string,

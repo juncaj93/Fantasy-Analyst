@@ -37,12 +37,14 @@
  *
  *  1. this app's market-derived projection, whenever a market exists;
  *  2. otherwise Rotowire-via-Sleeper's published weekly projection;
- *  3. otherwise null, rendered as `—`.
+ *  3. otherwise this league's own imported preseason season total over
+ *     {@link EXPECTED_GAMES};
+ *  4. otherwise null, rendered as `—`.
  *
  * **The fallback is display-only.** It does not enter the start/sit ranking, the
  * matchup simulation, the draft score, the trade engine or any other
  * recommendation this app makes. Those all read {@link marketProjection}, which
- * knows nothing about tier 2 and cannot be made to — the fallback is not an
+ * knows nothing about tiers 2 and 3 and cannot be made to — neither is an
  * argument it takes. That separation is enforced by the shape of these two
  * functions rather than by a comment, because a comment is not a compiler.
  *
@@ -55,11 +57,28 @@
  * a bare figure: it returns the figure and where it came from, so a caller
  * physically cannot render one without having been told the other. A Rotowire
  * number displayed as though it came from betting markets is the single failure
- * this design exists to prevent.
+ * this design exists to prevent, and an August season total shown as a forecast
+ * of Sunday is the second.
  *
- * Not to be confused with StartWho's **Preseason PTS**, which is a season-long
- * baseline from a different feed answering a different question. Nothing in this
- * file reads it and nothing in it may.
+ * ## Why the third tier is here and not in one screen
+ *
+ * It was written in `core/matchup/build.ts` on 15 September 2026, as a private
+ * `projectionFor`, and for a week the Matchup screen was the only place that
+ * could reach it. What that produced is the bug this file was moved here to
+ * prevent, in a new place: on 22 September 2026 a Compare sheet showed Trey
+ * McBride as `unknown` Vegas, 0% coverage and a paragraph of grey caveat, while
+ * this league's own snapshot held 183.7 preseason points for him under exactly
+ * its own scoring key — 11.5 a week. Matchup had three tiers, Team had two, and
+ * Compare had one, for the same player in the same session.
+ *
+ * So the ladder is one function again, and `projectionFor` delegates to it. A
+ * screen may decline to show a tier; it may not have a different ladder.
+ *
+ * Still not to be confused with the **whole** of StartWho's Preseason PTS as the
+ * draft board reads it — that is a season-long ranking input answering a
+ * different question. What crosses into this file is one number per player,
+ * passed in by a caller, divided once. Nothing here imports the snapshot, the
+ * repository or the import parser, and nothing in it may.
  *
  * ## Why the availability penalty comes back out
  *
@@ -77,6 +96,15 @@
  * same player, in the same session. One definition, in the layer that owns the
  * evaluation, is what stops two screens disagreeing about what a projection is.
  */
+
+/*
+ * One constant, and the reason it is an import rather than a `16` typed here:
+ * `core/trades/arbitrage.ts` divides the same total for the same reason, and a
+ * second copy would drift the moment either was tuned. `core/nfl/` holds facts
+ * about the National Football League and imports nothing itself, so this costs
+ * the leaf nothing — see its own header.
+ */
+import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
 
 /**
  * The parts of an evaluation a projection is derived from.
@@ -102,10 +130,12 @@ export interface ProjectableEvaluation {
  *
  * `market` is this app's own, derived from betting lines under the league's
  * scoring. `sleeper` is Rotowire's published weekly number, distributed by
- * Sleeper, shown only where this app has nothing — and it must be named wherever
+ * Sleeper, shown only where this app has nothing. `preseason` is this league's
+ * own imported season total over {@link EXPECTED_GAMES} — not a weekly forecast
+ * at all, and the weakest of the three. Every one of them must be named wherever
  * it is drawn.
  */
-export type ProjectionSource = 'market' | 'sleeper';
+export type ProjectionSource = 'market' | 'sleeper' | 'preseason';
 
 /** A projection and its provenance, which are never separated. */
 export interface WeeklyProjection {
@@ -173,26 +203,56 @@ export function marketProjection(evaluation: ProjectableEvaluation | null | unde
  * The number a screen may print under the word "projected", and its source.
  *
  * The whole hierarchy, in one place: this app's market-derived projection first,
- * the published fallback second, unknown third. Callers pass the published
- * figure for this player if they have one and `null` if they do not; passing one
- * can never displace a market projection, and omitting the argument entirely
- * reduces this to {@link marketProjection} with provenance attached.
+ * the published fallback second, this league's preseason season total over a
+ * season of games third, unknown fourth. Callers pass whichever of the two
+ * borrowed figures they hold and `null` for the rest; passing either can never
+ * displace a market projection, and omitting both reduces this to {@link
+ * marketProjection} with provenance attached.
  *
- * The fallback is quoted **exactly as published**. No availability penalty is
- * taken off it and no adjustment is added to it — this app's bounded nudges were
- * fitted to this app's own base, and applying them to somebody else's model
- * would be arithmetic nobody has validated on a number nobody here computed. It
- * is also why there is nothing here that could double-count: tier 2 is not
- * combined with tier 1, it replaces it.
+ * Both fallbacks are quoted **exactly as stored**. No availability penalty is
+ * taken off either and no adjustment is added to them — this app's bounded
+ * nudges were fitted to this app's own base, and applying them to somebody
+ * else's model would be arithmetic nobody has validated on a number nobody here
+ * computed. It is also why there is nothing here that could double-count: a
+ * lower tier is not combined with a higher one, it replaces it.
+ *
+ * The third tier is the weakest claim in the app and the caller has to be able
+ * to say so on screen, which is what `source: 'preseason'` is for: it is an
+ * August opinion of a whole season, flattened, with no account of who the
+ * player faces on Sunday or whether he is still the starter. It beats a dash
+ * for the same reason tier 2 does — a reader with no number cannot weigh
+ * anything — and it must never be drawn as though it were a forecast of this
+ * week. See `.matchup-player-proj-estimated` and `.compare-cell-preseason`.
  */
 export function weeklyProjection(
   evaluation: ProjectableEvaluation | null | undefined,
   published?: number | null,
+  preseasonSeasonTotal?: number | null,
 ): WeeklyProjection {
   const market = marketProjection(evaluation);
   if (market != null) return { points: market, source: 'market' };
   if (published != null && Number.isFinite(published)) {
     return { points: Math.max(0, Math.round(published * 100) / 100), source: 'sleeper' };
+  }
+  /*
+   * A season total over the games a healthy starter plays, and never over the
+   * games *this* one has played: the second reading of "average over games"
+   * makes a week-one projection three hundred points and would have looked
+   * like a feature right up until somebody read the screen.
+   *
+   * Zero and negative totals are refused rather than clamped. A stored zero is
+   * a player the import could not price, not a player projected for nothing,
+   * and passing it on as 0.0 would relabel a gap as a forecast.
+   */
+  if (
+    preseasonSeasonTotal != null &&
+    Number.isFinite(preseasonSeasonTotal) &&
+    preseasonSeasonTotal > 0
+  ) {
+    return {
+      points: Math.round((preseasonSeasonTotal / EXPECTED_GAMES) * 100) / 100,
+      source: 'preseason',
+    };
   }
   return UNKNOWN;
 }

@@ -724,6 +724,27 @@ describe('no recommendation engine can reach the fallback', () => {
    * support replay so the three cannot drift. The wall is unchanged in meaning —
    * that file assembles what is *shown*, and nothing in it decides a lineup.
    * `recommendLineup` runs to completion before the pass is applied.
+   *
+   * `core/matchup/build.ts` joined the list on 22 September 2026, and the reason
+   * is the failure it prevents rather than a convenience. That file held its own
+   * private copy of the ladder — a `projectionFor` with three tiers, written
+   * when Matchup was the only screen that wanted a third — while `assemble.ts`
+   * ran a two-tier one and the Compare route ran none at all. Three ladders for
+   * one question, and the Compare sheet was the empty one: production on that
+   * morning had eight of ten starters unpriced, Matchup showing every one of
+   * them a number and Compare showing `unknown`. `projectionFor` now delegates
+   * here and is only the mapping from a source to the tier name the matchup
+   * payload has always carried.
+   *
+   * It does not widen the wall. That file is where the owner's decision of 10
+   * September, extended on 15 September, is implemented: the matchup *simulator*
+   * may run on a borrowed number because the alternative — `buildDistribution`
+   * settling an unprojected player as truth-only — contributes a confident zero
+   * and came back as a 93.8% loss on a coin-flip fixture. That exception is
+   * documented at `MatchupPlayerInput.projection` and is unchanged by this. The
+   * test below still holds the engines that have no such exception:
+   * `core/matchup/model.ts`, `simulate.ts`, `distribution.ts`, `decision.ts`,
+   * the draft score, the trade engine and the start/sit engine.
    */
   const DISPLAY_OWNERS = new Set(
     [
@@ -731,6 +752,7 @@ describe('no recommendation engine can reach the fallback', () => {
       'core/startsit/weekCard.ts',
       'core/startsit/projection.ts',
       'core/startsit/assemble.ts',
+      'core/matchup/build.ts',
       'web/screens/TeamScreen.tsx',
     ].map((p) => path.join(ROOT, ...p.split('/'))),
   );
@@ -789,17 +811,33 @@ describe('no recommendation engine can reach the fallback', () => {
     }
 
     /*
-     * And the Team screen, which is where the two could actually be confused.
+     * And the Team *row*, which is where the two could actually be confused.
      *
-     * Preseason PTS has a legitimate home on the draft board and in the expanded
-     * player view, both of which label it. What it must never be is the number on
-     * the trailing edge of a Team row — that field is this week's projection, and
-     * a season-long baseline sitting in it would read as a forecast of Sunday.
-     * The row takes its value from `LineupSlot.projection` and the screen knows
-     * no other word for it, which is what this asserts.
+     * This used to be `expect(/preseason/i.test(TeamScreen.tsx)).toBe(false)` —
+     * a grep of the whole file — and that stopped being the right assertion on
+     * 22 September 2026, when the Compare grid moved into the same file and
+     * legitimately began serving the third tier. A file-wide grep would now
+     * fail for the correct behaviour, which is the worst kind of test: one that
+     * has to be deleted to ship a fix, and takes its real invariant with it.
+     *
+     * The real invariant was never about the word. Preseason PTS has a
+     * legitimate home on the draft board, in the expanded player view, on the
+     * Matchup screen and now in the Compare grid, all of which label it. What
+     * it must never be is the number on the trailing edge of a **Team row** —
+     * that field is this week's projection, and a season-long baseline sitting
+     * in it would read as a forecast of Sunday.
+     *
+     * So the assertion is now against the thing that decides it. `assembleLineup`
+     * is the only producer of that field, and it calls the ladder with a
+     * published figure and nothing else: no third argument, so
+     * `projectionSource` on a slot or a bench row cannot be `'preseason'`. The
+     * behavioural half is in `the lineup pass stops at tier 2` below.
      */
-    const team = readFileSync(path.join(ROOT, 'web', 'screens', 'TeamScreen.tsx'), 'utf8');
-    expect(/preseason/i.test(team), 'the Team screen mentions preseason').toBe(false);
+    const assemble = readFileSync(path.join(ROOT, 'core', 'startsit', 'assemble.ts'), 'utf8');
+    const lineupCall = /weeklyProjection\(\s*evaluation,\s*published\.get\(evaluation\.playerId\) \?\? null,?\s*\)/;
+    expect(lineupCall.test(assemble), 'assembleLineup passes the lineup ladder more than a published figure').toBe(
+      true,
+    );
 
     const preseason = sourceFiles(ROOT).filter((file) => /preseason|seasonImport|startWho/i.test(file));
     expect(preseason.length, 'the preseason modules should exist to be checked').toBeGreaterThan(0);
