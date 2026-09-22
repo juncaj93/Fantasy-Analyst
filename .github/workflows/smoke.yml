@@ -43,6 +43,29 @@ on:
         required: false
         default: ''
         type: string
+    secrets:
+      # The token the D1 budget guard reads today's row count with.
+      #
+      # Declared because a called workflow is given *no* secrets unless its
+      # caller passes them, and `secrets.CLOUDFLARE_API_TOKEN` in the `budget`
+      # job below therefore read as empty for every scheduled sweep from
+      # 2026-09-03 onward. The guard fails closed by design, so it declined
+      # twenty consecutive mornings with "Cannot determine today's D1 usage"
+      # and the sweep behind it never ran — a daily production check that had
+      # quietly not happened for nineteen days.
+      #
+      # Named rather than `secrets: inherit` at the call site, and that is the
+      # point of declaring it: inherit hands a called workflow *every* secret
+      # this repository holds, including the passphrase. This job needs one,
+      # so it is given one.
+      #
+      # `required: false` because the deploy gate does not run `budget` at all
+      # — `if: inputs.full` — so `deploy.yml` and `rollback.yml` call this
+      # without the secret and must keep working unchanged. Absent still means
+      # the guard declines, which is the behaviour a missing credential should
+      # have; what changes is that a token which *is* set now arrives.
+      CLOUDFLARE_API_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       full:
