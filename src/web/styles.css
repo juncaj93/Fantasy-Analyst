@@ -10195,8 +10195,13 @@ div.matchup-result {
  * column must not leave the screen when the subjects do.
  *
  * So: the table scrolls inside its own box and the label column is sticky.
- * Nothing else about it is clever, deliberately. The measurements below are
- * from a 360px viewport, the narrowest this app supports.
+ * Nothing else about it is clever, deliberately.
+ *
+ * Measured, because widths written from arithmetic are usually wrong by the
+ * card's padding. Two columns come to 324px: they sit still inside a 390px
+ * phone's 334px of card content, and have about twenty pixels of slack inside a
+ * 360px one's 304px. Three come to 434 on both and are *meant* to overflow —
+ * see the `data-columns` rule below.
  */
 
 .compare-scroll {
@@ -10224,12 +10229,65 @@ div.matchup-result {
   scroll-snap-type: x proximity;
 }
 
+/*
+ * The clipped edge, faded rather than sliced.
+ *
+ * The peek is the cue that a column is off screen, and the first version cut
+ * the third player's numbers in half: `9.` and `100%` truncated to `100` read
+ * as broken values, not as "there is more this way". The gradient makes the cut
+ * look like a cut. Sixteen pixels, which is enough to be read as a fade and not
+ * enough to make the last visible digit ambiguous.
+ *
+ * Only where something is actually clipped. With two players nothing overflows,
+ * and a screen edge that fades for no reason is worse than one that does not.
+ * The `data-columns` on the scroller mirrors the table's own, so the two cannot
+ * disagree about how many players are being compared.
+ */
+.compare-scroll[data-columns='3'],
+.compare-scroll[data-columns='4'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}
+
+/*
+ * A fade is ornament, and ornament does not get to hide a number from somebody
+ * who cannot see it fade. Anybody who has asked for less motion or more contrast
+ * gets the hard edge and the scroll, which were always the real mechanism.
+ */
+@media (prefers-contrast: more) {
+  .compare-scroll[data-columns='3'],
+  .compare-scroll[data-columns='4'] {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+}
+
 .compare-grid {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Three or four players: let the columns keep their own width so the last one
+ * *peeks*.
+ *
+ * `width: 100%` is right for two, which fit with room to spare and should use
+ * it. At three it is actively harmful: the table shrinks the columns to fit the
+ * box, the third lands exactly on the right edge, and the grid looks complete
+ * while a whole player is off screen. The reader's only clue was the chip row
+ * at the top of the sheet.
+ *
+ * At `auto` the `min-width` on the headers wins and the table runs past the
+ * scrollport, so a few millimetres of the last column sit at the edge — the
+ * oldest and least ornamental "there is more this way" there is, and it costs
+ * no gradient, no arrow and no JavaScript to know whether it should be drawn.
+ */
+.compare-grid[data-columns='3'],
+.compare-grid[data-columns='4'] {
+  width: auto;
 }
 
 /*
@@ -10247,7 +10305,7 @@ div.matchup-result {
 .compare-label,
 .compare-corner {
   position: sticky;
-  left: calc(-1 * var(--sp-3));
+  left: 0;
   z-index: 1;
   min-width: 104px;
   max-width: 104px;
@@ -10274,13 +10332,17 @@ div.matchup-result {
 /*
  * A column header: the name, then who he is and who he plays.
  *
- * `min-width` sized so two columns fill a 360px screen without scrolling
- * (104 + 2 × 116 = 336, inside the card's content box) and three or four
- * scroll. Names wrap rather than truncate — a comparison whose subject is
- * abbreviated to `Rhamondre S…` is a comparison the reader has to guess at.
+ * `min-width` sized against a measurement rather than a round number. At 110px
+ * a pair comes to 104 + 2 × 110 = 324 and sits still on a 390px phone; the
+ * first guess of 116px put it at 336, which is 2px past that screen's card and
+ * bought a scroll gesture that moved the grid by nothing. Three columns come to
+ * 434 and are meant to overflow — see the `data-columns` rule above.
+ *
+ * Names wrap rather than truncate: a comparison whose subject is abbreviated to
+ * `Rhamondre S…` is a comparison the reader has to guess at.
  */
 .compare-head {
-  min-width: 116px;
+  min-width: 110px;
   scroll-snap-align: end;
   text-align: right;
   vertical-align: bottom;

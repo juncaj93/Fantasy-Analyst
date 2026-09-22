@@ -125,8 +125,21 @@ const SCREENS = {
       count === 2 ? 'compare' : `compare${count}`,
       {
         async go(page) {
+          /*
+           * The seeded league is mid-draft, and Compare is a post-draft control
+           * — see `inSeason` in e2e/helpers.ts, which this mirrors rather than
+           * imports so the shot walker stays dependency-free. The roster
+           * response is rewritten to say the draft is done; nothing else about
+           * the page changes.
+           */
+          await page.route('**/api/leagues/*/roster', async (route) => {
+            const response = await route.fetch();
+            const body = await response.json();
+            await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
+          });
           await page.goto(`${BASE}/`);
           await page.getByTestId('tab-team').click();
+          await page.getByTestId('starters-title').waitFor({ state: 'visible' });
           await page.getByTestId('compare-open').click();
           await page.getByTestId('compare-sheet').waitFor({ state: 'visible' });
           for (const id of ['1001', '1005', '1008'].slice(0, count)) {

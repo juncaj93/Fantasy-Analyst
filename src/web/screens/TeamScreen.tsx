@@ -2075,7 +2075,7 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
         heading and the verdict off screen, and the reader loses the answer
         while reading the working.
       */}
-      <div className="compare-scroll" data-testid="compare-grid-scroll">
+      <div className="compare-scroll" data-testid="compare-grid-scroll" data-columns={columns.length}>
         <table className="compare-grid" data-testid="compare-grid" data-columns={columns.length}>
           <caption className="sr-only">
             {`Factor-by-factor comparison of ${columns.map((e) => e.name).join(', ')}. A dash means the factor could not be read for that player.`}
