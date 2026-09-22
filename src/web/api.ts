@@ -1380,6 +1380,16 @@ export interface SlotVacancy {
   position: string;
   reason: string;
   detail: string | null;
+  /**
+   * Which kind of gap this is: `unscorable`, `unavailable` or `locked`.
+   *
+   * Only `unscorable` claims there is no figure, so it is the only one the row
+   * suppresses when a figure is on it. Optional, and absent reads as
+   * `unscorable`: a response from a deployment older than this field carries
+   * no key, and that is the common case rather than a parse failure. See
+   * `core/startsit/lineup.ts`.
+   */
+  kind?: 'unscorable' | 'unavailable' | 'locked';
   alreadyStarting: boolean;
   /** Rotowire's published figure in this league's scoring, where there is one. */
   publishedProjection?: number | null;
@@ -1395,11 +1405,34 @@ export interface LineupSwap {
   reason: string;
 }
 
+/**
+ * Whether football is being played right now.
+ *
+ * Sent with the Team, Matchup and Waivers responses so the pull-to-refresh on
+ * each can say whether pulling is likely to change anything — obvious during a
+ * slate, quiet on a Tuesday. Computed on the server from the kickoffs it has
+ * already read, by the same function the schedule ingest uses, so no screen
+ * gets to have its own opinion about what a game window is.
+ *
+ * Optional everywhere it appears: a response from a deployment older than this
+ * field carries no key, and the screens read that as "no claim", which is the
+ * behaviour they had before it existed.
+ */
+export interface GameWindow {
+  live: boolean;
+  /** ISO. When the games in progress finish. Null when none are. */
+  until: string | null;
+  /** ISO. The next kickoff. Null out of season and on a bye. */
+  next: string | null;
+}
+
 export interface LineupRecommendation {
   league: { id: string; name: string; scoringLabel: string };
   found: boolean;
   error?: string;
   dataFreshness: { fetchedAt: string | null; provider: string | null; events: number };
+  /** Whether a game is on, for the refresh affordance. See {@link GameWindow}. */
+  gameWindow?: GameWindow;
   /** The slots this league starts, which is the order the Team screen uses. */
   rosterShape?: {
     starters: Record<string, number>;
@@ -1498,6 +1531,8 @@ export interface WaiverUpgrade {
 export interface WaiverAdvice {
   league: { id: string; name: string; scoringLabel: string };
   found: boolean;
+  /** Whether a game is on, for the refresh affordance. See {@link GameWindow}. */
+  gameWindow?: GameWindow;
   upgrades: WaiverUpgrade[];
   /** Said plainly when nothing available beats what the roster already has. */
   headline: string | null;
@@ -1869,6 +1904,8 @@ export interface MatchupResponse {
   /** The shared player sheet's contents, by player id, so a tap costs nothing. */
   cards: Record<string, WeeklyCard>;
   cached: boolean;
+  /** Whether a game is on, for the refresh affordance. See {@link GameWindow}. */
+  gameWindow?: GameWindow;
 }
 
 /**

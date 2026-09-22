@@ -174,6 +174,17 @@ export interface LineupSlot {
  * defence nobody has quoted and a defence projected two points are different
  * things, and this is the first of them.
  */
+/**
+ * The three shapes a vacancy comes in, which read differently on a row.
+ *
+ *  - `unscorable` — this app has no number for him and says so. The only one
+ *    that is contradicted by a figure sitting beside it.
+ *  - `unavailable` — he is out, or on injured reserve. A figure beside this is
+ *    information rather than a contradiction.
+ *  - `locked` — his game has started, so the question is closed either way.
+ */
+export type VacancyKind = 'unscorable' | 'unavailable' | 'locked';
+
 export interface SlotVacancy {
   playerId: string;
   name: string;
@@ -187,6 +198,24 @@ export interface SlotVacancy {
   reason: string;
   /** The specific cause, in the vocabulary the model itself used. */
   detail: string | null;
+  /**
+   * Which *kind* of gap this is, for a screen deciding whether to print it.
+   *
+   * The three reasons above are not interchangeable and a screen has to tell
+   * them apart without reading the prose. `unscorable` is the only one that
+   * claims there is no figure, so it is the only one a row must suppress when
+   * a figure is in fact on it — an availability note beside a number is not a
+   * contradiction, it is the point ("he is projected 14.2 and he is on IR").
+   *
+   * This exists because the first attempt at that rule used the borrowed
+   * figure as a proxy for it, which was a proxy for the wrong thing: see the
+   * note on {@link publishedProjection} and `TeamScreen`'s `StarterCard`.
+   *
+   * Optional for the same reason `publishedProjection` is: a response written
+   * by a deployment older than this field carries no key, and a missing key
+   * must read as the common case rather than as a parse failure.
+   */
+  kind?: VacancyKind;
   /** True when Sleeper currently has him in a starting spot, so the row is his. */
   alreadyStarting: boolean;
   /**
@@ -1028,12 +1057,12 @@ function unscorableReason(
   evaluation: StartSitEvaluation,
   locked: boolean,
   publishedProjection: number | null,
-): { reason: string; detail: string | null } {
+): { reason: string; detail: string | null; kind: VacancyKind } {
   if (evaluation.ruledOut) {
     const designation = evaluation.injury.designation === 'ir' ? 'on injured reserve' : evaluation.injury.designation;
-    return { reason: `is ${designation}, so he is not a playable starter`, detail: null };
+    return { reason: `is ${designation}, so he is not a playable starter`, detail: null, kind: 'unavailable' };
   }
-  if (locked) return { reason: 'has already kicked off', detail: null };
+  if (locked) return { reason: 'has already kicked off', detail: null, kind: 'locked' };
 
   /*
    * A figure is on the row, so the row may not say there is no figure.
@@ -1070,6 +1099,7 @@ function unscorableReason(
     return {
       reason: `is projected ${round2(publishedProjection)} by Rotowire, but no betting market has priced him, so this app will not rank him`,
       detail: evaluation.dst?.reasons[0] ?? evaluation.expectation.notes[0] ?? null,
+      kind: 'unscorable',
     };
   }
 
@@ -1082,7 +1112,7 @@ function unscorableReason(
    * rewritten here.
    */
   const detail = evaluation.dst?.reasons[0] ?? evaluation.expectation.notes[0] ?? null;
-  return { reason: 'can’t be scored this week', detail };
+  return { reason: 'can’t be scored this week', detail, kind: 'unscorable' };
 }
 
 /**

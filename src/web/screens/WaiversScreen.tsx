@@ -117,7 +117,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   );
 
   return (
-    <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull">
+    <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull" live={advice?.gameWindow?.live ?? false}>
       <NavBar title="Waivers" testId="waivers-nav" />
 
       {error ? <Notice tone="error">{error}</Notice> : null}

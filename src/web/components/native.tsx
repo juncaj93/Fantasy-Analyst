@@ -1718,12 +1718,27 @@ export function PullToRefresh({
   label = 'Refresh',
   testId = 'pull-to-refresh',
   enabled = true,
+  live = false,
 }: {
   onRefresh: () => Promise<unknown> | unknown;
   children: ReactNode;
   label?: string;
   testId?: string;
   enabled?: boolean;
+  /**
+   * True while a game is being played, from the server's `gameWindow`.
+   *
+   * It changes what the gesture *says* and never what it does. On a Sunday
+   * afternoon the numbers behind this screen are genuinely moving and pulling
+   * is worth doing; on a Tuesday nothing has changed since the last tick and
+   * a screen that implied otherwise would be inviting the reader to refresh
+   * at a wall. Same gesture, honest label.
+   *
+   * Deliberately not a shorter poll or an auto-refresh. The daily row
+   * allowance this app has exhausted three times is spent by reads nobody
+   * asked for, and a timer on three screens is exactly that.
+   */
+  live?: boolean;
 }) {
   const pull = usePullToRefresh({ onRefresh, enabled });
   const busy = pull.state === 'refreshing';
@@ -1733,6 +1748,13 @@ export function PullToRefresh({
       className="pull-surface"
       data-testid={testId}
       data-pull-state={pull.state}
+      /*
+       * The window, on the surface, so the spinner can be tinted from CSS
+       * without this component owning a colour. `false` is written out rather
+       * than omitted so a test can tell "not live" from "an older deployment
+       * that never said".
+       */
+      data-live={live ? 'true' : 'false'}
       {...pull.handlers}
     >
       <div
@@ -1759,8 +1781,15 @@ export function PullToRefresh({
         data-testid="pull-refresh-fallback"
         disabled={busy}
         onClick={pull.refresh}
+        /*
+          The one place the window is said in words rather than in a tint.
+          A reader who cannot see the spinner's colour gets the same fact, and
+          it is on the control itself rather than in a live region, because it
+          is a property of the button and not an event.
+        */
+        title={live ? 'Games are being played — the numbers are moving' : undefined}
       >
-        {label}
+        {live ? `${label} · games on` : label}
       </button>
       <div className="pull-content" style={{ transform: pull.distance > 0 ? `translateY(${pull.distance}px)` : '' }}>
         {children}

@@ -208,7 +208,7 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const openable = useCallback((playerId: string) => Boolean(data?.cards[playerId]), [data]);
 
   return (
-    <PullToRefresh onRefresh={load} label="Matchup" testId="matchup-pull">
+    <PullToRefresh onRefresh={load} label="Matchup" testId="matchup-pull" live={data?.gameWindow?.live ?? false}>
       <NavBar
         testId="matchup-nav"
         title={data ? `Week ${data.week} Matchup` : 'Matchup'}

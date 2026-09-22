@@ -163,6 +163,34 @@ export function teamLabel(team: OwnerTeam): string {
 }
 
 /**
+ * Who holds this player, for the pill on his card.
+ *
+ * The same three answers the filter beside it offers, in the same words, from
+ * the same `teams` payload — a card that said `Rival` where the picker said
+ * `Joe` would be the app using two names for one manager.
+ *
+ * `You` rather than your own manager name, because on your own card the
+ * second person is what a reader is looking for and their own name is a
+ * moment of working out that it means them.
+ *
+ * Null, not a word, when no league is selected: ownership is a fact about a
+ * league and there is no honest answer without one, which is the rule
+ * `core/roster/ownership.ts` opens with. The pill is then simply not drawn —
+ * an empty pill would be a claim that he is owned by nobody, and that is
+ * precisely what `Available` means and precisely what is not known here.
+ */
+export function ownerPillLabel(
+  ownerRosterId: number | null | undefined,
+  teams: readonly OwnerTeam[],
+): string | null {
+  if (teams.length === 0) return null;
+  if (ownerRosterId == null) return 'Available';
+  const team = teams.find((t) => t.rosterId === ownerRosterId);
+  if (!team) return `Team ${ownerRosterId}`;
+  return team.isMine ? 'You' : teamLabel(team);
+}
+
+/**
  * The one line an empty list is allowed to say, given everything narrowing it.
  *
  * Here rather than in the screen because it is the only place the three

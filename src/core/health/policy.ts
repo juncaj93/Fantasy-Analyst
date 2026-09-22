@@ -286,7 +286,7 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     label: 'NFL schedule',
     severity: 'important',
     measure: 'attempt',
-    cadence: 'Checked daily',
+    cadence: 'Checked every few hours, and more often during games',
     impact: 'Byes and future opponents come from the last stored fixture list.',
   },
   {

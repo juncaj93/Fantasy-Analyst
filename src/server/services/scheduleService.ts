@@ -37,7 +37,9 @@
 
 import { conditionalGet, type FetchLike } from '../../core/source/conditional.ts';
 import { parseSchedule, SCHEDULE_URL, type ScheduleTeamWeek } from '../../core/nfl/schedule.ts';
+import { gameWindowFrom } from '../../core/nfl/gameWindow.ts';
 import { NflScheduleRepo, ScheduleSourceRepo } from '../repos/nflSchedule.ts';
+import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import type { Database } from '../db.ts';
 
 /** The feed's key in the shared state table. */
@@ -55,6 +57,45 @@ export const SCHEDULE_LEASE_SECONDS = 120;
  */
 export const SCHEDULE_WRITE_CEILING = 1_800;
 
+/**
+ * The longest this feed may go unasked on an ordinary day.
+ *
+ * Six hours, and the number is set by the **alarm** rather than by the file.
+ * `DAILY_ATTEMPT_STALE_MINUTES` calls a daily feed unhealthy at 36 hours, and
+ * this ran on the 09:00 tick and nowhere else — so a once-a-day check had
+ * twelve hours of slack against it, and a single tick that did not land read
+ * as a degraded pipeline. That is what happened: the source was reported at
+ * 37+ hours, which is one missed tick and change, on a feed whose data was
+ * perfectly good the whole time.
+ *
+ * Four checks a day puts five and a half missed ticks between healthy and the
+ * alarm instead of one and a half. The cost of the extra three is three
+ * conditional GETs that answer 304 with no body — see the header.
+ */
+export const SCHEDULE_CHECK_INTERVAL_MINUTES = 6 * 60;
+
+/**
+ * …and the longest while football is actually being played.
+ *
+ * Ninety minutes. **This buys pipeline liveness, not fresher numbers, and the
+ * distinction is worth stating because the opposite was assumed.** Nothing in
+ * this file's output changes during a game: the parser keeps season, week,
+ * team, opponent, home, kickoff and roof, and the only one of those that ever
+ * moves mid-season is a flexed kickoff, which the league announces days ahead
+ * on a weekday. A defence's Sunday numbers come from the Vegas lines and the
+ * injury check, not from here.
+ *
+ * What a game window genuinely is, for this feed, is when nflverse rebuilds
+ * `games.csv` — it regenerates around the slate — so it is the part of the
+ * week where a conditional GET is most likely to come back 200 rather than
+ * 304, and the part where a stalled ingest is worth noticing soonest.
+ *
+ * The write ceiling above is what stops a run of 200s turning into a run of
+ * 544-row writes; at four checks in a Sunday window the ceiling is reached
+ * after three and the fourth is declined, recorded, and costs nothing.
+ */
+export const SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES = 90;
+
 export interface ScheduleRefresh {
   outcome: 'ok' | 'not_modified' | 'not_published' | 'failed' | 'skipped';
   season: string;
@@ -68,16 +109,117 @@ export class ScheduleService {
   private readonly schedule: NflScheduleRepo;
   private readonly state: ScheduleSourceRepo;
 
+  /**
+   * Retained for the week lookup `refreshIfDue` makes, and for nothing else.
+   *
+   * The two repositories above are still how every row is touched. This is
+   * here because the cadence decision needs the stored NFL week, which lives
+   * in settings rather than in either of them.
+   */
+  private readonly db: Database;
+
   constructor(
     db: Database,
     private readonly deps: { fetch?: FetchLike; now?: () => Date } = {},
   ) {
+    this.db = db;
     this.schedule = new NflScheduleRepo(db);
     this.state = new ScheduleSourceRepo(db);
   }
 
   private now(): Date {
     return this.deps.now ? this.deps.now() : new Date();
+  }
+
+  /**
+   * Check the fixture list, but only if it is due.
+   *
+   * The entry point the five-minute tick calls. `refresh` itself still does
+   * exactly what it always did and is still what the daily tick calls; this
+   * decides *whether*, and it is a separate method because the decision has a
+   * cost of its own that the caller should be able to see.
+   *
+   * ## The reads, in the order they are worth paying for
+   *
+   * A five-minute trigger fires 288 times a day, so anything unconditional in
+   * here is multiplied by 288 before it reaches the daily row allowance this
+   * repository has exhausted three times. So the cheap question is asked
+   * first and answers nearly every tick on its own:
+   *
+   *  1. **The state row.** One indexed read, every tick. If less time has
+   *     passed than even the *live* interval, nothing else is read and the
+   *     tick is over. At 90 minutes that is roughly 94% of ticks.
+   *  2. **This week's kickoffs**, and only on the remaining ~16 ticks a day.
+   *     One settings row for the week, then 32 rows on the primary key's own
+   *     `(season, week)` prefix. Not a scan, and deliberately not a range
+   *     query on `kickoff` — there is no index on that column, so asking the
+   *     obvious question would read the whole season to answer it.
+   *
+   * Measured against the 5,000,000-row daily allowance: 288 + 16 × 33 ≈ 816
+   * rows, or about 0.016% of a day. See `tests/schedule.cadence.test.ts`,
+   * which counts them rather than trusting this paragraph.
+   *
+   * Returns null when nothing was due, so a caller can tell "not yet" from
+   * "checked, and here is what happened" without reading prose.
+   */
+  async refreshIfDue(season: string): Promise<ScheduleRefresh | null> {
+    const now = this.now();
+    const state = await this.state.get(SCHEDULE_SOURCE, season).catch(() => null);
+
+    /*
+     * Never checked at all is always due.
+     *
+     * A cold database, a new season key, or a state row that could not be
+     * read: all three mean this app has no evidence the feed has ever run, and
+     * the honest response to that is to run it rather than to wait six hours
+     * to find out.
+     */
+    const checkedAt = state?.checkedAt ? Date.parse(state.checkedAt) : NaN;
+    if (!Number.isFinite(checkedAt)) return this.refresh(season);
+
+    const elapsedMinutes = (now.getTime() - checkedAt) / 60_000;
+    /*
+     * The clock running backwards is not a reason to hammer the source.
+     *
+     * A stored timestamp in the future means a clock skew or a hand-written
+     * row, and treating a negative elapsed time as "not due" is the safe
+     * reading: the alternative reads as overdue for ever.
+     */
+    if (elapsedMinutes < SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES) return null;
+
+    const due = (await this.footballIsOn(season, now))
+      ? SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES
+      : SCHEDULE_CHECK_INTERVAL_MINUTES;
+    if (elapsedMinutes < due) return null;
+
+    return this.refresh(season);
+  }
+
+  /**
+   * Is a game being played right now, according to the fixtures we stored?
+   *
+   * From this app's own schedule rather than from a table of Eastern kickoff
+   * times, for the four reasons `core/nfl/gameWindow.ts` sets out — daylight
+   * saving, London, Saturday football and Thanksgiving are each an hour or a
+   * whole slot that a clock-arithmetic answer gets wrong.
+   *
+   * False whenever the week cannot be established or no fixture is stored,
+   * which is the conservative direction: the slower cadence is the one that
+   * costs nothing, so an unknown week keeps this feed on it.
+   */
+  private async footballIsOn(season: string, now: Date): Promise<boolean> {
+    try {
+      const state = await new SettingsRepo(this.db).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+      const week = Number(state?.week);
+      if (!Number.isInteger(week) || week <= 0) return false;
+      const fixtures = await this.schedule.forWeek(season, week);
+      return gameWindowFrom(
+        fixtures.map((f) => f.kickoff),
+        now,
+      ).live;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -96,13 +238,24 @@ export class ScheduleService {
 
     const spent = await this.state.writesToday(day);
     if (spent >= SCHEDULE_WRITE_CEILING) {
-      return {
+      const note = `daily write ceiling reached (${spent}/${SCHEDULE_WRITE_CEILING})`;
+      /*
+       * A declined write is still the pipeline running, and the freshness row
+       * has to be told so.
+       *
+       * Data Health measures this source by *attempt* — the question it asks
+       * is "has the pipeline stopped?", not "is the fixture list old?" — and
+       * this branch used to return without recording anything. So a ceiling
+       * doing exactly its job looked identical to a cron that had been
+       * deleted, and would have raised the same alarm the cadence change
+       * above exists to stop raising falsely. Back-pressure is health.
+       */
+      await this.state.recordCheck(SCHEDULE_SOURCE, season, {
+        checkedAt: nowIso,
         outcome: 'skipped',
-        season,
-        games: 0,
-        rowsWritten: 0,
-        note: `daily write ceiling reached (${spent}/${SCHEDULE_WRITE_CEILING})`,
-      };
+        note,
+      });
+      return { outcome: 'skipped', season, games: 0, rowsWritten: 0, note };
     }
 
     const owner = `schedule-${nowIso}`;

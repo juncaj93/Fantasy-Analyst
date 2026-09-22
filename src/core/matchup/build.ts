@@ -49,6 +49,7 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
 import { marketProjection } from '../startsit/projection.ts';
+import { gameWindowFrom, type GameWindow } from '../nfl/gameWindow.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
 import { buildForecast, forecastFingerprint, slotKey, type MatchupForecast } from './model.ts';
@@ -82,6 +83,15 @@ export interface MatchupResponse {
   cards: Record<string, WeeklyCard>;
   /** True when the forecast was served from cache rather than recomputed. */
   cached: boolean;
+  /**
+   * Whether football is being played right now, for the refresh affordance.
+   *
+   * Optional because the three `found: false` returns above are answered
+   * before any kickoff has been read, and a bye week has no window to report.
+   * Derived from the kickoffs already on the evaluated inputs, so it costs
+   * this response no read at all.
+   */
+  gameWindow?: GameWindow;
 }
 /**
  * Everything the assembly needs, and nothing that can reach live truth.
@@ -506,7 +516,20 @@ export async function buildMatchupResponse(
     });
   }
 
-  const response: MatchupResponse = { ...base, found: true, reason: null, forecast, cards, cached: false };
+  const response: MatchupResponse = {
+    ...base,
+    found: true,
+    reason: null,
+    forecast,
+    cards,
+    cached: false,
+    /*
+     * From the same kickoffs the evaluations were built on, and through the
+     * same function the Team screen and the schedule ingest use. Three
+     * surfaces, one definition of "a game is on" — see `core/nfl/gameWindow`.
+     */
+    gameWindow: gameWindowFrom(inputs.map((i) => i.kickoff)),
+  };
   sources.remember({ fingerprint: forecast.fingerprint, response });
 
   /*
