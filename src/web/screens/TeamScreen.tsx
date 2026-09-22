@@ -2105,10 +2105,17 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
                     ) : null}
                     {e.name}
                   </span>
+                  {/*
+                    Position, club and fixture, from the label `fixtureOf`
+                    already wrote. Not re-derived from `opponent` and `home`
+                    here: `vs` and `@` have been swapped once in this codebase
+                    by exactly that second derivation, and a fixture with no
+                    stated side is `BAL` rather than a guess at either.
+                  */}
                   <span className="compare-head-meta">
                     {e.position}
                     {e.team ? ` · ${e.team}` : ''}
-                    {e.fixture?.opponent ? ` · ${e.fixture.home === false ? '@' : 'vs'} ${e.fixture.opponent}` : ''}
+                    {e.fixture?.label ? ` · ${e.fixture.label}` : ''}
                   </span>
                 </th>
               ))}

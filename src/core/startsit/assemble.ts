@@ -291,10 +291,20 @@ export interface ComparisonAssemblyRequest<T extends { playerId: string } & Proj
   publishedRefusal?: string | null;
 }
 
-/** An evaluation with the display projection and its provenance attached. */
+/** An evaluation with the display projection, its provenance and the fixture attached. */
 export type ProjectedEvaluation<T extends { playerId: string } & ProjectableEvaluation> = T & {
   projection: number | null;
   projectionSource: ProjectionSource | null;
+  /**
+   * Who he plays, already written as `vs BAL` / `@ BAL` / `BAL`.
+   *
+   * From the same `fixtureOf` the lineup rows use, rather than re-derived in the
+   * grid from `opponent` and `home`. The second derivation is where `vs` and `@`
+   * get swapped: `vegas_events.home_team` means "a team we asked about" and not
+   * "the home side", which is the vocabulary trap that had every spread
+   * backwards once already. One function writes the label; screens print it.
+   */
+  fixture: SlotFixture | null;
 };
 
 export interface ComparisonAssembly<T extends { playerId: string } & ProjectableEvaluation> {
@@ -320,7 +330,12 @@ export function assembleComparison<T extends { playerId: string } & ProjectableE
       published.get(evaluation.playerId) ?? null,
       preseason.get(evaluation.playerId) ?? null,
     );
-    return { ...evaluation, projection: projected.points, projectionSource: projected.source };
+    return {
+      ...evaluation,
+      projection: projected.points,
+      projectionSource: projected.source,
+      fixture: fixtureOf(evaluation as unknown as StartSitEvaluation),
+    };
   });
 
   const projectionNotes: string[] = [];
