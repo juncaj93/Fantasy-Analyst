@@ -126,8 +126,23 @@ export class SmartTradeService {
    * by the same run, so a probe and a screen can never disagree about what the
    * engine did.
    */
-  async explain(opts: { leagueId?: string } = {}): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections'] }> {
-    return this.assemble(opts);
+  async explain(
+    opts: { leagueId?: string } = {},
+  ): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections']; arbitrageReads: ArbitrageRead[] }> {
+    const gathered = await this.gather(opts);
+    return {
+      ...this.present(gathered),
+      /*
+       * The buy-low and sell-high reads the search was handed, before any gate.
+       *
+       * Diagnostic only, and never on the phone's board. Without them an empty
+       * arbitrage lane cannot be told apart from a broken one: the reads are
+       * built from a preseason import no public endpoint serves, so a probe
+       * outside the Worker has no other way to know what the generator had to
+       * work with.
+       */
+      arbitrageReads: [...(gathered.request.arbitrage ?? new Map<string, ArbitrageRead>()).values()],
+    };
   }
 
   /**
@@ -258,7 +273,10 @@ export class SmartTradeService {
   private async assemble(
     opts: { leagueId?: string; limit?: number } = {},
   ): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections'] }> {
-    const gathered = await this.gather(opts);
+    return this.present(await this.gather(opts));
+  }
+
+  private present(gathered: TradeGathering): SmartTradeBoard & { rejections: BilateralReport['rejections'] } {
     const board = assembleSmartTrades(gathered.request);
     return {
       league: gathered.league == null ? null : { id: gathered.league.id, name: gathered.league.name },

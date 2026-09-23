@@ -408,6 +408,31 @@ const WEEK_SEVEN_MARKET: Record<string, DemoMarketEntry> = Object.fromEntries(
 );
 
 /**
+ * Week eight: week seven's market, plus the lines the trade window needs.
+ *
+ * Marchetti holds a starting running back, two backups and two tight ends,
+ * and starts one receiver — a roster that wants a receiver and can spare a
+ * back, which is a real trade in any league. Until September 2026 it was
+ * invisible here, because none of those players had a line: the showcase
+ * instead surfaced a running back for a tight end both valued at 1.05, which is
+ * to say at their news and nothing else, and it vanished the moment the trade
+ * engine stopped valuing unpriced players. Pricing them is what a Wednesday of
+ * week eight looks like — the books have posted Sunday.
+ *
+ * Tuned against the real engine, not asserted: with these five lines the
+ * board's lead offer is Stallworth for Mabry, roughly even on value, a point
+ * to the reader's lineup and eight to Marchetti's.
+ */
+const WEEK_EIGHT_MARKET: Record<string, DemoMarketEntry> = {
+  ...WEEK_SEVEN_MARKET,
+  p098: { points: 16.8 },
+  p109: { points: 10.5 },
+  p120: { points: 9.0 },
+  p044: { points: 12.0 },
+  p076: { points: 11.0 },
+};
+
+/**
  * A week, assembled from the slate and the market.
  *
  * The one place a `DemoWeekSpec` is built, so the opponent, the spread, the
@@ -557,6 +582,16 @@ function weekFor(scenario: DemoScenario, clock: Clock): Record<string, DemoWeekS
      */
     case 'playoff-week':
       return weekFromSlate(scenario.week ?? 15, WEEK_SEVEN_MARKET, clock);
+    /*
+     * The trade window is a Wednesday in week eight, and by Wednesday the books
+     * have posted the coming Sunday. It had no market at all until the trade
+     * engine stopped valuing unpriced players (September 2026), at which point
+     * it became obvious that every offer this scenario had ever showcased was
+     * priced on news and usage alone — the exact failure the change fixed.
+     * See {@link WEEK_EIGHT_MARKET}.
+     */
+    case 'trade-window':
+      return weekFromSlate(scenario.week ?? 8, WEEK_EIGHT_MARKET, clock);
     default:
       return {};
   }

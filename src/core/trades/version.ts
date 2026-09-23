@@ -19,4 +19,4 @@
 import { composeEngineVersion } from '../engineVersion.ts';
 import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
 
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@1', LINEUP_ENGINE_VERSION);
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@2', LINEUP_ENGINE_VERSION);

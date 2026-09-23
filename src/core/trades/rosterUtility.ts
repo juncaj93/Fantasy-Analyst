@@ -35,6 +35,7 @@
 
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { recommendLineup } from '../startsit/lineup.ts';
+import { marketProjection } from '../startsit/projection.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 
 /**
@@ -84,6 +85,41 @@ export function tradeExcluded(position: string | null | undefined): boolean {
 }
 
 /**
+ * Whether the trade engine may put a value on this player at all.
+ *
+ * **A trade value requires a market.** The start/sit `score` is the market
+ * expectation plus a handful of bounded nudges — news, usage, role, game
+ * script, availability — and when no book has priced the player the score is
+ * the nudges and nothing else. That is a fine tiebreak between two players the
+ * market has already priced, and it is not a valuation: measured on production
+ * on 23 September 2026, Ashton Jeanty was worth 3.75 to this engine and Jaxon
+ * Smith-Njigba 5.30, against a priced Bijan Robinson at 19.05, and every one of
+ * those was news and usage with no base underneath. 86 of the league's 162
+ * rostered skill players were in that state on a Tuesday night.
+ *
+ * So the rule is the one `core/startsit/projection.ts` already applies to the
+ * word "projected": no market expectation, no number. {@link marketProjection}
+ * is the single definition of "priced" and this reads it rather than keeping a
+ * second threshold that could drift from it.
+ *
+ * **Market only — not the Rotowire or preseason fallbacks.** The Team screen
+ * displays a three-tier ladder (market → Rotowire-via-Sleeper → preseason ÷
+ * games), and that same file is explicit that tiers two and three are
+ * display-only and never enter a recommendation, the trade engine by name. A
+ * trade built on somebody else's model is one this app cannot explain or
+ * defend, and a season total flattened to a week is the weakest number in the
+ * app. An unpriced player is left out of trade valuation until a book prices
+ * him.
+ *
+ * A defence passes the same test: its anchor arrives as the market
+ * expectation, so a defence with no anchor is unpriced like anybody else — and
+ * is excluded from trades regardless, by {@link TRADE_EXCLUDED_POSITIONS}.
+ */
+export function isPriced(evaluation: StartSitEvaluation | null | undefined): boolean {
+  return evaluation != null && evaluation.score != null && marketProjection(evaluation) != null;
+}
+
+/**
  * A score at or below which a player is not depth.
  *
  * Zero rather than a threshold: the start/sit engine already floors an
@@ -100,8 +136,16 @@ export interface PositionNeed {
   slots: number;
   /** Players at this position who clear the startable bar. */
   startable: number;
-  /** This roster's values at the position, best first. */
+  /** This roster's *priced* values at the position, best first. */
   values: number[];
+  /**
+   * Startable players at the position the market has not priced.
+   *
+   * Bodies, not values: they can fill a slot, so they stop a slot reading as
+   * empty, but nothing is known about how well — so the ranks they would occupy
+   * are neither a shortfall nor a surplus. See {@link needFor}.
+   */
+  unpriced: number;
   /**
    * What the rest of the league starts at each slot rank of this position.
    *
@@ -127,6 +171,18 @@ export interface RosterDelta {
   entersLineup: string[];
   /** Players who started before this swap and do not afterwards. */
   displaced: string[];
+  /**
+   * Unpriced players whose place in the lineup this swap changes — benched,
+   * or promoted from the bench.
+   *
+   * `starterGain` comes from the lineup optimiser, which ranks an unpriced
+   * player on his news-only score. That is harmless while he starts on both
+   * sides of the swap (his number cancels) and meaningless the moment the swap
+   * moves him: benching an unpriced starter scored at 1.3 reads as a
+   * ten-point upgrade whatever he is really worth. Non-empty means this delta
+   * is measured against noise, and the caller must not trust `starterGain`.
+   */
+  unpricedMoved: string[];
   /**
    * True when a slot that was filled before is empty afterwards.
    *
@@ -154,12 +210,35 @@ export interface RosterDelta {
 export interface RosterView {
   key: string;
   playerIds: string[];
-  /** Objective value: the comparable start/sit score, per player. */
+  /**
+   * Objective value: the comparable start/sit score, per *priced* player.
+   *
+   * Absent for anybody the market has not priced — see {@link isPriced}. An
+   * absent value is not a zero, and every reader of this map treats a missing
+   * entry as "cannot be valued", never as "worth nothing".
+   */
   valueOf: ReadonlyMap<string, number>;
   positionOf: ReadonlyMap<string, string>;
   nameOf: ReadonlyMap<string, string>;
   /** Players the engine could not score at all. Never traded, never counted. */
   unscored: ReadonlySet<string>;
+  /**
+   * Players the engine scored with no market under the score.
+   *
+   * Never valued, never traded, never counted as a need or a surplus — and
+   * reported, so the board can say who was left out and why rather than
+   * letting them vanish. A subset disjoint from {@link unscored}.
+   */
+  unpriced: ReadonlySet<string>;
+  /**
+   * Players who are not playing this week, priced or not: ruled out (Out, IR,
+   * PUP, suspended) or on a bye.
+   *
+   * Carried so a report of who is waiting on a market price does not list a
+   * man on injured reserve or a team with the week off: neither will ever get
+   * a line this week, which is a fact about him, not a gap in coverage.
+   */
+  notPlaying: ReadonlySet<string>;
   /** Who the optimiser starts as the roster stands. */
   starterIds: ReadonlySet<string>;
   /** Startable players who are not starting, by position. */
@@ -209,6 +288,14 @@ export function buildRosterViews(opts: {
   const evaluations = new Map<string, StartSitEvaluation>();
   for (const [id, input] of pool) evaluations.set(id, evaluatePlayer(input, profile));
 
+  /*
+   * A bye is read off a missing opponent — but only when the schedule is known
+   * for somebody. With no fixture list at all every player has no opponent,
+   * and reading that as a league-wide bye would quietly report full coverage
+   * on exactly the day nothing is priced.
+   */
+  const scheduleKnown = [...evaluations.values()].some((e) => e.opponent != null);
+
   const slotsFor = positionSlots(shape);
 
   /*
@@ -218,22 +305,40 @@ export function buildRosterViews(opts: {
    * table. Only rosters actually being modelled contribute — a benchmark built
    * from free agents would describe a different question.
    */
-  const byPosition = new Map<string, number[][]>();
+  /*
+   * Priced players only, and the unpriced counted beside them.
+   *
+   * An unpriced player's score is not a low value, it is an absent one, so it
+   * cannot sit in a per-rank table next to real ones. It is still a body that
+   * could start, which matters twice: to this roster's own need (a slot he can
+   * fill is not empty) and to the league benchmark (his rank is unknown, not
+   * zero). Both readings carry the count rather than a number.
+   */
+  const byPosition = new Map<string, (number | null)[][]>();
   const rosterValues = new Map<string, Map<string, number[]>>();
+  const rosterUnpriced = new Map<string, Map<string, number>>();
   for (const roster of opts.rosters) {
     const perPosition = new Map<string, number[]>();
+    const unpricedHere = new Map<string, number>();
     for (const id of roster.playerIds) {
       const evaluation = evaluations.get(id);
       if (!evaluation || evaluation.score == null) continue;
+      if (!isPriced(evaluation)) {
+        if (evaluation.score > STARTABLE_FLOOR && !evaluation.ruledOut) {
+          unpricedHere.set(evaluation.position, (unpricedHere.get(evaluation.position) ?? 0) + 1);
+        }
+        continue;
+      }
       const list = perPosition.get(evaluation.position) ?? [];
       list.push(evaluation.score);
       perPosition.set(evaluation.position, list);
     }
     for (const list of perPosition.values()) list.sort((a, b) => b - a);
     rosterValues.set(roster.key, perPosition);
-    for (const [position, list] of perPosition) {
+    rosterUnpriced.set(roster.key, unpricedHere);
+    for (const position of new Set([...perPosition.keys(), ...unpricedHere.keys()])) {
       const rows = byPosition.get(position) ?? [];
-      rows.push(list);
+      rows.push([...(perPosition.get(position) ?? []), ...Array<null>(unpricedHere.get(position) ?? 0).fill(null)]);
       byPosition.set(position, rows);
     }
   }
@@ -253,7 +358,9 @@ export function buildRosterViews(opts: {
         evaluations,
         slotsFor,
         benchmarks,
+        scheduleKnown,
         values: rosterValues.get(roster.key) ?? new Map(),
+        unpriced: rosterUnpriced.get(roster.key) ?? new Map(),
       }),
     );
   }
@@ -269,6 +376,8 @@ function buildView(args: {
   slotsFor: ReadonlyMap<string, number>;
   benchmarks: ReadonlyMap<string, number[]>;
   values: ReadonlyMap<string, number[]>;
+  unpriced: ReadonlyMap<string, number>;
+  scheduleKnown: boolean;
 }): RosterView {
   const { roster, pool, shape, profile, evaluations } = args;
   const playerIds = [...roster.playerIds];
@@ -277,6 +386,8 @@ function buildView(args: {
   const positionOf = new Map<string, string>();
   const nameOf = new Map<string, string>();
   const unscored = new Set<string>();
+  const unpriced = new Set<string>();
+  const notPlaying = new Set<string>();
   for (const id of playerIds) {
     const evaluation = evaluations.get(id);
     if (!evaluation) {
@@ -285,7 +396,9 @@ function buildView(args: {
     }
     positionOf.set(id, evaluation.position);
     nameOf.set(id, evaluation.name);
+    if (evaluation.ruledOut || (args.scheduleKnown && evaluation.opponent == null)) notPlaying.add(id);
     if (evaluation.score == null) unscored.add(id);
+    else if (!isPriced(evaluation)) unpriced.add(id);
     else valueOf.set(id, evaluation.score);
   }
 
@@ -344,6 +457,7 @@ function buildView(args: {
       needFor({
         position,
         values: args.values.get(position) ?? [],
+        unpriced: args.unpriced.get(position) ?? 0,
         slots: args.slotsFor.get(position) ?? 0,
         benchmark: args.benchmarks.get(position) ?? [],
       }),
@@ -357,6 +471,8 @@ function buildView(args: {
     positionOf,
     nameOf,
     unscored,
+    unpriced,
+    notPlaying,
     starterIds: base.starters,
     benchDepth: base.depth,
     needs,
@@ -370,6 +486,8 @@ function buildView(args: {
 
       const entersLineup = incoming.filter((id) => next.starters.has(id));
       const displaced = playerIds.filter((id) => base.starters.has(id) && !leaving.has(id) && !next.starters.has(id));
+      const promoted = playerIds.filter((id) => !base.starters.has(id) && !leaving.has(id) && next.starters.has(id));
+      const unpricedMoved = [...displaced, ...promoted].filter((id) => unpriced.has(id));
 
       const depthBefore = [...base.depth.values()].reduce((a, b) => a + b, 0);
       const depthAfter = [...next.depth.values()].reduce((a, b) => a + b, 0);
@@ -379,6 +497,7 @@ function buildView(args: {
         depthChange: depthAfter - depthBefore,
         entersLineup,
         displaced,
+        unpricedMoved,
         opensSlot: next.empty > base.empty,
         sizeAfter: after.length,
         /*
@@ -408,11 +527,15 @@ function buildView(args: {
  */
 export function needFor(args: {
   position: string;
+  /** Priced values at the position. */
   values: readonly number[];
+  /** Startable players at the position with no market price. Defaults to none. */
+  unpriced?: number;
   slots: number;
   benchmark: readonly number[];
 }): PositionNeed {
   const values = [...args.values];
+  const unpriced = Math.max(0, Math.floor(args.unpriced ?? 0));
 
   /*
    * An excluded position is permanently adequate, whatever the roster holds.
@@ -437,8 +560,9 @@ export function needFor(args: {
     return {
       position: args.position,
       slots: args.slots,
-      startable: values.filter((v) => v > STARTABLE_FLOOR).length,
+      startable: values.filter((v) => v > STARTABLE_FLOOR).length + unpriced,
       values,
+      unpriced,
       benchmark: [...args.benchmark],
       shortfall: 0,
       surplus: 0,
@@ -461,7 +585,15 @@ export function needFor(args: {
   const dedicated = Math.max(0, Math.floor(args.slots));
   const measured = Math.max(dedicated, Math.round(args.slots));
   const required = measured;
-  const startable = values.filter((v) => v > STARTABLE_FLOOR).length;
+  const pricedStartable = values.filter((v) => v > STARTABLE_FLOOR).length;
+  /*
+   * An unpriced player is a body, and a body fills a slot.
+   *
+   * So he counts toward "can this roster field the position at all" — a roster
+   * holding two running backs nobody has priced yet does not have an empty RB
+   * slot — and toward nothing else.
+   */
+  const startable = pricedStartable + unpriced;
 
   /*
    * Missing players are a shortfall against the benchmark, not a zero.
@@ -471,14 +603,29 @@ export function needFor(args: {
    * other roster gets. Treating the empty slot as "worth zero, so no gap" is how
    * a genuine hole reads as adequate.
    */
+  /*
+   * …except where the rank is held by somebody the market has not priced.
+   *
+   * Those ranks are unknown rather than empty: he might be the best player at
+   * the position or the worst, and either answer would be a guess. Skipping
+   * them means an unpriced roster cannot *manufacture* a hole — which would
+   * send the search shopping for a position on the strength of missing data —
+   * and it cannot hide a real one among the ranks that are priced.
+   */
   let shortfall = 0;
   for (let rank = 0; rank < required; rank++) {
+    if (rank >= values.length && rank < values.length + unpriced) continue;
     const mine = values[rank] ?? 0;
     const par = args.benchmark[rank] ?? 0;
     if (par > mine) shortfall = Math.max(shortfall, round2(par - mine));
   }
 
-  const surplus = Math.max(0, startable - required);
+  /*
+   * Surplus is claimed on priced players only. A spare player is a reason to
+   * trade somebody away, and "we have depth, probably" is not a reason anyone
+   * should act on.
+   */
+  const surplus = Math.max(0, pricedStartable - required);
 
   let level: NeedLevel;
   if (dedicated > 0 && startable < dedicated) level = 'hole';
@@ -492,6 +639,7 @@ export function needFor(args: {
     slots: args.slots,
     startable,
     values,
+    unpriced,
     benchmark: [...args.benchmark],
     shortfall,
     surplus,
@@ -559,7 +707,7 @@ function allPositions(shape: RosterShape, values: ReadonlyMap<string, number[]>)
  * that holds none should not drag the bar down for everybody. Ranks are compared
  * like against like: every league's RB1 against every other RB1.
  */
-export function medianByRank(rows: readonly (readonly number[])[]): number[] {
+export function medianByRank(rows: readonly (readonly (number | null)[])[]): number[] {
   const depth = Math.max(0, ...rows.map((r) => r.length));
   const out: number[] = [];
   for (let rank = 0; rank < depth; rank++) {
@@ -568,8 +716,16 @@ export function medianByRank(rows: readonly (readonly number[])[]): number[] {
      * skipped. Skipping would measure "the median of rosters that have three
      * running backs", which is a benchmark that gets *higher* the scarcer the
      * position is — the exact inverse of what scarcity means.
+     *
+     * A `null` is different, and is skipped: somebody holds the rank and the
+     * market has not priced him. Counting him as a zero would drag the
+     * league's bar down every Tuesday, when the books are thinnest, and make
+     * every priced roster look strong against players nobody has measured.
      */
-    const column = rows.map((r) => r[rank] ?? 0).sort((a, b) => a - b);
+    const column = rows
+      .filter((r) => r[rank] !== null)
+      .map((r) => r[rank] ?? 0)
+      .sort((a, b) => a - b);
     if (column.length === 0) break;
     const mid = Math.floor(column.length / 2);
     out.push(

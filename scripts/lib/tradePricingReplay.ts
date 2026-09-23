@@ -20,6 +20,7 @@ import { gzipSync } from 'node:zlib';
 import { evaluatePlayer } from '../../src/core/startsit/engine.ts';
 import { marketProjection } from '../../src/core/startsit/projection.ts';
 import { assembleSmartTrades } from '../../src/core/trades/assemble.ts';
+import type { ArbitrageRead } from '../../src/core/trades/arbitrage.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../../src/core/support/inseason.ts';
 
 const file = process.argv[2];
@@ -29,6 +30,15 @@ const raw = readFileSync(file, 'utf8');
 const snapshot = JSON.parse(raw) as any;
 const inputs = snapshot.decision?.inputs;
 if (!inputs?.pool) throw new Error('not a trade-offer snapshot');
+
+/*
+ * The live buy-low / sell-high reads, when the probe could fetch them. The
+ * snapshot does not carry them, so without this file the replay runs with the
+ * arbitrage lane empty and says so.
+ */
+const readsFile = process.argv[3];
+const reads: ArbitrageRead[] = readsFile ? (JSON.parse(readFileSync(readsFile, 'utf8')) as ArbitrageRead[]) : [];
+const arbitrage = new Map(reads.map((r) => [r.playerId, r]));
 
 const { shape, profile } = rehydrateLeagueRules(inputs.rules);
 const pool = rehydrateStartSitInputs(inputs.pool);
@@ -132,9 +142,14 @@ const result = assembleSmartTrades({
     leagueRate: inputs.history.leagueRate,
   },
   limit: inputs.limit ?? undefined,
+  arbitrage,
 });
 
-console.log(`\n--- this checkout's engine on the snapshot ---`);
+console.log(`\n--- this checkout's engine on the snapshot (${arbitrage.size} arbitrage read(s) supplied) ---`);
+for (const r of reads) {
+  const row = rows.get(r.playerId);
+  if (row) console.log(`  read: ${r.kind} ${r.strength.toFixed(2)} ${row.name} (${row.position}) ${row.market == null ? 'UNPRICED this week' : `market ${fmt(row.market)}`}`);
+}
 console.log(`  search: ${JSON.stringify({ ...result.search, bounds: undefined })}`);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pricing = (result as any).pricing;
@@ -164,6 +179,7 @@ for (const r of touchesUnpriced.slice(0, 6)) {
  * printed last so it never pushes the readable part out of a log tail.
  */
 {
+  if (reads.length > 0) console.log(`\nREADS ${JSON.stringify(reads)}`);
   const packed = gzipSync(raw).toString('base64');
   console.log(`\n--- snapshot.json.gz base64 (${packed.length} chars) ---`);
   for (let i = 0; i < packed.length; i += 4000) console.log(`SNAP ${packed.slice(i, i + 4000)}`);

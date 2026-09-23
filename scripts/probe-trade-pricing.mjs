@@ -75,6 +75,25 @@ for (const [reason, n] of [...byReason].sort((a, b) => b[1] - a[1])) console.log
 const gaps = rejections.filter((r) => r.reason === 'value_gap_outside_range').slice(0, 6);
 for (const r of gaps) console.log(`        e.g. ${r.detail}`);
 
+/*
+ * The buy-low and sell-high reads the live search was handed. Absent on a
+ * deployment older than the field, which is said rather than read as "none".
+ */
+const reads = explain.body?.arbitrageReads;
+console.log(`\n--- live buy-low / sell-high reads ---`);
+if (!Array.isArray(reads)) console.log('  (this deployment does not publish its reads)');
+else {
+  const kinds = new Map();
+  for (const r of reads) kinds.set(r.kind, (kinds.get(r.kind) ?? 0) + 1);
+  console.log(`  ${reads.length} read(s): ${[...kinds].map(([k, n]) => `${n} ${k}`).join(', ') || 'none'}`);
+  for (const r of [...reads].sort((a, b) => b.strength - a.strength).slice(0, 8)) {
+    console.log(`    ${r.kind.padEnd(9)} ${r.strength.toFixed(2)}  ${r.headline}`);
+  }
+}
+const surfacedArb = (smart.body?.offers ?? []).filter((o) => o.category && o.category !== 'upgrade');
+console.log(`  arbitrage offers on the live board: ${surfacedArb.length}`);
+if (smart.body?.arbitrageOff) console.log(`  lane off: ${smart.body.arbitrageOff}`);
+
 // ------------------------------------------------ 2. the snapshot, replayed
 const snap = await get(`/api/leagues/${encodeURIComponent(leagueId)}/support-snapshot?context=trade-offer`);
 if (snap.status !== 200) {
@@ -86,9 +105,11 @@ const file = join(dir, 'snapshot.json');
 writeFileSync(file, JSON.stringify(snap.body));
 
 const here = dirname(fileURLToPath(import.meta.url));
+const readsFile = join(dir, 'reads.json');
+writeFileSync(readsFile, JSON.stringify(Array.isArray(reads) ? reads : []));
 const run = spawnSync(
   process.execPath,
-  ['--experimental-transform-types', '--no-warnings', join(here, 'lib', 'tradePricingReplay.ts'), file],
+  ['--experimental-transform-types', '--no-warnings', join(here, 'lib', 'tradePricingReplay.ts'), file, readsFile],
   { stdio: 'inherit' },
 );
 process.exit(run.status ?? 1);
