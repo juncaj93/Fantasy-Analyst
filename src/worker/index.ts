@@ -37,6 +37,7 @@ import { usageSeason } from '../server/services/usageService.ts';
 import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts';
 import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
+import { nflverseFeedDue } from '../core/nflverse/cadence.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { CronRunRecorder } from '../server/repos/cronRuns.ts';
@@ -238,7 +239,7 @@ export default {
    * night, Friday on a holiday, or Saturday in December. No fixed window covers
    * that set; a flat cadence does.
    */
-  async scheduled(event: { cron: string }, env: WorkerEnv): Promise<void> {
+  async scheduled(event: { cron: string; scheduledTime?: number }, env: WorkerEnv): Promise<void> {
     const appEnv = toAppEnv(env);
 
     /*
@@ -315,6 +316,38 @@ export default {
         if (schedule?.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
       } catch (err) {
         console.error('schedule check failed', err);
+      }
+
+      /*
+       * And one nflverse feed, on the three ticks that own one.
+       *
+       * They moved here from the 09:00 tick, which from 19 September ended
+       * `exceededCpu` part-way through parsing them. One feed per invocation
+       * keeps each parse on its own CPU allowance; see
+       * `core/nflverse/cadence.ts` for the windows and the measurements.
+       *
+       * Metered like the daily tick metered them: a GitHub release asset is a
+       * 302 and a second subrequest, so the transport charges double. Last on
+       * this tick and separately caught, so a feed that fails or runs long can
+       * never cost the injury check above it.
+       */
+      const feed = nflverseFeedDue(event.scheduledTime);
+      if (feed) {
+        try {
+          const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);
+          const nflverse = new NflverseService(env.DB, {
+            fetch: budgetedFetch(budget, undefined, { cost: REDIRECTING_FETCH_COST }),
+          });
+          const run =
+            feed === 'roster'
+              ? await nflverse.refreshRoster()
+              : feed === 'depth'
+                ? await nflverse.refreshDepthChart()
+                : await nflverse.refreshSnapCounts();
+          if (run.outcome === 'failed') console.error(`nflverse ${feed} refresh failed`, run.note);
+        } catch (err) {
+          console.error(`nflverse ${feed} refresh failed`, err);
+        }
       }
       return;
     }
@@ -629,56 +662,13 @@ export default {
       );
 
       /*
-       * The three nflverse feeds Projection v2 reads — **last of the live
-       * feeds on this tick, and that position is the point.**
-       *
-       * Everything above it feeds a live surface: the player dictionary, last
-       * season's statistics, the injury report, per-game usage, the season-long
-       * market lines the draft board prices against, the matchup calibration
-       * ledger, and the published weekly fallback. The one thing below it feeds
-       * no surface at all — the manager backfill is history, measured in
-       * seasons, and it takes what this leaves.
-       *
-       * It was written directly after the usage refresh, which read well and was
-       * wrong. A slow or hanging fetch there delays the season markets and the
-       * calibration ledger, and an invocation killed part-way through never
-       * reaches them at all — so a feed no recommendation reads could cost two
-       * that several do. Phase 1 promises Projection v2 is inert to live
-       * decisions; a queue position is part of keeping that promise, not just a
-       * dependency graph.
-       *
-       * Costs three conditional GETs on an ordinary day, two of which answer
-       * 304 with no body — but six subrequests, because each is a GitHub
-       * release asset and the 302 to `release-assets.githubusercontent.com` is
-       * a subrequest of its own that `fetch` follows before the validator is
-       * ever considered. That is why this transport is charged double; see
-       * `REDIRECTING_FETCH_COST`. The depth chart is a ranged read of the first
-       * 768KiB of a 42MiB file rather than the file; see
-       * `core/nflverse/depthChart.ts`.
-       *
-       * After the player dictionary, like everything else here, because snap
-       * rows are matched against the players this app knows. Separately caught,
-       * and this one matters least of any catch in this function: a total
-       * failure of all three feeds costs an evaluation report and no
-       * recommendation anywhere in the app.
+       * The three nflverse feeds are no longer on this tick. Parsing them was
+       * the most CPU-hungry work here, and from 19 September this invocation
+       * ended `exceededCpu` part-way through them, so nothing after them —
+       * the manager backfill, the run record — landed. They now run one per
+       * five-minute tick at 09:30, 09:35 and 09:40; see
+       * `core/nflverse/cadence.ts`.
        */
-      await run.step('nflverse', 'Snaps and depth charts', async () => {
-        const runs = await new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll();
-        /*
-         * Three feeds under one step, because they are one dependency chain and
-         * `refreshAll` already catches each of them separately. Reported as a
-         * whole: all three failing is a failure, some of them failing is a
-         * failure of this step, and none of them failing is a success. The
-         * per-feed detail stays where it already lives, in
-         * `nflverse_source_runs`, rather than being copied into the run record.
-         */
-        const failed = runs.filter((r) => r.outcome === 'failed');
-        if (runs.length === 0) return { outcome: 'failed' as const, note: 'no nflverse feed completed' };
-        if (failed.length > 0) {
-          return { outcome: 'failed' as const, items: runs.length - failed.length, note: `${failed.length} of ${runs.length} feeds did not complete` };
-        }
-        return { outcome: 'succeeded' as const, items: runs.length };
-      });
 
       /*
        * One bounded batch of manager history — **last on this tick, and last is

@@ -405,4 +405,37 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
     await worker.scheduled({ cron: '*/5 * * * *' }, cronEnv(db));
     expect(run.subrequests).toBeLessThan(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
   });
+
+  /*
+   * The nflverse feeds are off the daily tick and one per five-minute tick.
+   *
+   * Measured on 23 September: the 09:00 invocation ended `exceededCpu` after the
+   * depth chart and before the snap counts, three parses stacked on everything
+   * else the tick does. Cloudflare counts CPU per invocation, so no invocation
+   * may parse more than one of these files. See `core/nflverse/cadence.ts`.
+   */
+  /** The three files that moved: the roster crosswalk, the depth chart and the snap counts. */
+  const MOVED = /\/(rosters|depth_charts|snap_counts)\//;
+
+  it('keeps every nflverse file off the daily tick', async () => {
+    const run = stubWorld();
+    await worker.scheduled({ ...DAILY, scheduledTime: Date.UTC(2026, 8, 23, 9, 0) }, cronEnv(db));
+    expect(run.urls.filter((u) => MOVED.test(u))).toEqual([]);
+  });
+
+  it('gives each of three five-minute ticks exactly one nflverse file, roster first', async () => {
+    const fileOn = async (hour: number, minute: number): Promise<string[]> => {
+      const run = stubWorld();
+      await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.UTC(2026, 8, 23, hour, minute) }, cronEnv(db));
+      return run.urls.filter((u) => MOVED.test(u)).map((u) => u.split('/').pop()!.replace(/_2026\.csv$/, ''));
+    };
+    expect(await fileOn(9, 30)).toEqual(['roster']);
+    expect(await fileOn(9, 35)).toEqual(['depth_charts']);
+    expect(await fileOn(9, 40)).toEqual(['snap_counts']);
+    expect(await fileOn(21, 30)).toEqual(['roster']);
+    // Every other tick parses none of them.
+    for (const [h, m] of [[9, 25], [9, 45], [9, 0], [12, 30], [21, 45]] as const) {
+      expect(await fileOn(h, m)).toEqual([]);
+    }
+  });
 });
