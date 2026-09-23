@@ -45,6 +45,9 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
   });
 
   it('finds the scheduled workflows', () => {
+    // daily-tick-watch.yml, the alarm for the Worker's own 09:00 tick, whose
+    // record went stale for five days in September with nobody told.
+    //
     // The two ADP refreshes, and smoke-daily.yml: the full production sweep
     // moved off every deploy and onto a daily schedule when 150 test
     // executions a deploy were found to be spending the D1 row quota.
@@ -57,7 +60,7 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
     //
     // A new scheduled workflow that forgets the alert fails the assertions
     // below rather than going unnoticed for twelve days, which is the point.
-    expect(scheduled).toEqual(['refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke-daily.yml']);
+    expect(scheduled).toEqual(['daily-tick-watch.yml', 'refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke-daily.yml']);
   });
 
   it.each(scheduled)('%s calls the alert', (name) => {

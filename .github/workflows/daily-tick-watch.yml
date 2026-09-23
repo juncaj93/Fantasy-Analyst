@@ -1,0 +1,81 @@
+name: Daily tick watch
+
+# Did the Worker's 09:00 tick finish today?
+#
+# The tick records itself as its very last act, so one that is killed part-way
+# through is silent: the feeds above the point it died keep landing, and only the
+# run record goes stale. From 19 to 23 September 2026 Cloudflare ended every
+# 09:00 invocation `exceededCpu` and nothing reported it for five days. This is
+# the report.
+#
+# An hour after the tick it reads that one row and fails when the last finished
+# run is more than 20 hours old; see `scripts/daily-tick-watch.mjs` for why 20.
+# A failure here is turned into the "Scheduled job failures" issue by the alert
+# job below, and the next good morning closes it again.
+#
+# Reads one row of D1 and writes nothing. No new secret: the same Cloudflare
+# token the other D1 workflows use.
+
+on:
+  schedule:
+    # 10:15 UTC, an hour after the 09:00 tick, so a morning that did not finish
+    # is reported the same morning.
+    - cron: '15 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # The pinned wrangler, as everywhere else here.
+      - run: npm ci
+      - name: Read the 09:00 tick's run record
+        run: |
+          set -euo pipefail
+          # The committed wrangler.toml carries a placeholder database id; the
+          # real one is resolved from the account, the way who-is-calling.yml
+          # does it.
+          id=$(npx wrangler d1 list --json 2>/dev/null \
+               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                   const start = s.indexOf('[');
+                   let rows = [];
+                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                   const hit = rows.find(r => r.name === 'fantasy_analyst');
+                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                 })")
+          if [ -z "$id" ]; then echo "::error::could not resolve the database id"; exit 1; fi
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('wrangler.toml', fs.readFileSync('wrangler.toml','utf8')
+              .replace(/database_id = \"[^\"]*\"/, 'database_id = \"' + process.argv[1] + '\"'));
+          " "$id"
+          sql=$(node -e "import('./scripts/daily-tick-watch.mjs').then(m => process.stdout.write(m.SQL))")
+          npx wrangler d1 execute fantasy_analyst --remote --json --command "$sql" > record.json
+          # The verdict reaches the summary whichever way it went, then decides
+          # the job's colour.
+          code=0
+          node scripts/daily-tick-watch.mjs < record.json > verdict.txt || code=$?
+          cat verdict.txt
+          { echo '### Daily tick'; echo ''; cat verdict.txt; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+  # Scheduled work that fails silently is scheduled work nobody is doing;
+  # `tests/scheduledJobAlert.test.ts` refuses a scheduled workflow without this.
+  alert:
+    needs: check
+    if: ${{ always() }}
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Daily tick watch
+      result: ${{ needs.check.result }}
