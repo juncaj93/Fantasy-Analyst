@@ -127,6 +127,51 @@ export const MIN_USER_GAIN = 1;
  */
 export const MIN_ARBITRAGE_USER_GAIN = -0.5;
 
+/**
+ * Share of the league's tradeable players with no market price at which the
+ * board stops claiming it has looked.
+ *
+ * An unpriced player is never valued, so he is never in a package — see
+ * `isPriced` in `rosterUtility.ts`. On a quiet board that leaves two very
+ * different situations reading the same: "nothing in this league helps both
+ * sides" measured over the whole league, and the same sentence measured over
+ * half of it because the books have not posted the rest. The first is a finding
+ * and the second is a coverage gap wearing one.
+ *
+ * A quarter is where the second reading takes over: past it, enough of every
+ * roster is missing that a real deal is as likely to be sitting among the
+ * unpriced as among the priced, and the honest answer is that the board cannot
+ * say yet. Below it the ordinary empty-board sentence stands, with the count
+ * still reported beside it.
+ */
+export const UNPRICED_SHARE_LIMIT = 0.25;
+
+/**
+ * How many of the league's tradeable players the search could value.
+ *
+ * Counted over every roster the search ran against, and over players who could
+ * actually be traded: defences are excluded by rule, and a player who is Out or
+ * on a bye has no line because he is not playing, so neither is a gap in
+ * coverage.
+ */
+export interface PricingCoverage {
+  priced: number;
+  unpriced: number;
+  /** Your own players left out for want of a market price, by name. */
+  mineUnpriced: string[];
+  /** True when `unpriced` is at least {@link UNPRICED_SHARE_LIMIT} of the total. */
+  tooThin: boolean;
+  /**
+   * The sentence a screen prints about who was left out, or null when there is
+   * nothing to say or the board's empty-state note already says it.
+   *
+   * Built here and sent whole, the way `arbitrageOff` is: the phone renders it
+   * and decides nothing, which keeps one wording in one place and keeps the
+   * logic off the render path the app's JavaScript budget is measured on.
+   */
+  line: string | null;
+}
+
 /*
  * The category and its label live in `./category.ts`, which imports nothing.
  *
@@ -424,6 +469,8 @@ export type RejectionReason =
   | 'opens_hole_for_counterparty'
   | 'duplicate_package'
   | 'unscorable_player'
+  | 'unpriced_players'
+  | 'unpriced_lineup'
   | 'no_plausible_use'
   | 'pruned_by_bound';
 
@@ -447,6 +494,8 @@ export interface BilateralReport {
   /** Partners evaluated at all. */
   partners: number;
   notes: string[];
+  /** How much of the league the search could put a value on. */
+  pricing: PricingCoverage;
 }
 
 export interface BilateralInput {
@@ -487,7 +536,29 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
   let generated = 0;
   let scored = 0;
 
+  const coverage = pricingCoverage(input.me, input.partners.map((p) => p.view));
+
   for (const { view, partner, fit } of input.partners) {
+    /*
+     * Who on their roster the search could not value, said once per partner.
+     *
+     * Not a rejected package — nobody built one — but the same record, because
+     * "why is there no offer for Jeanty" deserves an answer in the one place a
+     * person asks it, and "he has no market price this week" is that answer.
+     */
+    const waiting = waitingOnMarket(view);
+    if (waiting.length > 0) {
+      rejections.push({
+        partnerKey: partner.key,
+        give: [],
+        get: [],
+        reason: 'unpriced_players',
+        detail:
+          `${waiting.length} of their players ${waiting.length === 1 ? 'has' : 'have'} no market price this week ` +
+          `and ${waiting.length === 1 ? 'was' : 'were'} left out: ${waiting.map((id) => view.nameOf.get(id) ?? id).join(', ')}`,
+      });
+    }
+
     const candidates = generateCandidates({
       me: input.me,
       them: view,
@@ -704,6 +775,18 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
 
   if (input.partners.length === 0) {
     notes.push('No other rosters were available to trade with.');
+  } else if (surfaced.length === 0 && coverage.tooThin) {
+    /*
+     * Not "nothing helps both sides" — the search has not seen enough of the
+     * league to say that. The same move the Team screen makes with a dash: an
+     * answer that could not be computed is said to be missing, never printed as
+     * though it were a finding.
+     */
+    notes.push(
+      `Not enough priced players to evaluate trades yet: ${coverage.unpriced} of ${coverage.priced + coverage.unpriced} ` +
+        `rostered players ${coverage.unpriced === 1 ? 'has' : 'have'} no market price this week. ` +
+        'Trade ideas fill in as the books post lines.',
+    );
   } else if (surfaced.length === 0) {
     /*
      * §18: say so, and do not manufacture filler.
@@ -727,6 +810,57 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
     rejections,
     partners: input.partners.length,
     notes,
+    pricing: {
+      ...coverage,
+      line: surfaced.length === 0 && coverage.tooThin ? null : unpricedLine(coverage),
+    },
+  };
+}
+
+/**
+ * Who the search left out, said once: counts first, then the reader's own
+ * players by name — the ones they can do something about — capped at four so
+ * the line stays a line. Null when everybody playing is priced.
+ */
+export function unpricedLine(coverage: Omit<PricingCoverage, 'line'>): string | null {
+  if (coverage.unpriced === 0) return null;
+  const head =
+    `${coverage.unpriced} of ${coverage.priced + coverage.unpriced} rostered players ` +
+    `${coverage.unpriced === 1 ? 'has' : 'have'} no market price this week and ` +
+    `${coverage.unpriced === 1 ? 'is' : 'are'} left out of trade ideas until the books post lines.`;
+  const mine = coverage.mineUnpriced;
+  if (mine.length === 0) return head;
+  const more = mine.length > 4 ? ` and ${mine.length - 4} more` : '';
+  return `${head} Yours: ${mine.slice(0, 4).join(', ')}${more}.`;
+}
+
+/**
+ * Players on this roster the search left out for want of a market price.
+ *
+ * Tradeable positions only, and nobody who is not playing this week — see
+ * {@link PricingCoverage}. Sorted so the sentence built from it is stable.
+ */
+function waitingOnMarket(view: RosterView): string[] {
+  return [...view.unpriced]
+    .filter((id) => !view.notPlaying.has(id) && !tradeExcluded(view.positionOf.get(id)))
+    .sort((a, b) => (view.nameOf.get(a) ?? a).localeCompare(view.nameOf.get(b) ?? b));
+}
+
+export function pricingCoverage(me: RosterView, partners: readonly RosterView[]): Omit<PricingCoverage, 'line'> {
+  let priced = 0;
+  let unpriced = 0;
+  for (const view of [me, ...partners]) {
+    for (const id of view.valueOf.keys()) {
+      if (!tradeExcluded(view.positionOf.get(id)) && !view.notPlaying.has(id)) priced++;
+    }
+    unpriced += waitingOnMarket(view).length;
+  }
+  const total = priced + unpriced;
+  return {
+    priced,
+    unpriced,
+    mineUnpriced: waitingOnMarket(me).map((id) => me.nameOf.get(id) ?? id),
+    tooThin: total > 0 && unpriced / total >= UNPRICED_SHARE_LIMIT,
   };
 }
 
@@ -1016,10 +1150,15 @@ export function generateCandidates(args: {
 /**
  * Players a roster could realistically move.
  *
- * Anyone the engine could score. A player it could not is excluded rather than
- * valued at zero — an unscorable player in a package is a package whose fairness
- * is a guess, and §7 names "a player is not realistically tradeable" as a
- * pruning rule.
+ * Anyone the engine could score *on a market price*. A player it could not is
+ * excluded rather than valued at zero — an unscorable player in a package is a
+ * package whose fairness is a guess, and §7 names "a player is not
+ * realistically tradeable" as a pruning rule.
+ *
+ * The same holds for a player scored with no market underneath: his score is
+ * the news and usage nudges alone, and a package priced on one is a fairness
+ * gap measured against noise. `valueOf` carries priced players only, so the
+ * filter below drops him — see `isPriced` in `rosterUtility.ts`.
  */
 function tradeableFrom(view: RosterView): string[] {
   return view.playerIds
@@ -1153,6 +1292,15 @@ function evaluate(args: {
   const userDelta = me.delta(candidate.give, candidate.get);
   if (!userDelta.legal) return reject('opens_hole_for_user', 'it would leave a starting slot of yours empty');
   /*
+   * Every player in the package is priced — `tradeableFrom` sees to that — but
+   * the lineup gain is measured over the whole roster, and a swap that benches
+   * or promotes an unpriced player is a gain measured against his news-only
+   * score. Refused and said, not scored: see `RosterDelta.unpricedMoved`.
+   */
+  if (userDelta.unpricedMoved.length > 0) {
+    return reject('unpriced_lineup', unpricedLineupDetail(me, userDelta.unpricedMoved, 'your'));
+  }
+  /*
    * The gate Alex asked to be reconciled, reconciled in one line.
    *
    * §18's "no meaningful hole to trade for" is this bar: with the lineup
@@ -1181,6 +1329,9 @@ function evaluate(args: {
   const partnerDelta = them.delta(candidate.get, candidate.give);
   if (!partnerDelta.legal) {
     return reject('opens_hole_for_counterparty', 'it would leave a starting slot of theirs empty');
+  }
+  if (partnerDelta.unpricedMoved.length > 0) {
+    return reject('unpriced_lineup', unpricedLineupDetail(them, partnerDelta.unpricedMoved, 'their'));
   }
   if (partnerDelta.starterGain < -MATERIAL_HARM) {
     return reject(
@@ -1271,6 +1422,15 @@ function evaluate(args: {
     caveats: caveatsFor({ me, giving, user: userSide, counterparty: partnerSide, fairness, managerFit }),
     headline: headlineFor({ user: userSide, counterparty: partnerSide }),
   };
+}
+
+/** The rejection sentence for a lineup change that moves an unpriced player. */
+function unpricedLineupDetail(view: RosterView, ids: readonly string[], whose: 'your' | 'their'): string {
+  const names = ids.map((id) => view.nameOf.get(id) ?? id).join(', ');
+  return (
+    `not enough priced players to evaluate this trade: it would move ${names} in or out of ${whose} lineup, ` +
+    'with no market price this week'
+  );
 }
 
 function playerOf(view: RosterView, id: string): OfferPlayer | null {

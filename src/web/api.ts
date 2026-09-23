@@ -1768,7 +1768,7 @@ export type {
 export type { ActivityClass, ManagerFit } from '../core/trades/managerFit.ts';
 export type { TradeCapability } from '../core/trades/capability.ts';
 
-import type { OfferEvaluation } from '../core/trades/bilateral.ts';
+import type { OfferEvaluation, PricingCoverage } from '../core/trades/bilateral.ts';
 import type { TradeCapability } from '../core/trades/capability.ts';
 
 export interface SmartTradeBoard {
@@ -1808,6 +1808,15 @@ export interface SmartTradeBoard {
    * suggest". Absent when the lane ran.
    */
   arbitrageOff?: string | null;
+  /**
+   * How much of the league the search could put a value on.
+   *
+   * A player with no market price this week is left out of every trade idea
+   * rather than valued on news alone, and this is what lets the screen say so.
+   * Optional on the wire for the offline-cache reason `arbitrageOff` gives;
+   * null when the search never ran.
+   */
+  pricing?: PricingCoverage | null;
 }
 
 /**
@@ -1870,7 +1879,7 @@ export type TradeLadderResponse =
       found: true;
       league: { id: string; name: string };
       partner: LadderPartner;
-      target: { playerId: string; name: string; position: string; value: number };
+      target: { playerId: string; name: string; position: string; value: number | null };
       ladder: TradeLadder;
       /** Whether turning depth into one better player suits this roster at all. */
       consolidation: ConsolidationAdvice | null;

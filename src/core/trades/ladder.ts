@@ -51,6 +51,15 @@ export interface LadderInputs {
   /** The assets you are willing to consider sending. */
   offering: TradeSide;
   partner: ManagerTradeProfile | null;
+  /**
+   * Players this ladder would have to value with no market price under them.
+   *
+   * Names, for the sentence. Non-empty means the ladder is not built: see
+   * `isPriced` in `rosterUtility.ts` for why a score with no market is an
+   * absent value rather than a low one. Optional so a caller that predates it
+   * reads as "everybody priced", which is what it assumed.
+   */
+  unpriced?: string[];
 }
 
 export interface TradeLadder {
@@ -92,6 +101,17 @@ const TAKE_IT_OR_LEAVE_IT_REDUCTION = 0.06;
  */
 export function buildLadder(inputs: LadderInputs): TradeLadder {
   const reasons: string[] = [];
+
+  /*
+   * Checked first, before any arithmetic, because every rung below is built
+   * from `targetValue` and a target with no market has none. A ladder of
+   * opening, fair and ceiling computed on news and usage alone would be three
+   * precise-looking numbers with nothing under them — the same failure as a
+   * projection column printing a nudge total, one screen over.
+   */
+  if (inputs.unpriced && inputs.unpriced.length > 0) {
+    return blockedLadder(inputs, unpricedSentence(inputs.unpriced));
+  }
 
   const floor = Math.max(0, inputs.targetCostToPartner);
   const ceiling = Math.max(0, inputs.targetValueToMe);
@@ -175,6 +195,20 @@ export function buildLadder(inputs: LadderInputs): TradeLadder {
     blocked: null,
     advisory: 'never auto-sent',
   };
+}
+
+/**
+ * The sentence for a ladder that cannot be valued.
+ *
+ * Says what is missing and that it is temporary, in the words the brief asked
+ * for, rather than a zeroed ladder or a silent absence.
+ */
+export function unpricedSentence(names: readonly string[]): string {
+  const who =
+    names.length === 1
+      ? `${names[0]} has`
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} have`;
+  return `Not enough priced players to evaluate this trade: ${who} no market price this week. Check back once the books post lines.`;
 }
 
 function blockedLadder(inputs: LadderInputs, why: string): TradeLadder {

@@ -35,6 +35,7 @@ import {
   TRADE_BOUNDS,
   findBilateralTrades,
   type BilateralReport,
+  type PricingCoverage,
   type TradeBounds,
   type TradePartnerView,
 } from './bilateral.ts';
@@ -137,6 +138,14 @@ export interface TradeAssembly {
   };
   notes: string[];
   warnings: string[];
+  /**
+   * How much of the league the search could put a value on.
+   *
+   * Null on an empty board that never reached the search — no roster, no
+   * format, no players — because a count of priced players the search never
+   * looked at would be a zero dressed as a measurement.
+   */
+  pricing: PricingCoverage | null;
   /** Every rejected candidate and the reason it died. For the probe only. */
   rejections: BilateralReport['rejections'];
 }
@@ -270,6 +279,7 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
     history: reportHistory(history),
     notes: report.notes,
     warnings,
+    pricing: report.pricing,
     rejections: report.rejections,
   };
 }
@@ -300,6 +310,7 @@ function empty(
      * the same defect as inventing a number for one.
      */
     warnings,
+    pricing: null,
     rejections: [],
   };
 }

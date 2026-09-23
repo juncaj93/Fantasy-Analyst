@@ -312,6 +312,22 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
       ) : null}
 
       {/*
+        Who the search could not look at, and why.
+
+        A player the market has not priced this week is left out of every
+        trade idea rather than valued on news alone — the same rule the Team
+        screen keeps with its dash. Left out silently, a reader would take the
+        board above as a verdict on Jeanty or Hurts when the engine never saw
+        them. The sentence arrives whole, and null when the empty-board line
+        already says exactly this.
+      */}
+      {smart?.pricing?.line ? (
+        <StatusRow tone="info" data-testid="smart-trades-unpriced">
+          {smart.pricing.line}
+        </StatusRow>
+      ) : null}
+
+      {/*
         A lane that is switched off, said out loud.
 
         Distinct from the line above it, and the distinction is the whole
