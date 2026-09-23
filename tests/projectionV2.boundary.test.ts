@@ -191,32 +191,27 @@ describe('no live surface can render a Projection v2 number', () => {
     expect(app).not.toMatch(/router\.post\('\/api\/diagnostics\/projection-v2'/);
   });
 
-  it('the nflverse refresh runs after every live surface on the daily tick', () => {
+  it('the nflverse refresh can never delay or starve a live surface', () => {
     /*
      * A queue position is part of the phase-1 promise, not just the dependency
-     * graph. Everything above it on the daily tick feeds a live surface — the
-     * player dictionary, the injury report, per-game usage, the season-long
-     * market lines the draft board prices against, the matchup calibration
-     * ledger, the published weekly fallback. A slow or hanging fetch placed
-     * before those delays them, and an invocation killed part-way through never
-     * reaches them at all, so a feed no recommendation reads could cost two
-     * that several do.
+     * graph. A slow or hanging nflverse fetch placed before a live feed delays
+     * it, and an invocation killed part-way through never reaches it at all, so
+     * a feed no recommendation reads could cost several that do.
      *
-     * It was written directly after the usage refresh, which read well and was
-     * wrong. This is what stops it drifting back.
-     *
-     * It is no longer the *last* thing the tick does, and that is a separate
-     * promise rather than a weakening of this one: the manager backfill moved
-     * below it when the invocation got a shared subrequest budget, because
-     * history measured in seasons is the one thing on this tick that should
-     * absorb a bad provider day. Nothing between the two feeds a live surface,
-     * so the guarantee this test exists for is unchanged — and the other half,
-     * that only the backfill is below, is asserted here too.
+     * The feeds used to sit at the bottom of the daily tick for that reason, and
+     * on 23 September that position was proved right the hard way: the 09:00
+     * invocation ended `exceededCpu` inside them, and every live feed above
+     * them had already landed. They have since moved off the daily tick
+     * entirely, one per five-minute tick (`core/nflverse/cadence.ts`), so the
+     * promise is now held two ways and both are asserted here: the daily tick
+     * does not touch them, and on the five-minute tick they are the last thing
+     * that runs — after the injury check, which is the one live feed there.
      */
     const worker = readFileSync(path.join(ROOT, 'worker', 'index.ts'), 'utf8');
-    const nflverse = worker.indexOf('new NflverseService(env.DB, { fetch: meteredRedirectingFetch }).refreshAll()');
-    expect(nflverse, 'the daily tick should refresh the nflverse feeds').toBeGreaterThan(-1);
 
+    const dailyStart = worker.indexOf("event.cron.startsWith('0 9')");
+    const daily = worker.slice(dailyStart, worker.indexOf('await refreshVegas(appEnv)', dailyStart));
+    expect(daily, 'the daily tick must not refresh the nflverse feeds').not.toContain('new NflverseService(');
     for (const live of [
       'syncPlayers()',
       'refreshSeasonStats()',
@@ -225,19 +220,21 @@ describe('no live surface can render a Projection v2 number', () => {
       'refreshMatchupCalibration(env, cronEnv)',
       'refreshPublishedProjections(env, cronEnv)',
     ]) {
-      const at = worker.indexOf(live);
-      expect(at, `${live} should be on the daily tick`).toBeGreaterThan(-1);
-      expect(at, `${live} must run before the nflverse refresh`).toBeLessThan(nflverse);
+      expect(daily, `${live} should be on the daily tick`).toContain(live);
     }
 
-    // And the only external work below it is the backfill that must yield first.
-    const start = worker.indexOf("event.cron.startsWith('0 9')");
-    // Bounded at the weekend branch, which refreshes some of the same feeds on
-    // clocks of its own — an unbounded slice would read those as "after".
-    const daily = worker.slice(start, worker.indexOf('await refreshVegas(appEnv)', start));
-    const after = daily.slice(daily.indexOf('new NflverseService('));
-    expect(after).toContain('ManagerIntelService');
-    for (const live of ['new InjuryService(', 'new UsageService(', 'new SeasonMarketService(', 'refreshPublishedProjections(']) {
+    const fiveStart = worker.indexOf("event.cron.startsWith('*/5')");
+    const five = worker.slice(fiveStart, dailyStart);
+    const nflverse = five.indexOf('new NflverseService(');
+    expect(nflverse, 'the five-minute tick should carry the nflverse feeds').toBeGreaterThan(-1);
+    for (const earlier of ['injuries.refresh()', 'new ScheduleService(']) {
+      const at = five.indexOf(earlier);
+      expect(at, `${earlier} should be on the five-minute tick`).toBeGreaterThan(-1);
+      expect(at, `${earlier} must run before the nflverse refresh`).toBeLessThan(nflverse);
+    }
+    // Nothing after it on that tick but the return.
+    const after = five.slice(nflverse);
+    for (const live of ['new InjuryService(', 'new ScheduleService(', 'new UsageService(']) {
       expect(after, `${live} must not run after the nflverse refresh`).not.toContain(live);
     }
   });
