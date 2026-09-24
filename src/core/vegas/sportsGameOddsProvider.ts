@@ -34,6 +34,7 @@ import {
   MARKET_KEYS,
   SEASON_MARKET_KEYS,
   VegasProviderError,
+  isRateLimited,
   type GameLines,
   type MarketKey,
   type QuotaStatus,
@@ -46,6 +47,7 @@ import {
   type VegasGame,
   type VegasProvider,
 } from './types.ts';
+import { RequestPacer } from './pacer.ts';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -213,6 +215,13 @@ export interface SportsGameOddsOptions {
   baseUrl?: string;
   /** Games this far ahead are considered "upcoming". */
   horizonDays?: number;
+  /**
+   * Spaces this instance's requests to the plan's per-minute ceiling.
+   *
+   * Defaults to one at the plan's own numbers. `null` turns pacing off, for a
+   * test whose fake transport has no limit to respect. See `pacer.ts`.
+   */
+  pacer?: RequestPacer | null;
 }
 
 interface SgoPlayer {
@@ -267,9 +276,11 @@ export class SportsGameOddsProvider implements VegasProvider {
   private readonly fetchImpl: FetchLike;
   private readonly baseUrl: string;
   private readonly horizonDays: number;
+  private readonly pacer: RequestPacer | null;
   private quota: QuotaStatus = { remaining: null, used: null, lastRequestAt: null, lastError: null };
 
   constructor(opts: SportsGameOddsOptions) {
+    this.pacer = opts.pacer === undefined ? new RequestPacer() : opts.pacer;
     this.apiKey = opts.apiKey?.trim() || null;
     this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
     this.baseUrl = opts.baseUrl ?? 'https://api.sportsgameodds.com/v2';
@@ -422,6 +433,7 @@ export class SportsGameOddsProvider implements VegasProvider {
 
     const results: { teamId: string; set: RawPropSet }[] = [];
     const unmapped: string[] = [];
+    const refused: string[] = [];
     const seen = new Set<string>();
     let requests = 0;
     let entities = 0;
@@ -443,10 +455,26 @@ export class SportsGameOddsProvider implements VegasProvider {
         continue;
       }
 
-      const body = await this.request<{ data?: SgoEvent[] }>(
-        `/events?leagueID=NFL&type=match&teamID=${encodeURIComponent(providerId)}` +
-          `&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=4`,
-      );
+      /*
+       * A refusal part-way keeps what was already bought.
+       *
+       * It used to throw, and the teams answered before it — paid for — were
+       * thrown away with it. Now the answers so far come back, with the teams
+       * never asked named in `refused`, so the caller can store the one and
+       * ask again for the other.
+       */
+      let body: { data?: SgoEvent[] };
+      try {
+        body = await this.request<{ data?: SgoEvent[] }>(
+          `/events?leagueID=NFL&type=match&teamID=${encodeURIComponent(providerId)}` +
+            `&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=4`,
+        );
+      } catch (err) {
+        if (!isRateLimited(err)) throw err;
+        const all = [...new Set(teamIds)].filter(Boolean);
+        refused.push(...all.slice(all.indexOf(teamId)));
+        break;
+      }
       requests++;
       const events = body.data ?? [];
       entities += Math.max(1, events.length);
@@ -461,7 +489,7 @@ export class SportsGameOddsProvider implements VegasProvider {
       }
     }
 
-    return { results, requests, entities, unmapped };
+    return { results, requests, entities, unmapped, ...(refused.length > 0 ? { refused } : {}) };
   }
 
   /**
@@ -551,6 +579,17 @@ export class SportsGameOddsProvider implements VegasProvider {
   private async request<T>(path: string): Promise<T> {
     if (!this.apiKey) {
       throw new VegasProviderError('no API key configured', this.name, 'auth');
+    }
+    /*
+     * Held, not sent, when the pass has waited all it may.
+     *
+     * The same error and status as the provider's own refusal, on purpose:
+     * everything above this treats the two alike — nothing billed, the rest of
+     * the pass left for the next one. See `isRateLimited`.
+     */
+    if (this.pacer && !(await this.pacer.admit())) {
+      this.quota.lastError = 'rate limited';
+      throw new VegasProviderError('rate limited (held for the next pass)', this.name, 'quota', 429);
     }
     let res: Response;
     try {

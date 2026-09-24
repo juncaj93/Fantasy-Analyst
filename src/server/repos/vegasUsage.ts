@@ -14,7 +14,13 @@ import { budgetView, emptyLedger, monthOf, type BudgetLedger, type BudgetView } 
 import { nowIso, type Database } from '../db.ts';
 
 export type UsageSource = 'weekly' | 'season' | 'manual' | 'schedule';
-export type UsageOutcome = 'fetched' | 'blocked' | 'failed';
+/**
+ * `refused` is the provider (or this app's pacer) saying "not now": a `429`.
+ * Logged, and not counted — the provider's own counter did not move across the
+ * nine refusals of 24 September 2026, while this ledger booked each as spent
+ * and drifted 54 ahead of it by the end of that morning.
+ */
+export type UsageOutcome = 'fetched' | 'blocked' | 'failed' | 'refused';
 
 export interface UsageEntry {
   at: string;
@@ -74,9 +80,9 @@ export class VegasUsageRepo {
       .bind(month, at, entry.source, entry.eventId ?? null, entry.entities, entry.requests, entry.outcome, entry.reason ?? null)
       .run();
 
-    // A blocked call spent nothing, so it is logged but not counted. Counting it
-    // would make the guard tighten itself every time it fired.
-    if (entry.outcome === 'blocked') return;
+    // A blocked or refused call spent nothing, so it is logged but not counted.
+    // Counting it would make the guard tighten itself every time it fired.
+    if (entry.outcome === 'blocked' || entry.outcome === 'refused') return;
 
     await this.db
       .prepare(

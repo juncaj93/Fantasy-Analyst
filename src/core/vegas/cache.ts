@@ -10,7 +10,7 @@
  * returned and explicitly marked stale — never fabricated, never empty.
  */
 
-import type { RawPropSet, VegasProvider } from './types.ts';
+import { isRateLimited, type RawPropSet, type VegasProvider } from './types.ts';
 
 export interface CachedSnapshot {
   provider: string;
@@ -56,6 +56,11 @@ export interface PropsResult {
   ageMinutes: number | null;
   /** Present when a fetch was attempted and failed. */
   error: string | null;
+  /**
+   * The failure was a refusal — "not now" — and was not billed. Set only on a
+   * failed fetch. See `isRateLimited`.
+   */
+  rateLimited?: boolean;
   /** Why the layer did what it did — surfaced in the UI freshness badge. */
   reason: string;
 }
@@ -160,8 +165,10 @@ export async function getPropsWithCache(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const refused = isRateLimited(err) ? { rateLimited: true } : {};
     if (cached) {
       return {
+        ...refused,
         origin: 'stale_cache',
         snapshot: cached,
         stale: true,
@@ -171,6 +178,7 @@ export async function getPropsWithCache(
       };
     }
     return {
+      ...refused,
       origin: 'unavailable',
       snapshot: null,
       stale: true,

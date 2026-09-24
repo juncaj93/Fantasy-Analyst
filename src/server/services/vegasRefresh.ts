@@ -23,7 +23,7 @@ import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
 import { buildFetchPlan, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
-import type { RawPropSet, VegasProvider } from '../../core/vegas/types.ts';
+import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
@@ -187,12 +187,42 @@ export class VegasRefreshService {
 
     let cached = 0;
     const allowance = decision.allowed ? decision.entities : 0;
-    for (const event of plan.events.slice(0, allowance)) {
+    /*
+     * A discovery the provider refused has already said "not now" for this
+     * pass. Asking again for a game straight after it is the burst again.
+     */
+    const planned = discovery.refused ? [] : plan.events.slice(0, allowance);
+    if (discovery.refused && allowance > 0 && plan.events.length > 0) {
+      blocked.push(`${Math.min(allowance, plan.events.length)} game(s) left for the next pass: the provider's per-minute limit`);
+    }
+    for (const [i, event] of planned.entries()) {
       try {
         const result = await getPropsWithCache(event.eventId, this.provider, this.props, {
           now,
           manual: opts.manual ?? false,
         });
+        if (result.rateLimited) {
+          /*
+           * "Not now" ends the pass, and costs nothing.
+           *
+           * Firing the rest into the same limit is what refused seven games in
+           * one second on 24 September 2026, the Patriots among them. The
+           * games not yet asked stay stale, so the next pass plans them first,
+           * and none of this is booked as spent — the provider did not bill it.
+           */
+          await this.usage.record({
+            source: opts.manual ? 'manual' : 'weekly',
+            eventId: event.eventId,
+            entities: 0,
+            requests: 1,
+            outcome: 'refused',
+            reason: result.error ?? 'rate limited',
+          });
+          blocked.push(
+            `${planned.length - i} game(s) left for the next pass: the provider's per-minute limit (${result.error ?? 'rate limited'})`,
+          );
+          break;
+        }
         if (result.origin === 'fresh' && result.snapshot) {
           fetched++;
           spent += 1;
@@ -288,7 +318,7 @@ export class VegasRefreshService {
     budget: BudgetView,
     now: number,
     sink: { errors: string[]; blocked: string[]; manual?: boolean },
-  ): Promise<{ entities: number; requests: number; events: number }> {
+  ): Promise<{ entities: number; requests: number; events: number; refused?: boolean }> {
     /*
      * At most one discovery per TTL, whatever the roster looks like.
      *
@@ -366,12 +396,34 @@ export class VegasRefreshService {
     if (asking.length >= teams.length) {
       await settings.set(SETTING_KEYS.lastVegasSchedule, new Date(now).toISOString());
     }
+    /*
+     * A refused discovery did not ask, so it must not look as though it did.
+     *
+     * The stamp above says "the roster's fixtures have been asked about", and
+     * it holds the next clock off for three days. A `429` part-way means some
+     * teams were never asked, and cost nothing, so the stamp goes back to what
+     * it was and the next pass asks again.
+     */
+    const unstamp = () => settings.set(SETTING_KEYS.lastVegasSchedule, attempted);
     try {
       const result = await fetchTeams.call(this.provider, asking, {
         from,
         to,
         maxEvents: decision.entities,
       });
+      if ((result.refused?.length ?? 0) > 0) {
+        await unstamp();
+        sink.blocked.push(
+          `schedule discovery: ${result.refused!.length} team(s) left for the next pass: the provider's per-minute limit`,
+        );
+        await this.usage.record({
+          source: 'schedule',
+          entities: 0,
+          requests: 1,
+          outcome: 'refused',
+          reason: `rate limited before ${result.refused!.join(', ')}`,
+        });
+      }
 
       /*
        * A team the adapter could not name is said out loud, not swallowed.
@@ -454,9 +506,20 @@ export class VegasRefreshService {
         reason: `${teams.length} roster team(s) -> ${fixtures.length} game(s)`,
       });
 
-      return { entities: result.entities, requests: result.requests, events: fixtures.length };
+      return {
+        entities: result.entities,
+        requests: result.requests,
+        events: fixtures.length,
+        ...((result.refused?.length ?? 0) > 0 ? { refused: true } : {}),
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (isRateLimited(err)) {
+        await unstamp();
+        sink.blocked.push(`schedule discovery left for the next pass: ${message}`);
+        await this.usage.record({ source: 'schedule', entities: 0, requests: 1, outcome: 'refused', reason: message });
+        return { entities: 0, requests: 1, events: 0, refused: true };
+      }
       sink.errors.push(`schedule discovery failed: ${message}`);
       await this.usage.record({ source: 'schedule', entities: 1, requests: 1, outcome: 'failed', reason: message });
       return { entities: 1, requests: 1, events: 0 };

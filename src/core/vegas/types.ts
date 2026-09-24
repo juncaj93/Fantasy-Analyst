@@ -193,6 +193,11 @@ export interface TeamPropsResult {
    * team with no game, and it must be able to reach the surface.
    */
   unmapped?: string[];
+  /**
+   * Teams not asked about because the provider, or this app's pacer, refused
+   * the request. Not billed and not answered: ask again next pass.
+   */
+  refused?: string[];
 }
 
 export interface QuotaStatus {
@@ -236,6 +241,18 @@ export interface VegasProvider {
    */
   getSeasonPlayerMarkets?(season: string, markets?: SeasonMarketKey[]): Promise<SeasonMarketSet>;
   getQuotaStatus?(): QuotaStatus | null;
+}
+
+/**
+ * Whether a provider said "not now", as against "no".
+ *
+ * A `429` — from the provider, or from this app's own pacer holding a request
+ * back — was never billed (the provider's counter did not move across nine of
+ * them on 24 September 2026), and the right response is to stop asking this
+ * pass and ask again on the next.
+ */
+export function isRateLimited(err: unknown): boolean {
+  return err instanceof VegasProviderError && err.status === 429;
 }
 
 export class VegasProviderError extends Error {
