@@ -12,7 +12,7 @@
  *   C. what the provider posts for his game right now, run through this
  *      revision's adapter and expectation so the three can be read side by side.
  *
- * Reads only. Part C is capped at MAX_ENTITIES (default 12) of the month's
+ * Reads only. Part C is capped at MAX_ENTITIES (default 16) of the month's
  * allowance, one per game, and stops if the month is past 2,000. The key is
  * never echoed.
  */
@@ -38,7 +38,7 @@ const { buildScoringProfile } = await import('../src/core/sleeper/scoring.ts');
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
 const KEY = process.env.SPORTSGAMEODDS_API_KEY ?? '';
 const SGO = 'https://api.sportsgameodds.com/v2';
-const MAX_ENTITIES = Number(process.env.MAX_ENTITIES ?? 12);
+const MAX_ENTITIES = Number(process.env.MAX_ENTITIES ?? 16);
 const SKILL = new Set(['QB', 'RB', 'WR', 'TE']);
 
 async function get(path) {
@@ -61,7 +61,12 @@ if (!league) {
   console.log('no league');
   process.exit(0);
 }
-const profile = buildScoringProfile(league.scoringSettings ?? {}, league.rosterPositions ?? []);
+/*
+ * `/api/leagues` does not serve the scoring settings, so part C falls back to
+ * this league's own shape, read off the app's contributions (`rec x 0.5`,
+ * `pass TDs x 6`). Only part C's recomputation uses it.
+ */
+const profile = buildScoringProfile(league.scoringSettings ?? { rec: 0.5, pass_td: 6 }, league.rosterPositions ?? []);
 console.log(`league ${league.name}  recTd=${profile.recTd} rushTd=${profile.rushTd} passTd=${profile.passTd} ppr=${profile.ppr}`);
 
 const [lineup, matchup] = await Promise.all([get(`/api/leagues/${league.id}/lineup`), get(`/api/leagues/${league.id}/matchup`)]);
@@ -90,6 +95,16 @@ for (const [id, card] of Object.entries(matchup.cards ?? {})) {
   sample.set(id, row);
 }
 
+const budget = await get('/api/vegas/budget');
+if (!budget.__error) {
+  console.log('\nlast ten odds purchases (newest first):');
+  for (const r of budget.recent ?? []) {
+    console.log(`  ${r.at}  ${String(r.source).padEnd(9)} ${String(r.outcome).padEnd(8)} event=${r.eventId ?? '-'}  ${String(r.reason ?? '').slice(0, 90)}`);
+  }
+  console.log('next plan:');
+  for (const e of budget.nextPlan?.events ?? []) console.log(`  ${e.eventId}  kickoff=${e.kickoff}  ${e.priority}  ${String(e.reason).slice(0, 100)}`);
+}
+
 console.log(`\n=== A+B. stored total and what the card shows (week ${matchup.week}) ===`);
 console.log('name | pos | team | side | market | stored TD part | chips on card | card detail | pending');
 const teams = new Set();
@@ -113,7 +128,12 @@ if (!KEY) {
   console.log('  SPORTSGAMEODDS_API_KEY is not set — part C skipped.');
   process.exit(0);
 }
+/* Ten requests a minute is the plan's limit; the first run hit it at the eleventh. */
+let lastCall = 0;
 async function sgo(path) {
+  const wait = lastCall + 6_500 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCall = Date.now();
   const res = await fetch(`${SGO}${path}`, { headers: { 'X-Api-Key': KEY, accept: 'application/json' } });
   const text = await res.text();
   try {
