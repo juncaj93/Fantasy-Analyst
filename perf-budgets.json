@@ -16,7 +16,7 @@
       "name": "app JavaScript (gzipped)",
       "match": "assets/*.js",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/demo-*.js",
+      "excludeMatch": "assets/{demo,draft}-*.js",
       "maxGzipBytes": 148600,
       "why": "The one number a phone on a bad connection actually feels. Today ~140KB. Raised from 140KB, deliberately and with the reason attached: the ceiling had 0.2KB of headroom, which is a budget that fails the next commit whatever that commit is, and a number nobody can land under stops being a budget and becomes a coin toss. 148KB keeps roughly a second of 3G as the bound while leaving room to work in. It is not permission to grow: the next lane that needs more should be shrinking this rather than raising it again, and the Draft screen — 2,700 lines, the largest thing in here — is where that work is. Raised from 148KB by the lineup-legality and partial-market round (24 September 2026), by 0.6KB, for +157 bytes of its own: the Team card's empty-slot fill, the fill count on the bench line, and the completeness check the display ladder now runs before it prints a market number. That round had 66 bytes to work in. It moved the missing-markets sentence to the server to get there from +209, and stopped short of cutting unrelated screens owned by other lanes to find the rest; the Draft screen is still where the shrinking work is."
     },
@@ -36,9 +36,16 @@
       "name": "everything the browser must fetch to render (gzipped)",
       "match": "**/*.{js,css,html}",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/demo-*.js",
+      "excludeMatch": "assets/{demo,draft}-*.js",
       "maxGzipBytes": 168000,
       "why": "The total, so splitting one large file into three does not quietly pass three budgets. Demo Mode is the one thing left out, because it is genuinely not on the render path — and it has a ceiling of its own directly below, so the exclusion buys nobody any headroom."
+    },
+    {
+      "name": "Draft screen, fetched only while a draft is ahead (gzipped)",
+      "match": "assets/draft-*.js",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 21000,
+      "why": "The Draft screen and the mock draft behind it. `App.tsx` reaches them only through `lazy()`, and draws the screen only while `draftVisible` holds (see `web/draftGate.ts`), so outside the few weeks before a draft no page load fetches this at all. Split out of the entry chunk on 24 September 2026, which took ~14KB off every page load; it is budgeted here rather than excluded, for the same reason Demo Mode is. Today ~18.6KB. Anything the Draft screen shares with another screen stays in the entry chunk, which is correct: it is the other screen's cost."
     },
     {
       "name": "Demo Mode, fetched only when a scenario is opened (gzipped)",
