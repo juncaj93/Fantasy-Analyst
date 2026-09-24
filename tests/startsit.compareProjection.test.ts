@@ -35,7 +35,7 @@ import { compareStartSit, evaluatePlayer } from '../src/core/startsit/engine.ts'
 import { weeklyProjection } from '../src/core/startsit/projection.ts';
 import { EXPECTED_GAMES } from '../src/core/nfl/expectedGames.ts';
 import { buildScoringProfile } from '../src/core/sleeper/scoring.ts';
-import { candidate, signalWithNet } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, signalWithNet } from './helpers/startsit.ts';
 
 const HALF_PPR = buildScoringProfile({ rec: 0.5 }, ['QB', 'RB', 'WR', 'TE', 'FLEX', 'BN']);
 

@@ -247,6 +247,33 @@ export class PropsRepo implements SnapshotStore {
    * from that row. So `provider` is the newest snapshot's provider by
    * construction, where before it was only accidentally so.
    */
+  /**
+   * When each of these games was last bought, keyed by event.
+   *
+   * The per-game question {@link freshness} cannot answer: that is one number
+   * for the whole table, and the refresh planner was reading it as the age of
+   * every player's lines. See `VegasRefreshService.snapshotAges`.
+   */
+  async newestFetchByEvent(eventIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const unique = [...new Set(eventIds)].filter(Boolean);
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = await this.db
+        .prepare(
+          `SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots
+            WHERE scope = 'week' AND event_id IN (${placeholders})
+            GROUP BY event_id`,
+        )
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      for (const r of rows.results) {
+        if (r['fetched_at'] != null) out.set(String(r['event_id']), String(r['fetched_at']));
+      }
+    }
+    return out;
+  }
+
   async freshness(): Promise<{ fetchedAt: string | null; provider: string | null; events: number }> {
     const row = await this.db
       .prepare(

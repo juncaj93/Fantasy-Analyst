@@ -66,7 +66,7 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './e
 import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
 import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
-import { weeklyProjection, type ProjectionSource } from './projection.ts';
+import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import type { MatchupAssessment } from './defense.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -250,6 +250,16 @@ export interface LineupSwap {
   reason: string;
 }
 
+/** A slot Sleeper has left empty, and the player this lineup puts in it. */
+export interface LineupFill {
+  slot: string;
+  inPlayerId: string;
+  inName: string;
+  /** His figure against an empty slot's nothing. Always positive. */
+  gain: number;
+  reason: string;
+}
+
 export interface LineupRecommendation {
   slots: LineupSlot[];
   /**
@@ -267,6 +277,15 @@ export interface LineupRecommendation {
   undecidable: StartSitEvaluation[];
   /** Changes from the current Sleeper lineup, biggest gain first. */
   swaps: LineupSwap[];
+  /**
+   * Slots Sleeper has left empty that this lineup fills, biggest first.
+   *
+   * Kept apart from {@link swaps} because they are a different sentence: a
+   * fill benches nobody. They used to be forced into the swap list, which is
+   * how an empty DEF slot came out as `Start Carolina Panthers over Rhamondre
+   * Stevenson` — see {@link buildSwaps}.
+   */
+  fills: LineupFill[];
   /** Total recommended points, and the current lineup's total for comparison. */
   recommendedPoints: number;
   currentPoints: number | null;
@@ -399,6 +418,7 @@ export function recommendLineup(
       bench: scored,
       undecidable,
       swaps: [],
+      fills: [],
       recommendedPoints: 0,
       currentPoints: null,
       confidence: 'low',
@@ -536,7 +556,7 @@ export function recommendLineup(
     [...assignment.values()].reduce((total, e) => total + (e.score ?? 0), 0),
   );
 
-  const swaps = buildSwaps(filled, bench, currentStarters, evaluations, minGain, opts.published);
+  const { swaps, fills } = buildSwaps(filled, slots, currentStarters, evaluations, minGain, opts.published);
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -560,7 +580,7 @@ export function recommendLineup(
    * borrowed rows say whose number they are; the genuinely unrankable ones keep
    * the older, stronger promise, which is still true of them.
    */
-  const borrowed = scored.filter((e) => !hasMarket(e) && rankingPoints(e, opts.published) != null);
+  const borrowed = scored.filter((e) => rankingPoints(e, opts.published)?.borrowed === true);
   const unrankable = scored.filter((e) => rankingPoints(e, opts.published) == null);
   if (unpriced && borrowed.length === 0 && scored.length > 0) {
     notes.push(
@@ -641,6 +661,7 @@ export function recommendLineup(
     bench,
     undecidable,
     swaps,
+    fills,
     recommendedPoints,
     currentPoints,
     confidence,
@@ -759,13 +780,13 @@ function applyLineupPreferences(
    * them is the same rule the assignment and the swap card keep, asked here.
    */
   const bench = playable.filter(
-    (e) => !started.has(e.playerId) && !lockedIds.has(e.playerId) && hasMarket(e),
+    (e) => !started.has(e.playerId) && !lockedIds.has(e.playerId) && hasCompleteMarket(e),
   );
   if (bench.length === 0) return notes;
 
   for (const [index, current] of [...assignment.entries()]) {
     if (lockedIds.has(current.playerId)) continue;
-    if (!hasMarket(current)) continue;
+    if (!hasCompleteMarket(current)) continue;
     const spec = slots[index]!;
     const candidates = bench
       .filter((e) => spec.accepts.includes(e.position))
@@ -1180,10 +1201,10 @@ function assignBest(
   return bySlot;
 }
 
-function tryAssign(
-  player: StartSitEvaluation,
+function tryAssign<P extends { position: string }>(
+  player: P,
   slots: SlotSpec[],
-  bySlot: Map<number, StartSitEvaluation>,
+  bySlot: Map<number, P>,
   visited: Set<number>,
 ): boolean {
   // Prefer a free slot before displacing anyone. Both routes produce a lineup
@@ -1237,17 +1258,41 @@ function tryAssign(
  * settle close calls in the ordering, and quoting a reader a number two points
  * below the difference between the two figures on his screen would be a second
  * contradiction in place of the first.
+ *
+ * ## Every sentence has to be a lineup Sleeper will accept
+ *
+ * The outgoing player used to be "the weakest benched starter the slot
+ * accepts, or failing that the weakest benched starter at all". The fallback
+ * was there for real reshuffles — a back into RB replacing a receiver, with the
+ * displaced back sliding to FLEX — but it asked nothing, so it also paired
+ * players no arrangement can exchange. Measured on production on 24 September
+ * 2026, with Sleeper's DEF slot empty:
+ *
+ *     swap  slot DEF  in Carolina Panthers (DEF)  out Rhamondre Stevenson (RB)  +8.83
+ *
+ * printed under Stevenson's FLEX row while the DEF row beneath it read
+ * "Nobody eligible yet". A defence cannot play FLEX, and filling DEF benches
+ * nobody. The same pass then had Stevenson marked as used, so the change the
+ * optimiser actually wanted at FLEX — Tyler Allgeier for him — was never
+ * offered at all.
+ *
+ * So both halves are now asked of the lineup rather than the label, with a
+ * matching over the league's own slots ({@link seatable}): a player who fits
+ * a slot left empty is a {@link LineupFill} and names nobody, and a swap names
+ * only a starter whose seat the incoming player can take in some legal
+ * arrangement. Nothing in it knows what a defence or a flex is.
  */
 function buildSwaps(
   filled: LineupSlot[],
-  bench: StartSitEvaluation[],
+  slots: SlotSpec[],
   currentStarters: Set<string>,
   evaluations: StartSitEvaluation[],
   minGain: number,
   published?: ReadonlyMap<string, number>,
-): LineupSwap[] {
+): { swaps: LineupSwap[]; fills: LineupFill[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
+  const positionOf = (id: string): string => byId.get(id)?.position ?? '';
 
   // Anyone starting now who is not in the recommendation is a candidate to sit.
   // Undecidable players are excluded: their score is unknown, so a swap against
@@ -1259,7 +1304,17 @@ function buildSwaps(
     .sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
 
   const swaps: LineupSwap[] = [];
+  const fills: LineupFill[] = [];
   const used = new Set<string>();
+
+  /*
+   * The lineup as the reader would have it after the changes made so far.
+   *
+   * Every sentence below is checked against it rather than against a slot
+   * label, which is the whole of the fix — see the docblock above.
+   */
+  const lineup = new Set(currentStarters);
+  const seated = (ids: Iterable<string>): number => seatable([...ids].map(positionOf), slots);
 
   for (const slot of filled) {
     if (slot.playerId == null || slot.alreadyStarting) continue;
@@ -1268,9 +1323,50 @@ function buildSwaps(
     const incomingBasis = rankingPoints(incoming, published);
     if (incomingBasis == null) continue;
 
-    const outgoing = sitting.find(
-      (e) => !used.has(e.playerId) && slot.accepts.includes(e.position),
-    ) ?? sitting.find((e) => !used.has(e.playerId));
+    const before = seated(lineup);
+
+    /*
+     * A slot Sleeper has left empty is filled, not swapped.
+     *
+     * Adding him seats one more starter than the lineup already does, so there
+     * is room for him without anybody leaving — which means there is nobody to
+     * name after "over", and a gain measured against whoever happened to be
+     * sitting would be a number about a change nobody needs to make.
+     *
+     * Only against a lineup the caller actually gave. With none, every slot
+     * would read as empty, and "we were not told" is not "Sleeper is empty".
+     */
+    if (currentStarters.size > 0 && seated([...lineup, incoming.playerId]) > before) {
+      const gain = round2(incomingBasis.points);
+      if (gain < minGain) continue;
+      lineup.add(incoming.playerId);
+      fills.push({
+        slot: slot.slot,
+        inPlayerId: incoming.playerId,
+        inName: incoming.name,
+        gain,
+        reason: `${slot.slot} is empty in your Sleeper lineup`,
+      });
+      continue;
+    }
+
+    /*
+     * Otherwise somebody sits, and only somebody whose seat he can take.
+     *
+     * "Can take" means the lineup with the one swapped for the other still
+     * seats every starter it did before — directly, or with the others moving
+     * between slots that accept them, which is how a back going into RB can
+     * replace a receiver when the displaced back slides to FLEX. A starter
+     * whose place no legal arrangement can give him is not a candidate at
+     * all, however few points he has.
+     */
+    const legal = sitting.filter((e) => {
+      if (used.has(e.playerId)) return false;
+      const after = [...lineup].filter((id) => id !== e.playerId);
+      after.push(incoming.playerId);
+      return seated(after) >= before;
+    });
+    const outgoing = legal.find((e) => slot.accepts.includes(e.position)) ?? legal[0];
     if (!outgoing) continue;
 
     /*
@@ -1283,6 +1379,8 @@ function buildSwaps(
     const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
     if (gain < minGain) continue;
     used.add(outgoing.playerId);
+    lineup.delete(outgoing.playerId);
+    lineup.add(incoming.playerId);
 
     swaps.push({
       slot: slot.slot,
@@ -1295,8 +1393,22 @@ function buildSwaps(
     });
   }
 
-  void bench;
-  return swaps.sort((a, b) => b.gain - a.gain);
+  return {
+    swaps: swaps.sort((a, b) => b.gain - a.gain),
+    fills: fills.sort((a, b) => b.gain - a.gain),
+  };
+}
+
+/**
+ * How many of these players the league's slots can seat at once.
+ *
+ * {@link tryAssign}'s matching, the one the lineup itself is built with, so
+ * "legal" means one thing in this file. Nothing about points: this answers
+ * only whether a set of players is a lineup a league will accept.
+ */
+function seatable(positions: string[], slots: SlotSpec[]): number {
+  const bySlot = new Map<number, { position: string }>();
+  return positions.filter((position) => tryAssign({ position }, slots, bySlot, new Set<number>())).length;
 }
 
 function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation): string {
@@ -1326,6 +1438,16 @@ function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation):
  */
 function hasMarket(evaluation: StartSitEvaluation): boolean {
   return evaluation.expectation?.points != null;
+}
+
+/**
+ * A market with every line his position is priced on — see `marketIsComplete`.
+ *
+ * What the ranking and the preference pass ask. {@link hasMarket} stays for the
+ * one sentence that is about whether any book has quoted the roster at all.
+ */
+function hasCompleteMarket(evaluation: StartSitEvaluation): boolean {
+  return hasMarket(evaluation) && marketIsComplete(evaluation);
 }
 
 /**
@@ -1384,10 +1506,20 @@ function rankingPoints(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
 ): { points: number; borrowed: boolean } | null {
-  if (hasMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
+  if (hasCompleteMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
   const figure = published?.get(evaluation.playerId);
-  if (figure == null || !Number.isFinite(figure)) return null;
-  return { points: Math.max(0, figure), borrowed: true };
+  if (figure != null && Number.isFinite(figure)) return { points: Math.max(0, figure), borrowed: true };
+  /*
+   * A partial market, and nobody published him: the partial score, as before.
+   *
+   * Reached by every caller that passes no published map — the trade engine's
+   * lineups are all of them — so their ordering is exactly what it was. Where a
+   * published figure exists, the Team screen now ranks on it instead, because
+   * on 24 September 2026 a 0.75 built from a touchdown line alone was benching
+   * a back whose published week was a whole game.
+   */
+  if (hasMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
+  return null;
 }
 
 /** The same, already discounted, which is the form the ordering uses. */

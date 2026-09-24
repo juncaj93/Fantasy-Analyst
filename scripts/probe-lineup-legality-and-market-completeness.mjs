@@ -151,6 +151,10 @@ if (lineup.__error || roster.__error) {
   if ((lineup.swaps ?? []).length === 0) console.log('    (none)');
   console.log(`  ${illegal} swap(s) pair two players who cannot share the slot named`);
 
+  console.log('\n  empty Sleeper slots the lineup fills (slot | in | gain) — absent before lineup@2:');
+  for (const f of lineup.fills ?? []) console.log(`    ${String(f.slot).padEnd(6)} in ${who(f.inPlayerId).padEnd(30)} +${f.gain}`);
+  if ((lineup.fills ?? []).length === 0) console.log(lineup.fills ? '    (none)' : '    (field not served by this deployment)');
+
   const rows = buildLineupVerdicts({
     rosterPositions: roster.rosterPositions ?? league.rosterPositions ?? [],
     starterIds: (roster.starters ?? []).map((p) => p.playerId),

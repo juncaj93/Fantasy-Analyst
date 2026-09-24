@@ -19,8 +19,8 @@ import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scori
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { CORRELATION, opponentExposure } from '../src/core/startsit/correlation.ts';
 import { player } from './helpers/players.ts';
+import { pricedCandidate } from './helpers/startsit.ts';
 import type { StartSitInput } from '../src/core/startsit/engine.ts';
-import type { PlayerProp } from '../src/core/vegas/types.ts';
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -42,22 +42,11 @@ function candidate(
   points: number,
   game: { team: string; opponent: string },
 ): StartSitInput {
-  const market = position === 'QB' ? 'pass_yards' : 'receiving_yards';
-  const line = position === 'QB' ? points / 0.04 : points * 10;
-  const props: PlayerProp[] = [
-    {
-      playerId: id,
-      sourcePlayerName: name,
-      market,
-      line,
-      overPrice: -110,
-      underPrice: -110,
-      bookCount: 3,
-      consensusMethod: 'median',
-      books: ['a', 'b', 'c'],
-      impliedProbability: null,
-    },
-  ];
+  /*
+   * Priced on his whole board: the pass only moves a player whose market is
+   * complete, so a one-line fixture would test that guard rather than this.
+   */
+  const { props } = pricedCandidate(id, name, position, points);
   return {
     player: player({ id, fullName: name, position, team: game.team }),
     props,
