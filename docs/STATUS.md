@@ -3907,3 +3907,35 @@ next pass rather than firing them into the same limit), and record a
 rate-limited answer as refused, not spent. Worth checking at the same time
 whether a manual pass needs the full schedule re-buy when the schedule is only
 hours old.
+
+## Bundle relief: the Draft screen loads only while a draft is ahead, and Demo Mode is a placeholder (done)
+
+Two changes, measured separately with `npm run perf:budget` (gzipped):
+
+| | before | after Draft split | after Demo trim |
+| --- | --- | --- | --- |
+| app JavaScript (render path) | 148.1 kB | 131.2 kB | 124.3 kB |
+| everything needed to render | 166.2 kB | 149.3 kB | 142.4 kB |
+| Draft screen (`draft-*.js`, new line) | in the entry | 18.6 kB | 20.0 kB |
+| Demo Mode (`demo-*.js`) | 164.2 kB | 164.2 kB | 25.9 kB |
+
+**Draft screen.** `App.tsx` reaches `DraftScreen` through `lazy()`, and Vite
+names the chunk `draft-*.js` so it is budgeted on its own line. The app used to
+land on Draft and mount it for one render on every page load, before the
+overview said the draft was over, which fetched its code and a board. It now
+waits for the overview and draws the screen only while
+`overview.season.draftVisible` holds (`web/draftGate.ts`). That flag is
+`resolveSeasonPhase`, the answer hardened after the 30 August untimed-draft
+incident; no second completion check exists. The draft board and draft sync are
+only ever requested by the Draft screen, so not drawing it is the whole data
+gate. Tests: `tests/seasonPhase.test.ts`, "the Draft screen is fetched exactly
+while the tab is shown".
+
+**Demo Mode.** One in-season Sunday from captured responses
+(`core/demo/placeholder/`). The draft-board demo and the other scenarios are
+gone from the browser. The old engine-driven scenarios remain as the test
+fixture harness only. See `docs/DEMO_MODE.md` for how to demo a new feature.
+
+The part of the main bundle that fell in the Demo step is real: modules the
+entry shares with the old demo (eligibility, the health model, team tables)
+kept every export the demo's engines used, and those went with the engines.

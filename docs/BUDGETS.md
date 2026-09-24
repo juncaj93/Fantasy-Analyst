@@ -26,11 +26,12 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 140 kB | 128 kB |
-| app CSS | 20 kB | 14 kB |
+| app JavaScript | 148.6 kB | 124 kB |
+| app CSS | 20 kB | 16.5 kB |
 | HTML shell | 4 kB | 1.6 kB |
-| everything needed to render | 160 kB | 144 kB |
-| Demo Mode, fetched only when opened | 150 kB | 140 kB |
+| everything needed to render | 168 kB | 142 kB |
+| Draft screen, fetched only while a draft is ahead | 24 kB | 20 kB |
+| Demo Mode, fetched only when opened | 32 kB | 26 kB |
 
 Both columns are read from `perf-budgets.json` and `npm run perf:report`
 respectively; the second is a snapshot and will drift, which is why the command
@@ -43,8 +44,11 @@ pass three budgets. Each file is gzipped **individually** and then summed,
 because that is how a browser fetches them — measuring the concatenation would
 report a compression ratio no client will ever see.
 
-**One thing is excluded from the render-path budgets, and it is capped
-separately.** Demo Mode ships as `assets/demo-*.js` — a name `vite.config.ts`
+**Two things are excluded from the render-path budgets, and each is capped
+separately.** The Draft screen ships as `assets/draft-*.js`: `App.tsx` reaches
+it only through `lazy()`, and draws it only while the season says a draft is
+ahead (`web/draftGate.ts`, which reads the same `draftVisible` that puts the tab
+in the bar), so for most of the year no page load fetches it. Demo Mode ships as `assets/demo-*.js` — a name `vite.config.ts`
 assigns deliberately — and no page load can fetch any of it: every path to it is
 a dynamic import behind Settings or an explicit `?demo=`. Counting it against
 "everything the browser must fetch to render" would make that number describe

@@ -41,8 +41,3 @@ export async function loadScenarioData(scenario: DemoScenario): Promise<Scenario
   built.set(scenario.id, data);
   return data;
 }
-
-/** Forget everything. Called when Demo Mode is left. */
-export function clearScenarioCache(): void {
-  built.clear();
-}

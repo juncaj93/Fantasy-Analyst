@@ -1,4 +1,14 @@
 /**
+ * The engine-driven demo runtime — no longer shipped to the browser.
+ *
+ * Until 24 September 2026 this was Demo Mode. Demo Mode is now a placeholder
+ * served from captured responses (`../placeholder/`), and nothing in `src/web`
+ * can reach this module. It stays because it is the fixture harness the
+ * support-snapshot tests and `npm run support:fixture` run the production
+ * engines against; see docs/DEMO_MODE.md.
+ *
+ * What follows describes how it behaves for those callers.
+ *
  * The demo's service boundary.
  *
  * Everything the app asks for while a scenario is active comes through
@@ -18,9 +28,6 @@ import { assertAllowedInDemo, DemoWriteBlockedError } from '../guard.ts';
 import { loadScenarioData, type ScenarioData } from '../fixtures/index.ts';
 import type { DemoScenario } from '../types.ts';
 import { handleDemoRequest, type DemoResponse } from './handlers.ts';
-import { buildDraftBoard } from '../../draft/boardBuilder.ts';
-import { boardForClient } from '../../draft/boardWire.ts';
-import { draftBoardSourcesFrom } from './sources.ts';
 
 export type { DemoResponse } from './handlers.ts';
 
@@ -61,31 +68,6 @@ export class DemoRuntime {
       params: parsed.searchParams,
       body,
     });
-  }
-
-  /**
-   * The board as it was before the signal went.
-   *
-   * Only the offline scenario needs this, and it needs it because the thing
-   * being demonstrated is a *production* behaviour: the draft screen keeps a
-   * capture of the last good board in local storage and falls back to it when
-   * the network does not answer. To show that honestly, there has to be a real
-   * capture to fall back to — so the runtime builds one, the caller stores it
-   * through the same cache the live app writes, and the board request then
-   * fails. Nothing is faked in between.
-   *
-   * Returns null for every other scenario.
-   */
-  async offlineCapture(): Promise<{ draftId: string; board: unknown } | null> {
-    if (this.data.freshness.sleeper !== 'unavailable') return null;
-    const draft = this.data.draft;
-    if (!draft) return null;
-    return {
-      draftId: draft.id,
-      // Through the wire projection, because what the live app caches is what
-      // the live app was sent — see `draft/boardWire.ts`.
-      board: boardForClient(await buildDraftBoard(draftBoardSourcesFrom(this.data), draft.id, { limit: 40 })),
-    };
   }
 }
 

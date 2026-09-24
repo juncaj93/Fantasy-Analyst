@@ -1,15 +1,44 @@
 # Demo Mode
 
-A deterministic, read-only view of the real product across states that are hard
-to reach on demand — draft night, a Tuesday waiver run, an injury eight minutes
-before kickoff, a rollover in March, an outage.
+**Settings → Demo Mode**, or `?demo=in-season` on any URL.
 
-It is two things at once: a preview tool, and audit infrastructure. The second
-is the one that shapes every decision below. A demo that showed *approximately*
-what the app does would be worse than no demo, because an audit would then be
-auditing the demo.
+## Now: a placeholder (since 24 September 2026)
 
-**Settings → Demo Mode**, or `?demo=<scenario-id>` on any URL.
+Demo Mode shows one in-season Sunday in a sample league, read-only, so there is
+something representative to look at. Team, Waivers, Matchup, Players and
+Settings draw the real screens over **captured responses**
+(`src/core/demo/placeholder/responses.json`). Draft and Trades answer "not in
+the demo". There is no engine behind it.
+
+It used to be a full rehearsal of every screen, draft board included: twenty-odd
+scenarios run through the production engines. That cost ~164 kB gzipped and
+meant every new screen owed the demo a matching handler. The requirement changed
+to "something representative, plus a cheap place to demo one new feature", and
+the chunk is now ~26 kB.
+
+What did not change: the seam is still `request()` in `web/api.ts`, the
+indicator and picker are the same components, and the read-only rule is still
+enforced twice (in the runtime, and by the server's `fa_demo` cookie guard; §3
+below).
+
+### Demoing a new feature
+
+1. Add a route to `FEATURE_ROUTES` in `src/core/demo/placeholder/runtime.ts`:
+   a path pattern and a function that answers it.
+2. If it needs its own moment in the season, add an entry to `DEMO_SHOWCASES`
+   in `placeholder/index.ts`; the picker lists it with no other change.
+3. Whatever it imports lands in `demo-*.js` and counts against that budget.
+
+The captured responses are not recomputed, so a change to a screen's wire shape
+can leave its demo stale. Re-capture rather than patch by hand.
+
+### The rest of this document
+
+Everything below describes the engine-driven scenarios. They still exist
+(`src/core/demo/registry.ts`, `runtime/`, `fixtures/`), but only as the fixture
+harness the support-snapshot tests and `npm run support:fixture` run the
+production engines against. Nothing in the browser can reach them, and the
+bundle-impact numbers in §9 are historical.
 
 ---
 

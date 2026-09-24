@@ -651,15 +651,10 @@ describe('degraded scenarios lose data, not screens', () => {
     }
   });
 
-  it('offline-draft refuses the board so the cached one is used instead', async () => {
+  it('offline-draft refuses the board', async () => {
     const runtime = await runtimeFor('offline-draft');
     const res = await runtime.request('GET', '/api/drafts/demo-draft-2026/board');
     expect(res.status).toBe(503);
-
-    // And there is a real capture for the screen to fall back to.
-    const capture = await runtime.offlineCapture();
-    expect(capture?.draftId).toBe('demo-draft-2026');
-    expect((capture?.board as DraftBoard).recommendations.length).toBeGreaterThan(0);
   });
 
   it('a stale injury report keeps the designation and loses the practice detail', async () => {

@@ -168,54 +168,31 @@ describe('entering and leaving a scenario', () => {
   it('moves the marker in the same breath as the session, in both directions', async () => {
     expect(currentWorld()).toBe(LIVE_WORLD);
 
-    await enterDemo('draft-mid');
-    expect(demoSession()?.scenario.id).toBe('draft-mid');
-    expect(currentWorld()).toBe('draft-mid');
-
-    await enterDemo('draft-late');
-    expect(demoSession()?.scenario.id).toBe('draft-late');
-    expect(currentWorld()).toBe('draft-late');
+    await enterDemo('in-season');
+    expect(demoSession()?.scenario.id).toBe('in-season');
+    expect(currentWorld()).toBe('in-season');
 
     await exitDemo();
     expect(demoSession()).toBeNull();
     expect(currentWorld()).toBe(LIVE_WORLD);
   });
 
-  it('seeds the offline scenario’s capture into the offline scenario', async () => {
-    await enterDemo('offline-draft');
-
-    // In its own world, where the scenario's own Draft screen will find it.
-    expect(recallBoard(SHARED_DRAFT, { storage, world: 'offline-draft' })).not.toBeNull();
-    // And nowhere else. This is the one thing a scenario writes to the browser.
-    expect(recallBoard(SHARED_DRAFT, { storage, world: LIVE_WORLD })).toBeNull();
-  });
-
-  it('takes the capture with it when it leaves for another scenario', async () => {
-    await enterDemo('offline-draft');
-    expect(recallBoard(SHARED_DRAFT, { storage, world: 'offline-draft' })).not.toBeNull();
-
-    /*
-     * Moving between two scenarios does not pass through `exitDemo`, which is
-     * how the capture used to survive the scenario that made it — and it would
-     * then be sitting at the key the next scenario reads, because there is only
-     * one draft id between them.
-     */
-    await enterDemo('draft-mid');
-
-    expect(recallBoard(SHARED_DRAFT, { storage, world: 'offline-draft' })).toBeNull();
-    expect(recallBoard(SHARED_DRAFT, { storage, world: 'draft-mid' })).toBeNull();
-  });
-
-  it('takes the capture with it when it leaves for live', async () => {
-    // The reader's own board for a real draft, captured before any of this.
+  /*
+   * The offline-draft scenario used to seed a captured board into the cache,
+   * and these tests proved it took it away again. That scenario went with the
+   * draft-board demo (24 September 2026); what is left to prove is the simpler
+   * rule, that a demo writes nothing into the board cache at all.
+   */
+  it('leaves the reader’s own board alone, in and out of a demo', async () => {
     rememberBoard('1234567890', { source: 'the reader’s draft' }, { storage, world: LIVE_WORLD });
 
-    await enterDemo('offline-draft');
+    const before = [...storage.map.keys()];
+
+    await enterDemo('in-season');
+    // The chosen scenario is the one thing a demo stores, and it is not a board.
+    expect([...storage.map.keys()].filter((k) => k !== 'fa.demo.scenario')).toEqual(before);
     await exitDemo();
 
-    expect(recallBoard(SHARED_DRAFT, { storage, world: 'offline-draft' })).toBeNull();
-    expect(recallBoard(SHARED_DRAFT, { storage, world: LIVE_WORLD })).toBeNull();
-    // Untouched. Nothing a demo does is allowed to cost the reader their own.
     expect(recallBoard('1234567890', { storage, world: LIVE_WORLD })?.value).toEqual({
       source: 'the reader’s draft',
     });

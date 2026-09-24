@@ -1,5 +1,11 @@
 /**
- * Every scenario Demo Mode knows about, declared once.
+ * The engine-driven scenarios — no longer shipped to the browser.
+ *
+ * Settings → Demo Mode now lists `../placeholder/index.ts` instead. These stay
+ * as the named fixture worlds the support-snapshot tests and
+ * `npm run support:fixture` build against; see docs/DEMO_MODE.md.
+ *
+ * Every scenario the old Demo Mode knew about, declared once.
  *
  * Metadata only. It is small enough to ship in the main bundle — the Settings
  * list has to name every scenario before one is chosen — and it carries no
@@ -484,5 +490,3 @@ export function selectableScenarios(): DemoScenario[] {
   return DEMO_SCENARIOS.filter((s) => s.awaiting == null);
 }
 
-/** The default a reader lands on when they turn Demo Mode on. */
-export const DEFAULT_SCENARIO_ID = 'draft-mid';
