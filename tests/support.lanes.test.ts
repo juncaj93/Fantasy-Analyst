@@ -25,7 +25,7 @@ import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scori
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
 import { findRedactionViolations } from '../src/core/support/redaction.ts';
 import { findLossyValues } from '../src/core/support/lossless.ts';
-import { candidate, defence } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, defence } from './helpers/startsit.ts';
 import type { StartSitInput } from '../src/core/startsit/engine.ts';
 import type { LeagueRecord, RosterRecord } from '../src/core/sleeper/types.ts';
 import type { DstPlanSources } from '../src/core/dst/assemble.ts';

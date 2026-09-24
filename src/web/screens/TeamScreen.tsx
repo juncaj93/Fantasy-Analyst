@@ -379,7 +379,7 @@ export function TeamScreen({
    */
   const benchSummary = useMemo(() => {
     if (!lineup?.found) return null;
-    const count = lineup.swaps.length;
+    const count = lineup.swaps.length + (lineup.fills?.length ?? 0);
     if (count === 0) return 'No better option';
     return `${count} strong alternative${count === 1 ? '' : 's'}`;
   }, [lineup]);
@@ -1812,6 +1812,18 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
    * is the first one rather than a new judgement made here.
    */
   const [best = null] = lineup.swaps;
+  /*
+   * An empty slot is a change too, and usually the bigger one.
+   *
+   * Carried apart from the swaps because it names nobody to bench; see
+   * `LineupFill`. It leads when it is worth more than the best swap, which is
+   * the same biggest-gain-first rule the swap list already follows.
+   */
+  const [fill = null] = lineup.fills ?? [];
+  const change =
+    fill != null && (best == null || fill.gain >= best.gain)
+      ? { ...fill, tail: `at ${fill.slot}, empty in Sleeper`, testId: 'lineup-fill' }
+      : best && { ...best, tail: `over ${best.outName}`, testId: 'lineup-swap' };
   const risks = lineup.lateSwapRisks ?? [];
   const material = risks.filter((r) => r.starting);
 
@@ -1822,7 +1834,7 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
         <LineupSourcing lineup={lineup} />
       </div>
 
-      {best == null ? (
+      {change == null ? (
         <div className="faint" data-testid="lineup-verdict">
           {lineup.currentPoints == null
             ? 'No changes to suggest from what is known so far.'
@@ -1845,13 +1857,13 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
          * actually actionable. The full recommended lineup is that list of rows.
          * Repeating both above them was the card competing with the screen.
          */
-        <div className="lineup-change" data-testid="lineup-swap">
+        <div className="lineup-change" data-testid={change.testId}>
           <span className="lineup-change-names">
-            Start <strong>{best.inName}</strong> over {best.outName}
+            Start <strong>{change.inName}</strong> {change.tail}
           </span>
           <span className="lineup-change-meta">
-            <span className="lineup-change-gain">+{best.gain}</span>
-            <span className="lineup-change-slot">{best.slot}</span>
+            <span className="lineup-change-gain">+{change.gain}</span>
+            <span className="lineup-change-slot">{change.slot}</span>
           </span>
         </div>
       )}

@@ -11,6 +11,7 @@ import { emptySignal } from '../../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../../src/core/evidence/types.ts';
 import type { StartSitInput } from '../../src/core/startsit/engine.ts';
 import type { PlayerProp } from '../../src/core/vegas/types.ts';
+import { EXPECTED_MARKETS } from '../../src/core/startsit/expectation.ts';
 import { player } from './players.ts';
 
 export function candidate(
@@ -25,6 +26,8 @@ export function candidate(
     team?: string;
     kickoff?: string | null;
     now?: string | Date;
+    /** Post his position's whole board. See {@link pricedCandidate}. */
+    fullBoard?: boolean;
   } = {},
 ): StartSitInput {
   const props: PlayerProp[] = [];
@@ -44,6 +47,29 @@ export function candidate(
       books: ['a', 'b', 'c'],
       impliedProbability: null,
     });
+    /*
+     * The rest of his position's board, posted and worth nothing.
+     *
+     * A real priced player carries every market his position is priced on,
+     * and a player carrying one of them is the partial market that
+     * `marketIsComplete` refuses to print as a week. Zero lines keep the total
+     * exactly `points`, so every figure a test asserts is unchanged.
+     */
+    for (const other of extra.fullBoard ? (EXPECTED_MARKETS[position] ?? []) : []) {
+      if (other === market) continue;
+      props.push({
+        playerId: id,
+        sourcePlayerName: name,
+        market: other,
+        line: other === 'anytime_td' ? null : 0,
+        overPrice: -110,
+        underPrice: -110,
+        bookCount: 3,
+        consensusMethod: 'median',
+        books: ['a', 'b', 'c'],
+        impliedProbability: other === 'anytime_td' ? 0 : null,
+      });
+    }
   }
   return {
     player: player({ id, fullName: name, position, team: extra.team ?? 'NE' }),
@@ -54,6 +80,21 @@ export function candidate(
     ...(extra.kickoff === undefined ? {} : { kickoff: extra.kickoff }),
     ...(extra.now === undefined ? {} : { now: extra.now }),
   };
+}
+
+/**
+ * {@link candidate}, with every market his position is priced on posted.
+ *
+ * The shape a real priced player has on a Sunday. `candidate` posts a single
+ * line, which since `marketIsComplete` is a *partial* market: real, and not a
+ * projection. Tests about what the screens print for a priced player use this;
+ * tests about ranking arithmetic keep `candidate`, whose scores they were
+ * written against. The extra lines are worth nothing, so the total is still
+ * exactly `points`.
+ */
+export function pricedCandidate(...args: Parameters<typeof candidate>): StartSitInput {
+  const [id, name, position, points, extra = {}] = args;
+  return candidate(id, name, position, points, { ...extra, fullBoard: true });
 }
 
 /** A tally with a chosen net, for the recent-news component. */

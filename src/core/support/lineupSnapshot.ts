@@ -256,7 +256,7 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
     compared: [
       { what: 'starting slots', count: output.slots.length },
       { what: 'players evaluated', count: inputs.startSit.inputs.length },
-      { what: 'recommended changes', count: output.swaps.length },
+      { what: 'recommended changes', count: output.swaps.length + (output.fills?.length ?? 0) },
     ],
     differences,
     distillation: [],

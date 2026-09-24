@@ -39,5 +39,12 @@ import { composeEngineVersion } from '../engineVersion.ts';
 /** The player evaluator. Four surfaces read it; see the note above. */
 export const STARTSIT_ENGINE_VERSION = 'startsit@1';
 
-/** The optimiser, and the weekly intelligence pass layered onto it. */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@1', STARTSIT_ENGINE_VERSION);
+/**
+ * The optimiser, and the weekly intelligence pass layered onto it.
+ *
+ * `lineup@2`, 24 September 2026: an empty slot is a fill rather than a swap,
+ * a swap names only a starter the incoming player can legally replace, and a
+ * player whose market is missing lines ranks on his published figure where
+ * one exists. Scores are unchanged, which is why `startsit@1` is.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@2', STARTSIT_ENGINE_VERSION);

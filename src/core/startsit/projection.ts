@@ -120,7 +120,7 @@ export interface ProjectableEvaluation {
    * **absent is treated exactly like null**: a projection this module cannot
    * confirm has a market underneath it is not a projection.
    */
-  expectation?: { points: number | null } | null;
+  expectation?: { points: number | null; missingMarkets?: readonly string[] } | null;
   /** The scored components. Absent means the availability charge cannot be found. */
   components?: { key: string; value: number; unknown: boolean }[];
 }
@@ -156,10 +156,12 @@ const UNKNOWN: WeeklyProjection = { points: null, source: null };
  * player nobody has priced is a gap in coverage, and the two must never look the
  * same.
  *
- * "Sufficient market coverage" is not re-decided here. `evaluatePlayer` already
- * refuses to publish an expectation it cannot stand behind — it returns
- * `points: null` when the markets it needs are missing — so this reads that
- * decision rather than inventing a second threshold that could disagree with it.
+ * **This answers "is there a market", not "is it the whole week".** A player
+ * with one of his position's four markets gets a number here — `evaluatePlayer`
+ * sums whatever was posted — and that is deliberate: it is the definition the
+ * trade engine's "priced" gate is built on, and it must not move. Whether the
+ * number is complete is {@link marketIsComplete}'s question, and the display
+ * ladder and the lineup ranking ask it; see {@link completeMarketProjection}.
  *
  * ## It is the market expectation, and nothing added to it
  *
@@ -200,6 +202,47 @@ export function marketProjection(evaluation: ProjectableEvaluation | null | unde
 }
 
 /**
+ * Whether every market this player's position is priced on is in the number.
+ *
+ * ## Why a market number can be real and still not be a forecast
+ *
+ * `buildExpectation` sums whichever markets a book has posted, so a player with
+ * one of four is still handed a total — and until 24 September 2026 that total
+ * was printed as though it were the whole week. Measured on production that
+ * morning, from a Patriots snapshot bought on the Tuesday before most of the
+ * board was up:
+ *
+ *     Rhamondre Stevenson   0.75   anytime TD only      the full board: 8.79
+ *     TreVeyon Henderson    0.69   anytime TD only      the full board: 7.76
+ *     Drake Maye           11.19   no passing-TD line   the full board: 20.21
+ *
+ * Every one of those is a real betting line, correctly converted, and every one
+ * of them is a fraction of the player's week. A partial sum is not a
+ * conservative estimate, it is a different quantity — and nothing on the screen
+ * could tell it apart from a complete one.
+ *
+ * Absent `missingMarkets` counts as complete, so a caller carrying a reduced
+ * view of an evaluation is not quietly demoted. A defence's expectation always
+ * carries an empty list: its one number is its game line, which is either there
+ * or not.
+ */
+export function marketIsComplete(evaluation: ProjectableEvaluation | null | undefined): boolean {
+  return (evaluation?.expectation?.missingMarkets?.length ?? 0) === 0;
+}
+
+/**
+ * {@link marketProjection}, but only when the market is the whole of the week.
+ *
+ * The number the *display* ladder and the lineup's ranking read. It is not
+ * what the trade engine reads: `core/trades` asks {@link marketProjection}
+ * whether a player is priced at all, and a partial market is still a market
+ * there. See `tests/tradeIsolation.partialMarket.test.ts`.
+ */
+export function completeMarketProjection(evaluation: ProjectableEvaluation | null | undefined): number | null {
+  return marketIsComplete(evaluation) ? marketProjection(evaluation) : null;
+}
+
+/**
  * The number a screen may print under the word "projected", and its source.
  *
  * The whole hierarchy, in one place: this app's market-derived projection first,
@@ -229,7 +272,18 @@ export function weeklyProjection(
   published?: number | null,
   preseasonSeasonTotal?: number | null,
 ): WeeklyProjection {
-  const market = marketProjection(evaluation);
+  /*
+   * A partial market does not hold the first rung.
+   *
+   * It drops to the tiers below it, exactly as no market would, and when they
+   * are empty too the answer is unknown rather than the partial sum. The
+   * alternative was to keep the real lines and fill the missing ones from
+   * Rotowire, and it is not available: the feed this app stores is a single
+   * total per player, so there is no Rotowire touchdown figure to borrow
+   * without inventing one — and adding two models' components together is the
+   * unvalidated arithmetic this file already refuses. See `marketIsComplete`.
+   */
+  const market = completeMarketProjection(evaluation);
   if (market != null) return { points: market, source: 'market' };
   if (published != null && Number.isFinite(published)) {
     return { points: Math.max(0, Math.round(published * 100) / 100), source: 'sleeper' };

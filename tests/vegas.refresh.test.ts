@@ -14,6 +14,7 @@ import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { VegasRefreshService } from '../src/server/services/vegasRefresh.ts';
 import { SeasonMarketService } from '../src/server/services/seasonMarketService.ts';
 import { VegasUsageRepo } from '../src/server/repos/vegasUsage.ts';
+import { PropsRepo } from '../src/server/repos/props.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { createTestDb } from './helpers/db.ts';
@@ -185,6 +186,56 @@ describe('a weekly refresh', () => {
     expect(provider.asked).toHaveLength(0);
     expect(provider.teamCalls).toHaveLength(0);
     expect(preview.plan.estimatedEntities).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('how old a player\'s lines are', () => {
+  let db: NodeSqliteDatabase;
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedDemoData(db);
+  });
+
+  /*
+   * His own game's age, not the newest purchase anywhere.
+   *
+   * On 24 September 2026 production held a Patriots snapshot from Tuesday,
+   * bought before most of its board was posted, and never bought it again:
+   * every player's age was read off the newest snapshot of *any* game, so one
+   * purchase for another fixture made the Patriots look minutes old.
+   */
+  it('ages each game on its own, so a stale game is planned again', async () => {
+    const service = new VegasRefreshService(db, new CountingProvider());
+    await service.refresh();
+
+    const before = await service.preview();
+    const priced = before.players.filter((p) => p.eventId != null && p.ageMinutes != null);
+    expect(priced.length, 'the fixture needs a priced game').toBeGreaterThan(0);
+    const staleEvent = priced[0]!.eventId!;
+
+    /* His game was last bought three days ago… */
+    await db
+      .prepare(
+        // A second apart per row: (provider, event, fetched_at) is unique.
+        "UPDATE prop_snapshots SET fetched_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 days', '-' || id || ' seconds') " +
+          "WHERE event_id = ? AND scope = 'week'",
+      )
+      .bind(staleEvent)
+      .run();
+    /* …and some other game was bought a minute ago. */
+    await new PropsRepo(db).put({
+      provider: 'mock',
+      eventId: 'another-game',
+      gameStart: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      fetchedAt: new Date(Date.now() - 60_000).toISOString(),
+      raw: { provider: 'mock', eventId: 'another-game', gameStart: '', fetchedAt: '', quotes: [] } as never,
+    });
+
+    const after = await service.preview();
+    const aged = after.players.filter((p) => p.eventId === staleEvent && p.ageMinutes != null);
+    expect(aged.length).toBeGreaterThan(0);
+    for (const p of aged) expect(p.ageMinutes!).toBeGreaterThan(3 * 1440 - 5);
+    expect(after.plan.events.map((e) => e.eventId)).toContain(staleEvent);
   });
 });
 

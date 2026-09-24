@@ -25,7 +25,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
-import { candidate } from './helpers/startsit.ts';
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../src/core/sleeper/types.ts';
 
 const LEAGUE: LeagueRecord = {

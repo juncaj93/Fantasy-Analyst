@@ -37,7 +37,7 @@ import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/b
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { DST_SCORING_UNSUPPORTED } from '../src/core/sleeper/dstScoring.ts';
 import type { LeagueRecord, RosterRecord, SleeperMatchup } from '../src/core/sleeper/types.ts';
-import { candidate, signalWithNet } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, signalWithNet } from './helpers/startsit.ts';
 
 /** Half PPR with Sleeper's defaults — the live league's shape. */
 const HALF_PPR = buildScoringProfile({ rec: 0.5 }, ['QB', 'RB', 'WR', 'TE', 'BN']);

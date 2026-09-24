@@ -28,7 +28,32 @@ export interface VegasExpectation {
   /** Number of books behind the thinnest market used. */
   minBookCount: number | null;
   notes: string[];
+  /**
+   * Set when some of the position's markets are in the total and some are
+   * not: which are missing, in a sentence for the card's Market line.
+   *
+   * Written here rather than on the card so the wording is decided where the
+   * total is, and so the browser carries a string rather than a vocabulary.
+   * See `marketIsComplete` in `projection.ts` for what a partial total is and
+   * is not allowed to become.
+   */
+  partial?: string;
 }
+
+/**
+ * Names for the markets a partial total is missing, as a reader says them.
+ *
+ * Lower case and not the chip labels (`Pass TDs`), because this is written
+ * into a sentence rather than printed as a label.
+ */
+const MISSING_WORDS: Record<MarketKey, string> = {
+  pass_yards: 'passing yards',
+  pass_tds: 'passing TD',
+  rush_yards: 'rushing yards',
+  receiving_yards: 'receiving yards',
+  receptions: 'receptions',
+  anytime_td: 'touchdown',
+};
 
 /** Markets we expect to exist for each position. */
 export const EXPECTED_MARKETS: Record<string, MarketKey[]> = {
@@ -120,6 +145,9 @@ export function buildExpectation(
     coverage,
     minBookCount: bookCounts.length === 0 ? null : Math.min(...bookCounts),
     notes,
+    ...(contributions.length > 0 && missingMarkets.length > 0
+      ? { partial: `Partial: no ${missingMarkets.map((m) => MISSING_WORDS[m]).join(', ')} line yet` }
+      : {}),
   };
 }
 

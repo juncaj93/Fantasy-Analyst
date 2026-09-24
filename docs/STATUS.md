@@ -3823,3 +3823,59 @@ never to move a projection. It cannot render today because there are no bid rows
 to hang it on. Its last capture was 2026-09-19T09:02Z, and `roster`, `players`,
 `usage`, `schedule`, `nflverse`, `nfl-state` and `trending` are all `degraded`
 at the same timestamp — roughly 66 hours stale.
+
+## A defence is not a flex, and a touchdown line is not a running back's week
+
+Reported with five screenshots on 24 September 2026, both measured on
+production before anything was changed (`scripts/probe-lineup-legality-and-market-completeness.mjs`,
+run through the Probe workflow).
+
+### The swap that named a slot nobody could fill
+
+Sleeper had the DEF slot empty and Rhamondre Stevenson in FLEX. The optimiser
+returned one swap, `slot DEF · in Carolina Panthers · out Rhamondre Stevenson ·
++8.83`, and the Team screen printed it under Stevenson's FLEX row. `buildSwaps`
+chose the outgoing player as "the weakest benched starter the slot accepts, or
+failing that the weakest benched starter at all", and the fallback asked
+nothing about legality. The same pass then had Stevenson used up, so the change
+it wanted at FLEX (Tyler Allgeier for him) was never offered.
+
+Both halves are now asked of the lineup, not the label, with a matching over the
+league's own slots (the optimiser's own `tryAssign`): a player who fits a slot
+Sleeper left empty is a **fill** and names nobody, and a swap names only a
+starter whose seat the incoming player can take in some legal arrangement.
+Checked against a brute-force search in four league shapes
+(`lineup.slotLegality.test.ts`). The Team card leads with a fill when it is worth
+more than the best swap. `lineup@2`.
+
+### The market number that was a quarter of a market
+
+The provider was not the gap. On the fresh board, the Patriots game carried
+rushing yards, receiving yards, receptions and touchdown odds for both backs and
+a passing-TD line for Drake Maye, and this revision's adapter keeps all of them.
+What production held was a snapshot bought at Tuesday's schedule discovery,
+before most of that board was posted, and it was never bought again:
+`VegasRefreshService.snapshotAges` stamped every player with the age of the
+newest snapshot of *any* game, so a Wednesday purchase of the Chiefs game made
+the Patriots look eleven minutes old. Ages are now per game.
+
+| player | shown | built from | the full board |
+|---|---|---|---|
+| Rhamondre Stevenson | 0.75 | anytime TD only | 8.79 |
+| TreVeyon Henderson | 0.69 | anytime TD only | 7.76 |
+| Drake Maye | 11.19 | pass + rush yards, no pass TDs | 20.21 |
+
+And the app printed a partial sum as a week. `marketIsComplete` now decides
+whether a market number may be the projection: a partial one drops to the
+published figure, then the preseason tier, then a dash, and the card's Market
+line keeps the real lines and says which are missing. The Team screen ranks a
+partial-market player on his published figure where one exists.
+
+Fallback, not blend: the stored Rotowire feed is one total per player, so there
+is no Rotowire touchdown figure to borrow without inventing one, and adding two
+models' components is arithmetic this app has never validated.
+
+**Trades are untouched.** `marketProjection` still returns the partial sum and
+`isPriced` still reads it, so "priced" still means a real market number. Nothing
+under `core/trades/` reads the completeness rule, and trade valuations take no
+published figure (`tradeIsolation.partialMarket.test.ts`).

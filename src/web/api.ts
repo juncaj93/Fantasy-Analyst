@@ -1418,6 +1418,15 @@ export interface LineupSwap {
   reason: string;
 }
 
+/** An empty Sleeper slot this lineup fills. Names nobody to bench. */
+export interface LineupFill {
+  slot: string;
+  inPlayerId: string;
+  inName: string;
+  gain: number;
+  reason: string;
+}
+
 /**
  * Whether football is being played right now.
  *
@@ -1462,6 +1471,8 @@ export interface LineupRecommendation {
   bench: StartSitEvaluation[];
   undecidable: StartSitEvaluation[];
   swaps: LineupSwap[];
+  /** Optional: a server from before fills existed sends none. */
+  fills?: LineupFill[];
   recommendedPoints: number;
   currentPoints: number | null;
   confidence: string;

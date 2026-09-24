@@ -30,7 +30,7 @@ import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
-import { VegasEventsRepo } from '../repos/vegasEvents.ts';
+import { VegasEventsRepo, type VegasEventRow } from '../repos/vegasEvents.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { MatchupRepo } from '../repos/matchup.ts';
 import { TrendingRepo } from '../repos/trending.ts';
@@ -652,21 +652,26 @@ export class VegasRefreshService {
     const playerIds = [...tiers.keys()];
 
     const playerRepo = new PlayerRepo(this.db);
-    const [index, ages] = await Promise.all([
+    const [index, window] = await Promise.all([
       playerRepo.listByIds(playerIds),
-      this.snapshotAges(playerIds, now),
+      this.events.teamIndex(
+        new Date(now).toISOString(),
+        new Date(now + HORIZON_DAYS * 86_400_000).toISOString(),
+      ),
     ]);
 
-    const window = await this.events.teamIndex(
-      new Date(now).toISOString(),
-      new Date(now + HORIZON_DAYS * 86_400_000).toISOString(),
-    );
+    const eventOf = new Map<string, VegasEventRow | null>();
+    for (const id of playerIds) {
+      const team = index.get(id)?.team?.toUpperCase() ?? null;
+      eventOf.set(id, team ? (window.get(team) ?? matchTeam(window, team)) : null);
+    }
+    const ages = await this.snapshotAges(eventOf, now);
 
     const out: (PlannedPlayer & { team: string | null })[] = [];
     for (const id of playerIds) {
       const player = index.get(id) ?? null;
       const team = player?.team ? player.team.toUpperCase() : null;
-      const event = team ? (window.get(team) ?? matchTeam(window, team)) : null;
+      const event = eventOf.get(id) ?? null;
       const starter = starters.has(id);
       const status = player?.status ?? null;
       out.push({
@@ -741,15 +746,41 @@ export class VegasRefreshService {
       .filter(Boolean);
   }
 
-  /** Minutes since each player's game was last priced. */
-  private async snapshotAges(playerIds: string[], now: number): Promise<Map<string, number>> {
-    const props = await this.props.latestForPlayers(playerIds);
-    const freshness = await this.props.freshness();
-    const at = freshness.fetchedAt ? Date.parse(freshness.fetchedAt) : NaN;
-    const ageMinutes = Number.isFinite(at) ? (now - at) / 60_000 : null;
+  /**
+   * Minutes since each player's own game was last priced.
+   *
+   * **His** game, and that is the fix. This read `freshness()` — the newest
+   * snapshot of *any* game — and stamped that age on every player with a line
+   * anywhere, so one purchase for one fixture made the whole roster look
+   * minutes old and `buildFetchPlan` skipped every other game as "still
+   * fresh". Measured on production on 24 September 2026: the Patriots game was
+   * last bought at Tuesday's schedule discovery, before the books had posted
+   * yardage for its backs or a passing-TD line for its quarterback, and a
+   * Wednesday-night purchase of the Chiefs game kept it "11 min old" from
+   * then on. Stevenson and Henderson priced at 0.75 and 0.69 off a touchdown
+   * line alone, and Drake Maye at 11.19 with no touchdowns, against 8.79, 7.76
+   * and 20.21 on the board that was actually up.
+   *
+   * A player with no line on the record is still "never fetched", as before:
+   * that is what earns a game its place in the plan when nothing is known.
+   */
+  private async snapshotAges(
+    eventOf: ReadonlyMap<string, VegasEventRow | null>,
+    now: number,
+  ): Promise<Map<string, number>> {
+    const playerIds = [...eventOf.keys()];
+    const eventIds = [...eventOf.values()].map((e) => e?.eventId).filter((id): id is string => id != null);
+    const [props, fetched] = await Promise.all([
+      this.props.latestForPlayers(playerIds),
+      this.props.newestFetchByEvent(eventIds),
+    ]);
     const out = new Map<string, number>();
-    if (ageMinutes == null) return out;
-    for (const id of playerIds) if ((props.get(id)?.length ?? 0) > 0) out.set(id, ageMinutes);
+    for (const id of playerIds) {
+      if ((props.get(id)?.length ?? 0) === 0) continue;
+      const eventId = eventOf.get(id)?.eventId;
+      const at = eventId ? Date.parse(fetched.get(eventId) ?? '') : NaN;
+      if (Number.isFinite(at)) out.set(id, (now - at) / 60_000);
+    }
     return out;
   }
 }

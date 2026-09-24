@@ -109,6 +109,8 @@ export interface WeeklyEvaluationLike {
   expectation?: {
     points: number | null;
     coverage: number;
+    /** Set when lines his position is priced on are missing: which, in words. */
+    partial?: string;
     contributions?: { market: string; line: number | null; points: number; detail: string }[];
   };
   /**
@@ -228,7 +230,15 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
       key: 'market',
       label: 'Market',
       value: `${marketPoints.toFixed(1)} pts`,
-      detail: evaluation.movement?.headline ?? null,
+      /*
+       * A partial market says so, on the line that prints it.
+       *
+       * The projection above no longer uses it — see `marketIsComplete` — but
+       * the lines that do exist are real and worth showing, and `0.8 pts`
+       * beside the word Market with nothing else said is exactly how a
+       * touchdown line alone passed for a running back's week.
+       */
+      detail: evaluation.expectation?.partial ?? evaluation.movement?.headline ?? null,
     });
   } else {
     pending.push('Vegas expectation');

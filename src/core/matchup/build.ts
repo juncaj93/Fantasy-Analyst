@@ -48,7 +48,7 @@ import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY, type ScoringPr
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
-import { marketProjection, weeklyProjection } from '../startsit/projection.ts';
+import { completeMarketProjection, marketProjection, weeklyProjection } from '../startsit/projection.ts';
 import { gameWindowFrom, type GameWindow } from '../nfl/gameWindow.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
@@ -366,7 +366,7 @@ export async function buildMatchupResponse(
    */
   const unpriced = allIds.filter(
     (playerId) =>
-      marketProjection(evaluations.get(playerId)) == null && !Number.isFinite(published.get(playerId) ?? NaN),
+      completeMarketProjection(evaluations.get(playerId)) == null && !Number.isFinite(published.get(playerId) ?? NaN),
   );
   let preseason: ReadonlyMap<string, number> = new Map();
   if (sources.preseasonProjections && unpriced.length > 0) {

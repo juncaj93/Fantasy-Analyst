@@ -32,7 +32,7 @@ import { activeProjection } from '../src/core/matchup/build.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
-import { candidate, signalWithNet } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, signalWithNet } from './helpers/startsit.ts';
 
 /** Half PPR, the shape the live league uses. */
 const PROFILE = buildScoringProfile({ rec: 0.5 }, ['QB', 'RB', 'WR', 'TE', 'BN']);
