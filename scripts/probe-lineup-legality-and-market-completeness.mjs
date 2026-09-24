@@ -40,6 +40,10 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
 
 const { buildLineupVerdicts } = await import('../src/core/startsit/sleeperLineup.ts');
 const { SportsGameOddsProvider } = await import('../src/core/vegas/sportsGameOddsProvider.ts');
+const { buildConsensus } = await import('../src/core/vegas/normalize.ts');
+const { PlayerIndex } = await import('../src/core/identity/index.ts');
+const { buildExpectation } = await import('../src/core/startsit/expectation.ts');
+const { buildScoringProfile } = await import('../src/core/sleeper/scoring.ts');
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
 const KEY = process.env.SPORTSGAMEODDS_API_KEY ?? '';
@@ -75,6 +79,24 @@ console.log(`roster_positions: ${JSON.stringify(league.rosterPositions ?? [])}`)
 
 const vegas = await get('/api/vegas/status');
 console.log(`vegas: provider=${vegas.provider} cached=${vegas.cachedProvider} fetchedAt=${vegas.fetchedAt} events=${JSON.stringify(vegas.events)?.slice(0, 200)}`);
+
+/*
+ * When each game was last bought, from the app's own spend ledger. Free: it is
+ * a read of this app's database, not of the provider.
+ */
+const budget = await get('/api/vegas/budget');
+if (budget.__error) console.log('budget:', budget.__error);
+else {
+  console.log('\nlast ten odds purchases (newest first):');
+  for (const r of budget.recent ?? []) {
+    console.log(`  ${r.at}  ${String(r.source).padEnd(9)} ${String(r.outcome).padEnd(8)} event=${r.eventId ?? '-'}  ${String(r.reason ?? '').slice(0, 90)}`);
+  }
+  console.log('next plan (what a refresh would buy now):');
+  for (const e of budget.nextPlan?.events ?? []) {
+    console.log(`  ${e.eventId}  kickoff=${e.kickoff}  ${e.priority}  ${String(e.reason).slice(0, 100)}`);
+  }
+  console.log(`  skipped players: ${budget.nextPlan?.skipped ?? '?'}`);
+}
 
 // --------------------------------------------------------------------- part 1
 console.log('\n=== 1. the lineup the Team screen is drawn from ===');
@@ -194,7 +216,12 @@ const start = await used();
 console.log(`  month so far: ${start} entities`);
 const from = new Date().toISOString().slice(0, 10);
 const to = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
-const teams = ['NEW_ENGLAND_PATRIOTS_NFL', 'ATLANTA_FALCONS_NFL', 'CINCINNATI_BENGALS_NFL', 'KANSAS_CITY_CHIEFS_NFL'];
+/*
+ * The first run of this probe (24 September, 02:16 UTC) read the Patriots,
+ * Falcons, Bengals and Chiefs games and found every one carrying yardage,
+ * receptions and touchdown markets. The Patriots alone is enough to re-check.
+ */
+const teams = (process.env.PROBE_TEAMS ?? 'NEW_ENGLAND_PATRIOTS_NFL').split(',').filter(Boolean);
 const events = [];
 for (const team of teams) {
   if (events.length >= MAX_ENTITIES) break;
@@ -258,4 +285,40 @@ for (const event of events) {
     if (kept.length === 0 && !Object.values(event.players ?? {}).some((p) => nameOfPlayer({ x: p }, 'x') === want)) continue;
     console.log(`    adapter keeps for ${want}: ${kept.map((q) => `${q.market}=${q.line ?? '-'}@${q.overPrice ?? '-'}`).join(', ') || '(nothing)'}`);
   }
+
+  /*
+   * The rest of the pipeline over the same board: consensus, then the
+   * expectation under this league's scoring. This is what the app would print
+   * if it bought this game now.
+   */
+  const positions = { 'Drake Maye': 'QB', 'Rhamondre Stevenson': 'RB', 'TreVeyon Henderson': 'RB' };
+  const index = new PlayerIndex(
+    WATCH.map((name, i) => ({
+      id: `p${i}`,
+      sleeperPlayerId: null,
+      fullName: name,
+      firstName: name.split(' ')[0],
+      lastName: name.split(' ').slice(1).join(' '),
+      team: 'NE',
+      position: positions[name],
+      status: null,
+      active: true,
+      normalizedName: '',
+      aliases: [],
+    })),
+  );
+  const consensus = buildConsensus(set.quotes, index);
+  const settings = league.scoringSettings ?? null;
+  const profile = settings
+    ? buildScoringProfile(settings, league.rosterPositions ?? [])
+    : buildScoringProfile({ rec: 0.5, pass_td: 6 }, []);
+  console.log(`    scoring: ${settings ? 'the league\'s own settings' : 'fallback half-PPR, 6-pt pass TD'} (passTd=${profile.passTd} ppr=${profile.ppr})`);
+  WATCH.forEach((name, i) => {
+    const props = consensus.filter((p) => p.playerId === `p${i}`);
+    const x = buildExpectation(positions[name], props, profile);
+    console.log(
+      `    fresh-board expectation ${name.padEnd(20)} ${fmt(x.points).padEnd(6)} cov=${Math.round(x.coverage * 100)}% ` +
+        `[${x.contributions.map((c) => `${c.market}→${c.points}`).join(', ')}] missing${JSON.stringify(x.missingMarkets)}`,
+    );
+  });
 }
