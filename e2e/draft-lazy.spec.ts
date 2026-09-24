@@ -39,8 +39,9 @@ test('in season, the Draft screen’s code is never requested', async ({ page })
   for (const name of ['team', 'matchup', 'waivers', 'players', 'setup']) {
     await page.getByTestId(`tab-${name}`).click();
     await expect(page.getByTestId(`tab-${name}`)).toHaveAttribute('aria-current', 'page');
+    // Each screen's first read is back. Not `networkidle`: some screens poll.
+    await expect(page.locator('.app-main .skeleton, .app-main .spinner')).toHaveCount(0);
   }
-  await page.waitForLoadState('networkidle');
   expect(seen, 'a draft-*.js request in season').toEqual([]);
   await page.getByTestId('demo-exit').click();
 });
