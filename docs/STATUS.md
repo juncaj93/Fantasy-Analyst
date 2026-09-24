@@ -3879,3 +3879,31 @@ models' components is arithmetic this app has never validated.
 `isPriced` still reads it, so "priced" still means a real market number. Nothing
 under `core/trades/` reads the completeness rule, and trade valuations take no
 published figure (`tradeIsolation.partialMarket.test.ts`).
+
+### Not fixed here: a manual refresh spends in a burst, and books what it was refused
+
+Found while re-verifying the round above on 24 September 2026, and left for a
+later round by the owner's decision: at 174 of 2,500 for the month it is not
+urgent.
+
+Two manual refreshes (03:32 and 03:55 UTC) each did the same thing. A manual
+pass skips the schedule interval (`vegasRefresh.ts`, the `!sink.manual` check in
+discovery), so it re-bought the whole schedule first: nine requests, nine
+entities. The per-game fetches that followed within the same second hit the
+provider's per-minute limit, and six of six, then three of four, came back
+`rate limited`. The Patriots game, the one the round needed, was refused both
+times.
+
+The refused requests are booked as spent. The failure branch records one entity
+each, on the strength of an earlier measurement that an *empty* answer costs
+one. A rate-limited answer does not: the provider's own counter, read before and
+after, moved 9 and then 10 across the two runs, while the ledger recorded 15 and
+13. The nine refusals were never billed. By the end of the morning the ledger
+read 174 and the provider 120.
+
+The fix is small and belongs in `VegasRefreshService.refresh`: space the
+per-game fetches (or stop at the first `rate limited` and leave the rest for the
+next pass rather than firing them into the same limit), and record a
+rate-limited answer as refused, not spent. Worth checking at the same time
+whether a manual pass needs the full schedule re-buy when the schedule is only
+hours old.
