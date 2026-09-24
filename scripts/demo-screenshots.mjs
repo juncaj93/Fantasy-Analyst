@@ -35,16 +35,11 @@ const WIDTHS = [430, 390, 375, 360];
  * different state on the same one.
  */
 const SHOTS = [
-  { scenario: 'draft-mid', tab: 'draft', name: 'draft-board' },
-  { scenario: 'sunday-pregame', tab: 'team', name: 'team-lineup' },
-  { scenario: 'sunday-pregame', tab: 'matchup', name: 'matchup-pregame-hold' },
-  { scenario: 'matchup-injury-swing', tab: 'matchup', name: 'matchup-best-move' },
-  { scenario: 'matchup-live-close', tab: 'matchup', name: 'matchup-live' },
-  { scenario: 'waivers-tuesday-active', tab: 'waivers', name: 'waivers-claim-plan' },
-  { scenario: 'waivers-tuesday-active', tab: 'team', name: 'team-dst-line' },
-  { scenario: 'trade-window', tab: 'trades', name: 'smart-trades' },
-  { scenario: 'sunday-pregame', tab: 'players', name: 'players' },
-  { scenario: 'playoff-week', tab: 'waivers', name: 'waivers-playoff-dst' },
+  // Demo Mode is one placeholder week now; see core/demo/placeholder/.
+  { scenario: 'in-season', tab: 'team', name: 'team-lineup' },
+  { scenario: 'in-season', tab: 'matchup', name: 'matchup' },
+  { scenario: 'in-season', tab: 'waivers', name: 'waivers' },
+  { scenario: 'in-season', tab: 'players', name: 'players' },
 ];
 
 const CHROMIUM_CANDIDATES = [

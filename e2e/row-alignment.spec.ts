@@ -173,7 +173,7 @@ test.describe('the identity cluster', () => {
    * worth checking rather than assuming.
    */
   test('and on Waivers', async ({ page }) => {
-    await page.goto('/?demo=waivers-tuesday-active');
+    await page.goto('/?demo=in-season');
     await page.getByTestId('tab-waivers').click();
     await expect(page.locator('[data-testid="waiver-row"]').first()).toBeVisible();
     await identityReadsLeftToRight(page, 'waiver-row', 2);

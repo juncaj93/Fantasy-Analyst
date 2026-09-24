@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveSeasonPhase } from '../src/core/sleeper/phase.ts';
+import { shouldDrawDraftScreen } from '../src/web/draftGate.ts';
 
 const LEAGUE = { season: '2026', status: 'pre_draft' };
 
@@ -282,5 +283,81 @@ describe('seasons that do not line up', () => {
     });
     expect(resolved.phase).toBe('preseason');
     expect(resolved.draftVisible).toBe(true);
+  });
+});
+
+/**
+ * Whether the Draft screen's code and board are fetched at all.
+ *
+ * The app stops downloading the Draft screen, and stops asking for a board,
+ * once the draft is over for the season. That gate reads `draftVisible` and
+ * nothing else, so every case above that keeps the tab also keeps the fetch —
+ * these restate the ones that matter most through the gate itself, so a
+ * future change to either half cannot quietly reopen the 30 August failure.
+ */
+describe('the Draft screen is fetched exactly while the tab is shown', () => {
+  const draw = (draftVisible: boolean, over: Partial<Parameters<typeof shouldDrawDraftScreen>[0]> = {}) =>
+    shouldDrawDraftScreen({ seasonKnown: true, draftVisible, chosen: false, ...over });
+
+  it('keeps fetching for an untimed, in-person draft eleven days before kickoff', () => {
+    const resolved = resolveSeasonPhase({
+      state: { season: '2026', seasonType: 'regular', week: 1, seasonStartDate: '2026-09-09' },
+      league: { season: '2026', status: 'pre_draft' },
+      draft: { status: 'pre_draft' },
+      now: '2026-08-30T14:00:00Z',
+    });
+    expect(draw(resolved.draftVisible)).toBe(true);
+  });
+
+  it('keeps fetching for any unfinished draft, whatever the calendar says', () => {
+    for (const status of ['pre_draft', 'paused', 'drafting']) {
+      const resolved = resolveSeasonPhase({
+        state: { season: '2026', seasonType: 'regular', week: 6, seasonStartDate: '2026-09-09' },
+        league: { season: '2026', status: 'pre_draft' },
+        draft: { status },
+        now: '2026-10-14T14:00:00Z',
+      });
+      expect(draw(resolved.draftVisible), `draft status ${status}`).toBe(true);
+    }
+  });
+
+  it('keeps fetching when nothing is known about the season', () => {
+    expect(draw(resolveSeasonPhase({}).draftVisible)).toBe(true);
+  });
+
+  it('stops fetching once Sleeper says the draft is complete', () => {
+    const resolved = resolveSeasonPhase({
+      state: { season: '2026', seasonType: 'pre', week: 3 },
+      league: { season: '2026', status: 'drafting' },
+      draft: { status: 'complete' },
+    });
+    expect(draw(resolved.draftVisible)).toBe(false);
+  });
+
+  it('stops fetching once the regular season is under way', () => {
+    const resolved = resolveSeasonPhase({
+      state: { season: '2026', seasonType: 'regular', week: 3, seasonStartDate: '2026-09-09' },
+      league: { season: '2026', status: 'in_season' },
+      draft: { status: 'complete' },
+      now: '2026-09-24T14:00:00Z',
+    });
+    expect(draw(resolved.draftVisible)).toBe(false);
+  });
+
+  it('starts fetching again for next season\'s draft', () => {
+    const resolved = resolveSeasonPhase({
+      state: { season: '2026', seasonType: 'regular', week: 14 },
+      league: { season: '2027', status: 'pre_draft' },
+      draft: { status: 'pre_draft' },
+    });
+    expect(draw(resolved.draftVisible)).toBe(true);
+  });
+
+  it('fetches nothing before the overview has answered', () => {
+    expect(draw(true, { seasonKnown: false })).toBe(false);
+  });
+
+  it('draws the board for a reader who asked for it, even before the overview answers', () => {
+    expect(draw(false, { seasonKnown: false, chosen: true })).toBe(true);
   });
 });

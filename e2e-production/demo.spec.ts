@@ -12,9 +12,10 @@
  *   1. **Entry and exit work**, through the documented `?demo=` hook and the
  *      indicator's own control — so the audit can drive the deployed site the
  *      same way it drives a local one.
- *   2. **Representative scenarios render the production screens** — a draft
- *      board, a Sunday lineup, a waiver bid and a matchup — from fixture data,
- *      with real rows on them rather than an empty shell.
+ *   2. **The placeholder renders the production screens** — a Sunday lineup,
+ *      a waiver board and a matchup — from captured responses, with real rows
+ *      on them rather than an empty shell. (Demo Mode has been one placeholder
+ *      week since 24 September 2026; see core/demo/placeholder/.)
  *   3. **Live truth is untouched.** The overview is read before a demo, after
  *      one, and after leaving, and the real numbers must be identical. This is
  *      the assertion the whole feature rests on, and it is the one that can
@@ -41,10 +42,9 @@ import { expect, test, type Page } from '@playwright/test';
  * testing the fixture's name rather than the scenario's identity.
  */
 const REPRESENTATIVE = [
-  { id: 'draft-mid', tab: 'draft', rows: 'recommendation-row', label: 'Draft · round 6' },
-  { id: 'sunday-pregame', tab: 'team', rows: 'starter-row', label: 'Sunday, 11:40am' },
-  { id: 'waivers-tuesday-active', tab: 'waivers', rows: 'waiver-row', label: 'Waivers · Tuesday night' },
-  { id: 'matchup-live-close', tab: 'matchup', rows: 'matchup-row', label: 'Matchup · one point in it' },
+  { id: 'in-season', tab: 'team', rows: 'starter-row', label: 'Sunday, 11:40am' },
+  { id: 'in-season', tab: 'waivers', rows: 'waiver-row', label: 'Sunday, 11:40am' },
+  { id: 'in-season', tab: 'matchup', rows: 'matchup-row', label: 'Sunday, 11:40am' },
 ] as const;
 
 /**
@@ -109,7 +109,7 @@ test.describe('Demo Mode on the deployed site', () => {
     await page.goto('/');
     await expect(page.getByTestId('demo-bar')).toHaveCount(0);
 
-    await enter(page, 'draft-mid');
+    await enter(page, 'in-season');
 
     /*
      * §4: conveyed beyond colour, and carrying the scenario's own clock.
@@ -124,7 +124,7 @@ test.describe('Demo Mode on the deployed site', () => {
     await expect(page.getByTestId('demo-scenario')).not.toBeEmpty();
     await expect(page.getByTestId('demo-bar').locator('time')).toHaveAttribute(
       'datetime',
-      '2026-08-31T00:04:00.000Z',
+      '2026-10-11T15:40:00.000Z',
     );
     // A status bar, not a banner.
     expect((await page.getByTestId('demo-bar').boundingBox())!.height).toBeLessThan(64);
@@ -150,9 +150,9 @@ test.describe('Demo Mode on the deployed site', () => {
       await expect(page.getByTestId(`tab-${scenario.tab}`)).toBeVisible();
       await open(page, scenario.tab);
 
-      // Real rows from the real engine, not an empty shell that happens to have
-      // rendered. A lazily imported fixture chunk that failed to load in
-      // production would show up exactly here.
+      // Real rows, not an empty shell that happens to have rendered. A lazily
+      // imported demo chunk that failed to load in production would show up
+      // exactly here.
       await expect(page.getByTestId(scenario.rows).first()).toBeVisible({ timeout: 20_000 });
       expect(await page.getByTestId(scenario.rows).count()).toBeGreaterThan(0);
 
@@ -160,54 +160,6 @@ test.describe('Demo Mode on the deployed site', () => {
       await expect(page.getByTestId('demo-bar')).toBeVisible();
     });
   }
-
-  /**
-   * The matchup scenario, on the numbers rather than on the rows.
-   *
-   * `matchup-live-close` exists to be close, and closeness is the simulator's
-   * conclusion rather than the fixture's claim. If the deployed bundle shipped
-   * a different model — or the fixture chunk and the engine chunk disagreed —
-   * the scoreboard would still render and this would still catch it.
-   */
-  test('matchup-live-close forecasts a genuinely close game in production', async ({ page }) => {
-    await enter(page, 'matchup-live-close');
-    await open(page, 'matchup');
-
-    await expect(page.getByTestId('matchup-score')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('matchup-score')).toHaveAttribute('data-degraded', 'false');
-    await expect(page.getByTestId('matchup-win-mine')).toBeVisible();
-    /* Nine: the eight skill slots and the defence the demo league starts. */
-    await expect(page.getByTestId('matchup-row')).toHaveCount(9);
-
-    /*
-     * No Live Insights element, and the insights themselves still reachable.
-     *
-     * Both halves matter in production and they fail differently: a stale
-     * bundle would still draw the entry point, and a wrongly-pruned one would
-     * drop the data. So the page is checked for the element's absence and the
-     * sheet behind the odds for the rows' presence.
-     */
-    await expect(page.getByTestId('insight-entry')).toHaveCount(0);
-    await expect(page.getByTestId('insight-entry-label')).toHaveCount(0);
-    await page.getByTestId('matchup-win').click();
-    await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('odds-sheet').getByTestId('insight-row').first()).toBeVisible();
-
-    /*
-     * And the scoreboard is the compact one: the two scores meet near the
-     * middle rather than sitting at the card's outer edges. Measured as the gap
-     * between them against the card's own width, so it holds at any width the
-     * suite runs — a stale bundle drawing the old layout puts them a whole card
-     * apart and fails this.
-     */
-    await page.getByTestId('odds-sheet').getByRole('button', { name: /done/i }).click();
-    const gap = await page.getByTestId('matchup-score').evaluate((card) => {
-      const mine = card.querySelector('[data-testid="matchup-actual-mine"]')!.getBoundingClientRect();
-      const theirs = card.querySelector('[data-testid="matchup-actual-theirs"]')!.getBoundingClientRect();
-      return (theirs.left - mine.right) / card.getBoundingClientRect().width;
-    });
-    expect(gap, 'the two scores sit near the middle of the card').toBeLessThan(0.3);
-  });
 
   /**
    * The promise the whole feature rests on, made against a real database.
@@ -243,7 +195,7 @@ test.describe('Demo Mode on the deployed site', () => {
    * that is a fault worth failing on rather than accepting.
    */
   test('refuses a hand-made write while a demo is running', async ({ page }) => {
-    await enter(page, 'draft-mid');
+    await enter(page, 'in-season');
 
     const result = await page.evaluate(async () => {
       const res = await fetch('/api/players/1001/my-guy', {

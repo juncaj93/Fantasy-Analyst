@@ -4,6 +4,9 @@ import { fileURLToPath, URL } from 'node:url';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
+/** The modules that make a chunk the Draft screen's own. See `chunkFileNames`. */
+const DRAFT_SCREEN_MODULES = ['/web/screens/DraftScreen.tsx', '/web/components/mockDraft.tsx'];
+
 export default defineConfig({
   plugins: [react()],
   root: r('./src/web'),
@@ -39,10 +42,20 @@ export default defineConfig({
          * say so out loud and cap it separately, instead of either counting it
          * against the shell or quietly ignoring a hashed filename.
          */
+        /*
+         * The Draft screen ships as `draft-*.js`, for the same reason.
+         *
+         * `App.tsx` reaches it only through `lazy()`, and only while the season
+         * says a draft is still ahead (see `draftScreenWanted` there), so for
+         * most of the year no page load fetches it. The prefix lets the budget
+         * count it on its own line rather than against the shell.
+         */
         chunkFileNames: (chunk) =>
           chunk.moduleIds.some((id) => id.includes('/core/demo/') || id.includes('/web/demo/'))
             ? 'assets/demo-[hash].js'
-            : 'assets/[name]-[hash].js',
+            : chunk.moduleIds.some((id) => DRAFT_SCREEN_MODULES.some((m) => id.endsWith(m)))
+              ? 'assets/draft-[hash].js'
+              : 'assets/[name]-[hash].js',
       },
     },
   },

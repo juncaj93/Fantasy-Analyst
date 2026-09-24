@@ -3963,3 +3963,44 @@ partial total, which was a floor all along, reads `180.5+` instead of `~180.5`,
 and the comparability note says "worth about". Tilde approximations in running
 prose (`~17 picks`, `~1 likely bidder`) were left alone: counts in a sentence,
 not a figure a glance takes for a score.
+
+## Bundle relief: the Draft screen loads only while a draft is ahead, and Demo Mode is a placeholder (done)
+
+Two changes, measured separately with `npm run perf:budget` (gzipped):
+
+| | before | after Draft split | after Demo trim |
+| --- | --- | --- | --- |
+| app JavaScript (render path) | 148.1 kB | 131.2 kB | 124.3 kB |
+| everything needed to render | 166.2 kB | 149.3 kB | 142.4 kB |
+| Draft screen (`draft-*.js`, new line) | in the entry | 18.6 kB | 20.0 kB |
+| Demo Mode (`demo-*.js`) | 164.2 kB | 164.2 kB | 25.9 kB |
+
+**Draft screen.** `App.tsx` reaches `DraftScreen` through `lazy()`, and Vite
+names the chunk `draft-*.js` so it is budgeted on its own line. The app used to
+land on Draft and mount it for one render on every page load, before the
+overview said the draft was over, which fetched its code and a board. It now
+waits for the overview and draws the screen only while
+`overview.season.draftVisible` holds (`web/draftGate.ts`). That flag is
+`resolveSeasonPhase`, the answer hardened after the 30 August untimed-draft
+incident; no second completion check exists. The draft board and draft sync are
+only ever requested by the Draft screen, so not drawing it is the whole data
+gate. Tests: `tests/seasonPhase.test.ts`, "the Draft screen is fetched exactly
+while the tab is shown".
+
+Fetching a screen on demand adds a failure a bundled screen never had: the
+fetch. While a draft is ahead the app now fetches the board's code as soon as it
+knows the season, wherever the reader is, so a lost signal later still has the
+board. If the fetch fails anyway (no signal, or a deploy renamed the file under
+an open tab), `components/screenLoad.tsx` shows a notice with Try again and
+Reload instead of React unmounting the whole app. `e2e/draft-lazy.spec.ts`
+watches the network: the chunk arrives mid-draft, is never requested in season,
+and a refused download leaves the toolbar working.
+
+**Demo Mode.** One in-season Sunday from captured responses
+(`core/demo/placeholder/`). The draft-board demo and the other scenarios are
+gone from the browser. The old engine-driven scenarios remain as the test
+fixture harness only. See `docs/DEMO_MODE.md` for how to demo a new feature.
+
+The part of the main bundle that fell in the Demo step is real: modules the
+entry shares with the old demo (eligibility, the health model, team tables)
+kept every export the demo's engines used, and those went with the engines.
