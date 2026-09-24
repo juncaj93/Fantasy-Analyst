@@ -33,6 +33,7 @@
 import { useState, type ReactNode } from 'react';
 import type { HeroInsight, LineupImpact, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
 import { TeamLogo } from './common.tsx';
+import { Estimated } from './estimate.tsx';
 import { ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
 
 /* --------------------------------------------------------------- score card */
@@ -798,13 +799,12 @@ function PlayerHalf({
           published  lighter, italic, dotted underline
           preseason  the same, plus a tilde and a dashed underline
 
-        The tilde is doing the work at 0.68rem. Dotted against dashed is a
-        distinction nobody can make at that size and a colour step would fail
-        contrast, but `~14.2` reads as an approximation at a glance and in a
-        screen reader, which is what the third tier is: the preseason season
-        total over sixteen, with no account of who he plays or whether he is
-        still the starter. The dashed rule and `.tag-season`'s outline are the
-        same vocabulary — a claim about the season among claims about Sunday.
+        The `EST` tag is doing the work at 0.68rem. Dotted against dashed is a
+        distinction nobody can make at that size. It was a tilde until the
+        owner read `~21.7` as `-21.7` on his phone; see `Estimated` for why a
+        word replaced it. The third tier is the preseason season total over a
+        full season, with no account of who he plays or whether he is still
+        the starter, and the whole number it prints is that precision.
 
         All three reach the forecast. On the owner's decision of 10 September
         2026, extended on 15 September, an unpriced starter is simulated on
@@ -830,8 +830,11 @@ function PlayerHalf({
               : `${player.projectedFinal.toFixed(1)} projected, from Rotowire via Sleeper`
           }
         >
-          {player.projectionEstimated ? '~' : ''}
-          {player.projectedFinal.toFixed(1)}
+          {player.projectionEstimated ? (
+            <Estimated value={player.projectedFinal} digits={0} />
+          ) : (
+            player.projectedFinal.toFixed(1)
+          )}
         </span>
       ) : (
         <span

@@ -111,7 +111,7 @@ export interface WeeklyEvaluationLike {
     coverage: number;
     /** Set when lines his position is priced on are missing: which, in words. */
     partial?: string;
-    contributions?: { market: string; line: number | null; points: number; detail: string }[];
+    contributions?: { market: string; line: number | null; points: number; detail: string; probability?: number }[];
   };
   /**
    * The scored components, so the card can report a projection rather than the
@@ -159,8 +159,22 @@ export interface WeeklyContext {
   published?: number | null;
 }
 
-/** How many prop lines are worth the space. Three is one glance. */
-export const MAX_WEEKLY_PROPS = 3;
+/**
+ * How many prop lines the card prints: every market in the total.
+ *
+ * This was three, "one glance", and a running back is priced on four. The
+ * fourth was usually the touchdown, which also had no line and was filtered out
+ * before the cap was reached, so for every receiver in the league the total
+ * beside Market was yards plus catches plus a touchdown and the chips under it
+ * were yards and catches. Rashee Rice, 24 September 2026: `9.6 pts` over
+ * `Rec yards 48.5  Receptions 4.5`, with 2.5 of the 9.6 coming from a 42%
+ * touchdown line nobody could see. Four is the most any position is priced on
+ * (`EXPECTED_MARKETS`), so every part of the number is on the card.
+ */
+export const MAX_WEEKLY_PROPS = 4;
+
+/** The usage model's line, while it has too few games to say anything. */
+export const PENDING_USAGE_MODEL = 'expected points from usage';
 
 /** How many drivers a card states. The rest are in the full breakdown. */
 export const MAX_WEEKLY_DRIVERS = 2;
@@ -267,14 +281,35 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
   for (const extra of evaluation.advanced ?? []) {
     lines.push({ key: extra.key, label: extra.label, value: extra.value, detail: extra.detail ?? null });
   }
-  if ((evaluation.advanced ?? []).length === 0) pending.push('expected points');
+  /*
+   * Named for what it is: the usage model's figure, not the market's.
+   *
+   * It said "expected points", directly under a Market line that is the
+   * market's expected points, so "Not known yet: expected points" read as the
+   * total above it being incomplete. It is `assessXfp` — points implied by
+   * targets and carries — and it waits for enough games to exist.
+   */
+  if ((evaluation.advanced ?? []).length === 0) pending.push(PENDING_USAGE_MODEL);
 
+  /*
+   * Every market in the total, including the one with no line.
+   *
+   * The anytime-TD market is a price, not a line, so it was filtered out here
+   * as "a gap" — while its points were in the Market figure. It prints as its
+   * implied chance. A contribution with neither is still a gap and still left
+   * out.
+   */
   const props = (evaluation.expectation?.contributions ?? [])
-    .filter((c) => c.line != null)
+    .filter((c) => c.line != null || c.probability != null)
     .slice()
     .sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
     .slice(0, MAX_WEEKLY_PROPS)
-    .map((c) => ({ key: `prop-${c.market}`, label: marketLabel(c.market), value: formatLine(c.line), detail: c.detail }));
+    .map((c) => ({
+      key: `prop-${c.market}`,
+      label: marketLabel(c.market),
+      value: c.line != null ? formatLine(c.line) : `${Math.round(c.probability! * 100)}%`,
+      detail: c.detail,
+    }));
 
   const conflicts = [...(evaluation.conflicts ?? [])];
   if (evaluation.injury?.conflictNote) conflicts.push(`Sources disagree — ${evaluation.injury.conflictNote}`);

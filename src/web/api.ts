@@ -1179,7 +1179,7 @@ export interface StartSitEvaluation {
   team: string;
   expectation: {
     points: number | null;
-    contributions: { market: string; line: number | null; points: number; detail: string }[];
+    contributions: { market: string; line: number | null; points: number; detail: string; probability?: number }[];
     missingMarkets: string[];
     coverage: number;
     notes: string[];

@@ -62,6 +62,7 @@ import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCar
 import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
+import { Estimated } from '../components/estimate.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
@@ -2375,12 +2376,13 @@ function CompareMissing({ reason, label, name }: { reason: string; label: string
  * Three tiers and three treatments, and the vocabulary is deliberately the one
  * the Matchup screen already uses rather than a second one invented here: plain
  * for this app's own market-derived figure, a dotted rule for Rotowire's
- * published week, a dashed rule and a leading `~` for a preseason season total
- * over a full season of games. See `core/startsit/projection.ts` for the ladder
+ * published week, a dashed rule and an `EST` tag for a preseason season total
+ * over a full season of games (a tilde until it was read as a minus sign; see
+ * `components/estimate.tsx`). See `core/startsit/projection.ts` for the ladder
  * and `.matchup-player-proj-estimated` for where the marks came from.
  *
  * The mark is the corroboration; the title and the accessible name are the
- * claim. Neither the rule nor the tilde is carrying the meaning on its own,
+ * claim. Neither the rule nor the tag is carrying the meaning on its own,
  * which is the rule this app keeps everywhere colour or ornament says something.
  */
 function CompareProjection({ evaluation }: { evaluation: StartSitEvaluation }) {
@@ -2414,8 +2416,7 @@ function CompareProjection({ evaluation }: { evaluation: StartSitEvaluation }) {
       title={projectionTitle(points, source)}
       aria-label={`${evaluation.name}${spokenProjection(points, source)}.`}
     >
-      {source === 'preseason' ? '~' : ''}
-      {points.toFixed(1)}
+      {source === 'preseason' ? <Estimated value={points} digits={1} /> : points.toFixed(1)}
     </span>
   );
 }

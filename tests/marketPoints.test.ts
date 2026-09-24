@@ -75,7 +75,7 @@ describe('the league’s own scoring, not a generic one', () => {
 describe('what it refuses to invent', () => {
   it('marks a total built from part of the picture rather than printing it bare', () => {
     const partial = points('QB', [{ market: 'season_pass_yards', line: 4050 }], PPR);
-    expect(partial.component.text.startsWith('~')).toBe(true);
+    expect(partial.component.text).toMatch(/^\d[\d.]*\+ pts$/);
     expect(partial.component.missing.length).toBeGreaterThan(0);
     expect(partial.baseline.coverage).toBeLessThan(1);
   });
@@ -83,7 +83,8 @@ describe('what it refuses to invent', () => {
   it('prints a complete total without a qualifier', () => {
     const complete = points('WR', RECEIVER, PPR);
     expect(complete.baseline.missing).toEqual([]);
-    expect(complete.component.text.startsWith('~')).toBe(false);
+    expect(complete.component.text).not.toContain('+');
+    expect(complete.component.text).not.toContain('~');
   });
 
   it('leaves a missing component out of the sum rather than calling it zero', () => {

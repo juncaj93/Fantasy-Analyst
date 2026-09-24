@@ -121,7 +121,7 @@ describe('what earns a line', () => {
       { starting: false },
     );
     expect(card.lines).toHaveLength(0);
-    expect(card.pending).toEqual(['role trend', 'opponent tendency', 'Vegas expectation', 'expected points']);
+    expect(card.pending).toEqual(['role trend', 'opponent tendency', 'Vegas expectation', 'expected points from usage']);
     expect(JSON.stringify(card.lines)).not.toContain('unknown');
   });
 
@@ -190,7 +190,7 @@ describe('the slots the intelligence passes will fill', () => {
     );
     const line = card.lines.find((l) => l.key === 'xfp');
     expect(line?.value).toBe('15.1');
-    expect(card.pending).not.toContain('expected points');
+    expect(card.pending).not.toContain('expected points from usage');
   });
 
   it('is silent about what would change the recommendation until it is told', () => {
