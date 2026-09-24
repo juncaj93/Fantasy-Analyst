@@ -26,7 +26,7 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 148.6 kB | 124 kB |
+| app JavaScript | 135 kB | 124.8 kB |
 | app CSS | 20 kB | 16.5 kB |
 | HTML shell | 4 kB | 1.6 kB |
 | everything needed to render | 168 kB | 142 kB |

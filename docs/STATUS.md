@@ -3977,6 +3977,13 @@ The part of the main bundle that fell in the Demo step is real: modules the
 entry shares with the old demo (eligibility, the health model, team tables)
 kept every export the demo's engines used, and those went with the engines.
 
+Decisions after the round (owner, 24 September 2026): the app JavaScript
+ceiling comes down from 148.6 kB to 135 kB so the freed space cannot fill back
+up unnoticed; the old engine-driven demo code stays, since it only backs test
+tooling; and the placeholder's captured responses, which predate #290's
+touchdown chip, are a small follow-up for whenever Demo Mode is next touched
+(noted in `docs/DEMO_MODE.md`).
+
 ## A refresh waits its turn, and a refusal costs nothing
 
 Found on 24 September 2026 (recorded then as a follow-up and deferred; fixed
@@ -4009,4 +4016,3 @@ by the end of the morning the ledger read 174 against the provider's 120.
 Not changed: a manual pass still re-buys the whole schedule even when it is
 hours old. With spacing it no longer starves the games that follow, and at
 nine entities a press it is cheap next to the 2,500 a month.
-

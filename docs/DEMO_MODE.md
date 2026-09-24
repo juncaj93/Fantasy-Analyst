@@ -32,6 +32,10 @@ below).
 The captured responses are not recomputed, so a change to a screen's wire shape
 can leave its demo stale. Re-capture rather than patch by hand.
 
+**Known stale, not urgent (24 September 2026):** the captures predate #290, so
+the demo's weekly cards do not show the Anytime TD chip and still read "Not
+known yet: expected points". Re-capture the next time Demo Mode is touched.
+
 ### The rest of this document
 
 Everything below describes the engine-driven scenarios. They still exist
