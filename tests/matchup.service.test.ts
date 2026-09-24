@@ -241,7 +241,7 @@ describe('GET /api/leagues/:id/matchup', () => {
     expect(line?.value).toMatch(/pts\/gm$/);
     // A player with no stored usage says so rather than printing a zero.
     expect(cards['1002']!.lines.some((l) => l.key === 'xfp')).toBe(false);
-    expect(cards['1002']!.pending).toContain('expected points');
+    expect(cards['1002']!.pending).toContain('expected points from usage');
   });
 
   /**

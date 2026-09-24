@@ -8706,19 +8706,52 @@ div.matchup-result {
  * It keeps the borrowed treatment and changes the rule from dotted to dashed,
  * matching `.tag-season`'s outline — the vocabulary this app already uses for
  * a claim about the season sitting among claims about this Sunday. The dash is
- * not what a reader will notice at 0.68rem and is not meant to be; the tilde
- * the component prints in front of the figure is. This is the corroborating
+ * not what a reader will notice at 0.68rem and is not meant to be; the `EST`
+ * tag the component prints in front of the figure is. This is the corroborating
  * signal for somebody who has learned the difference, not the announcement of
  * it, and neither one is carrying the meaning alone — the title and the
  * `aria-label` both say it in words.
  *
- * No further step down in opacity. 0.72 against `--text-faint` is already at
- * the floor of what passes contrast at this size, and the honest way to say
- * "weaker still" was never to make it harder to read.
+ * No step down in opacity at all, where the borrowed tier takes 0.72: the tag
+ * is in `--warn`, and faded it would miss contrast at this size. The honest
+ * way to say "weaker still" was never to make it harder to read.
  */
 .matchup-player-proj-estimated {
-  text-decoration-style: dashed;
   font-variant-numeric: tabular-nums;
+  /*
+   * No fade and no rule on the container: the rule belongs to the number and
+   * the tag must stay readable. See `.est-tag`.
+   */
+  opacity: 1;
+  text-decoration: none;
+}
+
+.matchup-player-proj-estimated .est-value,
+.compare-proj-preseason .est-value {
+  text-decoration: underline dashed var(--text-faint);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+/*
+ * The estimate's mark: the word, not a tilde.
+ *
+ * `~21.7` was read as `-21.7` on a real phone (24 September 2026), so the mark
+ * is a word a number cannot carry, set in small capitals in the warning tone —
+ * the tone lets a glance find it, the word says what it is, so colour is not
+ * the only carrier. Upright and bold against the italic figure it qualifies,
+ * so it reads as a label rather than as part of the number. Sized in `em`
+ * so it follows whichever figure it marks: the Matchup row's 0.68rem and the
+ * Compare sheet's body size. See `components/estimate.tsx`.
+ */
+.est-tag {
+  font-style: normal;
+  font-weight: 700;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+  margin-inline-end: 0.25em;
+  text-decoration: none;
 }
 
 /* The spine. Fixed width, so it never moves between rows. */
@@ -10444,7 +10477,7 @@ div.matchup-result {
 
 /*
  * The projection and its provenance, in the same vocabulary the Matchup screen
- * uses. Dotted for Rotowire's week, dashed plus a leading `~` for an August
+ * uses. Dotted for Rotowire's week, dashed plus an `EST` tag for an August
  * season total over sixteen games. See `.matchup-player-proj-borrowed` — this
  * is deliberately the same two marks rather than a second language for one
  * idea, and at this larger type size they are legible without the opacity step
@@ -10463,7 +10496,7 @@ div.matchup-result {
 }
 
 .compare-proj-preseason {
-  text-decoration-style: dashed;
+  text-decoration: none;
 }
 
 .compare-margin {

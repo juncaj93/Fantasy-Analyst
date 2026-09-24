@@ -313,16 +313,19 @@ function pointsComponent(baseline: MarketBaseline): PropComponent | null {
   const partial = baseline.missing.length > 0;
   return {
     /*
-     * `~` marks a floor rather than an estimate.
+     * A trailing `+` marks a floor, which is what this is.
      *
      * Every market this app knows about pays positive points, so a total built
-     * from a subset of them can only rise as the rest arrive. The tilde says
+     * from a subset of them can only rise as the rest arrive. `180.5+` says
      * "there is more than this"; the expanded card says exactly what is absent.
+     * It was a leading `~` until 24 September 2026, when the same tilde on the
+     * Matchup screen was read as a minus sign — and a tilde said "roughly",
+     * which was never the claim.
      * The alternative rules were suppressing the number, which hides something
      * a reader can act on, and printing it bare, which is the precise-looking
      * total the brief rules out.
      */
-    text: `${partial ? '~' : ''}${formatLine(baseline.points)} pts`,
+    text: `${formatLine(baseline.points)}${partial ? '+' : ''} pts`,
     label: 'pts',
     value: baseline.points,
     parts: baseline.contributions.map((c) => ({ market: c.market, line: c.line, points: c.points })),
