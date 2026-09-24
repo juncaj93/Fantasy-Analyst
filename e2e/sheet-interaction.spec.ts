@@ -272,48 +272,52 @@ test.describe('pushing a sheet away', () => {
   test('finishes a won push as an exit the reader can see', async ({ page }) => {
     await openPlayerCard(page);
     const card = page.getByTestId('player-sheet');
-    /*
-     * `null` the moment the card is gone, and quickly.
-     *
-     * `boundingBox()` waits for its element, so calling it on a card that has
-     * just left blocks for the whole action timeout and then fails the test on a
-     * timeout rather than on its subject. Counting first, and capping the wait,
-     * keeps this a sampler.
-     */
-    const topOf = async () => {
-      if ((await card.count()) === 0) return null;
-      const box = await card.boundingBox({ timeout: 250 }).catch(() => null);
-      return box ? Math.round(box.y) : null;
-    };
 
     await handOnCard(page);
-    const started = Date.now();
-    await page.evaluate(() => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      // Past the point of no return and still leaving, with travel left to make.
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.35;
-    });
-
-    const seen: number[] = [];
-    for (let i = 0; i < 14; i++) {
-      const y = await topOf();
-      if (y === null) break;
-      seen.push(y);
-      await page.waitForTimeout(25);
-    }
+    /*
+     * Sampled inside the page, on every frame, from the moment of the push.
+     *
+     * This used to read `boundingBox()` from the test every 25ms. Each read is a
+     * round trip to the browser, and on a loaded WebKit runner the first one
+     * could land after most of the exit had already happened: at 430px on
+     * 24 September 2026 every sample read 901, twice on one PR and again on the
+     * next, and the test reported "did not travel" about a card that had. A
+     * frame callback cannot miss the frames it runs in, so what is asserted is
+     * the motion itself, not how quickly the harness could look at it.
+     *
+     * The push and the first sample are in the same task, so frame zero is
+     * where the push left the card; the recorder stops when the card leaves the
+     * DOM or after 1.5s, whichever is first.
+     */
+    const run = await page.evaluate(
+      () =>
+        new Promise<{ tops: number[]; goneAfterMs: number | null }>((resolve) => {
+          const el = document.querySelector('.sheet-scroller') as HTMLElement;
+          const tops: number[] = [];
+          const started = performance.now();
+          el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.35;
+          const frame = () => {
+            const sheet = document.querySelector('[data-testid="player-sheet"]');
+            const elapsed = performance.now() - started;
+            if (!sheet) return resolve({ tops, goneAfterMs: elapsed });
+            tops.push(Math.round(sheet.getBoundingClientRect().top));
+            if (elapsed > 1500) return resolve({ tops, goneAfterMs: null });
+            requestAnimationFrame(frame);
+          };
+          frame();
+        }),
+    );
 
     await expect(card, 'the card never left').toHaveCount(0);
     await expect(page.getByTestId('sheet-backdrop'), 'the screen behind stayed covered').toHaveCount(0);
     expect(
-      seen.length,
+      run.tops.length,
       'the card was never observed on its way out — it disappeared rather than left',
     ).toBeGreaterThan(1);
+    expect(Math.max(...run.tops), 'the card did not travel downwards on its way out').toBeGreaterThan(run.tops[0]!);
+    expect(run.goneAfterMs, 'the card was still on screen 1.5s after the push had won').not.toBeNull();
     expect(
-      Math.max(...seen),
-      'the card did not travel downwards on its way out',
-    ).toBeGreaterThan(seen[0]!);
-    expect(
-      Date.now() - started,
+      run.goneAfterMs!,
       'the card took too long to finish leaving after the push had already won',
     ).toBeLessThan(900);
     await handOffCard(page);
