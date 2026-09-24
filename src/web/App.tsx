@@ -8,6 +8,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
+import { ScreenLoadBoundary } from './components/screenLoad.tsx';
 import {
   BoardIcon,
   GearIcon,
@@ -39,7 +40,8 @@ import { WaiversScreen } from './screens/WaiversScreen.tsx';
  * `draft-*.js`, budgeted apart from the shell, and a phone that never opens the
  * board never downloads it. See `draftScreenWanted` below for when it is drawn.
  */
-const DraftScreen = lazy(() => import('./screens/DraftScreen.tsx').then((m) => ({ default: m.DraftScreen })));
+const loadDraftScreen = () => import('./screens/DraftScreen.tsx');
+const lazyDraftScreen = () => lazy(() => loadDraftScreen().then((m) => ({ default: m.DraftScreen })));
 
 type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 'setup';
 
@@ -263,6 +265,21 @@ export function App() {
    */
   const seasonKnown = overview != null || error != null;
   const draftScreenWanted = shouldDrawDraftScreen({ seasonKnown, draftVisible, chosen: chosen.current });
+  /*
+   * A new lazy component on retry, because React remembers a failed load for
+   * the life of the old one. See `components/screenLoad.tsx`.
+   */
+  const [DraftScreen, setDraftScreen] = useState(lazyDraftScreen);
+  /*
+   * While a draft is ahead, fetch the board's code as soon as that is known,
+   * wherever the reader is. A reader who opens the app on Team during draft
+   * week and loses signal before tapping Draft still has the board; the
+   * browser shares the one request with the lazy component above.
+   */
+  const prefetchDraft = seasonKnown && draftVisible;
+  useEffect(() => {
+    if (prefetchDraft) void loadDraftScreen().catch(() => {});
+  }, [prefetchDraft]);
 
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
@@ -356,9 +373,11 @@ export function App() {
         {/* Once, on an iPhone, in a Safari tab. Silent everywhere else. */}
         <InstallPrompt />
         {tab === 'draft' && draftScreenWanted ? (
-          <Suspense fallback={<Loading what="your draft" />}>
-            <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} />
-          </Suspense>
+          <ScreenLoadBoundary what="The draft board" onRetry={() => setDraftScreen(lazyDraftScreen)}>
+            <Suspense fallback={<Loading what="your draft" />}>
+              <DraftScreen leagues={leagues} unlocked={unlocked} resetNonce={resetNonce} />
+            </Suspense>
+          </ScreenLoadBoundary>
         ) : null}
         {tab === 'draft' && !draftScreenWanted && !seasonKnown ? <Loading what="your league" /> : null}
         {tab === 'team' ? (

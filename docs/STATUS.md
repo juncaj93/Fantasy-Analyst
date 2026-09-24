@@ -3931,6 +3931,15 @@ only ever requested by the Draft screen, so not drawing it is the whole data
 gate. Tests: `tests/seasonPhase.test.ts`, "the Draft screen is fetched exactly
 while the tab is shown".
 
+Fetching a screen on demand adds a failure a bundled screen never had: the
+fetch. While a draft is ahead the app now fetches the board's code as soon as it
+knows the season, wherever the reader is, so a lost signal later still has the
+board. If the fetch fails anyway (no signal, or a deploy renamed the file under
+an open tab), `components/screenLoad.tsx` shows a notice with Try again and
+Reload instead of React unmounting the whole app. `e2e/draft-lazy.spec.ts`
+watches the network: the chunk arrives mid-draft, is never requested in season,
+and a refused download leaves the toolbar working.
+
 **Demo Mode.** One in-season Sunday from captured responses
 (`core/demo/placeholder/`). The draft-board demo and the other scenarios are
 gone from the browser. The old engine-driven scenarios remain as the test

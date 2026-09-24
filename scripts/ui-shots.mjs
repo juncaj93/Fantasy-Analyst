@@ -173,7 +173,7 @@ const SCREENS = {
   ),
   waivers: {
     async go(page) {
-      await page.goto(`${BASE}/?demo=waivers-tuesday-active`);
+      await page.goto(`${BASE}/?demo=in-season`);
       await page.getByTestId('tab-waivers').click();
       await page.locator('[data-testid="waiver-row"]').first().waitFor({ state: 'visible' });
     },
@@ -185,41 +185,9 @@ const SCREENS = {
       };
     },
   },
-  ...Object.fromEntries(
-    ['matchup-live-leading', 'matchup-live-trailing', 'matchup-live-close', 'matchup-final'].map((id) => [
-      id,
-      matchupScreen(id),
-    ]),
-  ),
-  /* The same two screens under a named draft scenario, to prove they are not
-     tuned to whichever league the seed happens to carry. */
-  ...Object.fromEntries(
-    ['draft-best-ball', 'draft-mid', 'draft-early'].flatMap((id) => [
-      [`${id}-draft`, scenarioScreen(id, null, 'board-list')],
-      [`${id}-team`, scenarioScreen(id, 'team', 'drafted-line')],
-    ]),
-  ),
+  /* Demo Mode is one placeholder week now (core/demo/placeholder/). */
+  'matchup-in-season': matchupScreen('in-season'),
 };
-
-function scenarioScreen(scenario, tab, waitFor) {
-  return {
-    async go(page) {
-      await page.goto(`${BASE}/?demo=${scenario}`);
-      if (tab) await page.getByTestId(`tab-${tab}`).click();
-      await page.locator(`[data-testid="${waitFor}"]`).first().waitFor({ state: 'visible' });
-    },
-    measure: () => {
-      const card = document.querySelector('[data-testid="live-draft-card"]');
-      const lines = [...document.querySelectorAll('[data-testid="drafted-line"]')];
-      return {
-        bestMove: document.querySelector('[data-testid="best-move"]')?.textContent ?? null,
-        cardHeight: card ? Math.round(card.getBoundingClientRect().height) : null,
-        lines: lines.length,
-        aboveFold: lines.filter((l) => l.getBoundingClientRect().bottom <= window.innerHeight).length,
-      };
-    },
-  };
-}
 
 function matchupScreen(scenario) {
   return {
