@@ -4004,3 +4004,10 @@ fixture harness only. See `docs/DEMO_MODE.md` for how to demo a new feature.
 The part of the main bundle that fell in the Demo step is real: modules the
 entry shares with the old demo (eligibility, the health model, team tables)
 kept every export the demo's engines used, and those went with the engines.
+
+Decisions after the round (owner, 24 September 2026): the app JavaScript
+ceiling comes down from 148.6 kB to 135 kB so the freed space cannot fill back
+up unnoticed; the old engine-driven demo code stays, since it only backs test
+tooling; and the placeholder's captured responses, which predate #290's
+touchdown chip, are a small follow-up for whenever Demo Mode is next touched
+(noted in `docs/DEMO_MODE.md`).
