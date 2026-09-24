@@ -2075,8 +2075,8 @@ function MarketProvenance({
       {baseline?.points == null ? null : (
         <div className="market-points" data-testid="market-points">
           <strong>
-            MKT PTS {baseline.missing.length > 0 ? '~' : ''}
-            {baseline.points}
+            MKT PTS {baseline.points}
+            {baseline.missing.length > 0 ? '+' : ''}
           </strong>{' '}
           <span className="muted">
             {Math.round(baseline.coverage * 100)}% of what a {rec.position} scores on had a market

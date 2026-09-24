@@ -15,6 +15,15 @@ export interface MarketContribution {
   /** Fantasy points this market contributes. */
   points: number;
   detail: string;
+  /**
+   * The market's implied chance, for a yes/no market with no line to print.
+   *
+   * Only the anytime-TD market sets it. It is carried so a card can show the
+   * touchdown part of the total as `Anytime TD 42%`: without it the one market
+   * with no number of its own was the one market no card showed, and a total
+   * built from yards, catches and a touchdown read as yards and catches alone.
+   */
+  probability?: number;
 }
 
 export interface VegasExpectation {
@@ -116,9 +125,10 @@ export function buildExpectation(
         const prob = prop.impliedProbability;
         if (prob == null) break;
         const tdPoints = position === 'RB' ? profile.rushTd : profile.recTd;
-        contributions.push(
-          contribution(market, null, prob * tdPoints, `${Math.round(prob * 100)}% anytime TD x ${tdPoints}`),
-        );
+        contributions.push({
+          ...contribution(market, null, prob * tdPoints, `${Math.round(prob * 100)}% anytime TD x ${tdPoints}`),
+          probability: prob,
+        });
         break;
       }
     }

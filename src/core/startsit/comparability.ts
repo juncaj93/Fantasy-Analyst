@@ -135,7 +135,7 @@ export function assessMarketComparability(
   const comparable = margin == null || coverageEdge <= 0 || coverageEdge < margin;
 
   const said = unpriced
-    .map((u) => `${u.name} has no ${u.markets.map(label).join(' or ')} line (worth ~${Math.abs(u.points).toFixed(1)} pts to the other)`)
+    .map((u) => `${u.name} has no ${u.markets.map(label).join(' or ')} line (worth about ${Math.abs(u.points).toFixed(1)} pts to the other)`)
     .join('; ');
 
   return {

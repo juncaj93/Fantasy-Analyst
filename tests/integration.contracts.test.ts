@@ -112,7 +112,7 @@ describe('the weekly card lights up', () => {
     expect(lines).toEqual([]);
     const card = buildWeeklyCard({ ...evaluation, advanced: lines }, { starting: true });
     expect(card.lines.some((l) => l.key === 'xfp')).toBe(false);
-    expect(card.pending).toContain('expected points');
+    expect(card.pending).toContain('expected points from usage');
   });
 
   it('never turns a missing expectation into a zero', () => {

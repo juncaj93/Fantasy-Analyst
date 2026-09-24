@@ -3908,6 +3908,62 @@ rate-limited answer as refused, not spent. Worth checking at the same time
 whether a manual pass needs the full schedule re-buy when the schedule is only
 hours old.
 
+## The touchdown was in the number, and not on the card
+
+Reported on 24 September 2026 for Rashee Rice (KC, `9.6 pts`, `Rec yards 48.5 ·
+Receptions 4.5`) and Jaxon Smith-Njigba (SEA, `15.2 pts`, `Rec yards 90.5 ·
+Receptions 6.5`), neither in the game the round above fixed. Measured on
+production before anything changed, across both sides of the week-3 matchup and
+fourteen games (`scripts/probe-td-odds-scope.mjs`, 24 entities):
+
+- **The provider posts touchdown odds broadly.** Every game read carried a
+  full-game touchdowns quote for 23 to 30 players.
+- **The app stores and sums them for everyone.** All 30 skill players the board
+  prices have a touchdown component. The app holds lines for 29 of them (Wan'Dale
+  Robinson is the opponent's, and only the reader's roster is bought), and a
+  fresh recomputation from the live board matches its stored total within half a
+  point for every one but the three Patriots below. Rice
+  is `48.5 × 0.1 + 4.5 × 0.5 + 42% × 6 = 9.6`; Smith-Njigba is
+  `90.5 × 0.1 + 6.5 × 0.5 + 50% × 6 = 15.3`.
+- **The card dropped it.** The chip list kept only markets with a line, and the
+  anytime-TD market has a price and no line. So every receiver's card showed
+  yards and catches under a total that also held a touchdown, and a running
+  back's fourth market was cut by a cap of three anyway.
+
+None of the three hypotheses in the brief: not a provider gap, not a formula
+bug, not an ingestion gap. The completeness rule from the round above was not
+missing these cases; Rice and Smith-Njigba had complete markets. It is catching
+the real partial ones in six different teams (RJ Harvey, Nico Collins, Kyle
+Monangai, Tank Bigsby, Emanuel Wilson, and the three Patriots), and for the five
+outside New England the live board is just as partial (four touchdown-only, and
+Monangai without receiving lines), which is the provider's gap and correctly
+shown as such.
+
+The card now prints every market in the total, touchdown as its implied chance
+(`Anytime TD 42%`), cap four. `Not known yet: expected points`, which sat under
+the Market line on every card, is the usage model (`assessXfp`) waiting for
+games, not the market; it now says `expected points from usage`.
+
+The three Patriots are the exception, and not for a new reason: their stored
+lines are still the Tuesday snapshot (0.8, 0.7, 11.2 against 8.79, 7.67, 20.21 on
+the live board). The purchase that would replace them was refused `rate limited`
+at 03:55 and again at 11:44, which is the burst recorded as a follow-up above
+and still deferred. They are flagged partial and fall back, so nothing prints a
+fraction of a week as a week.
+
+### The estimate mark was read as a minus sign
+
+`~21.7` for Drake Maye on the Matchup screen was read as `-21.7` on the owner's
+phone. The tilde is now a word: `EST` in small capitals in the warning tone,
+with the dashed rule under the number only (`components/estimate.tsx`). The
+Matchup column is 42px; `EST 22` measures 31px there, so the row prints the
+whole number, which is also the honest precision for a preseason total over a
+season. Compare keeps its tenth. The Draft card's and the season market line's
+partial total, which was a floor all along, reads `180.5+` instead of `~180.5`,
+and the comparability note says "worth about". Tilde approximations in running
+prose (`~17 picks`, `~1 likely bidder`) were left alone: counts in a sentence,
+not a figure a glance takes for a score.
+
 ## Bundle relief: the Draft screen loads only while a draft is ahead, and Demo Mode is a placeholder (done)
 
 Two changes, measured separately with `npm run perf:budget` (gzipped):
