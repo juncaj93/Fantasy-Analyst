@@ -220,6 +220,13 @@ Roster first, never the slate.
    priority.
 3. **The budget decides how much of that plan runs**, and it is told before the
    first request, not after the last.
+4. **The plan runs at the provider's pace.** Ten requests a minute is the free
+   plan's other binding limit, and a pass that fired its discovery and its
+   games back to back had most of the games refused (24 September 2026). The
+   adapter's `RequestPacer` keeps a pass to ten requests in any 61 seconds and
+   waits at most 75 seconds in all. A `429` — the provider's, or the pacer
+   declining to wait longer — ends the pass, is logged as `refused`, and is
+   not counted against the month, because the provider does not bill it.
 
 Markets are whitelisted at the adapter: passing yards/TDs, rushing yards,
 receptions, receiving yards, anytime TD, full-game over/unders only. Alternate

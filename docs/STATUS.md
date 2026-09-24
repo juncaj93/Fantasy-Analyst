@@ -3880,34 +3880,6 @@ models' components is arithmetic this app has never validated.
 under `core/trades/` reads the completeness rule, and trade valuations take no
 published figure (`tradeIsolation.partialMarket.test.ts`).
 
-### Not fixed here: a manual refresh spends in a burst, and books what it was refused
-
-Found while re-verifying the round above on 24 September 2026, and left for a
-later round by the owner's decision: at 174 of 2,500 for the month it is not
-urgent.
-
-Two manual refreshes (03:32 and 03:55 UTC) each did the same thing. A manual
-pass skips the schedule interval (`vegasRefresh.ts`, the `!sink.manual` check in
-discovery), so it re-bought the whole schedule first: nine requests, nine
-entities. The per-game fetches that followed within the same second hit the
-provider's per-minute limit, and six of six, then three of four, came back
-`rate limited`. The Patriots game, the one the round needed, was refused both
-times.
-
-The refused requests are booked as spent. The failure branch records one entity
-each, on the strength of an earlier measurement that an *empty* answer costs
-one. A rate-limited answer does not: the provider's own counter, read before and
-after, moved 9 and then 10 across the two runs, while the ledger recorded 15 and
-13. The nine refusals were never billed. By the end of the morning the ledger
-read 174 and the provider 120.
-
-The fix is small and belongs in `VegasRefreshService.refresh`: space the
-per-game fetches (or stop at the first `rate limited` and leave the rest for the
-next pass rather than firing them into the same limit), and record a
-rate-limited answer as refused, not spent. Worth checking at the same time
-whether a manual pass needs the full schedule re-buy when the schedule is only
-hours old.
-
 ## The touchdown was in the number, and not on the card
 
 Reported on 24 September 2026 for Rashee Rice (KC, `9.6 pts`, `Rec yards 48.5 ·
@@ -3947,9 +3919,9 @@ games, not the market; it now says `expected points from usage`.
 The three Patriots are the exception, and not for a new reason: their stored
 lines are still the Tuesday snapshot (0.8, 0.7, 11.2 against 8.79, 7.67, 20.21 on
 the live board). The purchase that would replace them was refused `rate limited`
-at 03:55 and again at 11:44, which is the burst recorded as a follow-up above
-and still deferred. They are flagged partial and fall back, so nothing prints a
-fraction of a week as a week.
+at 03:55 and again at 11:44, by the refresh burst fixed in the next section.
+Until then they are flagged partial and fall back, so nothing prints a fraction
+of a week as a week.
 
 ### The estimate mark was read as a minus sign
 
@@ -4004,3 +3976,37 @@ fixture harness only. See `docs/DEMO_MODE.md` for how to demo a new feature.
 The part of the main bundle that fell in the Demo step is real: modules the
 entry shares with the old demo (eligibility, the health model, team tables)
 kept every export the demo's engines used, and those went with the engines.
+
+## A refresh waits its turn, and a refusal costs nothing
+
+Found on 24 September 2026 (recorded then as a follow-up and deferred; fixed
+the same day on the owner's go-ahead). Two manual refreshes, at 03:55 and
+11:44 UTC, each re-bought the schedule (nine requests in a second) and then
+fired every planned game into the plan's limit of ten requests a minute. Seven
+of eight came back `rate limited` at 11:44, the Patriots game among them both
+times, so Rhamondre Stevenson, TreVeyon Henderson and Drake Maye sat on a
+Tuesday snapshot all day (0.8, 0.7 and 11.2 against 8.79, 7.77 and 20.21 on
+the live board). Each refusal was also booked as an entity spent; the
+provider's own counter, read either side, showed none of them was billed, and
+by the end of the morning the ledger read 174 against the provider's 120.
+
+- **Spaced.** `core/vegas/pacer.ts` holds the SportsGameOdds adapter to ten
+  requests in any 61 seconds, waiting when the next would break it. A pass
+  waits at most 75 seconds in total, which is room for twenty requests (a
+  discovery and a week's games) and stays inside the Refresh Vegas
+  workflow's `--max-time`, now 180. A request that would need longer is not
+  sent.
+- **Stops at "not now".** A `429`, from the provider or from the pacer
+  holding a request back (`isRateLimited`), ends the pass. The games not yet
+  asked stay stale, so the next pass plans them first. A discovery refused
+  part-way keeps the teams it already bought and un-stamps the schedule, so
+  the next pass asks again rather than waiting out the 72-hour interval; and
+  no game is asked for after a refused discovery.
+- **Not counted.** A refusal is logged as `refused`, with zero entities, and
+  like `blocked` it is not added to the month. A `failed` answer of any other
+  kind is still booked at one entity, as measured.
+
+Not changed: a manual pass still re-buys the whole schedule even when it is
+hours old. With spacing it no longer starves the games that follow, and at
+nine entities a press it is cheap next to the 2,500 a month.
+

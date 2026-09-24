@@ -73,7 +73,7 @@ jobs:
 
           code=$(curl -s -o /tmp/result.json -w '%{http_code}' -X POST "$URL/api/vegas/refresh" \
             -H 'content-type: application/json' -b /tmp/cookies.txt \
-            --data-binary '{}' --max-time 120)
+            --data-binary '{}' --max-time 180)
           echo "refresh: HTTP $code"
           cat /tmp/result.json
           echo
