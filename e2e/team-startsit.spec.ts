@@ -762,7 +762,20 @@ test.describe('the comparison tool', () => {
     await page.getByTestId('compare-open').click();
     for (const id of ['1001', '1005']) await choose(page, id);
 
-    await page.getByTestId('compare-search').focus();
+    /*
+     * The row to tap is chosen, and brought on screen, before the keyboard
+     * comes and goes — the list starts below the fold on the smaller phones.
+     */
+    const nextId = await page
+      .locator('[data-testid="compare-candidate"][data-chosen="false"]')
+      .first()
+      .getAttribute('data-player-id');
+    const next = page.locator(`[data-testid="compare-candidate"][data-player-id="${nextId}"]`);
+    await next.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+
+    // Focused without scrolling, so the row stays where it was brought to.
+    await page.getByTestId('compare-search').evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
     await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(380));
     await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(0));
 
@@ -771,14 +784,16 @@ test.describe('the comparison tool', () => {
      * target into view first, and that scroll is one the layer corrects on its
      * own — which put the card back and hid this bug from the suite.
      */
-    const nextId = await page
-      .locator('[data-testid="compare-candidate"][data-chosen="false"]')
-      .first()
-      .getAttribute('data-player-id');
-    const next = page.locator(`[data-testid="compare-candidate"][data-player-id="${nextId}"]`);
+    await page.waitForTimeout(100);
     const box = await next.boundingBox();
     const viewport = page.viewportSize();
-    expect(box && viewport && box.y + box.height < viewport.height, 'the row is on screen to be tapped').toBeTruthy();
+    const layer = await page
+      .getByTestId('sheet-scroller')
+      .evaluate((el) => `layer at ${el.scrollTop} of ${el.scrollHeight - el.clientHeight}`);
+    expect(
+      box && viewport && box.y + box.height < viewport.height,
+      `the row is on screen to be tapped (row top ${box?.y}, ${layer})`,
+    ).toBeTruthy();
     await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await expect(next).toHaveAttribute('data-chosen', 'true');
     await page.waitForTimeout(600);
