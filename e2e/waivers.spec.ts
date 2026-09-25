@@ -257,6 +257,34 @@ test.describe('the waivers page', () => {
     }
   });
 
+  /*
+   * One recommended move, and the rest demoted.
+   *
+   * A plan reading `No waiver move recommended` used to sit above a list of
+   * names that each wore a verdict badge. The rows the plan does not claim now
+   * sit under their own heading, below the plan, with a line saying what they
+   * are — so nothing on the page looks like a second recommendation.
+   */
+  test('puts the recommended move first and the other options under it', async ({ page }) => {
+    const recommended = page.getByTestId('waivers-recommended');
+    await expect(page.getByTestId('waivers-recommended-title')).toHaveText('Recommended move');
+    await expect(recommended.getByTestId('waiver-plan')).toBeVisible();
+
+    const others = page.getByTestId('waivers-others');
+    await expect(page.getByTestId('waivers-others-title')).toHaveText('Other options to consider');
+    await expect(page.getByTestId('waivers-others-note')).toBeVisible();
+    await expect(others.getByTestId('waiver-row').first()).toBeVisible();
+
+    const top = (await recommended.boundingBox())!.y;
+    const below = (await page.getByTestId('waivers-others-title').boundingBox())!.y;
+    expect(below).toBeGreaterThan(top);
+
+    const claimed = await recommended.getByTestId('waiver-plan-claim').count();
+    const plannedRows = await recommended.getByTestId('waiver-row').count();
+    // A row under the plan is one the plan claims (or the defence it named).
+    expect(plannedRows).toBeLessThanOrEqual(claimed + 2);
+  });
+
   test('filters by position without offering a chip that empties the list', async ({ page }) => {
     const filters = page.getByTestId('waiver-filters');
     await expect(filters).toBeVisible();
@@ -266,7 +294,8 @@ test.describe('the waivers page', () => {
     for (const chip of chips.slice(1)) {
       const position = chip.trim();
       await filters.locator('button', { hasText: new RegExp(`^${position}$`) }).first().click();
-      const rows = page.getByTestId('waiver-row');
+      // The chips narrow the options, not the recommended move above them.
+      const rows = page.getByTestId('waivers-others').getByTestId('waiver-row');
       await expect(rows.first()).toBeVisible();
       if (position === 'FLEX') {
         for (const row of await rows.all()) {

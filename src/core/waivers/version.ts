@@ -43,4 +43,8 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * borderline call and break a near-tie; and a player at the top of the adds
  * list is not offered as a cut. See `core/waivers/depthPolicy.ts`.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@3', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@4`: the two cut protections are one market hold, and its draft
+ * condition is the league's starter pool rather than a fixed pick 80.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@4', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

@@ -26,7 +26,7 @@ import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { BudgetFooter, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
-import { buildWaiverBoard, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
 
 const ALL_FILTER = 'ALL';
@@ -100,8 +100,31 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    * `offeredPositions`. A chip whose only possible outcome is an empty list is
    * a control that exists to disappoint.
    */
-  const segments = useMemo(() => [ALL_FILTER, ...(board?.positions ?? [])], [board]);
-  const rows = useMemo(() => (board?.rows ?? []).filter((row) => rowMatches(row, filter)), [board, filter]);
+  /*
+   * One recommended move, and everything else demoted beneath it.
+   *
+   * The board used to be one list under the plan, and every row on it wore a
+   * verdict badge — so a plan reading `No waiver move recommended` sat above
+   * nine names that each looked like a recommendation. The split is the plan's
+   * own: a row is *recommended* when the plan claims him, or when the defence
+   * planner named him. Everybody else is an option, and says so.
+   */
+  const claimed = useMemo(
+    () => new Set((advice?.claimPlan?.claims ?? []).map((claim) => claim.addPlayerId)),
+    [advice],
+  );
+  const recommended = useMemo(
+    () => (board?.rows ?? []).filter((row) => claimed.has(row.playerId) || row.dst != null),
+    [board, claimed],
+  );
+  const others = useMemo(
+    () => (board?.rows ?? []).filter((row) => !claimed.has(row.playerId) && row.dst == null),
+    [board, claimed],
+  );
+  /* The chips narrow the options, which is the only list long enough to need them. */
+  const segments = useMemo(() => [ALL_FILTER, ...offeredPositions(others)], [others]);
+  const rows = useMemo(() => others.filter((row) => rowMatches(row, filter)), [others, filter]);
+  const planMoves = (advice?.claimPlan?.claims.length ?? 0) > 0;
 
   /*
    * Who this roster would cut for each target, by player.
@@ -138,51 +161,62 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             in the order to enter them, and hiding it behind a filter for WRs
             would hide the tight end claim that the same plan depends on.
           */}
-          <WaiverPlanCard plan={advice.claimPlan} />
+          <div className="section-title" data-testid="waivers-recommended-title">
+            Recommended move
+          </div>
+          <section data-testid="waivers-recommended">
+            <WaiverPlanCard plan={advice.claimPlan} />
 
-          {segments.length > 1 ? (
-            <SegmentedControl
-              label="Filter by position"
-              testId="waiver-filters"
-              compact
-              value={filter}
-              onChange={setFilter}
-              segments={segments.map((p) => ({ id: p, label: p, testId: `waiver-filter-${p.toLowerCase()}` }))}
-            />
-          ) : null}
+            {/*
+              The defence, when it has no row of its own to be said in.
 
-          {/*
-            The defence, when it has no row of its own to be said in.
+              A `wait` or a `hold` names nobody, so it cannot be a row — and it
+              is still the answer to "which defence should I add". When the
+              planner *has* named somebody, his row below carries the same words
+              and this line would be the same recommendation twice.
+            */}
+            {recommended.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
 
-            A `wait` or a `hold` names nobody, so it cannot be a row — and it is
-            still the answer to "which defence should I add", which is the
-            question this page exists for. When the planner *has* named
-            somebody, the row below carries the same words and this line would
-            be the same recommendation twice.
+            {recommended.map((row) => (
+              <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+            ))}
+          </section>
 
-            Read from the whole board rather than from `rows`, which the
-            position chips have already narrowed: filtering to QB must not make
-            a defence line appear.
-          */}
-          {board?.rows.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
-
-          {rows.length === 0 ? (
+          {others.length > 0 ? (
+            <>
+              <div className="section-title" data-testid="waivers-others-title">
+                Other options to consider
+              </div>
+              <div className="faint waivers-others-note" data-testid="waivers-others-note">
+                {planMoves
+                  ? 'Not part of the plan above. Worth a look if a claim does not land.'
+                  : 'Each beats someone on your bench on paper, but none is worth a roster move this week.'}
+              </div>
+              {segments.length > 1 ? (
+                <SegmentedControl
+                  label="Filter by position"
+                  testId="waiver-filters"
+                  compact
+                  value={filter}
+                  onChange={setFilter}
+                  segments={segments.map((p) => ({ id: p, label: p, testId: `waiver-filter-${p.toLowerCase()}` }))}
+                />
+              ) : null}
+              <section className="waivers-others" data-testid="waivers-others">
+                {rows.length === 0 ? (
+                  <Empty>{`Nothing else at ${filter} is worth a look.`}</Empty>
+                ) : (
+                  rows.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
+                )}
+              </section>
+            </>
+          ) : recommended.length === 0 && !board?.dst?.surface ? (
             /*
-              Nothing on the board, said once — and not said at all when the
-              defence line above is already carrying an answer. A page reading
-              `Add PIT` over `Nothing available beats what you already have` is
-              two claims about the same wire.
+              Nothing on the board at all, said once — and not said when the
+              defence line is already carrying an answer.
             */
-            board?.dst?.surface && filter === ALL_FILTER && !board.rows.some((row) => row.dst != null) ? null : (
-              <Empty>
-                {filter === ALL_FILTER
-                  ? (board?.headline ?? 'Nothing available beats what you already have.')
-                  : `Nothing available at ${filter} beats what you already have.`}
-              </Empty>
-            )
-          ) : (
-            rows.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
-          )}
+            <Empty>{board?.headline ?? 'Nothing available beats what you already have.'}</Empty>
+          ) : null}
 
           {/*
             What the page knows it does not know — and nothing about its own

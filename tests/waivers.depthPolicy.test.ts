@@ -278,7 +278,7 @@ describe('the live board of 25 September 2026, rebuilt', () => {
     const withRoom = planWaiverClaims({ ...base, roster: [...roster().slice(0, -1), candidate('wilson', 'Emanuel Wilson', 'RB', 1)], roomIsAdding: new Map([['wilson', 1]]) });
     for (const claim of withRoom.claims) expect(claim.dropName).not.toBe('Emanuel Wilson');
     expect(withRoom.protectedPlayers).toContainEqual(
-      expect.objectContaining({ name: 'Emanuel Wilson', reason: 'room_is_adding' }),
+      expect.objectContaining({ name: 'Emanuel Wilson', reason: 'market_hold' }),
     );
   });
 });

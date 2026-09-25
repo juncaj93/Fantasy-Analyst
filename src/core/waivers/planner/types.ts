@@ -114,8 +114,17 @@ export type ProtectionReason =
   | 'reserve_slot'
   | 'core_value'
   | 'unscorable'
-  | 'early_pick'
-  | 'room_is_adding';
+  | 'market_hold';
+
+/**
+ * Why the market says hold him: one protection, two qualifying conditions.
+ *
+ * `draft_capital` — the market drafted him inside the league's starter pool,
+ * and the season is young enough for that to still be the better evidence.
+ * `trending` — he is near the top of Sleeper's adds list this week, so a rival
+ * claims him the moment he is cut.
+ */
+export type MarketHoldCondition = 'draft_capital' | 'trending';
 
 /**
  * What removing one rostered player costs, given one specific incoming player.
@@ -360,6 +369,14 @@ export interface WaiverPlannerInput {
    * behaviour.
    */
   roomIsAdding?: ReadonlyMap<string, number>;
+  /**
+   * The ADP inside which a player counts as real draft capital.
+   *
+   * The league's starter pool — teams × starting slots — so "drafted as a
+   * starter" means the same thing in an eight-team league and a fourteen-team
+   * one. Absent falls back to `EARLY_PICK_RANK`.
+   */
+  draftCapitalRank?: number;
   /** 1-based, so the draft's say can expire as production accumulates. */
   week?: number;
   /** Players on an injured-reserve slot, which is not a bench spot. */

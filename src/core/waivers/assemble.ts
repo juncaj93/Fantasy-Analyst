@@ -487,6 +487,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
         ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
         roomIsAdding: roomIsAdding(trending),
+        ...(request.rosters.length > 0 ? { draftCapitalRank: request.rosters.length * shape.totalStarters } : {}),
         week: request.week,
         reserveIds: request.reserveIds,
         budget: request.budgets,
