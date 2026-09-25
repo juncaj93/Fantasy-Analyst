@@ -1318,6 +1318,14 @@ export interface StartSitComparison {
    * is read as "nothing to say".
    */
   projectionNotes?: string[];
+  /**
+   * Whether the top two were priced on the same markets, and the engine's own
+   * sentence about it when they were not. The sheet's closing note is this
+   * sentence, not a second one written in the browser.
+   */
+  comparability?: { comparable: boolean; detail: string | null };
+  /** The regular-season week the numbers are for. Absent outside it. */
+  week?: number;
 }
 
 export interface LineupSlot {

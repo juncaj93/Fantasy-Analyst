@@ -1595,7 +1595,8 @@ test.describe('team, ADP import and start/sit', () => {
      * table a screen reader can navigate rather than a pile of divs that looks
      * like one.
      */
-    await expect(comparison.getByRole('rowheader', { name: 'Projected' })).toBeVisible();
+    // The projection has its own card since the 25 September redesign, under the score.
+    await expect(comparison.getByRole('region', { name: 'Projected points' })).toBeVisible();
     await expect(comparison.getByRole('rowheader', { name: 'Market coverage' })).toBeVisible();
     await expect(comparison.getByRole('rowheader', { name: 'Vegas market expectation' })).toBeVisible();
     // And the players are the columns.
