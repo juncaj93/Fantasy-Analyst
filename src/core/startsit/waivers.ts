@@ -160,6 +160,21 @@ export interface WaiverAddBasis {
   bar: number;
   /** This week's market expectation, when there is one. */
   projection: number | null;
+  /** The market expectation of the man he is measured against. */
+  overProjection: number | null;
+  /**
+   * The number the screen shows: his projection minus the other man's, and
+   * nothing else. Null when either side has no market line.
+   *
+   * Deliberately not `gain`. The gain is the risk-adjusted grade gap — status,
+   * thin data, usage — and it is the right number to *decide* with, because
+   * those penalties are real reasons to prefer one player. It is the wrong
+   * number to *print as points*: on 25 September 2026 a bench back the market
+   * priced at 0.35 pts graded −1.97, and every add on the board looked two
+   * points better than any projection said. The call stays on the gain; the
+   * card says what the projections say.
+   */
+  projectionGap: number | null;
   /** Held at his position (healthy, off reserve) and the cap, when capped. */
   depth: { position: string; held: number; cap: number | null };
   /** Sleeper's trending adds, when he is on the list. */
@@ -490,6 +505,11 @@ export function recommendWaiverUpgrades(opts: {
         comparedTo: overCap ? 'position' : 'bench',
         bar,
         projection: e.expectation.points,
+        overProjection: floor.expectation.points,
+        projectionGap:
+          e.expectation.points == null || floor.expectation.points == null
+            ? null
+            : round2(e.expectation.points - floor.expectation.points),
         depth: { position: e.position, held: atPosition.length, cap },
         attention: heat ? { rank: heat.rank, heat: heat.heat, nudge } : null,
         lean,

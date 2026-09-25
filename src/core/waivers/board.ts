@@ -698,6 +698,14 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
   };
 }
 
+/** `+6.7 pts`, `−0.4 pts`, or `No market line` when a side has none. */
+function valueAddLabel(add: WaiverValueAddLike): string {
+  if (!add.basis) return `+${add.gain.toFixed(1)} pts`;
+  const gap = add.basis.projectionGap;
+  if (gap == null) return 'No market line';
+  return `${gap < 0 ? '\u2212' : '+'}${Math.abs(gap).toFixed(1)} pts`;
+}
+
 /**
  * A bench-value add, as a row.
  *
@@ -720,9 +728,17 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
       label: add.overName ? `Better than ${add.overName}` : 'Best available',
       alsoFits: [],
     },
+    /*
+     * The printed number is the projection gap, not the grade gap.
+     *
+     * `gain` stays the sort key and the decision; the label is what the market
+     * projects him for minus what it projects the other man for, with no
+     * penalty in it — see `WaiverAddBasis.projectionGap`. An older payload has
+     * no basis and keeps printing the gain it always printed.
+     */
     shortTerm: {
       gain: add.gain,
-      label: `+${add.gain.toFixed(1)} pts`,
+      label: valueAddLabel(add),
       over: add.overName ?? null,
     },
     multiWeek: add.multiWeek ?? null,
