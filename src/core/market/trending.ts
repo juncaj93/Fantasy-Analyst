@@ -11,9 +11,13 @@
  *   opinion into the app's own numbers and then present the result as
  *   independent evidence — the exact circularity this project exists to avoid.
  *
- * So trending is allowed to do two things: price a bid, and raise a question.
- * It is never allowed to move a projection. `core/market/disagreement.ts` is
- * where the question gets asked.
+ * So trending is allowed to price a bid and raise a question, and on the waiver
+ * board it may do what a manager does with it: break a near-tie, lift a call
+ * the projection already favours over a bar it only just misses, and keep the
+ * player the whole of Sleeper is adding from being offered as a cut. It is
+ * never allowed to move a projection or to invent a call the projection does
+ * not favour — see `ATTENTION_WEIGHT` in `core/startsit/waivers.ts`.
+ * `core/market/disagreement.ts` is where the question gets asked.
  *
  * A single snapshot is a rank. Velocity needs two, which is why snapshots are
  * stored: `#2 trending add` is interesting, `add rate accelerated 6×` is why you

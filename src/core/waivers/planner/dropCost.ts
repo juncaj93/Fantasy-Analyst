@@ -174,6 +174,8 @@ export function rankDropsFor(opts: {
       reasons.push({ code: 'protected_in_lineup', playerId: dropId, value: lineupCost });
     } else if (protection === 'early_pick') {
       reasons.push({ code: 'protected_early_pick', playerId: dropId, value: null });
+    } else if (protection === 'room_is_adding') {
+      reasons.push({ code: 'protected_room_is_adding', playerId: dropId, value: simulation.roomIsAdding.get(dropId) ?? null });
     } else if (protection === 'reserve_slot') {
       reasons.push({ code: 'protected_reserve_slot', playerId: dropId, value: null });
     } else if (protection === 'core_value') {
@@ -240,10 +242,14 @@ export function rankDropsFor(opts: {
    */
   const anyEligible = ranked.some((c) => c.protection == null && c.cost != null);
   if (!anyEligible) {
-    const released = ranked.find((c) => c.protection === 'early_pick' && c.cost != null);
+    const released =
+      ranked.find((c) => c.protection === 'room_is_adding' && c.cost != null) ??
+      ranked.find((c) => c.protection === 'early_pick' && c.cost != null);
     if (released) {
       released.protection = null;
-      released.reasons = released.reasons.filter((r) => r.code !== 'protected_early_pick');
+      released.reasons = released.reasons.filter(
+        (r) => r.code !== 'protected_early_pick' && r.code !== 'protected_room_is_adding',
+      );
       released.reasons.push({ code: 'drop_outside_lineup', playerId: released.playerId, value: null });
       return ranked.sort(compareDrops);
     }
@@ -313,6 +319,15 @@ function protectionFor(args: {
    * {@link EARLY_PICK_WEEKS}.
    */
   if (simulation.earlyPick.has(dropId)) return 'early_pick';
+  /*
+   * A player the whole of Sleeper is adding is not cut this week.
+   *
+   * Attention is not quality, and this says nothing about what he is worth.
+   * It says what happens to him the moment he is dropped: a rival claims him,
+   * and the cut cannot be taken back. Categorical, like the draft protection
+   * above, and it yields the same way when it is all that is left.
+   */
+  if (simulation.roomIsAdding.has(dropId)) return 'room_is_adding';
   if (lineupCost >= PROTECTED_LINEUP_COST) return 'core_value';
   return null;
 }

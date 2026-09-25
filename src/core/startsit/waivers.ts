@@ -19,8 +19,9 @@
 
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import type { RoleAssessment } from './decisions.ts';
-import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
+import { DEFENCE_POSITION, evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { recommendLineup, type LineupRecommendation } from './lineup.ts';
+import { depthCap, depthLean } from '../waivers/depthPolicy.ts';
 
 /**
  * How much better an available player has to be before he is worth mentioning.
@@ -50,6 +51,22 @@ export const MEANINGFUL_UPGRADE_GAIN = 2.5;
  * One constant, read by both.
  */
 export const ROSTER_SPOT_GAIN = 0.5;
+
+/**
+ * The most the rest of Sleeper's attention can move a waiver call, in points.
+ *
+ * Trending adds measure attention, not quality — see `core/market/trending.ts`
+ * — so they never touch a projection and never invent a recommendation. What
+ * they may do is what a manager does with them: break a near-tie, and lift a
+ * call the projection already favours over a bar it only just misses. The #1
+ * add of the week is worth three-quarters of a point on the ordering and on
+ * the bar; the bottom of the published list is worth almost nothing.
+ *
+ * Only ever applied to a candidate whose own projection already beats the man
+ * he is measured against. A trending surge on a player the numbers say is
+ * worse moves nothing.
+ */
+export const ATTENTION_WEIGHT = 0.75;
 
 /** Free agents scored per slot before the list is cut. Keeps Team fast. */
 export const DEFAULT_ALTERNATIVES = 3;
@@ -114,7 +131,45 @@ export interface WaiverValueAdd extends WaiverCandidate {
   /** The weakest man on the bench, whom this add is measured against. */
   overPlayerId: string | null;
   overName: string | null;
+  /**
+   * The order the board draws value adds in: gain, plus the attention nudge,
+   * plus the positional lean. Never a points claim, which is `gain`.
+   */
+  priority: number;
+  /** Every factor behind the call, carried so **See why** can say them. */
+  basis: WaiverAddBasis;
 }
+
+/**
+ * Why a value add is on the board, as data rather than prose.
+ *
+ * The reasons list is for the card. This is for the sheet that has to explain
+ * the call — which comparison was made, what bar it had to clear, and which of
+ * the supplementary signals moved it — and a sheet that re-derived these from
+ * the reason strings would be string-matching its own output.
+ */
+export interface WaiverAddBasis {
+  /**
+   * `bench`: measured against the weakest bench player who competes for his
+   * slots, the ordinary value-add question. `position`: his position is already
+   * at its cap, so he was measured against the weakest player *at his position*
+   * and had to be a real upgrade.
+   */
+  comparedTo: 'bench' | 'position';
+  /** The gap he had to clear, in points. */
+  bar: number;
+  /** This week's market expectation, when there is one. */
+  projection: number | null;
+  /** Held at his position (healthy, off reserve) and the cap, when capped. */
+  depth: { position: string; held: number; cap: number | null };
+  /** Sleeper's trending adds, when he is on the list. */
+  attention: { rank: number | null; heat: number; nudge: number } | null;
+  /** The positional ordering lean applied, in points. Zero for most. */
+  lean: number;
+}
+
+/** What the rest of Sleeper is adding. Heat is 0–1, rank is 1-based. */
+export type WaiverAttention = ReadonlyMap<string, { heat: number; rank: number | null }>;
 
 /**
  * A free agent nothing could be scored on.
@@ -191,6 +246,13 @@ export function recommendWaiverUpgrades(opts: {
   alternatives?: number;
   /** Players held on IR or taxi, who are not the roster spot a claim frees. */
   reserveIds?: string[];
+  /**
+   * The week and the league's playoff weeks, for the positional depth policy.
+   * Absent means week 1 and no playoff window, which only matters to defence.
+   */
+  calendar?: { week: number; playoffWeeks: readonly number[] };
+  /** Sleeper trending adds. Absent or empty moves nothing. */
+  attention?: WaiverAttention;
 }): WaiverAdvice {
   const base = opts.minGain ?? MEANINGFUL_UPGRADE_GAIN;
   const perSlot = opts.alternatives ?? DEFAULT_ALTERNATIVES;
@@ -351,30 +413,113 @@ export function recommendWaiverUpgrades(opts: {
    * load-bearing rather than a refinement: one floor for the whole wire ranked
    * positions against each other instead of players. See `replacementFor`.
    */
-  const valueAdds: WaiverValueAdd[] = playable
-    .filter((e) => !spent.has(e.playerId))
-    .map((e) => {
-      const floor = replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
-      return { evaluation: e, floor, gain: floor == null ? null : round2((e.score ?? 0) - (floor.score ?? 0)) };
-    })
-    .filter(
-      (c): c is { evaluation: StartSitEvaluation; floor: StartSitEvaluation; gain: number } =>
-        c.floor != null && c.gain != null && c.gain >= ROSTER_SPOT_GAIN && (c.evaluation.score ?? 0) > 0,
-    )
-    .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name))
-    .map(({ evaluation, floor, gain }) => ({
+  const reserved = new Set(opts.reserveIds ?? []);
+  const depthContext = {
+    shape: opts.shape,
+    week: opts.calendar?.week ?? 1,
+    playoffWeeks: opts.calendar?.playoffWeeks ?? [],
+  };
+  const attention = opts.attention ?? new Map();
+
+  interface ValueCall {
+    evaluation: StartSitEvaluation;
+    floor: StartSitEvaluation;
+    gain: number;
+    priority: number;
+    basis: WaiverAddBasis;
+  }
+
+  const calls: ValueCall[] = [];
+  for (const e of playable) {
+    if (spent.has(e.playerId)) continue;
+    if ((e.score ?? 0) <= 0) continue;
+
+    /*
+     * The positional depth policy, first, because it decides which comparison
+     * is the right one. See `core/waivers/depthPolicy.ts`.
+     *
+     * A position already at its cap is not asking for a spare body. The add
+     * would replace somebody at his own position, so that is who he is
+     * measured against, and the bar is the starter-upgrade one rather than the
+     * half point a free bench spot costs.
+     */
+    const cap = depthCap(e.position, depthContext);
+    const held = heldAt(e.position, opts.roster, rosterEvaluations, reserved);
+    const overCap = cap != null && held.length >= cap;
+    /*
+     * Except a defence. Replacing the one you hold is streaming, which belongs
+     * to the defence planner for the reasons given at the upgrade tier above,
+     * and the positional comparison must not bring it back in by another door.
+     */
+    if (overCap && e.position === DEFENCE_POSITION) continue;
+
+    const floor = overCap
+      ? weakestScored(held)
+      : replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
+    if (floor == null) continue;
+
+    const gain = round2((e.score ?? 0) - (floor.score ?? 0));
+    const bar = overCap ? upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, floor, e) : ROSTER_SPOT_GAIN;
+
+    /*
+     * The supplementary signal, and exactly as far as it may go.
+     *
+     * The projection has to say he is better already — a positive gain — or
+     * attention moves nothing at all. Past that, it can lift a call that falls
+     * just short of the bar and it can reorder calls that are close.
+     */
+    const heat = attention.get(e.playerId);
+    const nudge = heat && gain > 0 ? round2(ATTENTION_WEIGHT * Math.max(0, Math.min(1, heat.heat))) : 0;
+    if (gain <= 0 || gain + nudge < bar) continue;
+
+    const lean = depthLean(e.position);
+    calls.push({
+      evaluation: e,
+      floor,
+      gain,
+      priority: round2(gain + nudge + lean),
+      basis: {
+        comparedTo: overCap ? 'position' : 'bench',
+        bar,
+        projection: e.expectation.points,
+        depth: { position: e.position, held: held.length, cap },
+        attention: heat ? { rank: heat.rank, heat: heat.heat, nudge } : null,
+        lean,
+      },
+    });
+  }
+
+  /*
+   * At most one over-cap suggestion per position: the best one.
+   *
+   * Four tight ends that each beat the tight end you hold are one decision —
+   * which tight end, if any — and printing all four crowds out the positions
+   * that actually need help.
+   */
+  calls.sort((a, b) => b.priority - a.priority || a.evaluation.name.localeCompare(b.evaluation.name));
+  const cappedSeen = new Set<string>();
+  const valueAdds: WaiverValueAdd[] = [];
+  for (const { evaluation, floor, gain, priority, basis } of calls) {
+    if (basis.comparedTo === 'position') {
+      if (cappedSeen.has(evaluation.position)) continue;
+      cappedSeen.add(evaluation.position);
+    }
+    valueAdds.push({
       playerId: evaluation.playerId,
       name: evaluation.name,
       position: evaluation.position,
       team: evaluation.team,
       score: evaluation.score,
       gain,
-      reasons: valueAddReasons(evaluation, floor),
+      reasons: valueAddReasons(evaluation, floor, basis),
       statusFlag: evaluation.statusFlag,
       role: { trend: evaluation.role.trend, games: evaluation.role.games },
       overPlayerId: floor.playerId,
       overName: floor.name,
-    }));
+      priority,
+      basis,
+    });
+  }
 
   /*
    * And the ones there was nothing to say about, said anyway.
@@ -533,6 +678,42 @@ function replacementFor(
 }
 
 /**
+ * Everybody the roster holds at one position who could actually play.
+ *
+ * Off reserve and not ruled out: a tight end on injured reserve is not the
+ * tight end a claim is measured against, and counting him toward the cap would
+ * tell a roster with its only healthy tight end hurt that it is full.
+ */
+function heldAt(
+  position: string,
+  roster: StartSitInput[],
+  evaluations: Map<string, StartSitEvaluation>,
+  reserved: ReadonlySet<string>,
+): StartSitEvaluation[] {
+  const out: StartSitEvaluation[] = [];
+  for (const input of roster) {
+    const evaluation = evaluations.get(input.player.id);
+    if (!evaluation || evaluation.position !== position) continue;
+    if (reserved.has(evaluation.playerId) || evaluation.ruledOut) continue;
+    out.push(evaluation);
+  }
+  return out;
+}
+
+/**
+ * The weakest of them who can be compared at all.
+ *
+ * A player with no market is left out for the reason `replacementFor` leaves
+ * him out: his near-zero score is an absence of data, and measured against it
+ * every free agent at the position looks like a bargain.
+ */
+function weakestScored(held: StartSitEvaluation[]): StartSitEvaluation | null {
+  const scored = held.filter((e) => e.score != null && e.expectation.points != null);
+  if (scored.length === 0) return null;
+  return scored.reduce((worst, e) => ((e.score ?? 0) < (worst.score ?? 0) ? e : worst));
+}
+
+/**
  * Why he is worth a roster spot, in the terms that decision is made in.
  *
  * Deliberately not `upgradeReasons`: that one opens with how he compares to the
@@ -540,17 +721,22 @@ function replacementFor(
  * the bench, and naming the player who would go is what turns "best available"
  * into a move the reader can actually picture making.
  */
-function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation): string[] {
+function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation, basis: WaiverAddBasis): string[] {
   /*
-   * "the last man on your bench" is what this said, and it is no longer what
-   * the floor is. It is the weakest man on the bench *who competes for his
-   * slots* — a different and usually higher bar, and the whole reason the tier
-   * stopped offering backup quarterbacks. Naming the slot keeps the sentence
-   * true and, more usefully, tells the reader which comparison was made.
+   * Which comparison was made, said in the words it was made in.
+   *
+   * The bench comparison is against the weakest man who competes for his
+   * slots, which for a flex-eligible player is often a different position — so
+   * the sentence names it as a flex option rather than calling a running back
+   * "your weakest tight end". The positional comparison names the position,
+   * because that is the whole of what changed.
    */
-  const reasons: string[] = [
-    `Worth more than ${floor.name}, your weakest ${floor.position} option on the bench`,
-  ];
+  const reasons: string[] =
+    basis.comparedTo === 'position'
+      ? [`Clear upgrade on ${floor.name}, the weaker ${floor.position} you hold`]
+      : floor.position === candidate.position
+        ? [`Worth more than ${floor.name}, your weakest ${floor.position} option on the bench`]
+        : [`Worth more than ${floor.name}, your weakest flex option on the bench`];
 
   const points = candidate.expectation.points;
   if (points != null) reasons.push(`Market priced — ${points.toFixed(1)} pts expected`);

@@ -106,12 +106,53 @@ when:
 | `core_value` | removing him costs the lineup ≥ `PROTECTED_LINEUP_COST` (2 pts), or he is a defence |
 | `reserve_slot` | he occupies an injured-reserve slot, which is not a bench spot |
 | `unscorable` | the engine cannot score him, so no confident cut can be named |
+| `early_pick` | the room drafted him inside the top 80, and it is still week 6 or earlier |
+| `room_is_adding` | he is in the top 10 of Sleeper's trending adds, so a rival claims him the moment he is cut |
+
+The last two yield when they are all that is left, cheapest first, so a roster
+full of early picks or hot names can still make a claim.
 
 The first is measured **after the add**, and that is load-bearing rather than
 fastidious. A starter displaced by the arriving player is no longer in the
 lineup and is no longer protected — which is how a straight upgrade claim finds
 its drop with no special case, and why a roster of seven players for seven slots
 can still make a claim.
+
+---
+
+## Positional depth, and the supplementary signals
+
+The board's value-add tier used to measure every free agent against one bar:
+the weakest bench player who competes for his slots. In a league with two flex
+spots that is one player for every back, receiver and tight end, so on
+25 September 2026 four tight ends on the wire each "beat" a questionable back
+and all four reached the board of a roster already holding two tight ends.
+
+`core/waivers/depthPolicy.ts` is the fix, as one table and one rule:
+
+| kind | positions | cap |
+| --- | --- | --- |
+| slot | QB, TE, K, DEF | the league's dedicated slots (+1 per superflex for QB; +1 for DEF from the week before the playoffs) |
+| depth | RB, WR | none, with a 0.25-pt lean toward backs on the ordering |
+
+A free agent at a position already at its cap is measured against the weakest
+player **at his own position**, at the starter-upgrade bar (2.5 pts plus the
+thin-data surcharge), and the board carries at most one such add per position.
+The DST planner's playoff stash obeys the same window.
+
+Sleeper's trending adds are a **supplementary** signal: up to 0.75 pts on the
+ordering and on the bar, scaled by heat, and only for a player whose projection
+already beats the man he is measured against. A surge alone never creates a
+recommendation. On the drop side, `room_is_adding` above keeps the top of the
+adds list off the cut list.
+
+League rostered percentage is not used. Sleeper's public API does not publish
+it, and inside one league every free agent is rostered by nobody, so there is
+no local version to compute.
+
+Every factor reaches **See why** through the value add's `basis`: the
+projection, which comparison was made and why, the trending read and how far
+it moved him, and the lean.
 
 ---
 

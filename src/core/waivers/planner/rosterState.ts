@@ -205,6 +205,14 @@ export interface RosterSimulationInput {
    * was.
    */
   draftRankOf?: ReadonlyMap<string, number>;
+  /**
+   * Rostered players near the top of Sleeper's trending adds, by rank.
+   *
+   * Reaches the cut order and nothing else: the player the whole of Sleeper is
+   * picking up this week is not offered as a cut. Absent is the previous
+   * behaviour.
+   */
+  roomIsAdding?: ReadonlyMap<string, number>;
   /** 1-based. Decides whether the draft still outranks production. */
   week?: number;
   reserveIds?: readonly string[];
@@ -228,6 +236,8 @@ export interface RosterSimulation {
    * previous behaviour exactly.
    */
   earlyPick: ReadonlySet<string>;
+  /** Rostered players Sleeper is adding in bulk, by trending rank. Empty is the old behaviour. */
+  roomIsAdding: ReadonlyMap<string, number>;
   /** Standing worth of holding each player, from the existing bench model. */
   slotValueOf: ReadonlyMap<string, number>;
   reserveIds: ReadonlySet<string>;
@@ -527,6 +537,7 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
     valueOf,
     unscored,
     earlyPick,
+    roomIsAdding: input.roomIsAdding ?? new Map(),
     slotValueOf,
     reserveIds,
     baseline,

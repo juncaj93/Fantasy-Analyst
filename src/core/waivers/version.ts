@@ -34,4 +34,13 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * order, at different prices. That is exactly what the head of this string is
  * for.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@2', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@3`: positions have a depth policy, and attention is a tie-break.
+ *
+ * A slot position already at its cap (QB, TE, K, DEF) is measured against its
+ * own weakest player at the upgrade bar, with one such add per position; a
+ * running back leans ahead of a close receiver; Sleeper's trending adds lift a
+ * borderline call and break a near-tie; and a player at the top of the adds
+ * list is not offered as a cut. See `core/waivers/depthPolicy.ts`.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@3', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

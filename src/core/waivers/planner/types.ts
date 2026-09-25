@@ -59,6 +59,7 @@ export type WaiverReasonCode =
   | 'protected_core_value'
   | 'protected_unscorable'
   | 'protected_early_pick'
+  | 'protected_room_is_adding'
   /* Why the pair was or was not worth it. */
   | 'net_gain_below_bar'
   | 'pair_opens_starting_slot'
@@ -113,7 +114,8 @@ export type ProtectionReason =
   | 'reserve_slot'
   | 'core_value'
   | 'unscorable'
-  | 'early_pick';
+  | 'early_pick'
+  | 'room_is_adding';
 
 /**
  * What removing one rostered player costs, given one specific incoming player.
@@ -350,6 +352,14 @@ export interface WaiverPlannerInput {
    * waiver drop in September. Absent is the previous behaviour.
    */
   draftRankOf?: ReadonlyMap<string, number>;
+  /**
+   * Rostered players near the top of Sleeper's trending adds, by rank.
+   *
+   * Reaches the cut order and nothing else: the player the whole of Sleeper is
+   * picking up this week is not offered as a cut. Absent is the previous
+   * behaviour.
+   */
+  roomIsAdding?: ReadonlyMap<string, number>;
   /** 1-based, so the draft's say can expire as production accumulates. */
   week?: number;
   /** Players on an injured-reserve slot, which is not a bench spot. */

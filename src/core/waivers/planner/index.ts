@@ -132,6 +132,7 @@ export function planWaiverClaims(input: WaiverPlannerInput): WaiverPlan {
     held: input.held,
     ...(input.preseasonPoints === undefined ? {} : { preseasonPoints: input.preseasonPoints }),
     ...(input.draftRankOf === undefined ? {} : { draftRankOf: input.draftRankOf }),
+    ...(input.roomIsAdding === undefined ? {} : { roomIsAdding: input.roomIsAdding }),
     ...(input.week === undefined ? {} : { week: input.week }),
     reserveIds: input.reserveIds,
     now: input.now,
