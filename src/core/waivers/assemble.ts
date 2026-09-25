@@ -213,6 +213,27 @@ function lineFor(trending: ReadonlyMap<string, TrendingVelocity>, playerId: stri
 }
 
 /**
+ * How high on Sleeper's trending adds a rostered player has to be before he is
+ * not offered as a cut.
+ *
+ * The top ten of the published fifty. On 25 September 2026 the live plan said
+ * `Drop Emanuel Wilson` while he was the #1 add in all of Sleeper — a million
+ * adds in a day — because the plan knew his projection and nothing else. A
+ * player the whole of Sleeper is picking up is one a rival claims the moment
+ * he clears waivers, and the cut cannot be undone.
+ */
+export const ROOM_IS_ADDING_RANK = 10;
+
+/** Rostered-or-not, the players at the top of Sleeper's adds list. */
+export function roomIsAdding(trending: ReadonlyMap<string, TrendingVelocity>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [playerId, v] of trending) {
+    if (v.rank != null && v.rank <= ROOM_IS_ADDING_RANK) out.set(playerId, v.rank);
+  }
+  return out;
+}
+
+/**
  * The lineup everything downstream is measured against.
  *
  * Exported because the defence planner's bench cost is measured against it and
@@ -234,6 +255,15 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
 
   const lineup = waiverLineup(request);
 
+  /*
+   * What the rest of Sleeper is adding, read once for both of its jobs.
+   *
+   * It is a supplementary signal on the wire scan — a tie-break and a lift for
+   * a borderline call, never a projection — and a guard on the drop side: the
+   * player the whole of Sleeper is adding this week is not offered as a cut.
+   */
+  const trending: ReadonlyMap<string, TrendingVelocity> = request.trending ?? new Map();
+
   const advice = recommendWaiverUpgrades({
     roster: rosterInputs,
     candidates: candidateInputs,
@@ -243,6 +273,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     currentStarterIds: request.currentStarterIds,
     reserveIds: request.reserveIds,
     lineup,
+    calendar: { week: request.week, playoffWeeks: request.playoff.weeks },
+    attention: new Map([...trending].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
   });
 
   /*
@@ -377,14 +409,10 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   /*
    * What the rest of Sleeper is doing, folded onto the board it belongs to.
    *
-   * Two uses, and the line between them is the one `core/market/trending.ts`
-   * draws in its own header: attention is allowed to *surface* a player and to
-   * price him, and is never allowed to score him. So nothing below touches a
-   * projection or a gain. It adds a sentence to rows that already earned their
-   * place, and it decides which unscored players are worth naming at all.
+   * The wire scan above already used it as a tie-break. Below, it adds a
+   * sentence to rows that earned their place and decides which unscored
+   * players are worth naming at all. Nothing touches a projection or a gain.
    */
-  const trending: ReadonlyMap<string, TrendingVelocity> = request.trending ?? new Map();
-
   /*
    * One owner for the defence, and it is still the planner.
    *
@@ -458,6 +486,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         profile,
         ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
         ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
+        roomIsAdding: roomIsAdding(trending),
         week: request.week,
         reserveIds: request.reserveIds,
         budget: request.budgets,

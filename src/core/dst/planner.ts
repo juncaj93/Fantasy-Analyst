@@ -60,6 +60,7 @@ import { DEFENCE_POSITION } from '../startsit/engine.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { DstOutlook } from './outlook.ts';
 import { DST_OUTLOOK } from './outlook.ts';
+import { inPlayoffPrep } from '../waivers/depthPolicy.ts';
 
 export { assessStreaming, weekRange };
 
@@ -796,6 +797,13 @@ function considerStash(args: {
    */
   if (input.playoff.emphasis < DST_PLAN.stashEmphasis) return null;
   if (input.currentWeek >= (playoffWeeks[0] ?? 0)) return null;
+  /*
+   * And the manager's own rule on top of it: one defence, except in the week
+   * before the playoffs. Emphasis can climb past the gate by mid-season for a
+   * team on a winning run, and a stash in week 9 is a second defence carried
+   * for six weeks. See `PLAYOFF_PREP_LEAD_WEEKS` in `core/waivers/depthPolicy.ts`.
+   */
+  if (!inPlayoffPrep({ week: input.currentWeek, playoffWeeks })) return null;
 
   const replacement = input.streaming?.replacementLevel ?? null;
   /*

@@ -365,9 +365,13 @@ describe('a bye is a missing week, not a bad defence', () => {
 describe('playoffs are the league’s own weeks, and a stash has to earn its slot', () => {
   const playoffWeeks = [14, 15, 16];
 
+  /*
+   * Week 13, the one week before these playoffs open: the only week the
+   * manager's rule allows a second defence. See `PLAYOFF_PREP_LEAD_WEEKS`.
+   */
   function stashInput(over: Partial<DstPlanInput> = {}) {
     return input({
-      currentWeek: 10,
+      currentWeek: 13,
       rostered: [option('BUF', 9, { forward: outlook(9) })],
       available: [option('NYJ', 8), option('DEN', 6, { playoff: outlook(13, { playable: 3 }) })],
       streaming: streaming(6),
@@ -388,6 +392,18 @@ describe('playoffs are the league’s own weeks, and a stash has to earn its slo
 
     expect(plan.stash).toBeNull();
     expect(plan.decision).not.toBe('stash');
+  });
+
+  it('does not carry a second defence before the week ahead of the playoffs', () => {
+    /*
+     * A team on a winning run clears the emphasis gate by mid-season. The
+     * manager's rule is one defence until the playoffs are next, so week 10
+     * streams or holds and never stashes.
+     */
+    const plan = planDst(stashInput({ currentWeek: 10 }));
+
+    expect(plan.stash).toBeNull();
+    expect(['stash', 'stream_and_stash']).not.toContain(plan.decision);
   });
 
   it('stashes when the multi-week gain clears the slot cost', () => {

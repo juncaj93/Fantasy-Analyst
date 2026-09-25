@@ -47,6 +47,7 @@
 import { weekRange } from '../dst/weeks.ts';
 import type { SeasonOutlook } from './seasonOutlook.ts';
 import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
+import type { WaiverAddBasis } from '../startsit/waivers.ts';
 
 export interface WaiverLeagueIntel {
   /**
@@ -161,6 +162,10 @@ export interface WaiverBidLike {
 export interface WaiverValueAddLike extends WaiverCandidateLike {
   overPlayerId?: string | null;
   overName?: string | null;
+  /** The engine's order for value adds. Absent on an older payload, which sorts on gain. */
+  priority?: number;
+  /** Why he is on the board, as data. Absent on an older payload. */
+  basis?: WaiverAddBasis;
 }
 
 /**
@@ -290,6 +295,9 @@ export interface WaiverBoardRow {
   bid: WaiverBidLike | null;
   /** Present only on a defence row. Absent everywhere else, not null-filled. */
   dst?: WaiverDstRole;
+  /** Present only on a value-add row: the engine's order, and every factor behind it. */
+  priority?: number;
+  basis?: WaiverAddBasis;
 }
 
 export interface WaiverBoard {
@@ -728,6 +736,8 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
     score: add.score,
     leagueRank: add.leagueRank ?? null,
     bid: null,
+    ...(add.priority === undefined ? {} : { priority: add.priority }),
+    ...(add.basis === undefined ? {} : { basis: add.basis }),
   };
 }
 
@@ -829,6 +839,14 @@ function compareRows(a: WaiverBoardRow, b: WaiverBoardRow): number {
   }
   if (a.leagueRank != null && b.leagueRank == null) return -1;
   if (a.leagueRank == null && b.leagueRank != null) return 1;
+  /*
+   * Value adds in the engine's order when it gave one.
+   *
+   * The priority is gain plus the two supplementary nudges — Sleeper's trending
+   * adds and the positional lean — and re-sorting those rows on gain alone
+   * would quietly undo both. See `core/startsit/waivers.ts`.
+   */
+  if (a.priority != null && b.priority != null && a.priority !== b.priority) return b.priority - a.priority;
   if (b.shortTerm.gain !== a.shortTerm.gain) return b.shortTerm.gain - a.shortTerm.gain;
   return a.name.localeCompare(b.name);
 }

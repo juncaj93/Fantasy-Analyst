@@ -180,6 +180,14 @@ export interface WaiverClaimPlanInput {
   preseasonPoints?: ReadonlyMap<string, number>;
   /** Where this room's draft took each player, for the cut order. */
   draftRankOf?: ReadonlyMap<string, number>;
+  /**
+   * Rostered players near the top of Sleeper's trending adds, by rank.
+   *
+   * Reaches the cut order and nothing else: the player the whole of Sleeper is
+   * picking up this week is not offered as a cut. Absent is the previous
+   * behaviour.
+   */
+  roomIsAdding?: ReadonlyMap<string, number>;
   /** 1-based, so the draft's say expires as production accumulates. */
   week?: number;
   reserveIds?: string[];
@@ -260,6 +268,7 @@ export function planWaiversFor(opts: WaiverClaimPlanInput): { plan: WaiverPlan |
       profile: opts.profile,
       ...(opts.preseasonPoints === undefined ? {} : { preseasonPoints: opts.preseasonPoints }),
       ...(opts.draftRankOf === undefined ? {} : { draftRankOf: opts.draftRankOf }),
+      ...(opts.roomIsAdding === undefined ? {} : { roomIsAdding: opts.roomIsAdding }),
       ...(opts.week === undefined ? {} : { week: opts.week }),
       reserveIds: opts.reserveIds,
       budget: opts.budget
@@ -486,8 +495,15 @@ function whyFor(
   const position = claim.addPosition || 'the slot';
   if (codes.has('add_fills_empty_slot')) lines.push(`${claim.addName} fills your empty ${position} slot.`);
   else if (codes.has('add_enters_lineup')) lines.push(`${claim.addName} starts for you this week.`);
-  else if (codes.has('add_bench_depth')) lines.push(`${claim.addName} is depth rather than a starter — he covers a position you are thin at.`);
+  else if (codes.has('add_bench_depth')) lines.push(`${claim.addName} is depth rather than a starter: he does not start this week, but he is worth a bench spot.`);
   else if (codes.has('add_no_lineup_effect')) lines.push(`${claim.addName} does not change this week's lineup; he is a hold for later.`);
+
+  /*
+   * The case for him, factor by factor: the projection, what he was measured
+   * against and why, and whether Sleeper's trending adds moved him. Read off
+   * the board row's basis, which the wire scan wrote beside the arithmetic.
+   */
+  lines.push(...caseLines(claim.addName, row));
 
   /*
    * Why that cut — and nothing at all about it when the roster cannot be read.
@@ -529,6 +545,60 @@ function whyFor(
   lines.push(...relationLines(claim, plan.claims));
 
   return lines.filter((line) => line.length > 0);
+}
+
+/**
+ * The factors behind the add, said the way a manager would weigh them.
+ *
+ * Four of them, in the order they carry weight: the projection, the positional
+ * need that decided which comparison was fair, and the two supplementary
+ * signals — Sleeper's trending adds and the running-back lean — each said with
+ * how far it moved him, so a reader can see that neither did the deciding.
+ * Nothing for a row without a basis (an upgrade, or an older payload).
+ */
+export function caseLines(name: string, row: WaiverBoardRow | null): string[] {
+  const basis = row?.basis;
+  if (!row || !basis) return [];
+  const lines: string[] = [];
+  const over = row.shortTerm.over;
+  const gain = row.shortTerm.gain;
+
+  if (basis.projection != null) {
+    lines.push(
+      over
+        ? `The market projects ${name} for ${basis.projection.toFixed(1)} pts this week. He grades ${gain.toFixed(1)} pts better than ${over}.`
+        : `The market projects ${name} for ${basis.projection.toFixed(1)} pts this week.`,
+    );
+  } else if (over) {
+    lines.push(`${name} grades ${gain.toFixed(1)} pts better than ${over} on the evidence available, with no market line this week.`);
+  }
+
+  const { position, held, cap } = basis.depth;
+  if (basis.comparedTo === 'position') {
+    lines.push(
+      `You already hold ${held} ${position}${held === 1 ? '' : 's'}, as many as your lineup uses, so he was measured against ${over ?? 'the weaker one'} rather than a spare bench spot and had to clear the upgrade bar of ${basis.bar.toFixed(1)} pts.`,
+    );
+  } else if (cap != null) {
+    lines.push(`You hold ${held} ${position}${held === 1 ? '' : 's'} and your lineup uses ${cap}, so there is room for him without doubling up.`);
+  } else {
+    lines.push(`${position}s are held for depth with no cap, so he only had to beat your weakest flex option on the bench.`);
+  }
+
+  if (basis.attention) {
+    const rank = basis.attention.rank == null ? 'On' : `#${basis.attention.rank} on`;
+    lines.push(
+      basis.attention.nudge > 0
+        ? `${rank} Sleeper's trending adds this week, which moved him up ${basis.attention.nudge.toFixed(2)} pts in the order. It does not change his projection.`
+        : `${rank} Sleeper's trending adds this week.`,
+    );
+  } else {
+    lines.push('Not on Sleeper\'s trending adds this week, so the call rests on the projection alone.');
+  }
+
+  if (basis.lean > 0) {
+    lines.push(`Running backs get a ${basis.lean.toFixed(2)}-pt lean when adds are close. It breaks ties and never overrides a real gap.`);
+  }
+  return lines;
 }
 
 /** Why that cut, from the codes the drop ranking attached to it. */
@@ -767,6 +837,10 @@ function protectedLines(plan: WaiverPlan): string[] {
     {
       lead: 'Drafted early enough that one quiet week is not a reason to cut him',
       take: (p) => p.reason === 'early_pick',
+    },
+    {
+      lead: 'Among the most-added players in Sleeper this week, so a rival would claim him the moment he is cut',
+      take: (p) => p.reason === 'room_is_adding',
     },
   ];
 
