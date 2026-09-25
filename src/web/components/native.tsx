@@ -1555,6 +1555,42 @@ export function Sheet({
       window.clearTimeout(timer);
       timer = window.setTimeout(settle, SETTLE);
     };
+    /*
+     * The layer changing size keeps a resting card at rest.
+     *
+     * **This is the compare sheet losing the reader's picks.** The keyboard
+     * shortens this layer (see `useKeyboardInset`), and every length in it is a
+     * percentage of that height — so the card's detent moves with the keyboard.
+     * Going up is harmless: the layer shrinks, the browser clamps `scrollTop` to
+     * the new, smaller end, and that end *is* the detent. Coming down is not.
+     * The layer grows by the keyboard's height, `scrollTop` has no reason to
+     * change, and the card is left a keyboard short of its detent without
+     * anything having scrolled. Measured at 390×844 with a 300px keyboard:
+     * `scrollTop` 443 against a detent of 743. The next lift anywhere on the
+     * card — a tap on a search result is the obvious one — arms the settle,
+     * which reads 300 of 743 as a push to 0.40 of the way, and 0.40 is
+     * `DISMISS_HOLD`. The card goes, and every player chosen in it with it.
+     *
+     * So a card that was resting at its detent before a resize is put back at
+     * the new one. A card the reader is part-way through pushing is not: its
+     * `scrollTop` is short of the old detent, and what happens to it is the
+     * settle's question, not this one's.
+     */
+    let restingAt = root.scrollHeight - root.clientHeight;
+    const resized =
+      typeof ResizeObserver === 'function'
+        ? new ResizeObserver(() => {
+            if (leaving) return;
+            const detentTop = root.scrollHeight - root.clientHeight;
+            const wasResting = root.scrollTop >= restingAt - 1;
+            restingAt = detentTop;
+            if (!wasResting || detentTop <= 0 || root.scrollTop >= detentTop - 1) return;
+            say('RE-ANCHOR', `detent ${detentTop}`);
+            root.scrollTop = detentTop;
+            show(0, detentTop);
+          })
+        : null;
+    resized?.observe(root);
     rewind();
     traceReset();
     root.addEventListener('scroll', onScroll, { passive: true });
@@ -1578,6 +1614,7 @@ export function Sheet({
     for (const [type, listener] of watched) root.addEventListener(type, listener, { passive: true });
     return () => {
       window.clearTimeout(timer);
+      resized?.disconnect();
       root.removeEventListener('scroll', onScroll);
       for (const [type, listener] of watched) root.removeEventListener(type, listener);
     };
