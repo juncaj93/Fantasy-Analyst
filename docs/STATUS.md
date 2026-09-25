@@ -549,6 +549,15 @@ suggestions).
    there are none. It is a season of Sundays before that sentence can be
    answered, which is exactly why the writing had to start now.
 
+14. **Three Chromium-only e2e failures, open for a future round.** Found on
+   25 September 2026 in a full local `chromium-small-360` run, and confirmed to
+   exist before that day's waiver work by re-running them on `63bc217`:
+   `player-face.spec.ts:309` (the portrait's 64px header cost) and
+   `shell.spec.ts:194` (draft board density: the list starts below the 132px
+   line) fail outright; `player-card-scroll.spec.ts:702` (downward flick on an
+   expanded card) is flaky, passing on retry. CI runs WebKit only, where all
+   three pass, so nothing gates on them. Not investigated yet.
+
 Closed since the last report: **WebKit now runs and passes in CI.** The
 "iPhone WebKit smoke tests" job is green on GitHub, so the specs have executed
 on the real Safari engine, not only on Chromium locally.

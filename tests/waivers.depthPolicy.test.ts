@@ -160,6 +160,52 @@ describe('a defence on the generic scan', () => {
   });
 });
 
+/*
+ * The bar is somebody the plan would actually cut.
+ *
+ * 25 September 2026: every value add read `Better than RJ Harvey` while the
+ * plan's own protected list said RJ Harvey would not be cut. The market hold
+ * now reaches the bar too, so the comparison is with a move the reader can
+ * make.
+ */
+describe('the bar a value add is measured against', () => {
+  // `rb3` (Weak Back, 1 pt) is the weakest bench player; `wr4` sits above him.
+  const wire = [candidate('fa-rb1', 'Wire Back', 'RB', 7)];
+
+  it('is the weakest bench player when nobody is held', () => {
+    expect(scan(wire).valueAdds[0]!.overName).toBe('Weak Back');
+  });
+
+  it('skips a player the market holds, and the gain shrinks to match', () => {
+    const before = scan(wire).valueAdds[0]!;
+    const after = recommendWaiverUpgrades({
+      roster: [...roster(), candidate('rb5', 'Cuttable Back', 'RB', 2)],
+      candidates: wire,
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...ROSTER_IDS, 'rb5'],
+      calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+      heldIds: new Set(['rb3']),
+    }).valueAdds[0]!;
+
+    expect(after.overName).toBe('Cuttable Back');
+    expect(after.gain).toBeLessThan(before.gain);
+  });
+
+  it('falls back to the weakest held player when nobody on the bench can be cut', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: roster(),
+      candidates: wire,
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: ROSTER_IDS,
+      calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+      heldIds: new Set(roster().map((c) => c.player.id)),
+    });
+    expect(advice.valueAdds[0]!.overName).toBe('Weak Back');
+  });
+});
+
 describe('backs and receivers', () => {
   it('are uncapped: several can clear at once', () => {
     const advice = scan([

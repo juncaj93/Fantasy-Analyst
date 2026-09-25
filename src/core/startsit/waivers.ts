@@ -253,6 +253,13 @@ export function recommendWaiverUpgrades(opts: {
   calendar?: { week: number; playoffWeeks: readonly number[] };
   /** Sleeper trending adds. Absent or empty moves nothing. */
   attention?: WaiverAttention;
+  /**
+   * Rostered players the plan will not cut — the market hold in
+   * `core/waivers/planner/rosterState.ts`. A value add is never measured
+   * against one of them while somebody cuttable is available, because a bar
+   * set by a player nobody can drop describes a move nobody can make.
+   */
+  heldIds?: ReadonlySet<string>;
 }): WaiverAdvice {
   const base = opts.minGain ?? MEANINGFUL_UPGRADE_GAIN;
   const perSlot = opts.alternatives ?? DEFAULT_ALTERNATIVES;
@@ -414,6 +421,7 @@ export function recommendWaiverUpgrades(opts: {
    * positions against each other instead of players. See `replacementFor`.
    */
   const reserved = new Set(opts.reserveIds ?? []);
+  const held = opts.heldIds ?? new Set<string>();
   const depthContext = {
     shape: opts.shape,
     week: opts.calendar?.week ?? 1,
@@ -444,8 +452,8 @@ export function recommendWaiverUpgrades(opts: {
      * half point a free bench spot costs.
      */
     const cap = depthCap(e.position, depthContext);
-    const held = heldAt(e.position, opts.roster, rosterEvaluations, reserved);
-    const overCap = cap != null && held.length >= cap;
+    const atPosition = heldAt(e.position, opts.roster, rosterEvaluations, reserved);
+    const overCap = cap != null && atPosition.length >= cap;
     /*
      * Except a defence. Replacing the one you hold is streaming, which belongs
      * to the defence planner for the reasons given at the upgrade tier above,
@@ -454,8 +462,8 @@ export function recommendWaiverUpgrades(opts: {
     if (overCap && e.position === DEFENCE_POSITION) continue;
 
     const floor = overCap
-      ? weakestScored(held)
-      : replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? []);
+      ? weakestScored(cuttableFirst(atPosition, held))
+      : replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? [], held);
     if (floor == null) continue;
 
     const gain = round2((e.score ?? 0) - (floor.score ?? 0));
@@ -482,7 +490,7 @@ export function recommendWaiverUpgrades(opts: {
         comparedTo: overCap ? 'position' : 'bench',
         bar,
         projection: e.expectation.points,
-        depth: { position: e.position, held: held.length, cap },
+        depth: { position: e.position, held: atPosition.length, cap },
         attention: heat ? { rank: heat.rank, heat: heat.heat, nudge } : null,
         lean,
       },
@@ -654,6 +662,7 @@ function replacementFor(
   roster: StartSitInput[],
   evaluations: Map<string, StartSitEvaluation>,
   reserveIds: string[],
+  heldIds: ReadonlySet<string> = new Set(),
 ): StartSitEvaluation | null {
   const slots = lineup.slots.filter((s) => s.accepts.includes(candidate.position));
   if (slots.length === 0) return null;
@@ -672,9 +681,26 @@ function replacementFor(
   }
   if (usable.length === 0) return null;
 
-  const benched = usable.filter((e) => !starting.has(e.playerId));
+  const benched = cuttableFirst(
+    usable.filter((e) => !starting.has(e.playerId)),
+    heldIds,
+  );
   if (benched.length === 0) return null;
   return benched.reduce((worst, e) => ((e.score ?? 0) < (worst.score ?? 0) ? e : worst));
+}
+
+/**
+ * The players a claim could actually cut, or everyone when nobody can be.
+ *
+ * The market hold keeps well-drafted and heavily-added players off the cut
+ * list, and the bar a value add is measured against has to come from the same
+ * list, or the board says `Better than RJ Harvey` beside a plan that refuses to
+ * cut him. When every candidate is held the hold yields, exactly as the cut
+ * planner's does, and the weakest of them is the bar again.
+ */
+function cuttableFirst(players: StartSitEvaluation[], heldIds: ReadonlySet<string>): StartSitEvaluation[] {
+  const cuttable = players.filter((e) => !heldIds.has(e.playerId));
+  return cuttable.length > 0 ? cuttable : players;
 }
 
 /**

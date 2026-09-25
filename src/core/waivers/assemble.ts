@@ -62,6 +62,7 @@ import { waiverLeagueIntel, withCompetition, type WaiverIntelRoster } from './in
 import { trendingHeadline, type TrendingVelocity } from '../market/trending.ts';
 import { priceWaiverUpgrades, type PricedBid, type WaiverPricingContext } from './pricing.ts';
 import { buildWaiverClaimPlan, type WaiverClaimPlan } from './claimPlan.ts';
+import { marketHoldFor } from './planner/rosterState.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
@@ -264,6 +265,22 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    */
   const trending: ReadonlyMap<string, TrendingVelocity> = request.trending ?? new Map();
 
+  /*
+   * Who the market says to hold, read once and handed to both halves: the
+   * wire scan measures value adds against somebody cuttable, and the cut
+   * planner refuses to name the same players. One list, so the board and the
+   * plan cannot disagree about who is on the table.
+   */
+  const draftCapitalRank = request.rosters.length > 0 ? request.rosters.length * shape.totalStarters : undefined;
+  const heldIds = new Set(
+    marketHoldFor({
+      ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
+      ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
+      roomIsAdding: roomIsAdding(trending),
+      week: request.week,
+    }).keys(),
+  );
+
   const advice = recommendWaiverUpgrades({
     roster: rosterInputs,
     candidates: candidateInputs,
@@ -275,6 +292,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     lineup,
     calendar: { week: request.week, playoffWeeks: request.playoff.weeks },
     attention: new Map([...trending].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
+    heldIds,
   });
 
   /*
@@ -487,7 +505,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
         ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
         roomIsAdding: roomIsAdding(trending),
-        ...(request.rosters.length > 0 ? { draftCapitalRank: request.rosters.length * shape.totalStarters } : {}),
+        ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
         week: request.week,
         reserveIds: request.reserveIds,
         budget: request.budgets,

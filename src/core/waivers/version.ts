@@ -47,4 +47,8 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * `waiver@4`: the two cut protections are one market hold, and its draft
  * condition is the league's starter pool rather than a fixed pick 80.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@4', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@5`: a value add is measured against somebody the plan would cut —
+ * the market hold now reaches the bar as well as the cut list.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@5', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

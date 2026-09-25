@@ -78,6 +78,7 @@ import {
 export * from './types.ts';
 export {
   buildRosterSimulation,
+  marketHoldFor,
   applyClaims,
   plannerExcluded,
   BENCH_OPTION_WEIGHT,
