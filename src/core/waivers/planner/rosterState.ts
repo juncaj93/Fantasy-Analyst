@@ -57,6 +57,7 @@ import { recommendLineup } from '../../startsit/lineup.ts';
 import { valueOfSlot, type HeldPlayer } from '../../roster/bench.ts';
 import { buildHeldPlayers } from '../../roster/held.ts';
 import { EARLY_PICK_RANK, EARLY_PICK_WEEKS } from './dropCost.ts';
+import type { MarketHoldCondition } from './types.ts';
 import type { RosterShape, ScoringProfile } from '../../sleeper/scoring.ts';
 
 /**
@@ -213,6 +214,14 @@ export interface RosterSimulationInput {
    * behaviour.
    */
   roomIsAdding?: ReadonlyMap<string, number>;
+  /**
+   * The ADP inside which a player counts as real draft capital.
+   *
+   * The league's starter pool — teams × starting slots — so "drafted as a
+   * starter" means the same thing in an eight-team league and a fourteen-team
+   * one. Absent falls back to `EARLY_PICK_RANK`.
+   */
+  draftCapitalRank?: number;
   /** 1-based. Decides whether the draft still outranks production. */
   week?: number;
   reserveIds?: readonly string[];
@@ -235,9 +244,14 @@ export interface RosterSimulation {
    * `EARLY_PICK_RANK` and `EARLY_PICK_WEEKS` in `dropCost.ts`. Empty is the
    * previous behaviour exactly.
    */
-  earlyPick: ReadonlySet<string>;
-  /** Rostered players Sleeper is adding in bulk, by trending rank. Empty is the old behaviour. */
-  roomIsAdding: ReadonlyMap<string, number>;
+  /**
+   * Players the market says to hold, and which condition qualified them.
+   *
+   * One protection with two conditions — see `MarketHoldCondition`. Draft
+   * capital is checked first, so a player who qualifies both ways is described
+   * by the steadier of the two. The number is his ADP or his trending rank.
+   */
+  marketHold: ReadonlyMap<string, { condition: MarketHoldCondition; rank: number }>;
   /** Standing worth of holding each player, from the existing bench model. */
   slotValueOf: ReadonlyMap<string, number>;
   reserveIds: ReadonlySet<string>;
@@ -301,11 +315,15 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
    * has to be young enough that it is still the better evidence. With no
    * ranking imported this set is empty and nothing downstream changes.
    */
-  const earlyPick = new Set<string>();
+  const marketHold = new Map<string, { condition: MarketHoldCondition; rank: number }>();
+  const capital = input.draftCapitalRank ?? EARLY_PICK_RANK;
   if (input.draftRankOf && (input.week ?? 1) <= EARLY_PICK_WEEKS) {
     for (const [playerId, rank] of input.draftRankOf) {
-      if (Number.isFinite(rank) && rank <= EARLY_PICK_RANK) earlyPick.add(playerId);
+      if (Number.isFinite(rank) && rank <= capital) marketHold.set(playerId, { condition: 'draft_capital', rank });
     }
+  }
+  for (const [playerId, rank] of input.roomIsAdding ?? []) {
+    if (!marketHold.has(playerId)) marketHold.set(playerId, { condition: 'trending', rank });
   }
 
   /*
@@ -536,8 +554,7 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
     nameOf,
     valueOf,
     unscored,
-    earlyPick,
-    roomIsAdding: input.roomIsAdding ?? new Map(),
+    marketHold,
     slotValueOf,
     reserveIds,
     baseline,

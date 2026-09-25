@@ -70,7 +70,7 @@ describe('the draft still speaks in September', () => {
     });
     const him = drops.find((d) => d.playerId === 'earlyPick')!;
 
-    expect(him.protection).toBe('early_pick');
+    expect(him.protection).toBe('market_hold');
     expect(eligibleDrops(drops).map((d) => d.playerId)).not.toContain('earlyPick');
   });
 
@@ -165,3 +165,68 @@ describe('a protection that could cover the whole roster yields', () => {
     }
   });
 });
+
+/*
+ * 25 September 2026: RJ Harvey, ADP 81.6, sat at the bottom of the bench as
+ * the cheapest cut on the board. The fixed line of 80 missed him by under two
+ * picks. The line is now the league's own starter pool — teams × starting
+ * slots, 100 in a ten-team league starting ten — and trending adds are the
+ * second condition of the same protection rather than a system of their own.
+ */
+describe('one market hold, two conditions', () => {
+  const harvey = new Map([['earlyPick', 81.6]]);
+
+  it('missed an ADP-82 back on the old fixed line', () => {
+    const drops = rankDropsFor({ simulation: simulation({ draftRankOf: harvey }), addPlayerId: 'wireWr' });
+    expect(drops.find((d) => d.playerId === 'earlyPick')?.protection).toBeNull();
+  });
+
+  it('holds him once the line is the league starter pool', () => {
+    const drops = rankDropsFor({
+      simulation: buildRosterSimulationWith({ draftRankOf: harvey, draftCapitalRank: 100 }),
+      addPlayerId: 'wireWr',
+    });
+    const him = drops.find((d) => d.playerId === 'earlyPick')!;
+    expect(him.protection).toBe('market_hold');
+    expect(him.reasons).toContainEqual(expect.objectContaining({ code: 'protected_early_pick', value: 81.6 }));
+  });
+
+  it('holds an undrafted back the whole of Sleeper is adding, through the same protection', () => {
+    const drops = rankDropsFor({
+      simulation: buildRosterSimulationWith({ roomIsAdding: new Map([['benchRb', 1]]) }),
+      addPlayerId: 'wireWr',
+    });
+    const him = drops.find((d) => d.playerId === 'benchRb')!;
+    expect(him.protection).toBe('market_hold');
+    expect(him.reasons).toContainEqual(expect.objectContaining({ code: 'protected_room_is_adding', value: 1 }));
+  });
+
+  it('describes a player who qualifies both ways by his draft capital', () => {
+    const drops = rankDropsFor({
+      simulation: buildRosterSimulationWith({ draftRankOf: RANKS, roomIsAdding: new Map([['earlyPick', 3]]) }),
+      addPlayerId: 'wireWr',
+    });
+    const codes = drops.find((d) => d.playerId === 'earlyPick')!.reasons.map((r) => r.code);
+    expect(codes).toContain('protected_early_pick');
+    expect(codes).not.toContain('protected_room_is_adding');
+  });
+});
+
+function buildRosterSimulationWith(over: {
+  draftRankOf?: ReadonlyMap<string, number>;
+  draftCapitalRank?: number;
+  roomIsAdding?: ReadonlyMap<string, number>;
+}) {
+  const rosterInputs = rosterWithEarlyPick();
+  const wireInputs = wire();
+  return buildRosterSimulation({
+    pool: [...rosterInputs, ...wireInputs],
+    rosterIds: rosterInputs.map((r) => r.player.id),
+    wireIds: wireInputs.map((r) => r.player.id),
+    shape: SHAPE,
+    profile: HALF_PPR,
+    now: NOW,
+    week: 2,
+    ...over,
+  });
+}

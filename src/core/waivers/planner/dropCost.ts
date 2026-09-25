@@ -172,10 +172,13 @@ export function rankDropsFor(opts: {
 
     if (protection === 'in_lineup') {
       reasons.push({ code: 'protected_in_lineup', playerId: dropId, value: lineupCost });
-    } else if (protection === 'early_pick') {
-      reasons.push({ code: 'protected_early_pick', playerId: dropId, value: null });
-    } else if (protection === 'room_is_adding') {
-      reasons.push({ code: 'protected_room_is_adding', playerId: dropId, value: simulation.roomIsAdding.get(dropId) ?? null });
+    } else if (protection === 'market_hold') {
+      const hold = simulation.marketHold.get(dropId);
+      reasons.push({
+        code: hold?.condition === 'trending' ? 'protected_room_is_adding' : 'protected_early_pick',
+        playerId: dropId,
+        value: hold?.rank ?? null,
+      });
     } else if (protection === 'reserve_slot') {
       reasons.push({ code: 'protected_reserve_slot', playerId: dropId, value: null });
     } else if (protection === 'core_value') {
@@ -227,7 +230,7 @@ export function rankDropsFor(opts: {
   /*
    * A protection that can cover the whole roster is not a protection.
    *
-   * `early_pick` is the only one of the five that could plausibly apply to
+   * `market_hold` is the only one of the five that could plausibly apply to
    * every rostered player at once — a room that drafted well has a board full
    * of early picks — and when it does, the waiver lane goes silent with no
    * cause a reader can see. That is a worse failure than the one it prevents:
@@ -242,9 +245,7 @@ export function rankDropsFor(opts: {
    */
   const anyEligible = ranked.some((c) => c.protection == null && c.cost != null);
   if (!anyEligible) {
-    const released =
-      ranked.find((c) => c.protection === 'room_is_adding' && c.cost != null) ??
-      ranked.find((c) => c.protection === 'early_pick' && c.cost != null);
+    const released = ranked.find((c) => c.protection === 'market_hold' && c.cost != null);
     if (released) {
       released.protection = null;
       released.reasons = released.reasons.filter(
@@ -318,16 +319,17 @@ function protectionFor(args: {
    * what the reader actually needs said. It expires; see
    * {@link EARLY_PICK_WEEKS}.
    */
-  if (simulation.earlyPick.has(dropId)) return 'early_pick';
   /*
-   * A player the whole of Sleeper is adding is not cut this week.
+   * The market says hold him, on either of two conditions.
    *
-   * Attention is not quality, and this says nothing about what he is worth.
-   * It says what happens to him the moment he is dropped: a rival claims him,
-   * and the cut cannot be taken back. Categorical, like the draft protection
-   * above, and it yields the same way when it is all that is left.
+   * One protection, not two systems. The draft condition is the one above:
+   * the market spent a starter's pick on him and the season is young. The
+   * trending condition is that the whole of Sleeper is adding him this week,
+   * so a rival claims him the moment he is cut. Attention is not quality, and
+   * neither condition says what he is worth — they say that cutting him now
+   * is the kind of mistake that cannot be taken back. See `MarketHoldCondition`.
    */
-  if (simulation.roomIsAdding.has(dropId)) return 'room_is_adding';
+  if (simulation.marketHold.has(dropId)) return 'market_hold';
   if (lineupCost >= PROTECTED_LINEUP_COST) return 'core_value';
   return null;
 }

@@ -195,14 +195,20 @@ test.describe('the defence on the Waivers board', () => {
     await expect(row.locator('[data-testid="team-logo"][data-team="NYJ"], [data-testid="team-code"]')).toHaveCount(1);
   });
 
-  test('is filterable, like every other position on the board', async ({ page }) => {
+  /*
+   * A defence the planner named is a recommendation, so it sits under
+   * `Recommended move` with the plan — not among the other options, and not
+   * behind a position chip that only narrows those options.
+   */
+  test('sits under the recommended move, not among the other options', async ({ page }) => {
     await inSeason(page);
     await withPlan(page, plan());
     await openWaivers(page);
 
-    await page.getByTestId('waiver-filter-def').click();
-    await expect(page.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="waiver-row"]:not([data-position="DEF"])')).toHaveCount(0);
+    const recommended = page.getByTestId('waivers-recommended');
+    await expect(recommended.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="waivers-others"] [data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
+    await expect(page.getByTestId('waiver-filter-def')).toHaveCount(0);
   });
 
   test('is said once — the row, or the line, never both', async ({ page }) => {

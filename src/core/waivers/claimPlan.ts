@@ -188,6 +188,14 @@ export interface WaiverClaimPlanInput {
    * behaviour.
    */
   roomIsAdding?: ReadonlyMap<string, number>;
+  /**
+   * The ADP inside which a player counts as real draft capital.
+   *
+   * The league's starter pool — teams × starting slots — so "drafted as a
+   * starter" means the same thing in an eight-team league and a fourteen-team
+   * one. Absent falls back to `EARLY_PICK_RANK`.
+   */
+  draftCapitalRank?: number;
   /** 1-based, so the draft's say expires as production accumulates. */
   week?: number;
   reserveIds?: string[];
@@ -269,6 +277,7 @@ export function planWaiversFor(opts: WaiverClaimPlanInput): { plan: WaiverPlan |
       ...(opts.preseasonPoints === undefined ? {} : { preseasonPoints: opts.preseasonPoints }),
       ...(opts.draftRankOf === undefined ? {} : { draftRankOf: opts.draftRankOf }),
       ...(opts.roomIsAdding === undefined ? {} : { roomIsAdding: opts.roomIsAdding }),
+      ...(opts.draftCapitalRank === undefined ? {} : { draftCapitalRank: opts.draftCapitalRank }),
       ...(opts.week === undefined ? {} : { week: opts.week }),
       reserveIds: opts.reserveIds,
       budget: opts.budget
@@ -834,14 +843,6 @@ function protectedLines(plan: WaiverPlan): string[] {
       take: (p) => p.reason === 'core_value' && isDefence(p.playerId),
     },
     { lead: 'Not scorable yet, so never named as a cut', take: (p) => p.reason === 'unscorable' },
-    {
-      lead: 'Drafted early enough that one quiet week is not a reason to cut him',
-      take: (p) => p.reason === 'early_pick',
-    },
-    {
-      lead: 'Among the most-added players in Sleeper this week, so a rival would claim him the moment he is cut',
-      take: (p) => p.reason === 'room_is_adding',
-    },
   ];
 
   const lines: string[] = [];
@@ -850,7 +851,40 @@ function protectedLines(plan: WaiverPlan): string[] {
     if (names.length === 0) continue;
     lines.push(`${group.lead}: ${joinNames(names)}.`);
   }
+
+  /*
+   * The market hold, one line, each name with the condition that qualified him.
+   *
+   * One protection with two conditions, so one sentence — but the reader is
+   * owed which condition, because "drafted around pick 82" and "#1 add in
+   * Sleeper" are different arguments for keeping somebody.
+   */
+  const held = plan.protectedPlayers
+    .filter((p) => p.reason === 'market_hold')
+    .map((p) => `${p.name} (${marketHoldNote(plan, p.playerId)})`);
+  if (held.length > 0) {
+    lines.push(`The market still rates ${held.length === 1 ? 'him' : 'them'}, so a claim will not cut ${held.length === 1 ? 'him' : 'them'}: ${joinNames(held)}.`);
+  }
   return lines;
+}
+
+/** Which market-hold condition qualified a player, in a few words. */
+function marketHoldNote(plan: WaiverPlan, playerId: string): string {
+  for (const ranking of plan.dropRanking) {
+    for (const drop of ranking.drops) {
+      if (drop.playerId !== playerId) continue;
+      const reason = drop.reasons.find(
+        (r) => r.code === 'protected_early_pick' || r.code === 'protected_room_is_adding',
+      );
+      if (!reason) continue;
+      const rank = reason.value == null ? null : Math.round(reason.value);
+      if (reason.code === 'protected_room_is_adding') {
+        return rank == null ? 'a top add in Sleeper this week' : `#${rank} add in Sleeper this week`;
+      }
+      return rank == null ? 'drafted as a starter' : `drafted around pick ${rank}`;
+    }
+  }
+  return 'the market still rates him';
 }
 
 /**

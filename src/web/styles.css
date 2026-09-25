@@ -4969,6 +4969,26 @@ table.compact tr:last-child td {
 }
 
 /*
+ * Options, not recommendations.
+ *
+ * The Waivers screen splits its board: the rows the plan claims sit under
+ * `Recommended move`, and the rest under `Other options to consider`. A tinted
+ * verdict badge on every option made each one read as a recommendation, so
+ * inside that section the badge takes the plain tag colours. Scoped to the
+ * section's class, so the Team screen's rows keep theirs.
+ */
+.waivers-others .waiver-strength {
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+}
+
+.waivers-others-note {
+  margin: 0 var(--sp-1) var(--sp-2);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+/*
  * The one line under a waiver card's tags.
  *
  * What he costs, who else wants him, what he is worth — in that order, because
