@@ -732,6 +732,60 @@ test.describe('the comparison tool', () => {
     await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
   });
 
+  /**
+   * The keyboard going away does not take the comparison with it.
+   *
+   * Reported as "tapping a name in the search closes the whole compare
+   * screen", and measured as the keyboard, not the tap: the sheet's layer is
+   * shortened by the keyboard, and when it came back down the card was left a
+   * keyboard's height short of where it rests. The next lift anywhere on the
+   * card read that as a push to 40% of the way and dismissed it, and every
+   * player chosen went with it.
+   *
+   * No browser in this suite has a software keyboard, so the visual viewport
+   * is stood in for — the same object `useKeyboardInset` reads.
+   */
+  test('keeps the sheet and the picks when the keyboard goes away before a tap', async ({ page }) => {
+    await page.addInitScript(() => {
+      const visual = new EventTarget();
+      let keyboard = 0;
+      Object.defineProperty(visual, 'height', { get: () => window.innerHeight - keyboard });
+      Object.defineProperty(visual, 'offsetTop', { get: () => 0 });
+      Object.defineProperty(window, 'visualViewport', { get: () => visual });
+      (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard = (px) => {
+        keyboard = px;
+        visual.dispatchEvent(new Event('resize'));
+      };
+    });
+    await page.reload();
+    await page.getByTestId('tab-team').click();
+    await page.getByTestId('compare-open').click();
+    for (const id of ['1001', '1005']) await choose(page, id);
+
+    await page.getByTestId('compare-search').focus();
+    await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(380));
+    await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(0));
+
+    /*
+     * A tap where the row is drawn, not `click()`: Playwright scrolls its
+     * target into view first, and that scroll is one the layer corrects on its
+     * own — which put the card back and hid this bug from the suite.
+     */
+    const nextId = await page
+      .locator('[data-testid="compare-candidate"][data-chosen="false"]')
+      .first()
+      .getAttribute('data-player-id');
+    const next = page.locator(`[data-testid="compare-candidate"][data-player-id="${nextId}"]`);
+    const box = await next.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box && viewport && box.y + box.height < viewport.height, 'the row is on screen to be tapped').toBeTruthy();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(next).toHaveAttribute('data-chosen', 'true');
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(3);
+  });
+
   test('cannot choose the same player twice', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
