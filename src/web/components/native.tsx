@@ -521,6 +521,7 @@ export function Sheet({
   onClose,
   children,
   testId,
+  className,
 }: {
   title: ReactNode;
   /**
@@ -544,6 +545,8 @@ export function Sheet({
   onClose: () => void;
   children: ReactNode;
   testId?: string;
+  /** An extra class on the card, for a sheet that re-values the palette's roles. */
+  className?: string;
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -1699,7 +1702,7 @@ export function Sheet({
         <div className="sheet-dismiss" data-testid="sheet-dismiss" />
         <div className="sheet-snap" ref={detent}>
           <div
-            className="sheet"
+            className={className ? `sheet ${className}` : 'sheet'}
             role="dialog"
             aria-modal="true"
             aria-label={accessibleLabel ?? (typeof title === 'string' ? title : undefined)}

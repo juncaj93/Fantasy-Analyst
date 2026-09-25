@@ -3234,10 +3234,11 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * column and never the comparison.
      */
     const positions = new Map(inputs.map((input) => [input.player.id, input.player.position ?? null]));
+    const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
     const display = await gatherComparisonDisplay(db, ctx.env.sleeper, {
       league,
       profile,
-      nflState: await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
+      nflState,
       positions,
     }).catch(() => null);
 
@@ -3263,6 +3264,14 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
        * this app serves cached responses from older workers.
        */
       ...(projected.projectionNotes.length > 0 ? { projectionNotes: projected.projectionNotes } : {}),
+      /*
+       * Which week this is, for the sheet's subtitle. Read from the same stored
+       * state the display ladder above was given, so the sheet cannot name a
+       * different week from the one its numbers came from. Only in the regular
+       * season, because `week` means a week *within the season type* and a
+       * preseason "week 1" is not the week a lineup is set for.
+       */
+      ...(nflState?.seasonType === 'regular' && nflState.week != null ? { week: nflState.week } : {}),
     });
   });
 

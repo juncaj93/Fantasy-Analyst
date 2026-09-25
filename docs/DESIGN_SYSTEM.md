@@ -44,6 +44,8 @@ icon, asset or branding — every glyph in the app is drawn in
 | Injury | `.injury-caution` `.injury-serious` `.injury-out`, over `--status-neutral` |
 | Position | `--pos-QB-line` / `--pos-QB-tint` … and `--pos-mix` / `--pos-mix-open` / `--pos-mix-draft` for how much of it a row shows |
 | State | `--selected` `--selected-tint` `--pressed` `--focus-ring` |
+| Paper (Compare) | `--paper` `--paper-card` `--paper-head` `--paper-line` `--paper-line-soft` `--paper-ink` `--paper-label` `--paper-dim` `--paper-faint` `--paper-teal` `--paper-teal-tint` `--paper-warn` `--paper-control` |
+| Verdict / insight | `--verdict-surface` `--verdict-text` `--verdict-body` `--verdict-name` `--verdict-muted` `--verdict-accent` `--verdict-bar` `--verdict-bar-muted` `--verdict-track` · `--insight-tint` `--insight-line` `--insight-text` |
 | Geometry | `--radius-sm: 8` `--radius: 12` `--radius-lg: 16` `--radius-sheet: 20` `--radius-toolbar: 25` `--radius-pill` `--tap: 44` |
 | Row control | `--row-action: 28` (the mark) against `--tap: 44` (the target), `--row-pad-top: 6`, `--chevron: 14` / `--chevron-nudge: -2` |
 | Spacing | `--sp-0: 2` `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-5: 20` `--sp-6: 24` |
@@ -51,6 +53,16 @@ icon, asset or branding — every glyph in the app is drawn in
 | Elevation | `--shadow-1` `--shadow-2` `--shadow-sheet` `--shadow-toolbar` |
 | Toolbar | `--tab-w: 54` `--tab-h: 48` `--tab-icon: 24` `--tab-label: 0.6875rem` `--toolbar-pad: 5` `--toolbar-height` (measured) `--toolbar-gap` |
 | Device | `--safe-top` `--safe-bottom` `--nav-inset` `--content-inset` |
+
+**The compare sheet is the one warm surface, and it is still this system.**
+The approved redesign (25 September 2026) draws Compare on paper: off-white
+canvas, white cards, a near-black recommendation card with a mint accent.
+It is not a second palette. `.sheet-compare` re-points the ordinary roles
+(`--surface`, `--text-dim`, `--neg`, `--pos` …) at the `--paper-*` values, so
+the search field, chips and notices inside it change with no rule of their own,
+and every `--paper-*` and `--verdict-*` token has a Dark value in the theme
+blocks. Its type is Space Grotesk (headings), IBM Plex Sans (text) and IBM Plex
+Mono (every number), loaded from Google Fonts only when the sheet first opens.
 
 `--text-faint` is the quietest text allowed: it reads at 4.5:1 against both the
 page and a card. Anything greyer looked calmer on a desk and vanished on a phone

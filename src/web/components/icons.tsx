@@ -537,3 +537,30 @@ export function InstallIcon({ size = 18, className }: IconProps) {
     </svg>
   );
 }
+
+/** Swap one player for another: two arrows passing in opposite directions. */
+export function SwapIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2}>
+      <path d="M17 3l4 4-4 4M21 7H9M7 21l-4-4 4-4M3 17h12" />
+    </svg>
+  );
+}
+
+/** Filled star, for the one mark that says "on your team". */
+export function StarIcon({ size = 13, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} fill="currentColor" stroke="none">
+      <path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.8-6.2 3.8 1.6-7L2 9.2l7.1-.6z" />
+    </svg>
+  );
+}
+
+/** A tick, for the recommendation's label. */
+export function CheckIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className} strokeWidth={2.5}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}

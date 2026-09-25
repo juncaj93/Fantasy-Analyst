@@ -48,7 +48,16 @@ import {
   positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
-import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
+import {
+  AlertCircleIcon,
+  CheckIcon,
+  CompareIcon,
+  DisclosureChevronIcon,
+  RefreshIcon,
+  StarIcon,
+  SwapIcon,
+} from '../components/icons.tsx';
+import { barWidths, explainGap, layoutFactors, shortName } from '../compareLayout.ts';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
@@ -752,6 +761,7 @@ export function TeamScreen({
           slot={compare.slot}
           seed={compare.seed}
           nameOf={(id) => byId.get(id)?.name ?? id}
+          ownedByMe={(id) => byId.has(id)}
           onClose={() => setCompare(null)}
         />
       ) : null}
@@ -1516,6 +1526,7 @@ function CompareSheet({
   slot,
   seed,
   nameOf,
+  ownedByMe,
   onClose,
 }: {
   leagueId: string;
@@ -1524,6 +1535,8 @@ function CompareSheet({
   slot: string | null;
   seed: string[];
   nameOf: (id: string) => string;
+  /** Whether a player is on the reader's roster, for the tag on his card. */
+  ownedByMe: (id: string) => boolean;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -1540,11 +1553,43 @@ function CompareSheet({
   const [names, setNames] = useState<Record<string, string>>(() =>
     Object.fromEntries(seed.map((id) => [id, nameOf(id)])),
   );
+  /*
+   * Whose each chosen player is. Seeded from the roster, and filled in from
+   * the picker's own rows as they arrive, which carry the league's answer.
+   */
+  const [owners, setOwners] = useState<Record<string, PickerPlayer['availability']>>(() =>
+    Object.fromEntries(seed.filter((id) => ownedByMe(id)).map((id) => [id, 'mine' as const])),
+  );
   const [results, setResults] = useState<PickerPlayer[]>([]);
   const [loading, setLoading] = useState(false);
   const [comparison, setComparison] = useState<StartSitComparison | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The player being swapped out, while the reader picks his replacement.
+   *
+   * Set by the swap button on a player's card and cleared by the pick. While
+   * it is set, a tap on a search result *replaces* that player in the same
+   * position and re-runs the comparison, so the reader lands back on an
+   * answer rather than on a half-built selection.
+   */
+  const [swapping, setSwapping] = useState<string | null>(null);
+  const search = useRef<HTMLDivElement | null>(null);
+
+  useComparisonFonts();
+
+  useEffect(() => {
+    setOwners((current) => {
+      let next = current;
+      for (const p of results) {
+        if (p.availability && current[p.id] !== p.availability) {
+          if (next === current) next = { ...current };
+          next[p.id] = p.availability;
+        }
+      }
+      return next;
+    });
+  }, [results]);
 
   const segments = useMemo(() => {
     const startable = startablePositions(buildRosterShape(rosterPositions));
@@ -1585,6 +1630,11 @@ function CompareSheet({
    * comparing three players they did not choose.
    */
   const toggle = (player: PickerPlayer) => {
+    if (player.availability) setOwners((o) => ({ ...o, [player.id]: player.availability }));
+    if (swapping) {
+      replace(swapping, player);
+      return;
+    }
     setComparison(null);
     setError(null);
     setIds((current) => {
@@ -1596,6 +1646,46 @@ function CompareSheet({
       setNames((n) => ({ ...n, [player.id]: player.name }));
       return [...current, player.id];
     });
+  };
+
+  /**
+   * Put `player` where `out` was, and answer again.
+   *
+   * The position in the list is kept, so the chips do not reshuffle under the
+   * reader. Choosing somebody already in the comparison is refused out loud:
+   * a comparison of a player against himself is not a question.
+   */
+  const replace = (out: string, player: PickerPlayer) => {
+    setError(null);
+    if (player.id === out) {
+      setSwapping(null);
+      return;
+    }
+    if (ids.includes(player.id)) {
+      setError(`${player.name} is already in this comparison. Pick somebody else, or cancel the swap.`);
+      return;
+    }
+    const next = ids.map((id) => (id === out ? player.id : id));
+    setNames((n) => ({ ...n, [player.id]: player.name }));
+    setIds(next);
+    setSwapping(null);
+    setQuery('');
+    if (next.length >= 2) void compare(next);
+    else setComparison(null);
+  };
+
+  /** Start a swap: remember who is going, and hand the reader the search. */
+  const startSwap = (playerId: string) => {
+    setError(null);
+    setSwapping(playerId);
+    /*
+     * Focused inside the tap, not on a later frame, so iOS counts it as the
+     * reader's own and raises the keyboard. The field is scrolled to the
+     * middle of the card, above where the keyboard will land.
+     */
+    const input = search.current?.querySelector('input');
+    input?.focus({ preventScroll: true });
+    search.current?.scrollIntoView({ block: 'center' });
   };
 
   const compare = async (playerIds: string[] = ids) => {
@@ -1639,12 +1729,27 @@ function CompareSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <Sheet title={slot ? `Compare for ${slot}` : 'Compare players'} onClose={onClose} testId="compare-sheet">
-      <div className="faint" style={{ margin: '0 2px 8px' }} data-testid="compare-hint">
-        Choose 2–{MAX_COMPARE} players. Anyone in the league is fair game — your roster, the bench, or the
-        free-agent pool.
-      </div>
+  const title = slot ? `Compare for ${slot}` : 'Compare players';
+  const shownSlot = comparison?.slot?.comparable ? comparison.slot.slot : null;
+  const subtitle = [
+    comparison?.week != null ? `Week ${comparison.week}` : null,
+    shownSlot ? `${shownSlot} slot` : slot ? `${slot} slot` : 'Any lineup spot',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const picker = (
+    <>
+      {comparison ? (
+        <div className="cmp-eyebrow cmp-picker-head" data-testid="compare-edit-head">
+          Change players
+        </div>
+      ) : (
+        <div className="faint" style={{ margin: '0 2px 8px' }} data-testid="compare-hint">
+          Choose 2–{MAX_COMPARE} players. Anyone in the league is fair game — your roster, the bench, or the
+          free-agent pool.
+        </div>
+      )}
 
       {ids.length > 0 ? (
         <div className="tag-row" data-testid="compare-selection">
@@ -1659,6 +1764,7 @@ function CompareSheet({
               onClick={() => {
                 setComparison(null);
                 setError(null);
+                if (swapping === id) setSwapping(null);
                 setIds((current) => current.filter((x) => x !== id));
               }}
             >
@@ -1668,12 +1774,23 @@ function CompareSheet({
         </div>
       ) : null}
 
-      <div style={{ margin: '8px 0' }}>
+      {swapping ? (
+        <div className="cmp-swapping" role="status" data-testid="compare-swapping">
+          <span>
+            Pick a player to replace <strong>{names[swapping] ?? swapping}</strong>.
+          </span>
+          <button type="button" className="btn btn-sm" data-testid="compare-swap-cancel" onClick={() => setSwapping(null)}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
+      <div style={{ margin: '8px 0' }} ref={search}>
         <SearchField
           value={query}
           onChange={setQuery}
           placeholder="Search players"
-          label="Search players to compare"
+          label={swapping ? `Search for a player to replace ${names[swapping] ?? swapping}` : 'Search players to compare'}
           testId="compare-search"
         />
       </div>
@@ -1693,25 +1810,25 @@ function CompareSheet({
 
       {error ? <Notice tone="warn">{error}</Notice> : null}
 
-      <div className="btn-row" style={{ margin: '8px 2px' }}>
-        <button
-          className="btn btn-primary"
-          data-testid="compare-run"
-          disabled={ids.length < 2 || busy}
-          onClick={() => void compare()}
-        >
-          {busy ? 'Comparing…' : `Compare ${ids.length} player${ids.length === 1 ? '' : 's'}`}
-        </button>
-      </div>
-
-      {comparison ? <ComparisonCard comparison={comparison} /> : null}
+      {swapping ? null : (
+        <div className="btn-row" style={{ margin: '8px 2px' }}>
+          <button
+            className="btn btn-primary"
+            data-testid="compare-run"
+            disabled={ids.length < 2 || busy}
+            onClick={() => void compare()}
+          >
+            {busy ? 'Comparing…' : `Compare ${ids.length} player${ids.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      )}
 
       {loading && results.length === 0 ? (
         <SkeletonRows rows={5} testId="compare-skeleton" />
       ) : results.length === 0 ? (
         <Empty>Nobody matching that search.</Empty>
       ) : (
-        <div role="list" aria-label="Players to compare">
+        <div role="list" aria-label={swapping ? 'Players to swap in' : 'Players to compare'}>
           {results.map((p) => {
             const chosen = ids.includes(p.id);
             return (
@@ -1738,8 +1855,65 @@ function CompareSheet({
           })}
         </div>
       )}
+    </>
+  );
+
+  return (
+    <Sheet
+      title={
+        <span className="cmp-title">
+          <span className="cmp-title-main">{title}</span>
+          <span
+            className="cmp-title-sub"
+            {...(comparison?.slot?.comparable ? { 'data-testid': 'comparison-slot', title: comparison.slot.detail } : {})}
+          >
+            {subtitle}
+          </span>
+        </span>
+      }
+      accessibleLabel={title}
+      className="sheet-compare"
+      onClose={onClose}
+      testId="compare-sheet"
+    >
+      {/*
+        With an answer on screen, the answer leads and the picker follows it
+        under "Change players". Before there is one, the picker is all there is.
+        Busy is shown on the answer itself, so a swap does not blank the sheet.
+      */}
+      {comparison ? (
+        <div aria-busy={busy} className={busy ? 'cmp-busy' : undefined}>
+          <ComparisonCard comparison={comparison} availability={owners} onSwap={startSwap} />
+        </div>
+      ) : null}
+      {picker}
     </Sheet>
   );
+}
+
+/**
+ * The compare sheet's three faces, loaded when the sheet first opens.
+ *
+ * Space Grotesk for headings, IBM Plex Sans for text and IBM Plex Mono for
+ * every number, as approved in the redesign mockup. Requested here rather
+ * than in the page head so the rest of the app pays nothing for them: one
+ * stylesheet link, added once, the first time anybody compares. `swap` means
+ * the sheet draws immediately in the system face and changes face when the
+ * files arrive, so an offline phone just keeps the system face.
+ */
+const COMPARISON_FONTS =
+  'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap';
+
+function useComparisonFonts() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (document.querySelector('link[data-fonts="comparison"]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = COMPARISON_FONTS;
+    link.dataset.fonts = 'comparison';
+    document.head.appendChild(link);
+  }, []);
 }
 
 interface PickerPlayer {
@@ -1910,152 +2084,259 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
 }
 
 /**
- * Two to four players, side by side, in one grid.
+ * Two to four players, laid out so the decision comes first.
  *
  * ## What this replaced, and why
  *
- * One vertical list. The verdict, then the ranking, then a four-column summary
- * table, then one accordion per player holding twelve rows of breakdown. To
- * compare rush yards between two men the reader scrolled through the whole of
- * the first player's profile and then the whole of the second one's, and held a
- * number in their head across the gap. The owner sent two screenshots of it on
- * 22 September 2026 and asked for exactly the thing a table is for: the same
- * factor on one row, both players' readings beside each other.
+ * A single table: `Projected` at the top, then the start/sit score, then every
+ * factor the engine has, one full-width row each, dashes included. On the FLEX
+ * comparison the owner photographed on 25 September 2026 (Bateman against
+ * Collins), five of fourteen rows were dashes for both men, and the number
+ * that decides the lineup sat *under* a projection that pointed the other way
+ * (8.7 against 12.3 projected, 9.1 against −0.3 on the score) with nothing on
+ * screen saying why.
  *
- * So the default view is the grid and the long view is behind a tap, which is
- * the inversion of what shipped before — the accordions are still here,
- * unchanged in content, underneath.
+ * So the order is the order of the question:
  *
- * ## Why a `<table>` and not a grid of divs
+ *  1. who is being compared, and whose they are (the identity row, which is
+ *     also where a player is swapped out);
+ *  2. the answer: the start/sit score, big for the leader, a bar per player on
+ *     one scale, and one line naming the factors that make up the gap;
+ *  3. the raw projection, smaller, because it is context and not the verdict;
+ *  4. the working, in three short cards, with a factor nobody has a value for
+ *     collapsed into one sentence instead of a row of dashes;
+ *  5. the engine's own note about market coverage, when there is one.
  *
- * Because this *is* a table: every cell is the value of one named factor for
- * one named player, and that is the one structure a screen reader can already
- * navigate two-dimensionally. `scope="col"` and `scope="row"` mean "Rush yards,
- * Trey McBride, no data" is announced without the reader having to count
- * columns. A CSS grid would look the same and say nothing.
- *
- * The left column is sticky and the rest scrolls, so three and four players fit
- * a 360px phone without the labels leaving the screen. Two players need no
- * scroll at all, which is the common case.
+ * Nothing here computes a score. Every number is the one the server sent, and
+ * the grouping, the bars and the gap line are arithmetic on those numbers; see
+ * `compareLayout.ts`.
  *
  * ## A dash is not a zero
  *
- * The whole reason this pass happened alongside the layout. `evaluatePlayer`
- * sums only the components it marks `unknown: false` — a probe of production on
- * 22 September 2026 found every `unknown` component in the league sitting at
- * exactly 0, and `sum(known)` equal to `sum(all)` for every player on the
- * roster — so an unknown component's number contributes nothing to the score
- * and never did. It was printed as a bold `0.00` anyway, which is the single
- * most misleading thing a data screen can do: "this factor does not help you"
- * and "we cannot tell you anything about this factor" are opposite statements
- * about a start/sit decision and they looked identical.
+ * `evaluatePlayer` sums only the components it marks `unknown: false`, so an
+ * unknown component contributes nothing and is drawn `—`, with the engine's
+ * reason in its title and accessible name. A genuinely computed zero (an
+ * uncharged availability, say) still prints `0.00`, because that is a real
+ * reading.
  *
- * Unknown cells now carry `—`. The row stays, because *which* factor is unread
- * is worth knowing, and the reason is in the cell's title and accessible name.
- * A genuinely computed zero — an uncharged availability, a zero uncertainty
- * penalty — still prints `0.00`, because that is a real reading.
+ * ## Why the factor cards are tables
+ *
+ * Every cell is the value of one named factor for one named player, which is
+ * the one structure a screen reader already navigates in two dimensions. The
+ * player names are drawn once, above the first card, and each table carries
+ * them again as a visually hidden header row so that "Availability, Nico
+ * Collins, −2.10" is still announced as such.
  */
-function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
+function ComparisonCard({
+  comparison,
+  availability,
+  onSwap,
+}: {
+  comparison: StartSitComparison;
+  /** Whose each player is, when the sheet knows. */
+  availability: Record<string, PickerPlayer['availability']>;
+  /** Start replacing one player; the sheet owns the search that finishes it. */
+  onSwap: (playerId: string) => void;
+}) {
   const winner = comparison.evaluations.find((e) => e.playerId === comparison.recommendedPlayerId);
   /*
-   * A comparison with no legal shared slot is reported, never forced.
-   *
-   * The numbers underneath are still honest — they are the same per-player
-   * evaluation as everywhere else — but "Start X" over a set of players who
-   * cannot occupy the same spot would be answering a question nobody asked.
+   * A comparison with no legal shared slot is reported, never forced. The
+   * numbers are still the same per-player evaluation as everywhere else, but
+   * "Start X" over players who cannot occupy the same spot would be answering
+   * a question nobody asked.
    */
   const comparable = comparison.slot?.comparable ?? true;
   const ranked = [...comparison.evaluations].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
-
   /*
    * Column order is the ranking when there is one, and the reader's own order
-   * when there is not.
-   *
-   * Best-first matters more here than it did in a list: the eye starts at the
-   * first data column, and on a grid that scrolls the recommended player should
-   * be the one that never needs scrolling to. With no legal shared slot there
-   * is no ranking to honour, so the chips' order stands.
+   * when there is not: the eye starts at the first column, and the recommended
+   * player should be the one it lands on.
    */
   const columns = comparable ? ranked : comparison.evaluations;
+  const pick = comparable && winner ? winner : null;
+  const runnerUp = pick ? ranked.find((e) => e.playerId !== pick.playerId && e.score != null) ?? null : null;
+
+  const { groups, untracked } = layoutFactors(columns);
+  const componentOf = (e: StartSitEvaluation, key: string) => e.components.find((c) => c.key === key) ?? null;
+
+  const scoreBars = barWidths(columns.map((e) => e.score));
+  const projectionBars = barWidths(columns.map((e) => e.projection ?? null));
+  const gap = pick && runnerUp ? explainGap(pick, runnerUp) : null;
 
   /*
-   * The factor rows, as the union of every player's components in engine order.
-   *
-   * Taken from the evaluations rather than written down here, because the engine
-   * owns which factors exist and a hardcoded list would quietly drop a new one.
-   * A defence is scored by a different model and carries a different, shorter
-   * set — see `evaluateDefence` — so comparing a defence against a skill player
-   * produces rows that are populated for one column and dashed for the other,
-   * which is the honest drawing of that comparison.
+   * The closing note is the engine's own sentence about market coverage,
+   * written by `assessMarketComparability` — the "Market coverage differs"
+   * line this app already prints. Pulled out of `reasons` and `warnings` so it
+   * is said once, in the callout, rather than twice.
    */
-  const factors: { key: string; label: string }[] = [];
-  for (const evaluation of columns) {
-    for (const component of evaluation.components) {
-      if (!factors.some((f) => f.key === component.key)) {
-        factors.push({ key: component.key, label: component.label });
-      }
-    }
-  }
+  const insight = comparison.comparability?.detail ?? null;
+  const warnings = comparison.warnings.filter((w) => w !== insight);
+  const reasons = comparison.reasons.filter((r) => r !== insight);
 
-  const componentOf = (playerId: string, key: string) =>
-    comparison.evaluations.find((e) => e.playerId === playerId)?.components.find((c) => c.key === key) ?? null;
+  const cols = columns.length;
+  /* The label column takes 1.3 shares and each player one, as in the approved mockup. */
+  const labelShare = `${((1.3 / (1.3 + cols)) * 100).toFixed(2)}%`;
+  const playerShare = `${((1 / (1.3 + cols)) * 100).toFixed(2)}%`;
+
+  const showLateSwap =
+    comparison.lateSwap != null && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown';
+  const moving = comparison.evaluations.filter((e) => e.movement?.headline);
+  const locked = comparison.evaluations.filter((e) => e.lock?.locked);
+
+  const valueTone = (value: number) => (value < 0 ? 'cmp-num cmp-num-neg' : 'cmp-num');
 
   return (
-    <div className="card" data-testid="comparison">
-      {/*
-        The recommendation, first and loudest.
+    <div
+      className="cmp"
+      data-testid="comparison"
+      data-columns={cols}
+      style={{ ['--cmp-cols' as string]: String(cols) }}
+    >
+      {/* 1. Who. */}
+      <ul className="cmp-players" aria-label="Players in this comparison">
+        {columns.map((e) => {
+          const owner = availability[e.playerId];
+          return (
+            <li
+              key={e.playerId}
+              className={owner === 'mine' ? 'cmp-player cmp-player-mine' : 'cmp-player'}
+              data-testid="compare-column"
+              data-player-id={e.playerId}
+              data-pick={pick?.playerId === e.playerId ? 'true' : 'false'}
+            >
+              <div className="cmp-player-top">
+                <OwnerTag owner={owner} />
+                <button
+                  type="button"
+                  className="cmp-swap"
+                  data-testid="compare-swap"
+                  data-player-id={e.playerId}
+                  aria-label={`Swap ${e.name} for another player`}
+                  onClick={() => onSwap(e.playerId)}
+                >
+                  <SwapIcon size={16} />
+                </button>
+              </div>
+              <div className="cmp-player-name">{e.name}</div>
+              {/*
+                Position, club and fixture, from the label `fixtureOf` already
+                wrote. Not re-derived from `opponent` and `home` here: `vs` and
+                `@` have been swapped once in this codebase by exactly that
+                second derivation.
+              */}
+              <div className="cmp-player-meta">
+                {e.position}
+                {e.team ? ` · ${e.team}` : ''}
+                {e.fixture?.label ? ` · ${e.fixture.label}` : ''}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
 
-        A start/sit screen is one question with one answer, and everything under
-        it is why. Nothing about how it is reached has changed.
-      */}
-      <div className={winner && comparable ? 'verdict verdict-take' : 'verdict verdict-calm'}>
-        <div className="verdict-label" data-testid="comparison-verdict">
-          {!comparable
-            ? 'Not the same lineup decision'
-            : winner
-              ? `Start ${winner.name}`
-              : 'No recommendation'}
+      {/* 2. The answer. */}
+      <section className="cmp-verdict" aria-label="Start/sit score">
+        <div className="cmp-verdict-label">
+          {pick ? <CheckIcon size={14} /> : null}
+          <span>{pick ? 'Recommended · start/sit score' : 'Start/sit score'}</span>
         </div>
-        <div className="verdict-detail">
-          <Confidence level={comparison.confidence} /> · Vegas data{' '}
-          {comparison.dataFreshness.provider ?? 'none'} · {formatAge(comparison.dataFreshness.fetchedAt)}
+        <div className="cmp-verdict-head">
+          {pick && pick.score != null ? <span className="cmp-verdict-score">{pick.score.toFixed(1)}</span> : null}
+          <span className="cmp-verdict-name" data-testid="comparison-verdict">
+            {!comparable ? 'Not the same lineup decision' : pick ? `Start ${pick.name}` : 'No recommendation'}
+          </span>
         </div>
-      </div>
 
-      {comparison.slot ? (
-        <div className={comparable ? 'faint' : 'hint hint-caution'} data-testid="comparison-slot">
+        <ul className="cmp-bars" data-row="score">
+          {columns.map((e, i) => (
+            <li key={e.playerId} className={pick?.playerId === e.playerId ? 'cmp-bar cmp-bar-pick' : 'cmp-bar'}>
+              <span className="cmp-bar-name">{shortName(e.name)}</span>
+              <span className="cmp-bar-value" data-player-id={e.playerId}>
+                {e.score == null ? (
+                  <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
+                ) : (
+                  <span title="The comparable figure this verdict was made on: the market expectation plus this app's own bounded adjustments. Not a forecast.">
+                    {e.score.toFixed(1)}
+                  </span>
+                )}
+              </span>
+              <span className="cmp-bar-track" aria-hidden="true">
+                {scoreBars[i] != null ? <span className="cmp-bar-fill" style={{ width: `${scoreBars[i]}%` }} /> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {/*
+          Why the leader leads, in the engine's own factors.
+
+          The score is the sum of the known components, so naming the biggest
+          gaps between them is a decomposition of the number above, not a
+          story about it. When the leader's raw projection is the lower one,
+          the line says so first, because that is the case the reader cannot
+          reconcile alone.
+        */}
+        {pick && comparison.margin != null ? (
+          <p className="cmp-verdict-why" data-testid="comparison-margin">
+            {comparison.margin === 0 ? (
+              'Level on the score. The tie is broken by the reasons below.'
+            ) : (
+              <>
+                {shortName(pick.name)} is ahead by <span className="cmp-num">{comparison.margin.toFixed(1)}</span>
+                {gap?.projectionShortfall != null ? (
+                  <>
+                    {' '}
+                    despite a projection <span className="cmp-num">{gap.projectionShortfall.toFixed(1)}</span> lower
+                  </>
+                ) : null}
+                .
+                {gap && gap.drivers.length > 0 ? (
+                  <>
+                    {' '}
+                    Most of the gap:{' '}
+                    {gap.drivers.map((d, i) => (
+                      <span key={d.label}>
+                        {i > 0 ? ', ' : ''}
+                        {d.label} <span className="cmp-num">+{d.delta.toFixed(1)}</span>
+                      </span>
+                    ))}
+                    .
+                  </>
+                ) : null}
+              </>
+            )}
+          </p>
+        ) : null}
+
+        <div className="cmp-verdict-meta">
+          <Confidence level={comparison.confidence} /> · Vegas data {comparison.dataFreshness.provider ?? 'none'} ·{' '}
+          {formatAge(comparison.dataFreshness.fetchedAt)}
+        </div>
+      </section>
+
+      {!comparable && comparison.slot ? (
+        <div className="hint hint-caution" data-testid="comparison-slot">
           {comparison.slot.detail}
         </div>
       ) : null}
 
       {/*
-        The ranking as a sentence is gone, and the grid's column order carries it.
-
-        It was an `<ol>` repeating every name and score directly above a table
-        holding the same names and the same scores. On a phone that is a third of
-        the sheet spent saying one thing twice. The order is in the columns, the
-        winner is starred in its header, and the margin — the part the list never
-        said — is the line under the grid.
+        Compact tags for the things a score cannot express: whether kickoff
+        timing is a problem, whether the market has moved, whether a game has
+        started.
       */}
-
-      {/*
-        Compact tags for the things a projection cannot express: whether kickoff
-        timing is a problem, and whether the market has moved since the last
-        look.
-      */}
-      <div className="tag-row">
-        {comparison.lateSwap && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown' ? (
-          <span
-            className={comparison.lateSwap.verdict === 'consider_early_option' ? 'tag tag-urgent' : 'tag tag-calm'}
-            title={comparison.lateSwap.detail}
-            data-testid="late-swap-tag"
-          >
-            ⏱ {comparison.lateSwap.label}
-          </span>
-        ) : null}
-        {comparison.evaluations
-          .filter((e) => e.movement?.headline)
-          .map((e) => (
+      {showLateSwap || moving.length > 0 || locked.length > 0 ? (
+        <div className="tag-row">
+          {showLateSwap ? (
+            <span
+              className={comparison.lateSwap.verdict === 'consider_early_option' ? 'tag tag-urgent' : 'tag tag-calm'}
+              title={comparison.lateSwap.detail}
+              data-testid="late-swap-tag"
+            >
+              ⏱ {comparison.lateSwap.label}
+            </span>
+          ) : null}
+          {moving.map((e) => (
             <span
               key={`move-${e.playerId}`}
               className={e.movement.direction === 'up' ? 'tag tag-star' : 'tag tag-warn'}
@@ -2065,222 +2346,173 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
               {e.movement.direction === 'up' ? '↑' : '↓'} {e.name}: {e.movement.headline}
             </span>
           ))}
-        {comparison.evaluations
-          .filter((e) => e.lock?.locked)
-          .map((e) => (
+          {locked.map((e) => (
             <span key={`lock-${e.playerId}`} className="tag tag-calm" data-testid="locked-tag">
               🔒 {e.name} locked
             </span>
           ))}
-      </div>
+        </div>
+      ) : null}
 
-      {comparison.warnings.map((w) => (
+      {warnings.map((w) => (
         <div className="hint hint-caution" key={w}>
           {w}
         </div>
       ))}
 
-      {/*
-        The grid.
+      {/* 3. The projection: context, drawn quieter than the answer. */}
+      <section className="cmp-proj-card" aria-label="Projected points">
+        <div className="cmp-eyebrow">Projected points</div>
+        <ul className="cmp-bars cmp-bars-quiet" data-row="projection">
+          {columns.map((e, i) => (
+            <li key={e.playerId} className="cmp-bar">
+              <span className="cmp-bar-name">{shortName(e.name)}</span>
+              <span className="cmp-bar-value" data-player-id={e.playerId}>
+                <CompareProjection evaluation={e} />
+              </span>
+              <span className="cmp-bar-track" aria-hidden="true">
+                {projectionBars[i] != null ? (
+                  <span className="cmp-bar-fill" style={{ width: `${projectionBars[i]}%` }} />
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {/*
+          Whose numbers these are, said once under them rather than per value.
+          Composed on the server, where the published feed's own assumptions
+          are legible. See `assembleComparison`.
+        */}
+        {(comparison.projectionNotes ?? []).map((note) => (
+          <div className="faint compare-provenance" key={note} data-testid="compare-projection-note">
+            {note}
+          </div>
+        ))}
+      </section>
 
-        Wrapped in its own scroller rather than letting the sheet scroll
-        sideways: a horizontal scroll that moves the whole sheet takes the
-        heading and the verdict off screen, and the reader loses the answer
-        while reading the working.
-      */}
-      <div className="compare-scroll" data-testid="compare-grid-scroll" data-columns={columns.length}>
-        <table className="compare-grid" data-testid="compare-grid" data-columns={columns.length}>
-          <caption className="sr-only">
-            {`Factor-by-factor comparison of ${columns.map((e) => e.name).join(', ')}. A dash means the factor could not be read for that player.`}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col" className="compare-corner">
-                <span className="sr-only">Factor</span>
-              </th>
-              {columns.map((e) => (
-                <th
-                  scope="col"
-                  key={e.playerId}
-                  className={
-                    comparable && e.playerId === comparison.recommendedPlayerId
-                      ? 'compare-head compare-head-pick'
-                      : 'compare-head'
-                  }
-                  data-player-id={e.playerId}
-                  data-testid="compare-column"
-                >
-                  <span className="compare-head-name">
-                    {comparable && e.playerId === comparison.recommendedPlayerId ? (
-                      <span className="compare-pick-mark" aria-label="recommended">
-                        ★
-                      </span>
-                    ) : null}
-                    {e.name}
-                  </span>
-                  {/*
-                    Position, club and fixture, from the label `fixtureOf`
-                    already wrote. Not re-derived from `opponent` and `home`
-                    here: `vs` and `@` have been swapped once in this codebase
-                    by exactly that second derivation, and a fixture with no
-                    stated side is `BAL` rather than a guess at either.
-                  */}
-                  <span className="compare-head-meta">
-                    {e.position}
-                    {e.team ? ` · ${e.team}` : ''}
-                    {e.fixture?.label ? ` · ${e.fixture.label}` : ''}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
+      {/* 4. The working. */}
+      <div className="cmp-stats" data-testid="compare-grid" data-columns={cols}>
+        <div className="cmp-eyebrow cmp-stats-title">Why the scores differ</div>
+        <div className="cmp-stats-head" aria-hidden="true">
+          <span />
+          {columns.map((e) => (
+            <span key={e.playerId} className="cmp-stats-name">
+              {shortName(e.name)}
+            </span>
+          ))}
+        </div>
 
-          {/*
-            Three headline rows, in their own group and drawn heavier.
+        {groups.map((group) => {
+          // Coverage is a market fact about every player, so the market card
+          // always has at least that row.
+          if (group.factors.length === 0 && group.id !== 'market') return null;
+          return (
+            <section key={group.id} className="cmp-group" data-group={group.id}>
+              <div className="cmp-group-title" aria-hidden="true">
+                {group.title}
+              </div>
+              <table className="cmp-table">
+                <caption className="sr-only">{group.title}</caption>
+                <colgroup>
+                  <col style={{ width: labelShare }} />
+                  {columns.map((e) => (
+                    <col key={e.playerId} style={{ width: playerShare }} />
+                  ))}
+                </colgroup>
+                <thead className="sr-only">
+                  <tr>
+                    <th scope="col">Factor</th>
+                    {columns.map((e) => (
+                      <th scope="col" key={e.playerId}>
+                        {e.name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.id === 'market' ? (
+                    <tr data-row="coverage">
+                      <th scope="row" className="cmp-label">
+                        Market coverage
+                      </th>
+                      {columns.map((e) => (
+                        <td key={e.playerId} className="cmp-cell" data-player-id={e.playerId}>
+                          <span
+                            className={e.expectation.coverage > 0 ? 'cmp-num' : 'cmp-num compare-zero-coverage'}
+                            title={
+                              e.expectation.missingMarkets.length > 0
+                                ? `No line for: ${e.expectation.missingMarkets.join(', ')}`
+                                : 'Every market this position is priced on has a line'
+                            }
+                          >
+                            {Math.round(e.expectation.coverage * 100)}%
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ) : null}
+                  {group.factors.map((factor) => (
+                    <tr key={factor.key} data-factor={factor.key}>
+                      <th scope="row" className="cmp-label">
+                        {factor.label}
+                      </th>
+                      {columns.map((e) => {
+                        const component = componentOf(e, factor.key);
+                        return (
+                          <td key={e.playerId} className="cmp-cell" data-testid="compare-cell" data-player-id={e.playerId}>
+                            {component == null ? (
+                              <CompareMissing
+                                reason={`${factor.label.toLowerCase()} is not part of how he is scored`}
+                                label={factor.label}
+                                name={e.name}
+                              />
+                            ) : component.unknown ? (
+                              <CompareMissing reason={component.display} label={factor.label} name={e.name} />
+                            ) : (
+                              <span className={valueTone(component.value)} title={component.display}>
+                                {component.value.toFixed(2)}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          );
+        })}
 
-            `Projected` is the number the reader came for and the only one on the
-            grid that is a forecast of a week of football; `Start/sit score` is
-            the comparable figure the verdict was actually made on; `Coverage` is
-            how much of a market is behind the first two. Everything below is the
-            working. They are a separate `<tbody>` so the rule between the two
-            groups is structural rather than a class on a row.
-          */}
-          <tbody className="compare-headline">
-            {/*
-              `data-row` and `data-player-id` are the grid's coordinates.
+        {/*
+          The factors nobody in this comparison has a value for, said once.
 
-              A cell in a table of players has to be addressable by *which
-              factor* and *which player*, and until this pass neither was
-              recoverable from the markup: a test looking for a player's score
-              found the row with his name in it, which worked exactly as long
-              as players were rows. They are columns now, and the first CI run
-              on this branch failed on precisely that. Positional selectors
-              (`td:nth-child(2)`) would work and are the wrong answer — they
-              silently read the wrong player the day the column order changes,
-              which is a thing the ranking is allowed to do.
-            */}
-            <tr data-row="projection">
-              <th scope="row" className="compare-label">
-                Projected
-              </th>
-              {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell compare-cell-lead" data-player-id={e.playerId}>
-                  <CompareProjection evaluation={e} />
-                </td>
-              ))}
-            </tr>
-            <tr data-row="score">
-              <th scope="row" className="compare-label">
-                Start/sit score
-              </th>
-              {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell compare-cell-lead" data-player-id={e.playerId}>
-                  {e.score == null ? (
-                    <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
-                  ) : (
-                    <span title="The comparable figure this verdict was made on: the market expectation plus this app's own bounded adjustments. Not a forecast.">
-                      {e.score.toFixed(1)}
-                    </span>
-                  )}
-                </td>
-              ))}
-            </tr>
-            <tr data-row="coverage">
-              <th scope="row" className="compare-label">
-                Market coverage
-              </th>
-              {columns.map((e) => (
-                <td key={e.playerId} className="compare-cell" data-player-id={e.playerId}>
-                  <span
-                    className={e.expectation.coverage > 0 ? undefined : 'compare-zero-coverage'}
-                    title={
-                      e.expectation.missingMarkets.length > 0
-                        ? `No line for: ${e.expectation.missingMarkets.join(', ')}`
-                        : 'Every market this position is priced on has a line'
-                    }
-                  >
-                    {Math.round(e.expectation.coverage * 100)}%
-                  </span>
-                </td>
-              ))}
-            </tr>
-          </tbody>
-
-          <tbody>
-            {factors.map((factor) => (
-              <tr key={factor.key} data-factor={factor.key}>
-                <th scope="row" className="compare-label">
-                  {factor.label}
-                </th>
-                {columns.map((e) => {
-                  const component = componentOf(e.playerId, factor.key);
-                  return (
-                    <td
-                      key={e.playerId}
-                      className="compare-cell"
-                      data-testid="compare-cell"
-                      data-player-id={e.playerId}
-                    >
-                      {component == null ? (
-                        <CompareMissing
-                          reason={`${factor.label.toLowerCase()} is not part of how he is scored`}
-                          label={factor.label}
-                          name={e.name}
-                        />
-                      ) : component.unknown ? (
-                        /*
-                         * The reason the engine gave, verbatim, as the title —
-                         * `no opponent tendency data`, `role not classified`,
-                         * `insufficient data`. It used to be printed as grey
-                         * prose under a bold 0.00 on every single row, which is
-                         * where most of the old sheet's height went.
-                         */
-                        <CompareMissing reason={component.display} label={factor.label} name={e.name} />
-                      ) : (
-                        <span title={component.display}>{component.value.toFixed(2)}</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          Five rows of `— —` on the photographed sheet said "we could not read
+          this" five times. It is still worth knowing which factors were not
+          read, so they are named, in one line, instead of drawn.
+        */}
+        {untracked.length > 0 ? (
+          <p className="cmp-untracked" data-testid="compare-untracked">
+            Not tracked for this matchup: {untracked.map((f) => f.label.toLowerCase()).join(', ')}.
+          </p>
+        ) : null}
       </div>
 
-      {/*
-        The margin, which the deleted ranking list never actually said.
-
-        "Start him by 2.4" is the part of a close call that decides whether the
-        reader bothers, and it was derivable from the old list only by
-        subtracting two numbers by hand.
-      */}
-      {comparable && winner && comparison.margin != null ? (
-        <div className="faint compare-margin" data-testid="comparison-margin">
-          {comparison.margin === 0
-            ? 'Level on the score — the tie is broken by the reasons below.'
-            : `${winner.name} is ahead by ${comparison.margin.toFixed(1)} on the start/sit score.`}
+      {/* 5. The engine's note about coverage, when the two were priced differently. */}
+      {insight ? (
+        <div className="cmp-insight" role="note" data-testid="compare-insight">
+          <AlertCircleIcon size={16} />
+          <p>{insight}</p>
         </div>
       ) : null}
 
-      {comparison.reasons.length > 0 ? (
-        <ul className="reason-list" style={{ margin: '8px 0' }}>
-          {comparison.reasons.map((r) => (
+      {reasons.length > 0 ? (
+        <ul className="reason-list cmp-reasons">
+          {reasons.map((r) => (
             <li key={r}>{r}</li>
           ))}
         </ul>
       ) : null}
-
-      {/*
-        Whose numbers the `Projected` row is made of, said once under the column
-        rather than per cell. Composed on the server, where the published feed's
-        own assumptions are legible. See `assembleComparison`.
-      */}
-      {(comparison.projectionNotes ?? []).map((note) => (
-        <div className="faint compare-provenance" key={note} data-testid="compare-projection-note">
-          {note}
-        </div>
-      ))}
 
       {/*
         Availability, per player, in the terms a lineup decision is made in.
@@ -2297,13 +2529,9 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
         ))}
 
       {/*
-        The long view, kept and moved.
-
-        Same content as before — every component with the engine's own sentence
-        beside it, the market contributions, the expectation's notes — and it is
-        no longer the only way to see anything. A reader who wants one player's
-        whole profile still has it; a reader comparing two numbers no longer has
-        to open two of these to do it.
+        The long view: every component with the engine's own sentence beside
+        it, the market contributions, the expectation's notes. Collapsed, for
+        the reader who wants one player's whole profile.
       */}
       {comparison.evaluations.map((e) => (
         <details className="disclosure" key={e.playerId}>
@@ -2315,12 +2543,6 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
                   {c.label}
                   {c.unknown ? ' (unknown)' : ''}
                 </span>
-                {/*
-                  A dash here too, for the same reason as in the grid: this
-                  disclosure is the place the old bold `0.00` was photographed,
-                  and a breakdown that contradicts the grid above it would be
-                  worse than either one alone.
-                */}
                 <span className="component-value">{c.unknown ? '—' : c.value.toFixed(2)}</span>
                 <span className="component-detail">{c.display}</span>
               </div>
@@ -2346,6 +2568,27 @@ function ComparisonCard({ comparison }: { comparison: StartSitComparison }) {
       ))}
     </div>
   );
+}
+
+/**
+ * Whose a player is, as a small tag on his card.
+ *
+ * Three states, the same three the picker already reads from the league
+ * (`availabilityLabel`), each with a word so the colour never carries it
+ * alone. Nothing at all when the sheet has not been told, rather than a guess.
+ */
+function OwnerTag({ owner }: { owner: PickerPlayer['availability'] }) {
+  if (owner === 'mine') {
+    return (
+      <span className="cmp-owner cmp-owner-mine">
+        <StarIcon size={12} />
+        On your team
+      </span>
+    );
+  }
+  if (owner === 'available') return <span className="cmp-owner cmp-owner-free">Free agent</span>;
+  if (owner === 'rostered') return <span className="cmp-owner">Rostered elsewhere</span>;
+  return <span />;
 }
 
 /**

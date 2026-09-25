@@ -717,7 +717,8 @@ test.describe('the comparison tool', () => {
       await expect(grid).toBeVisible();
       await expect(grid).toHaveAttribute('data-columns', String(count));
       await expect(page.getByTestId('compare-column')).toHaveCount(count);
-      await expect(page.getByTestId('compare-column').first()).toContainText('★');
+      // The recommended player leads the row of cards, and is marked as the pick.
+      await expect(page.getByTestId('compare-column').first()).toHaveAttribute('data-pick', 'true');
     });
   }
 
@@ -799,6 +800,71 @@ test.describe('the comparison tool', () => {
     await page.waitForTimeout(600);
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
     await expect(page.getByTestId('compare-chosen')).toHaveCount(3);
+  });
+
+  /**
+   * The swap button on a player's card: search, tap, and the answer comes back
+   * with the new player in the same place, without leaving the sheet.
+   *
+   * This is the flow the "search closes the sheet" report was about, so it is
+   * asserted end to end: the sheet stays, the other player stays, the swapped
+   * one is gone, and a fresh comparison is on screen without a second tap.
+   */
+  test('swaps one player for another from search and answers again', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    for (const id of ['1001', '1005']) await choose(page, id);
+    await page.getByTestId('compare-run').click();
+    await expect(page.getByTestId('compare-grid')).toBeVisible();
+
+    await page.locator('[data-testid="compare-swap"][data-player-id="1005"]').click();
+    await expect(page.getByTestId('compare-swapping')).toBeVisible();
+    await expect(page.getByTestId('compare-search')).toBeFocused();
+
+    await page.locator('[data-testid="compare-candidate"][data-player-id="1008"]').click();
+
+    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    await expect(page.getByTestId('compare-swapping')).toHaveCount(0);
+    const columns = page.getByTestId('compare-column');
+    await expect(columns).toHaveCount(2);
+    const ids = await columns.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+    expect(new Set(ids)).toEqual(new Set(['1001', '1008']));
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(2);
+  });
+
+  test('a swap can be called off, and changes nothing', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    for (const id of ['1001', '1005']) await choose(page, id);
+    await page.getByTestId('compare-run').click();
+    await expect(page.getByTestId('compare-grid')).toBeVisible();
+
+    await page.locator('[data-testid="compare-swap"][data-player-id="1001"]').click();
+    await page.getByTestId('compare-swap-cancel').click();
+    await expect(page.getByTestId('compare-swapping')).toHaveCount(0);
+    await expect(page.getByTestId('compare-grid')).toBeVisible();
+    await expect(page.getByTestId('compare-column')).toHaveCount(2);
+  });
+
+  /**
+   * A factor nobody in the comparison has a value for is a sentence, not a
+   * row of dashes; a factor at least one player has keeps its row.
+   */
+  test('collapses factors nobody has into one note, and keeps the rest as rows', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    for (const id of ['1001', '1005']) await choose(page, id);
+    await page.getByTestId('compare-run').click();
+    const comparison = page.getByTestId('comparison');
+    await expect(comparison).toBeVisible();
+
+    const rows = comparison.locator('tr[data-factor]');
+    for (const row of await rows.all()) {
+      const values = row.locator('td [data-testid="compare-missing"]');
+      const cells = row.locator('td');
+      expect(await values.count(), 'a row where every player is a dash should have collapsed').toBeLessThan(
+        await cells.count(),
+      );
+    }
+    const note = page.getByTestId('compare-untracked');
+    if ((await note.count()) > 0) await expect(note).toContainText('Not tracked for this matchup:');
   });
 
   test('cannot choose the same player twice', async ({ page }) => {
@@ -906,10 +972,13 @@ test.describe('the comparison tool', () => {
      *
      * It is also a stronger claim than it was: the old one passed if the score
      * appeared anywhere in the row, including inside another number.
+     *
+     * The score moved out of the grid and onto the recommendation card in the
+     * 25 September redesign; `data-row` and `data-player-id` moved with it.
      */
     const cell = page
       .getByTestId('comparison')
-      .locator(`tr[data-row="score"] td[data-player-id="${te.playerId}"]`);
+      .locator(`[data-row="score"] [data-player-id="${te.playerId}"]`);
     await expect(cell).toHaveText(te.score!.toFixed(1));
   });
 });
