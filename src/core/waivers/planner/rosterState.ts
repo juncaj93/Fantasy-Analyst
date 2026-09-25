@@ -275,6 +275,34 @@ export interface RosterSimulation {
  * per plan. Every hypothetical afterwards is one optimiser call on a set that
  * has not been seen before, and none at all on a set that has.
  */
+/**
+ * Who the market says to hold, and which condition qualified each of them.
+ *
+ * One function, read in two places: the cut planner, which will not name
+ * these players as a drop, and the waiver board, which will not measure a
+ * value add against one of them — a bar set by a player the plan refuses to
+ * cut is a comparison with a move nobody can make.
+ *
+ * The draft condition needs both halves: a ranking has to exist for him, and
+ * the season has to be young enough that it is still the better evidence. With
+ * no ranking and no trending capture the map is empty and nothing changes.
+ */
+export function marketHoldFor(
+  input: Pick<RosterSimulationInput, 'draftRankOf' | 'draftCapitalRank' | 'roomIsAdding' | 'week'>,
+): Map<string, { condition: MarketHoldCondition; rank: number }> {
+  const marketHold = new Map<string, { condition: MarketHoldCondition; rank: number }>();
+  const capital = input.draftCapitalRank ?? EARLY_PICK_RANK;
+  if (input.draftRankOf && (input.week ?? 1) <= EARLY_PICK_WEEKS) {
+    for (const [playerId, rank] of input.draftRankOf) {
+      if (Number.isFinite(rank) && rank <= capital) marketHold.set(playerId, { condition: 'draft_capital', rank });
+    }
+  }
+  for (const [playerId, rank] of input.roomIsAdding ?? []) {
+    if (!marketHold.has(playerId)) marketHold.set(playerId, { condition: 'trending', rank });
+  }
+  return marketHold;
+}
+
 export function buildRosterSimulation(input: RosterSimulationInput): RosterSimulation {
   const { shape, profile } = input;
   const now = input.now ?? new Date();
@@ -308,23 +336,7 @@ export function buildRosterSimulation(input: RosterSimulationInput): RosterSimul
 
   const reserveIds = new Set(input.reserveIds ?? []);
 
-  /*
-   * Who the draft still speaks for.
-   *
-   * Both halves have to hold: a ranking has to exist for him, and the season
-   * has to be young enough that it is still the better evidence. With no
-   * ranking imported this set is empty and nothing downstream changes.
-   */
-  const marketHold = new Map<string, { condition: MarketHoldCondition; rank: number }>();
-  const capital = input.draftCapitalRank ?? EARLY_PICK_RANK;
-  if (input.draftRankOf && (input.week ?? 1) <= EARLY_PICK_WEEKS) {
-    for (const [playerId, rank] of input.draftRankOf) {
-      if (Number.isFinite(rank) && rank <= capital) marketHold.set(playerId, { condition: 'draft_capital', rank });
-    }
-  }
-  for (const [playerId, rank] of input.roomIsAdding ?? []) {
-    if (!marketHold.has(playerId)) marketHold.set(playerId, { condition: 'trending', rank });
-  }
+  const marketHold = marketHoldFor(input);
 
   /*
    * The starting slots each position can legally occupy.

@@ -570,16 +570,28 @@ export function caseLines(name: string, row: WaiverBoardRow | null): string[] {
   if (!row || !basis) return [];
   const lines: string[] = [];
   const over = row.shortTerm.over;
-  const gain = row.shortTerm.gain;
 
-  if (basis.projection != null) {
+  /*
+   * The projections, as the market states them, and the gap between them.
+   *
+   * Said in the same terms as the number on the card. The call itself also
+   * weighs status and how much is known about each player; when that moves it
+   * by half a point or more, one more sentence says so, so a reader comparing
+   * the card with the bar is not left doing arithmetic that does not add up.
+   */
+  if (basis.projection != null && basis.overProjection != null && over) {
     lines.push(
-      over
-        ? `The market projects ${name} for ${basis.projection.toFixed(1)} pts this week. He grades ${gain.toFixed(1)} pts better than ${over}.`
-        : `The market projects ${name} for ${basis.projection.toFixed(1)} pts this week.`,
+      `The market projects ${name} for ${basis.projection.toFixed(1)} pts this week and ${over} for ${basis.overProjection.toFixed(1)}.`,
     );
-  } else if (over) {
-    lines.push(`${name} grades ${gain.toFixed(1)} pts better than ${over} on the evidence available, with no market line this week.`);
+  } else if (basis.projection != null) {
+    lines.push(`The market projects ${name} for ${basis.projection.toFixed(1)} pts this week.`);
+  } else {
+    lines.push(`No betting market has priced ${name} this week, so the call rests on usage and news.`);
+  }
+  if (basis.projectionGap != null && Math.abs(row.shortTerm.gain - basis.projectionGap) >= 0.5) {
+    lines.push(
+      'The recommendation also discounts injury status and thin data, which is why it is not simply that gap. The number on the card leaves those discounts out.',
+    );
   }
 
   const { position, held, cap } = basis.depth;

@@ -160,6 +160,87 @@ describe('a defence on the generic scan', () => {
   });
 });
 
+/*
+ * The bar is somebody the plan would actually cut.
+ *
+ * 25 September 2026: every value add read `Better than RJ Harvey` while the
+ * plan's own protected list said RJ Harvey would not be cut. The market hold
+ * now reaches the bar too, so the comparison is with a move the reader can
+ * make.
+ */
+/*
+ * The number on the card is the projection gap, with no penalty in it.
+ *
+ * A bench player who is questionable grades well below his projection, and
+ * the grade gap is still what decides the call. The card prints the market's
+ * two numbers subtracted, so `+6.7 pts` means what a reader thinks it means.
+ */
+describe('the points a value add shows', () => {
+  it('are his projection minus the other man\'s, even when the other man carries a penalty', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: [...roster().filter((c) => c.player.id !== 'rb3'), candidate('rb3', 'Weak Back', 'RB', 1, { status: 'Questionable' })],
+      candidates: [candidate('fa-rb1', 'Wire Back', 'RB', 7)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: ROSTER_IDS,
+      calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+    });
+    const add = advice.valueAdds[0]!;
+    expect(add.basis.projectionGap).toBeCloseTo(6, 5);
+    // The decision still sees the penalty: the grade gap is wider.
+    expect(add.gain).toBeGreaterThan(add.basis.projectionGap!);
+
+    const row = buildWaiverBoard({ upgrades: [], valueAdds: advice.valueAdds }).rows[0]!;
+    expect(row.shortTerm.label).toBe('+6.0 pts');
+    expect(row.shortTerm.gain).toBe(add.gain);
+    expect(caseLines('Wire Back', row).join(' ')).toMatch(/discounts injury status and thin data/);
+  });
+
+  it('say so plainly when a side has no market line', () => {
+    const advice = scan([candidate('fa-rb1', 'Wire Back', 'RB', 7)]);
+    const add = { ...advice.valueAdds[0]!, basis: { ...advice.valueAdds[0]!.basis, projectionGap: null } };
+    expect(buildWaiverBoard({ upgrades: [], valueAdds: [add] }).rows[0]!.shortTerm.label).toBe('No market line');
+  });
+});
+
+describe('the bar a value add is measured against', () => {
+  // `rb3` (Weak Back, 1 pt) is the weakest bench player; `wr4` sits above him.
+  const wire = [candidate('fa-rb1', 'Wire Back', 'RB', 7)];
+
+  it('is the weakest bench player when nobody is held', () => {
+    expect(scan(wire).valueAdds[0]!.overName).toBe('Weak Back');
+  });
+
+  it('skips a player the market holds, and the gain shrinks to match', () => {
+    const before = scan(wire).valueAdds[0]!;
+    const after = recommendWaiverUpgrades({
+      roster: [...roster(), candidate('rb5', 'Cuttable Back', 'RB', 2)],
+      candidates: wire,
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: [...ROSTER_IDS, 'rb5'],
+      calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+      heldIds: new Set(['rb3']),
+    }).valueAdds[0]!;
+
+    expect(after.overName).toBe('Cuttable Back');
+    expect(after.gain).toBeLessThan(before.gain);
+  });
+
+  it('falls back to the weakest held player when nobody on the bench can be cut', () => {
+    const advice = recommendWaiverUpgrades({
+      roster: roster(),
+      candidates: wire,
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: ROSTER_IDS,
+      calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+      heldIds: new Set(roster().map((c) => c.player.id)),
+    });
+    expect(advice.valueAdds[0]!.overName).toBe('Weak Back');
+  });
+});
+
 describe('backs and receivers', () => {
   it('are uncapped: several can clear at once', () => {
     const advice = scan([
@@ -228,7 +309,7 @@ describe('See why', () => {
     const lines = caseLines('Wire Back', board.rows[0]!);
 
     expect(lines.join('\n')).toMatch(/projects Wire Back for 7\.0 pts/);
-    expect(lines.join('\n')).toMatch(/better than Weak Back/);
+    expect(lines.join('\n')).toMatch(/and Weak Back for 1\.0/);
     expect(lines.join('\n')).toMatch(/held for depth with no cap/);
     expect(lines.join('\n')).toMatch(/#15 on Sleeper's trending adds.*does not change his projection/);
     expect(lines.join('\n')).toMatch(/lean/);
