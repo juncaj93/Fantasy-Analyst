@@ -422,6 +422,40 @@ test.describe('the honest endings', () => {
     await expect(page.getByTestId('waiver-plan-why')).toBeVisible();
   });
 
+  /*
+   * The same ending with nobody to name, which is what production drew on
+   * 29 September 2026: every player starting or on injured reserve, so the
+   * protected list is empty and the note on the card is the whole argument. A
+   * sheet would repeat the headline, so there is no See why, and no button of
+   * any kind.
+   */
+  test('draws a full roster with nobody to name as its note alone, with no See why', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(
+      page,
+      planFixture({
+        state: 'no_safe_drop',
+        headline: 'No safe drop for this upgrade',
+        instruction: null,
+        claims: [],
+        note: 'Everybody on your roster is either starting, on injured reserve, or worth more than the upgrade would gain.',
+        mechanics: null,
+        outcomes: [],
+        relationships: [],
+        protectedPlayers: [],
+        budget: null,
+        dropHints: [],
+      }),
+    );
+    await openWaivers(page);
+
+    const card = page.getByTestId('waiver-plan');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-state', 'no_safe_drop');
+    await expect(page.getByTestId('waiver-plan-note')).toContainText('Everybody on your roster');
+    await expect(card.getByRole('button')).toHaveCount(0);
+  });
+
   /**
    * A quiet week says nothing, because the board underneath already said it.
    *

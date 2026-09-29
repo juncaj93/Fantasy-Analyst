@@ -73,8 +73,10 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
    *
    * An empty plan whose whole story is its own headline — a quiet week — would
    * open onto a sheet repeating that headline, which is a control that exists to
-   * disappoint. A plan with claims always has more; a `no safe drop` plan has
-   * the protected list, which is precisely the argument somebody wants with it.
+   * disappoint. A plan with claims always has more; a `no safe drop` plan
+   * usually has the protected list, which is precisely the argument somebody
+   * wants with it. When nobody is protected (everyone starting or on injured
+   * reserve) its note is the whole argument, and it gets no See why.
    */
   const hasWhy =
     plan.claims.length > 0 ||
