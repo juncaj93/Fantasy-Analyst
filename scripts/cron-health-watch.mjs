@@ -50,8 +50,15 @@ export const CRONS = [
  */
 export const FIVE_MINUTE_RULES = { consecutive: 3, windowMinutes: 120, maxInWindow: 6 };
 
-/** How far back to ask. Long enough to see the last run of a weekly cron. */
-export const LOOKBACK_HOURS = 8 * 24;
+/**
+ * How far back to ask.
+ *
+ * Just under a week, because that is the widest range the analytics API will
+ * answer on this plan ("cannot request a time range wider than 1w", measured
+ * on the first dry run). Enough to see the last run of a weekly cron except in
+ * the few minutes before its next one, which `judgeCron` allows for.
+ */
+export const LOOKBACK_HOURS = 7 * 24 - 1;
 
 const ok = (status) => status === 'success';
 
@@ -67,6 +74,11 @@ export function judgeCron(spec, runs, now) {
   const verdict = (healthy, message) => ({ name: spec.name, cron: spec.cron, result: healthy ? 'success' : 'failure', message });
 
   if (!last) {
+    // A weekly cron's last run can sit just outside the week this can see, so
+    // an empty window only counts as silence for a cron due more often than that.
+    if (spec.expectEveryMinutes >= LOOKBACK_HOURS * 60) {
+      return verdict(true, `${spec.cron} has not run within the ${LOOKBACK_HOURS} hours this can see; nothing to judge.`);
+    }
     return verdict(false, `${spec.cron} has no invocation on record in the last ${LOOKBACK_HOURS} hours.`);
   }
   const silentMinutes = (now.getTime() - Date.parse(last.datetime)) / 60_000;

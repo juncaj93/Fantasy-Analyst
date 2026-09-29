@@ -102,6 +102,21 @@ describe('the other crons', () => {
     expect(v.result).toBe('success');
   });
 
+  it('asks for no more than the week the analytics API will answer', async () => {
+    // @ts-expect-error -- plain .mjs
+    const { LOOKBACK_HOURS } = await import('../scripts/cron-health-watch.mjs');
+    expect(LOOKBACK_HOURS).toBeLessThan(7 * 24);
+  });
+
+  it('does not call a weekly cron silent when its last run is just outside that week', () => {
+    const v = judgeCron(spec('0 23 * * SAT'), [], new Date('2026-10-03T22:20:00Z'));
+    expect(v.result).toBe('success');
+  });
+
+  it('does call the five-minute tick silent with nothing in the window', () => {
+    expect(judgeCron(spec(FIVE), [], new Date('2026-10-03T22:20:00Z')).result).toBe('failure');
+  });
+
   it('judges every cron the Worker has, one verdict each', () => {
     const verdicts = judgeAll([], new Date('2026-09-29T12:00:00Z'));
     expect(verdicts.map((v: { cron: string }) => v.cron)).toEqual(['*/5 * * * *', '0 9 * * *', '0 23 * * SAT', '0 15 * * SUN']);
