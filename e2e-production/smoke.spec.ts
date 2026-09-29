@@ -1973,12 +1973,46 @@ test.describe('the season features', () => {
     const card = page.getByTestId('waiver-plan');
     test.skip((await card.count()) === 0, 'this deployment surfaced no plan to draw');
 
-    await expect(card.getByRole('button')).toHaveCount(1);
-    const label = (await card.getByRole('button').innerText()).toLowerCase();
-    for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-      expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
-        new RegExp(`\\b${forbidden}\\b`),
-      );
+    /*
+     * See why is offered only when the plan has more than its headline and note.
+     * A `no_safe_drop` plan with nobody to name (every player starting or on
+     * injured reserve) is drawn as its note alone, which is what this deployment
+     * showed on 29 September 2026. So the server's own plan says how many
+     * buttons to expect: one when there is something behind it, none when there
+     * is not, and never anything else.
+     */
+    const id = await selectedLeagueId(page);
+    const plan = id
+      ? (
+          await apiJson<{
+            claimPlan?: {
+              claims?: unknown[];
+              protectedPlayers?: unknown[];
+              outcomes?: unknown[];
+              relationships?: unknown[];
+              mechanics?: unknown;
+              budget?: unknown;
+            } | null;
+          }>(page, `/api/leagues/${id}/waivers`)
+        )?.claimPlan
+      : null;
+    const hasWhy =
+      plan == null ||
+      (plan.claims?.length ?? 0) > 0 ||
+      (plan.protectedPlayers?.length ?? 0) > 0 ||
+      (plan.outcomes?.length ?? 0) > 0 ||
+      (plan.relationships?.length ?? 0) > 0 ||
+      plan.mechanics != null ||
+      plan.budget != null;
+
+    await expect(card.getByRole('button')).toHaveCount(hasWhy ? 1 : 0);
+    if (hasWhy) {
+      const label = (await card.getByRole('button').innerText()).toLowerCase();
+      for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
+        expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
+          new RegExp(`\\b${forbidden}\\b`),
+        );
+      }
     }
 
     /* And the claims are not controls, so there is nothing to nest one inside. */
