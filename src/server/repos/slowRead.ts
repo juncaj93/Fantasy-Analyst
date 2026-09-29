@@ -43,13 +43,23 @@
  *
  * Two details that are load-bearing rather than incidental:
  *
- *   - **the promise is stored, not the value.** Concurrent callers inside one
- *     request — `/api/setup/status` asks for two of these counts in the same
- *     `Promise.all` — collapse onto one query instead of racing to fill the
- *     same slot twice.
- *   - **a rejection is never remembered.** A failed read drops its own entry,
- *     so a D1 error during an incident is not pinned in front of every reader
- *     for the rest of the window. That is the exact failure this module was
+ *   - **only a settled answer is shared, never a read in flight.** This used
+ *     to store the promise, so concurrent callers collapsed onto one query.
+ *     On Workers that is a hang waiting to happen: a promise belongs to the
+ *     request whose I/O will settle it, and when that request ends first (a
+ *     client that hung up, which production cancels outright) the runtime
+ *     cancels every *other* request's wait on it. They never answer, and the
+ *     memo went on handing the same dead promise to every reader for the rest
+ *     of its window (an hour for the counts, six for the usage tendencies).
+ *     That was the 30-45 second hang on `/api/overview` and the lineup read
+ *     in September 2026: Cloudflare recorded dozens of requests ending
+ *     `clientDisconnected` at 44.8s having spent ~60ms of CPU and no D1 time.
+ *     Now a caller who finds nothing settled runs its own read, and the first
+ *     to land fills the slot. The price is a duplicate query when two requests
+ *     miss at the same instant, once per window.
+ *   - **a rejection is never remembered.** Only a value is ever stored, so a
+ *     D1 error during an incident is not pinned in front of every reader for
+ *     the rest of the window. That is the exact failure this module was
  *     written during, and caching it would be a fine way to cause it again.
  */
 
@@ -57,7 +67,7 @@ import type { Database } from '../db.ts';
 
 interface Entry<T> {
   at: number;
-  value: Promise<T>;
+  value: T;
 }
 
 /**
@@ -95,18 +105,22 @@ export class SlowRead<T> {
 
     const at = this.now();
     const hit = byKey.get(key);
-    if (hit && at - hit.at < this.ttlMs) return hit.value;
+    if (hit && at - hit.at < this.ttlMs) return Promise.resolve(hit.value);
 
-    const value = load();
-    byKey.set(key, { at, value });
     /*
-     * Drop a failure rather than serve it for the rest of the window, and do
-     * it without claiming to have handled it: the caller still receives this
-     * same rejected promise and still has to deal with it.
+     * The caller's own read, shared with nobody until it has settled. The
+     * window runs from when the read started, as it always has. A `forget`
+     * during the read orphans `byKey`, so a read that began before a write
+     * cannot land after it.
      */
-    void value.catch(() => {
-      if (byKey.get(key)?.value === value) byKey.delete(key);
-    });
+    const value = load();
+    const slot = byKey;
+    void value.then(
+      (settled) => {
+        slot.set(key, { at, value: settled });
+      },
+      () => {},
+    );
     return value;
   }
 
