@@ -438,4 +438,25 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
       expect(await fileOn(h, m)).toEqual([]);
     }
   });
+
+  /*
+   * And the fixture list never shares a tick with one of them.
+   *
+   * Measured from Cloudflare's own records: the fixture refresh alone ran
+   * 67-129ms of CPU on the ten-millisecond tick, and on 27 September it was
+   * killed 246 times in a row. A second heavy parse on the same invocation is
+   * the stacking #286 took off the daily tick.
+   */
+  it('keeps the fixture list off the ticks that own an nflverse file', async () => {
+    const scheduleOn = async (hour: number, minute: number): Promise<boolean> => {
+      const run = stubWorld();
+      await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.UTC(2026, 8, 23, hour, minute) }, cronEnv(db));
+      return run.urls.some((u) => u.includes('/schedules/'));
+    };
+    for (const [h, m] of [[9, 30], [9, 35], [9, 40], [21, 30]] as const) {
+      expect(await scheduleOn(h, m), `${h}:${m} owns a feed`).toBe(false);
+    }
+    // The control: on an ordinary tick the same refresh, still due, does run.
+    expect(await scheduleOn(9, 45)).toBe(true);
+  });
 });

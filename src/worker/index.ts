@@ -310,12 +310,21 @@ export default {
        * Separately caught, like everything else on this tick, and last: a
        * planning input that fails must never take down the check that decides
        * whether somebody plays today.
+       *
+       * And never on a tick that owns an nflverse file. Fetching and parsing
+       * the fixture list is itself several times the ten-millisecond CPU
+       * allowance, and stacking it on a feed parse is the stacking #286 took
+       * off the daily tick. A refresh that is due on one of those three ticks
+       * is just as due five minutes later.
        */
-      try {
-        const schedule = await new ScheduleService(env.DB).refreshIfDue(usageSeason());
-        if (schedule?.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
-      } catch (err) {
-        console.error('schedule check failed', err);
+      const feed = nflverseFeedDue(event.scheduledTime);
+      if (!feed) {
+        try {
+          const schedule = await new ScheduleService(env.DB).refreshIfDue(usageSeason());
+          if (schedule?.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
+        } catch (err) {
+          console.error('schedule check failed', err);
+        }
       }
 
       /*
@@ -331,7 +340,6 @@ export default {
        * this tick and separately caught, so a feed that fails or runs long can
        * never cost the injury check above it.
        */
-      const feed = nflverseFeedDue(event.scheduledTime);
       if (feed) {
         try {
           const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);

@@ -129,7 +129,7 @@ const COLUMNS = [
  * to keep a whole-file scan inside the CPU allowance.
  */
 export function parseSchedule(csv: string, opts: { season?: string } = {}): ParsedSchedule {
-  const lines = csv.split('\n');
+  const lines = seasonLines(csv, opts.season);
   if (lines.length < 2) return EMPTY;
 
   const at = headerIndex(lines[0] ?? '');
@@ -182,6 +182,32 @@ export function parseSchedule(csv: string, opts: { season?: string } = {}): Pars
   }
 
   return { rows, games, skipped, seasons: [...seasons].sort() };
+}
+
+/**
+ * The header, then only the lines from the season's first game onward.
+ *
+ * The filter above was not enough on its own. It skips old seasons before
+ * materialising their columns, but it still split all 2.2MB into ~7,500 strings
+ * and read a field out of every one, and in production that ingest measured
+ * 67–129ms of CPU against a 10ms allowance. On 27 September 2026 Cloudflare
+ * stopped letting it through, and because the refresh had no record of trying,
+ * every five-minute tick for twenty hours tried again and was killed.
+ *
+ * Every `game_id` in the file begins with its season (`2026_01_NE_SEA`) and the
+ * file is written oldest season first -- both checked against all 7,548 rows of
+ * the live file. So the season's first line is one `indexOf` away, and the ~95%
+ * of the file before it is never split at all. When the marker is not there
+ * (a season not yet published, or the id format changing) this falls back to
+ * the whole file, and the per-line season check above still decides what is
+ * kept, so a wrong guess here can only cost time, never a row.
+ */
+function seasonLines(csv: string, season: string | undefined): string[] {
+  if (season == null) return csv.split('\n');
+  const headerEnd = csv.indexOf('\n');
+  const start = headerEnd === -1 ? -1 : csv.indexOf(`\n${season}_`, headerEnd);
+  if (start === -1) return csv.split('\n');
+  return [csv.slice(0, headerEnd), ...csv.slice(start + 1).split('\n')];
 }
 
 /**
