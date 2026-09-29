@@ -218,6 +218,9 @@ jobs:
             id=$(npx wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || true)
           fi
           ACCOUNT_ID="$id" node scripts/probe-d1-latency.mjs | tee latency.txt
+          # Requests that hang without spending CPU or D1 time: does the runtime
+          # report promises settled from a request that had already ended?
+          ACCOUNT_ID="$id" node scripts/probe-worker-logs.mjs | tee -a latency.txt || true
           {
             echo '### D1 and Worker time'
             echo ''
