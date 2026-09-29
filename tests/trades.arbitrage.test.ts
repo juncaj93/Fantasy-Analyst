@@ -188,27 +188,41 @@ describe('a sell-high read, and the touchdowns it turns on', () => {
     expect(regressionRisk('WR', assessTdDependency('WR', hotOnVolume))).toBe(0);
   });
 
-  it('never treats a quarterback’s scoring as a sell signal', () => {
-    // TD rate is his offence rather than his luck. The read survives on the
-    // size of the overperformance alone.
-    expect(regressionRisk('QB', assessTdDependency('WR', hotOnScores))).toBe(1);
+  /*
+   * Quarterbacks follow the same rule as everyone else since 29 September 2026.
+   * They used to read a risk of 1 whatever the line was made of, beside a
+   * reason calling the same production "a real gain".
+   */
+  const passerWeek = (n: number, over: Partial<UsageWeek>): UsageWeek => ({
+    ...week(n),
+    targets: null,
+    receptions: null,
+    recYards: null,
+    recTds: null,
+    ...over,
+  });
 
-    const passer = read({
-      position: 'QB',
-      preseasonPoints: 16 * 18,
-      weeks: [1, 2, 3, 4, 5].map((n) => ({
-        ...week(n),
-        targets: null,
-        receptions: null,
-        recYards: null,
-        recTds: null,
-        passAttempts: 38,
-        passYards: 330,
-        passTds: 3,
-      })),
-    })!;
-    expect(passer.kind).toBe('sell_high');
-    expect(passer.reasons.join(' ')).toMatch(/offence rather than his luck/i);
+  it('does not sell a quarterback whose line is a full workload scoring every week', () => {
+    const workhorse = [1, 2, 3, 4, 5].map((n) => passerWeek(n, { passAttempts: 38, passYards: 330, passTds: 3 }));
+    expect(regressionRisk('QB', assessTdDependency('QB', workhorse))).toBeLessThan(1);
+    expect(read({ position: 'QB', preseasonPoints: 16 * 18, weeks: workhorse })).toBeNull();
+  });
+
+  it('does not sell a quarterback whose overperformance is made of yardage', () => {
+    const volume = [1, 2, 3, 4, 5].map((n) => passerWeek(n, { passAttempts: 40, passYards: 420, passTds: 0 }));
+    expect(regressionRisk('QB', assessTdDependency('QB', volume))).toBe(0);
+    expect(read({ position: 'QB', preseasonPoints: 16 * 12, weeks: volume })).toBeNull();
+  });
+
+  it('sells a quarterback on a thin workload whose line is touchdowns', () => {
+    // Few attempts, scores in two games of five: the part that regresses.
+    const lucky = [1, 2, 3, 4, 5].map((n) =>
+      passerWeek(n, { passAttempts: 22, passYards: 150, passTds: n === 2 || n === 4 ? 6 : 0 }),
+    );
+    const sell = read({ position: 'QB', preseasonPoints: 16 * 10, weeks: lucky })!;
+    expect(sell.kind).toBe('sell_high');
+    expect(sell.reasons.join(' ')).toMatch(/touchdown rate does not carry forward/);
+    expect(sell.reasons.join(' ')).not.toMatch(/real gain/);
   });
 
   it('scales with how much of the line is end zone, rather than switching at a line', () => {
