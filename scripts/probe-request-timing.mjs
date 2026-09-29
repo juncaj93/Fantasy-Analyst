@@ -20,8 +20,10 @@
  */
 
 const BASE = process.env.BASE ?? 'https://fantasy-analyst.juncaj93.workers.dev';
-const MINUTES = Number(process.env.MINUTES ?? 60);
-const INTERVAL = Number(process.env.INTERVAL ?? 20);
+// A round a minute for 75 minutes: every minute-of-the-five-minute-cron gets
+// sampled fifteen times, at a read cost the daily allowance does not notice.
+const MINUTES = Number(process.env.MINUTES ?? 75);
+const INTERVAL = Number(process.env.INTERVAL ?? 60);
 const SLOW_MS = Number(process.env.SLOW_MS ?? 5000);
 const LIMIT_MS = 60_000;
 
