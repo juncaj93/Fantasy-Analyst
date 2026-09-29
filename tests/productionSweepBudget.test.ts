@@ -59,6 +59,27 @@ describe('the budget guard in front of a full pass', () => {
     const { text } = readWorkflow('smoke.yml');
     expect(text).toContain('ceiling_percent');
   });
+
+  /**
+   * The ceiling only protects the day if the ceiling plus one sweep stays under
+   * Cloudflare's 80% alert. The most expensive sweep measured read 2.0M rows,
+   * 40% of the allowance (27 September, retries re-crawling). At the old 50%
+   * default, 25 September started a sweep at 41.5% and ended at 82%.
+   */
+  it('defaults low enough that the worst sweep measured cannot reach the 80% alert', () => {
+    const WORST_SWEEP_PERCENT = 40;
+    const ALERT_PERCENT = 80;
+    const { yaml, text } = readWorkflow('smoke.yml');
+    const on = yaml['on'] as Record<string, YamlValue>;
+    for (const trigger of ['workflow_call', 'workflow_dispatch']) {
+      const inputs = (on[trigger] as Record<string, YamlValue>)['inputs'] as Record<string, YamlValue>;
+      const ceiling = Number((inputs['ceiling_percent'] as Record<string, YamlValue>)['default']);
+      expect(ceiling + WORST_SWEEP_PERCENT, `${trigger} default`).toBeLessThan(ALERT_PERCENT);
+    }
+    const fallback = /inputs\.ceiling_percent \|\| '(\d+)'/.exec(text);
+    expect(fallback, 'the guard step falls back to a default').not.toBeNull();
+    expect(Number(fallback![1]) + WORST_SWEEP_PERCENT).toBeLessThan(ALERT_PERCENT);
+  });
 });
 
 describe('the daily sweep', () => {

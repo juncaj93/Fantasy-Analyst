@@ -26,7 +26,7 @@
  * has been renamed must read as "cannot determine", never as zero.
  *
  * Usage:
- *   ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... node scripts/d1-budget-guard.mjs [--ceiling 50]
+ *   ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... node scripts/d1-budget-guard.mjs [--ceiling 30]
  *
  * Writes `proceed=yes|no`, `percent` and `rows` to $GITHUB_OUTPUT when set.
  */
@@ -41,7 +41,7 @@ const argOf = (name, fallback) => {
   const i = args.indexOf(name);
   return i === -1 ? fallback : args[i + 1];
 };
-const ceiling = Number(argOf('--ceiling', process.env.CEILING_PERCENT ?? '50'));
+const ceiling = Number(argOf('--ceiling', process.env.CEILING_PERCENT ?? '30'));
 
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const ACCOUNT = process.env.ACCOUNT_ID;
