@@ -220,6 +220,56 @@ describe('a sell-high read, and the touchdowns it turns on', () => {
   });
 });
 
+/*
+ * Alex, 29 September 2026, on Kenneth Walker: outperforming expectations is not
+ * automatically "sell before it disappears" when usage supports the production.
+ * The touchdown gate above already asked *why* once four games exist. These
+ * cover the two places it did not.
+ */
+describe('a sell-high has to say why, and a real workload weakens it', () => {
+  it('waits for the touchdown read instead of selling on three games with no reason', () => {
+    // Three games, far over expectation, and the touchdown model needs four.
+    // This used to survive at 0.4 as "running over expectation. Sell into it."
+    const threeHot = [1, 2, 3].map((n) => week(n, { targets: 4, recYards: 35, recTds: 3 }));
+    expect(assessTdDependency('WR', threeHot).share).toBeNull();
+    expect(regressionRisk('WR', assessTdDependency('WR', threeHot))).toBe(0);
+    expect(read({ weeks: threeHot })).toBeNull();
+  });
+
+  /** A back with a starter's workload who scores in every game. */
+  const workhorse = [1, 2, 3, 4, 5].map((n) => ({
+    ...week(n),
+    targets: 3,
+    receptions: 2,
+    recYards: 15,
+    carries: 18,
+    rushYards: 70,
+    rushTds: n % 2 === 0 ? 2 : 1,
+  }));
+
+  it('does not call a goal-line workhorse a full-strength sell', () => {
+    const td = assessTdDependency('RB', workhorse);
+    expect(td.profile).toBe('td_driven_with_role');
+    // Half for the scoring role, and the read then falls under its floor once
+    // the workload halves it again.
+    expect(regressionRisk('RB', td)).toBe(0.5);
+    expect(read({ position: 'RB', weeks: workhorse })).toBeNull();
+  });
+
+  it('keeps a lucky scorer with volume as a sell, weakened and saying why', () => {
+    // Real targets, but the scores came in two games of five: that is not a
+    // scoring role, and the part of the line made of them still regresses.
+    const lucky = [1, 2, 3, 4, 5].map((n) =>
+      week(n, { targets: 10, recYards: 40, recTds: n === 2 || n === 4 ? 5 : 0 }),
+    );
+    const sell = read({ weeks: lucky })!;
+    expect(sell.kind).toBe('sell_high');
+    expect(sell.tdDependency.profile).toBe('td_dependent_weak_opportunity');
+    expect(sell.strength).toBeLessThanOrEqual(ARBITRAGE.roleDiscount);
+    expect(sell.reasons.join(' ')).toMatch(/workload backs part of it/);
+  });
+});
+
 describe('the newsletter tally reinforces and never originates', () => {
   it('leaves a read alone when the tally is positive or silent', () => {
     expect(tallyFactorOf(null).factor).toBe(1);

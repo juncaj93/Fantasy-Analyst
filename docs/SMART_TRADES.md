@@ -182,6 +182,29 @@ It also asserts the other half: every non-DEF position's need is byte-identical
 to the same league with the defences removed, so the exclusion cannot distort
 what it is not about.
 
+### Roster fit on both sides (29 September 2026)
+
+Two live cards priced every player on his own number and never looked at the
+rosters: LaPorta (TE) to a manager who already had a tight end, and Walker (one
+of two startable backs) for Lamb on a roster deep at receiver.
+`core/trades/rosterFit.ts` adds two checks on top of everything above:
+
+- **Counterpart need.** The waivers depth policy (`core/waivers/depthPolicy.ts`)
+  applied to the partner's roster. QB, TE and K are slot positions: at his
+  cap, a newcomer has to beat the one he starts by `MEANINGFUL_UPGRADE_GAIN`
+  (2.5). A holder ruled out (IR, Out) is a real gap and does not count; a holder
+  with no market price is not evidence he wants another. RB and WR have no cap.
+  Checked at candidate generation, so a refused give frees its shortlist place.
+  Rejection: `counterparty_has_position`.
+- **Own scarcity.** For each position Alex sends from, the league's dedicated
+  slots there are summed before and after the deal over priced players, with
+  anything arriving at the position counted. Loss past 1.5 pts is charged at
+  half against the user-benefit bar, for upgrades and arbitrage alike. Depth
+  pays nothing. Rejection: `costs_scarce_player`; a surfaced offer that paid a
+  charge says so in its caveats.
+
+Neither touches what counts as priced. Both only ever remove or demote offers.
+
 ---
 
 ## Candidate generation, and the bounds

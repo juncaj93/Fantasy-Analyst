@@ -239,6 +239,15 @@ export interface RosterView {
    * a line this week, which is a fact about him, not a gap in coverage.
    */
   notPlaying: ReadonlySet<string>;
+  /**
+   * Players ruled out outright (Out, IR, PUP, suspended). A subset of
+   * {@link notPlaying} without the byes: a starter on a bye is still the
+   * starter, and one on injured reserve is a real gap at his position. See
+   * `rosterFit.ts`.
+   */
+  ruledOut: ReadonlySet<string>;
+  /** The league's starting slots, so a positional policy can be read per roster. */
+  shape: RosterShape;
   /** Who the optimiser starts as the roster stands. */
   starterIds: ReadonlySet<string>;
   /** Startable players who are not starting, by position. */
@@ -388,6 +397,7 @@ function buildView(args: {
   const unscored = new Set<string>();
   const unpriced = new Set<string>();
   const notPlaying = new Set<string>();
+  const ruledOut = new Set<string>();
   for (const id of playerIds) {
     const evaluation = evaluations.get(id);
     if (!evaluation) {
@@ -396,6 +406,7 @@ function buildView(args: {
     }
     positionOf.set(id, evaluation.position);
     nameOf.set(id, evaluation.name);
+    if (evaluation.ruledOut) ruledOut.add(id);
     if (evaluation.ruledOut || (args.scheduleKnown && evaluation.opponent == null)) notPlaying.add(id);
     if (evaluation.score == null) unscored.add(id);
     else if (!isPriced(evaluation)) unpriced.add(id);
@@ -473,6 +484,8 @@ function buildView(args: {
     unscored,
     unpriced,
     notPlaying,
+    ruledOut,
+    shape,
     starterIds: base.starters,
     benchDepth: base.depth,
     needs,

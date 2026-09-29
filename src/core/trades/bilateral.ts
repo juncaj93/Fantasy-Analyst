@@ -48,6 +48,7 @@ import { MANAGER_FIT_CAP, managerFitFor, type ActivityClass, type ManagerFit, ty
 import type { ArbitrageRead } from './arbitrage.ts';
 import type { OfferCategory } from './category.ts';
 import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
+import { counterpartNeed, scarcityLine, scarcityOf, type ScarcityCost } from './rosterFit.ts';
 
 // ------------------------------------------------------------- the bounds --
 
@@ -408,6 +409,11 @@ export interface OfferEvaluation {
   counterparty: SideOutcome;
   managerFit: ManagerFit;
   /**
+   * What the players sent cost your roster beyond this week, per position.
+   * Empty when everything sent is depth. See `rosterFit.ts`.
+   */
+  scarcity: ScarcityCost[];
+  /**
    * The internal composite the ordering rests on.
    *
    * **No screen may print this.** §15 is explicit: an internal deterministic
@@ -465,6 +471,10 @@ export type RejectionReason =
   | 'user_benefit_negligible'
   | 'harms_counterparty'
   | 'no_counterparty_logic'
+  /** They are already full at a slot position and this is no clear upgrade. See `rosterFit.ts`. */
+  | 'counterparty_has_position'
+  /** The return does not cover how hard the sent player is to replace. See `rosterFit.ts`. */
+  | 'costs_scarce_player'
   | 'opens_hole_for_user'
   | 'opens_hole_for_counterparty'
   | 'duplicate_package'
@@ -990,11 +1000,31 @@ export function generateCandidates(args: {
    * player the partner has no use for is not a sale, he is a message nobody
    * answers.
    */
-  const mine = tradeableFrom(me).map((id) => ({
-    id,
-    useful: upgradeOver(them, me, id),
-    spare: spareness(me, id),
-  }));
+  /*
+   * …and only players the partner would actually want, before the shortlist
+   * is cut rather than after it.
+   *
+   * `useful` says a player would beat somebody in their lineup. It does not
+   * say they want a second tight end when they start one already, and on 29
+   * September 2026 that gap put Sam LaPorta on the board for a manager in
+   * exactly that spot. Filtering here, not only at the package, is what lets
+   * the freed shortlist places go to positions they would value: a rejected
+   * tight end at the package stage would still have taken a place a receiver
+   * could have had. See `rosterFit.ts`.
+   */
+  const mine = tradeableFrom(me)
+    .filter((id) => {
+      const need = counterpartNeed({ receiver: them, sender: me, incoming: [id], outgoing: [] });
+      if (!need.wanted && upgradeOver(them, me, id) > 0) {
+        args.rejections.push({ partnerKey, give: [id], get: [], reason: 'counterparty_has_position', detail: need.detail! });
+      }
+      return need.wanted;
+    })
+    .map((id) => ({
+      id,
+      useful: upgradeOver(them, me, id),
+      spare: spareness(me, id),
+    }));
   const giveable = withArbitrage({
     ranked: mine
       .filter((g) => g.useful > 0 && g.spare > 0)
@@ -1097,6 +1127,20 @@ export function generateCandidates(args: {
     const key = packageKey(give, get);
     if (seen.has(key)) return;
     seen.add(key);
+
+    /*
+     * The same need check on the whole package. Each player passed on his own
+     * above; two of them together can still overfill a position. A one-for-one
+     * never needs it: the shortlist already asked, and a like-for-like swap at
+     * a slot position was dropped there, since it gives them no upgrade.
+     */
+    if (give.length > 1 || get.length > 1) {
+      const need = counterpartNeed({ receiver: them, sender: me, incoming: give, outgoing: get });
+      if (!need.wanted) {
+        args.rejections.push({ partnerKey, give, get, reason: 'counterparty_has_position', detail: need.detail! });
+        return;
+      }
+    }
 
     const boost = arbitrageBoost(give, get);
     out.push({ partnerKey, give, get, priority: round3(priority + boost.delta), arbitrage: boost.carries });
@@ -1325,6 +1369,29 @@ function evaluate(args: {
     );
   }
 
+  /*
+   * The same bar, raised by how hard the sent players are to replace.
+   *
+   * `starterGain` is this week's lineup, and in a flex league that routinely
+   * hides the loss of a scarce starter: on 29 September 2026 Kenneth Walker,
+   * one of Alex's two startable backs, priced out at -0.2 for CeeDee Lamb
+   * because a receiver slid into the flex. A deep position pays nothing here;
+   * a thin one has to be bought back with a better return. See `rosterFit.ts`.
+   */
+  const scarcity = scarcityOf({
+    view: me,
+    give: candidate.give,
+    incoming: getting.map((p) => ({ position: p.position, value: p.value })),
+  });
+  const netGain = round2(userDelta.starterGain - scarcity.charge);
+  if (netGain < bar) {
+    return reject(
+      'costs_scarce_player',
+      `${scarcity.costs.map((c) => scarcityLine(me, c)).join(' ')} ` +
+        `Net of that, the trade is worth ${netGain.toFixed(1)} pts to you, below the ${bar} pt bar.`,
+    );
+  }
+
   // ------------------------------------ gate 3: could they defend accepting --
   const partnerDelta = them.delta(candidate.get, candidate.give);
   if (!partnerDelta.legal) {
@@ -1383,7 +1450,7 @@ function evaluate(args: {
    * `applyLineupPreferences` keeps about naming correlation only when
    * correlation moved something.
    */
-  const carriedByArbitrage = strongest.length > 0 && userDelta.starterGain < MIN_USER_GAIN;
+  const carriedByArbitrage = strongest.length > 0 && netGain < MIN_USER_GAIN;
   const category: OfferCategory = carriedByArbitrage ? strongest[0]!.kind : 'upgrade';
 
   const breakdown = scoreOf({
@@ -1392,6 +1459,7 @@ function evaluate(args: {
     counterparty: partnerSide,
     managerFit,
     size: giving.length + getting.length,
+    netGain,
     /*
      * What an arbitrage offer is scored on instead of this week's points.
      *
@@ -1416,10 +1484,14 @@ function evaluate(args: {
     user: userSide,
     counterparty: partnerSide,
     managerFit,
+    scarcity: scarcity.costs,
     score: breakdown.total,
     breakdown,
     reasons: reasonsFor({ me, them, partner, giving, getting, user: userSide, counterparty: partnerSide, fairness, managerFit }),
-    caveats: caveatsFor({ me, giving, user: userSide, counterparty: partnerSide, fairness, managerFit }),
+    caveats: [
+      ...scarcity.costs.map((c) => scarcityLine(me, c)),
+      ...caveatsFor({ me, giving, user: userSide, counterparty: partnerSide, fairness, managerFit }),
+    ],
     headline: headlineFor({ user: userSide, counterparty: partnerSide }),
   };
 }
@@ -1544,6 +1616,12 @@ export function scoreOf(args: {
   managerFit: ManagerFit;
   size: number;
   /**
+   * This week's gain net of the scarcity charge, when one was computed. The
+   * user term ranks on it, so a scarce give ranks below an equal gain from
+   * depth. Absent reads `user.starterGain`.
+   */
+  netGain?: number;
+  /**
    * The arbitrage read's own strength, when that is what the offer is claiming.
    *
    * Replaces the weekly-lineup term rather than adding to it, because they are
@@ -1555,7 +1633,7 @@ export function scoreOf(args: {
   const user =
     args.arbitrageStrength != null
       ? clamp01(args.arbitrageStrength) * ARBITRAGE_BENEFIT_SCALE
-      : clamp01(args.user.starterGain / REFERENCE_GAIN);
+      : clamp01((args.netGain ?? args.user.starterGain) / REFERENCE_GAIN);
 
   /*
    * An edge to the user is *better* than an even deal, and paying over the odds
@@ -1752,9 +1830,11 @@ function caveatsFor(args: {
 
 /** The one line a collapsed row shows. Net benefit, in the app's own units. */
 function headlineFor(args: { user: SideOutcome; counterparty: SideOutcome }): string {
-  const mine = `+${args.user.starterGain.toFixed(1)} to your lineup`;
+  // Signed once, here: a negative gain printed as "+-0.2" on the 29 September board.
+  const signed = (v: number) => `${Math.round(v * 10) < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
+  const mine = `${signed(args.user.starterGain)} to your lineup`;
   if (args.counterparty.starterGain > 0) {
-    return `${mine}, +${args.counterparty.starterGain.toFixed(1)} to theirs`;
+    return `${mine}, ${signed(args.counterparty.starterGain)} to theirs`;
   }
   return `${mine}; fits their roster shape`;
 }
