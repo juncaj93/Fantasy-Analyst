@@ -48,7 +48,7 @@ const QUERIES = [
   ['injury rows by week (2026)', `SELECT week, COUNT(*) AS n, MIN(fetched_at) AS first, MAX(fetched_at) AS last FROM player_injury_reports WHERE season = '2026' GROUP BY week ORDER BY week`],
   ['recent injury runs', `SELECT fetched_at, latest_week, rows_returned, outcome, note FROM injury_source_runs ORDER BY fetched_at DESC LIMIT 12`],
   ['recent nflverse runs', `SELECT * FROM nflverse_source_runs ORDER BY rowid DESC LIMIT 12`],
-  ['current week setting', `SELECT key, value FROM settings WHERE key LIKE '%week%' OR key LIKE '%season%'`],
+  ['nflverse write ledger, by day', `SELECT * FROM nflverse_write_budget ORDER BY 1 DESC LIMIT 12`],
 ];
 
 for (const [title, sql] of QUERIES) {

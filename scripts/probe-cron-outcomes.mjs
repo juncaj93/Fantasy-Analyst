@@ -223,9 +223,34 @@ async function observability() {
 async function windows() {
   // Defaults: the last good ticks and the first kill of 27 September, one
   // mid-outage hour, and the recovery on 28 September.
+  // Plus every five-minute tick that spent over 20ms of CPU in the last three
+  // days, with what it logged: the heavy ones are the ones worth naming.
+  const heavy = await post(`${OBS}/query`, {
+    queryId: `cron-heavy-${to.getTime()}`,
+    timeframe: { from: from.getTime(), to: to.getTime() },
+    view: 'events',
+    limit: 100,
+    parameters: {
+      datasets: ['cloudflare-workers'],
+      filters: [
+        { key: '$metadata.service', operation: 'eq', type: 'string', value: SCRIPT },
+        { key: '$workers.event.cron', operation: 'eq', type: 'string', value: '*/5 * * * *' },
+        { key: '$workers.cpuTimeMs', operation: 'gt', type: 'number', value: 20 },
+      ],
+      filterCombination: 'and',
+    },
+  });
+  console.log('');
+  console.log(`=== five-minute ticks over 20ms CPU: HTTP ${heavy.status} ===`);
+  for (const e of (heavy.json?.result?.events?.events ?? []).sort((a, b) => Number(a.timestamp) - Number(b.timestamp))) {
+    const w = e.$workers ?? {};
+    console.log(`  ${new Date(Number(w.event?.scheduledTime ?? e.timestamp)).toISOString()}  ${w.outcome}  cpu=${w.cpuTimeMs}ms  wall=${w.wallTimeMs}ms`);
+  }
+  if (!heavy.json?.success) console.log(heavy.text.slice(0, 600));
+
   const spec =
     process.env.WINDOWS ??
-    '2026-09-27T08:48:00Z/2026-09-27T09:22:00Z,2026-09-27T15:03:00Z/2026-09-27T15:12:00Z,2026-09-28T05:33:00Z/2026-09-28T06:02:00Z';
+    '2026-09-27T02:58:00Z/2026-09-27T03:12:00Z,2026-09-29T09:03:00Z/2026-09-29T09:08:00Z,2026-09-29T15:03:00Z/2026-09-29T15:08:00Z';
   if (!spec) return;
   const base = [{ key: '$metadata.service', operation: 'eq', type: 'string', value: SCRIPT }];
   for (const pair of spec.split(',')) {
