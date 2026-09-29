@@ -423,9 +423,15 @@ this is the freshness policy.
   snapshot. Downstream, that surfaces as "unknown" in the UI and lowers the
   start/sit confidence — it never becomes a zero that looks like a projection.
 
-Every fetched payload is persisted in `prop_snapshots.raw_json`, and per-book
-quotes are retained on the consensus row (`books_json`, `book_count`,
-`consensus_method`) so contradictory lines are never silently merged.
+Every fetch is persisted in `prop_snapshots.raw_json` as the quotes and game
+lines taken out of it, and per-book quotes are retained on the consensus row
+(`books_json`, `book_count`, `consensus_method`) so contradictory lines are
+never silently merged. The provider's own payload is not kept: measured on
+29 September 2026 it was 99% of every stored game (1.24-1.37 MB against about
+9 KB of quotes), nothing read it back, and serialising it, parsing it again on
+every cache check and re-indexing all 3,309 players per game is what the
+weekend cron was killed for from 19 September. Rows written before then still
+hold it; `PropsRepo.get` has SQLite drop it rather than the Worker.
 
 ## Consensus method
 
