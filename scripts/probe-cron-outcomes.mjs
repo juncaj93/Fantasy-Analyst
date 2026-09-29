@@ -221,8 +221,8 @@ async function observability() {
  * comma-separated list of ISO start/end pairs joined by "/".
  */
 async function windows() {
-  // Defaults: the last good ticks and the first kill of 27 September, one
-  // mid-outage hour, and the recovery on 28 September.
+  // Defaults: the two weekly Vegas refreshes the cron watch first reported
+  // failing, Saturday 26 September 23:00 and Sunday 27 September 15:00 UTC.
   // Plus every five-minute tick that spent over 20ms of CPU in the last three
   // days, with what it logged: the heavy ones are the ones worth naming.
   const heavy = await post(`${OBS}/query`, {
@@ -250,7 +250,7 @@ async function windows() {
 
   const spec =
     process.env.WINDOWS ??
-    '2026-09-27T02:58:00Z/2026-09-27T03:12:00Z,2026-09-29T09:03:00Z/2026-09-29T09:08:00Z,2026-09-29T15:03:00Z/2026-09-29T15:08:00Z';
+    '2026-09-26T22:59:30Z/2026-09-26T23:06:00Z,2026-09-27T14:59:30Z/2026-09-27T15:06:00Z';
   if (!spec) return;
   const base = [{ key: '$metadata.service', operation: 'eq', type: 'string', value: SCRIPT }];
   for (const pair of spec.split(',')) {
