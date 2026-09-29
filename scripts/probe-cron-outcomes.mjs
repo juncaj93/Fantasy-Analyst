@@ -204,10 +204,6 @@ async function observability() {
   }
   const list = failing.json.result?.events?.events ?? [];
   console.log(`${list.length} non-ok event(s) returned (capped at 100)`);
-  if (list[0]) {
-    console.log('one raw event, for the shape:');
-    console.log(JSON.stringify(list[0]).slice(0, 3000));
-  }
   const byHour = new Map();
   for (const e of list) {
     const w = e.$workers ?? {};
@@ -217,32 +213,54 @@ async function observability() {
   }
   for (const [k, n] of [...byHour].sort()) console.log(`  ${k}  ${n}`);
 
-  // The log lines of the three most recent failing invocations, so the step
-  // each one reached is on record.
-  const ids = [...new Set(list.map((e) => e.$workers?.requestId ?? e.$metadata?.requestId).filter(Boolean))].slice(0, 3);
-  for (const id of ids) {
-    const lines = await post(`${OBS}/query`, {
-      queryId: `cron-lines-${id}`,
-      timeframe: { from: from.getTime(), to: to.getTime() },
+}
+
+/*
+ * Every event in a few short windows, grouped by invocation, printed for the
+ * scheduled ones: the log lines a tick wrote, then how it ended. WINDOWS is a
+ * comma-separated list of ISO start/end pairs joined by "/".
+ */
+async function windows() {
+  // Defaults: the last good ticks and the first kill of 27 September, one
+  // mid-outage hour, and the recovery on 28 September.
+  const spec =
+    process.env.WINDOWS ??
+    '2026-09-27T08:48:00Z/2026-09-27T09:22:00Z,2026-09-27T15:03:00Z/2026-09-27T15:12:00Z,2026-09-28T05:33:00Z/2026-09-28T06:02:00Z';
+  if (!spec) return;
+  const base = [{ key: '$metadata.service', operation: 'eq', type: 'string', value: SCRIPT }];
+  for (const pair of spec.split(',')) {
+    const [a, b] = pair.split('/');
+    const r = await post(`${OBS}/query`, {
+      queryId: `cron-window-${a}`,
+      timeframe: { from: Date.parse(a), to: Date.parse(b) },
       view: 'events',
-      limit: 100,
-      parameters: {
-        datasets: ['cloudflare-workers'],
-        filters: [...base, { key: '$workers.requestId', operation: 'eq', type: 'string', value: id }],
-        filterCombination: 'and',
-      },
+      limit: 1000,
+      parameters: { datasets: ['cloudflare-workers'], filters: base, filterCombination: 'and' },
     });
-    const evs = (lines.json?.result?.events?.events ?? []).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    const evs = r.json?.result?.events?.events ?? [];
     console.log('');
-    console.log(`invocation ${id}: ${evs.length} event(s)`);
+    console.log(`=== window ${a} -> ${b}: HTTP ${r.status}, ${evs.length} event(s) ===`);
+    if (!r.json?.success) console.log(r.text.slice(0, 800));
+    const groups = new Map();
     for (const e of evs) {
-      const m = e.$metadata ?? {};
-      const w = e.$workers ?? {};
-      console.log(
-        `  ${new Date(Number(e.timestamp ?? m.timestamp ?? 0)).toISOString()} ${m.level ?? ''} ` +
-          `${w.outcome ? `[${w.outcome} cpu=${w.cpuTimeMs}ms wall=${w.wallTimeMs}ms] ` : ''}` +
-          `${String(m.message ?? '').slice(0, 300)}`,
-      );
+      const id = e.$metadata?.requestId ?? e.$workers?.requestId ?? '?';
+      const g = groups.get(id) ?? [];
+      g.push(e);
+      groups.set(id, g);
+    }
+    for (const [id, g] of groups) {
+      const scheduled = g.some((e) => e.$workers?.event?.cron || e.$workers?.eventType === 'cron' || e.$workers?.eventType === 'scheduled');
+      if (!scheduled) continue;
+      g.sort((x, y) => Number(x.timestamp) - Number(y.timestamp));
+      const end = g.find((e) => e.$workers?.outcome) ?? {};
+      const w = end.$workers ?? {};
+      console.log('');
+      console.log(`invocation ${id}  cron=${w.event?.cron ?? '?'}  outcome=${w.outcome ?? '?'}  cpu=${w.cpuTimeMs}ms  wall=${w.wallTimeMs}ms`);
+      for (const e of g) {
+        const m = e.$metadata ?? {};
+        const msg = m.message ?? e.source?.message ?? '';
+        console.log(`  ${new Date(Number(e.timestamp)).toISOString()} ${m.level ?? e.source?.level ?? ''}  ${String(typeof msg === 'string' ? msg : JSON.stringify(msg)).slice(0, 400)}`);
+      }
     }
   }
 }
@@ -256,4 +274,9 @@ try {
   await observability();
 } catch (err) {
   console.log(`observability failed: ${err.message}`);
+}
+try {
+  await windows();
+} catch (err) {
+  console.log(`windows failed: ${err.message}`);
 }
