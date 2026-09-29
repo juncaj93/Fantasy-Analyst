@@ -49,6 +49,12 @@ export const SCHEDULE_SOURCE = 'nflverse_schedule';
 export const SCHEDULE_LEASE_SECONDS = 120;
 
 /**
+ * What the state row says while a refresh is running -- and, if nothing ever
+ * overwrites it, what it says about a refresh that was cut off.
+ */
+export const STARTED_NOTE = 'started and did not finish: cut off before it could record an outcome';
+
+/**
  * Rows one day's schedule refreshes may write.
  *
  * A full season is 544. Three times that leaves room for a season boundary —
@@ -264,8 +270,36 @@ export class ScheduleService {
       return { outcome: 'skipped', season, games: 0, rowsWritten: 0, note: 'another ingest holds the lease' };
     }
 
+    let claimed = false;
     try {
       const known = await this.state.get(SCHEDULE_SOURCE, season);
+
+      /*
+       * Say that this started before doing the part that can be cut off.
+       *
+       * A download and parse of this file is the heaviest thing the five-minute
+       * tick does, and Cloudflare ends an invocation that runs over its CPU
+       * allowance with no exception, no `finally` and no line after it. Every
+       * record below this point is written *after* the work, so a run that was
+       * killed left `checked_at` where it was and the very next tick found the
+       * refresh just as overdue -- and was killed the same way. From 27
+       * September 2026 09:15 UTC that happened on 246 consecutive ticks, for
+       * twenty hours, until one squeezed through.
+       *
+       * So the attempt is written first, as a failure: `checked_at` moves, which
+       * puts the next try a whole interval away instead of five minutes, and the
+       * failure count goes up, which is what a run that never came back is.
+       * Every way this call does come back overwrites both. Two small writes,
+       * on the few ticks a day this runs at all.
+       */
+      await this.state.recordCheck(SCHEDULE_SOURCE, season, {
+        checkedAt: nowIso,
+        outcome: 'started',
+        note: STARTED_NOTE,
+      });
+      await this.state.recordIngestFailure(SCHEDULE_SOURCE, season, nowIso, STARTED_NOTE);
+      claimed = true;
+
       const response = await conditionalGet(SCHEDULE_URL, {
         fetch: this.deps.fetch,
         fingerprint: known ? { etag: known.etag, lastModified: known.lastModified } : null,
@@ -289,8 +323,10 @@ export class ScheduleService {
           outcome: response.outcome,
           note: response.note,
         });
-        if (response.outcome === 'failed') {
-          await this.state.recordIngestFailure(SCHEDULE_SOURCE, season, nowIso, response.note ?? 'fetch failed');
+        // A failure was already counted when the attempt was claimed above; a
+        // 304 or a 404 is the pipeline working, so it clears that count.
+        if (response.outcome !== 'failed') {
+          await this.state.recordIngestSuccess(SCHEDULE_SOURCE, season, null);
         }
         return { outcome: response.outcome, season, games: 0, rowsWritten: 0, note: response.note };
       }
@@ -314,6 +350,7 @@ export class ScheduleService {
           outcome: 'not_published',
           note: `no ${season} fixtures in the published schedule yet`,
         });
+        await this.state.recordIngestSuccess(SCHEDULE_SOURCE, season, null);
         return {
           outcome: 'not_published',
           season,
@@ -339,9 +376,11 @@ export class ScheduleService {
       return { outcome: 'ok', season, games: parsed.games, rowsWritten, note: null };
     } catch (err) {
       const note = err instanceof Error ? err.message : String(err);
-      await this.state
-        .recordIngestFailure(SCHEDULE_SOURCE, season, nowIso, note)
-        .catch(() => undefined);
+      // Counted once: by the claim when it was written, here when it was not.
+      await (claimed
+        ? this.state.recordCheck(SCHEDULE_SOURCE, season, { checkedAt: nowIso, outcome: 'ingest_failed', note })
+        : this.state.recordIngestFailure(SCHEDULE_SOURCE, season, nowIso, note)
+      ).catch(() => undefined);
       return { outcome: 'failed', season, games: 0, rowsWritten: 0, note };
     } finally {
       await this.state.releaseLock(SCHEDULE_SOURCE, season, owner).catch(() => undefined);

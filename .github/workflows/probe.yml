@@ -48,6 +48,11 @@ jobs:
           # place it cannot be driven: this workflow invokes `node
           # scripts/<name>.mjs` with no arguments.
           REJECTIONS: ${{ inputs.rejections }}
+          # The Cloudflare token, under a name no probe reads. It is handed on
+          # as CLOUDFLARE_API_TOKEN below only to the probes named there, which
+          # read Cloudflare's own logs and metrics, or run SELECTs, and nothing else.
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -uo pipefail
           case "$SCRIPT" in
@@ -61,4 +66,9 @@ jobs:
               try { console.log(JSON.parse(s).league?.draftId ?? ''); } catch { console.log(''); }
             })")
           export DRAFT_ID
+          case "$SCRIPT" in
+            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs)
+              export CLOUDFLARE_API_TOKEN="$CF_TOKEN" ACCOUNT_ID="$CF_ACCOUNT" ;;
+          esac
+          unset CF_TOKEN CF_ACCOUNT
           node "scripts/$SCRIPT"

@@ -60,7 +60,7 @@ describe('every scheduled workflow raises an alarm when it fails', () => {
     //
     // A new scheduled workflow that forgets the alert fails the assertions
     // below rather than going unnoticed for twelve days, which is the point.
-    expect(scheduled).toEqual(['daily-tick-watch.yml', 'refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke-daily.yml']);
+    expect(scheduled).toEqual(['cron-health-watch.yml', 'daily-tick-watch.yml', 'refresh-adp.yml', 'refresh-underdog-adp.yml', 'smoke-daily.yml']);
   });
 
   it.each(scheduled)('%s calls the alert', (name) => {

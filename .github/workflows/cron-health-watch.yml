@@ -1,0 +1,82 @@
+name: Worker cron watch
+
+# Did the Worker's own scheduled runs end the way they should?
+#
+# Every other alarm here reads something the app writes about itself, and a run
+# Cloudflare kills for CPU writes nothing after the point it died. From
+# 27 September 2026 09:15 UTC to 28 September 05:40 UTC the five-minute tick was
+# killed on 246 consecutive runs; its injury check had already recorded a 304
+# each time, so every freshness signal stayed green, Daily tick watch only reads
+# the 09:00 cron, and nobody was told.
+#
+# This asks Cloudflare's own record of each scheduled invocation how it ended,
+# once an hour, and hands one verdict per cron to the alert every scheduled
+# workflow uses. A failing cron becomes its own row on "Scheduled job failures"
+# with a comment -- the part that notifies -- and the row goes again on the
+# first healthy hour. See scripts/cron-health-watch.mjs for the rules.
+#
+# Read-only: a metrics API. No new secret, no cost (this repository is public,
+# so its Actions minutes are free).
+
+on:
+  schedule:
+    # Hourly at :20, so an outage like 27 September's is reported within about
+    # an hour of starting rather than found by accident two days later.
+    - cron: '20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      verdicts: ${{ steps.watch.outputs.verdicts }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No `npm ci`: the script depends on nothing, like the alert it feeds.
+      - name: Ask Cloudflare how each scheduled run ended
+        id: watch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/cron-health-watch.mjs | tee watch.txt
+          grep '^VERDICTS=' watch.txt | sed 's/^VERDICTS=/verdicts=/' >> "$GITHUB_OUTPUT"
+          { echo '### Worker crons'; echo ''; echo '```'; grep -v '^VERDICTS=' watch.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # The watch itself: red only when it could not read Cloudflare at all.
+  # `tests/scheduledJobAlert.test.ts` refuses a scheduled workflow without this.
+  alert:
+    needs: check
+    if: ${{ always() }}
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: Worker cron watch
+      result: ${{ needs.check.result }}
+
+  # One row per cron, each opened, updated and cleared on its own.
+  #
+  # One at a time: the alert is a read-modify-write on a single issue body, and
+  # four of them finishing inside the same second would lose rows.
+  crons:
+    needs: [check, alert]
+    if: ${{ always() && needs.check.outputs.verdicts != '' }}
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.verdicts) }}
+    uses: ./.github/workflows/alert-on-failure.yml
+    permissions:
+      contents: read
+      issues: write
+    with:
+      workflow: ${{ matrix.name }}
+      result: ${{ matrix.result }}
