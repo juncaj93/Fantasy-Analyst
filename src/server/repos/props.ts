@@ -15,10 +15,22 @@ import type { SlateWindow } from '../../core/nfl/slateWindow.ts';
 export class PropsRepo implements SnapshotStore {
   constructor(private readonly db: Database) {}
 
-  /** Latest snapshot for an event, regardless of provider. */
+  /**
+   * Latest snapshot for an event, regardless of provider.
+   *
+   * The provider payload is left in the database. Rows written before `put`
+   * stopped storing it carry about 1.3 MB of it beside some 9 KB of quotes, and
+   * this runs once per planned game on every refresh purely to learn how old
+   * the game's lines are; parsing that payload in the Worker is CPU the weekend
+   * cron could not afford. SQLite drops it instead, which costs the Worker
+   * nothing.
+   */
   async get(eventId: string): Promise<CachedSnapshot | null> {
     const row = await this.db
-      .prepare("SELECT * FROM prop_snapshots WHERE event_id = ? AND scope = 'week' ORDER BY fetched_at DESC LIMIT 1")
+      .prepare(
+        `SELECT provider, event_id, game_start, fetched_at, json_remove(raw_json, '$.raw') AS raw_json
+         FROM prop_snapshots WHERE event_id = ? AND scope = 'week' ORDER BY fetched_at DESC LIMIT 1`,
+      )
       .bind(eventId)
       .first<Record<string, unknown>>();
     if (!row) return null;
@@ -38,14 +50,27 @@ export class PropsRepo implements SnapshotStore {
     };
   }
 
+  /**
+   * Store a fetched set: its quotes and game lines, not the provider's payload.
+   *
+   * Measured on production on 29 September 2026: a stored game was 1.24-1.37 MB,
+   * of which 99% was the provider's own answer (1,500-1,650 odds with a
+   * per-book breakdown each) and about 9 KB the ~70 quotes anything here reads.
+   * Writing that out cost a full serialisation per game, and was a large part
+   * of why the Saturday and Sunday Vegas crons were killed for CPU on every
+   * weekend from 19 September. Nothing reads the payload back: the quotes and
+   * the game lines are taken out of it at fetch time, and the consensus rows
+   * are what every screen reads.
+   */
   async put(snapshot: CachedSnapshot): Promise<void> {
+    const { raw: _payload, ...kept } = snapshot.raw;
     await this.db
       .prepare(
         `INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope)
          VALUES (?,?,?,?,?,'week')
          ON CONFLICT(provider, event_id, fetched_at) DO NOTHING`,
       )
-      .bind(snapshot.provider, snapshot.eventId, snapshot.gameStart, snapshot.fetchedAt, toJson(snapshot.raw))
+      .bind(snapshot.provider, snapshot.eventId, snapshot.gameStart, snapshot.fetchedAt, toJson({ ...kept, raw: null }))
       .run();
   }
 

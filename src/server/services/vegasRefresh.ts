@@ -36,6 +36,7 @@ import { MatchupRepo } from '../repos/matchup.ts';
 import { TrendingRepo } from '../repos/trending.ts';
 import type { LeagueRecord, RosterRecord } from '../../core/sleeper/types.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
+import type { PlayerIndex } from '../../core/identity/index.ts';
 
 export interface VegasRefreshReport {
   provider: string;
@@ -613,8 +614,24 @@ export class VegasRefreshService {
   private async persist(set: RawPropSet): Promise<void> {
     const snapshotId = await this.props.snapshotId(set.provider, set.eventId, set.fetchedAt);
     if (snapshotId == null) return;
-    const index = await new PlayerRepo(this.db).buildIndex();
-    await this.props.saveConsensus(snapshotId, buildConsensus(set.quotes ?? [], index));
+    await this.props.saveConsensus(snapshotId, buildConsensus(set.quotes ?? [], await this.playerIndex()));
+  }
+
+  /**
+   * The player dictionary, read and indexed once per refresh.
+   *
+   * It was rebuilt for every game stored: all 3,309 players read and indexed
+   * again for each of the eight to ten games a weekend run stores, when none of
+   * them can change in between.
+   */
+  private indexOnce: Promise<PlayerIndex> | null = null;
+  private playerIndex(): Promise<PlayerIndex> {
+    // A read that failed is not kept, so the next game asks again as before.
+    this.indexOnce ??= new PlayerRepo(this.db).buildIndex().catch((err: unknown) => {
+      this.indexOnce = null;
+      throw err;
+    });
+    return this.indexOnce;
   }
 
   /**
