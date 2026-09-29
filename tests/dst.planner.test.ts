@@ -462,6 +462,9 @@ describe('a league that starts two defences is a different game', () => {
 
     expect(plan.decision).toBe('add');
     expect(plan.headline).toMatch(/1 DEF slot unfilled/);
+    // Printed on a button, so it recommends rather than reading as one.
+    expect(plan.headline).toMatch(/^Pick up NYJ/);
+    expect(plan.headline).not.toMatch(/\badd\b/i);
     expect(plan.notes.join(' ')).toMatch(/starts 2 defenses/);
   });
 

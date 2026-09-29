@@ -436,7 +436,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    *
    * The same rule the upgrades above are filtered by, applied to the two new
    * streams for the same reason: the planner decides `Stream PHI over BUF` or
-   * `Hold BUF`, and a generic `Value add · Tennessee DEF` beside it is a second
+   * `Hold BUF`, and a generic `Bench value · Tennessee DEF` beside it is a second
    * answer to a question that already has one. Where the plan could not be
    * computed at all, `dst` is null and the generic rows are allowed through,
    * exactly as a generic DEF upgrade is.

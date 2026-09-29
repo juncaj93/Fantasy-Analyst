@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SOLID_MULTIPLE,
+  STRENGTH_LABEL,
   STRONG_MULTIPLE,
   buildWaiverBoard,
   offeredPositions,
@@ -357,7 +358,25 @@ describe('the three tiers', () => {
     const row = board.rows[0]!;
     expect(row.fit.label).toBe('Better than Last Man');
     expect(row.shortTerm.over).toBe('Last Man');
-    expect(row.strength.label).toBe('Value add');
+    expect(row.strength.label).toBe('Bench value');
+  });
+
+  /*
+   * Every badge, held to the rule the production sweep holds the screen to.
+   *
+   * The badge is drawn inside a tappable row, so the sweep reads it as part of
+   * a control and fails on any whole word a transaction button would use.
+   * `Value add` shipped past every unit test and failed production every
+   * morning from 25 September 2026; this is the same check, run where it costs
+   * nothing and fails before a deploy rather than after one.
+   */
+  it('prints no badge a reader could take for a transaction button', () => {
+    const forbidden = ['add', 'drop', 'claim', 'bid', 'submit'];
+    for (const label of Object.values(STRENGTH_LABEL)) {
+      for (const word of forbidden) {
+        expect(label.toLowerCase(), `"${label}" reads as "${word}"`).not.toMatch(new RegExp(`\\b${word}\\b`));
+      }
+    }
   });
 
   /*

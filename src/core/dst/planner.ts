@@ -915,7 +915,8 @@ function multiDefence(args: {
     decision: 'add',
     activation: 'active',
     surface: true,
-    headline: `Add ${best.team} — ${slots - startable} DEF slot${slots - startable === 1 ? '' : 's'} unfilled`,
+    // `Pick up`, not `Add`: this is printed on a button — see `SHORT` in `web/components/dst.tsx`.
+    headline: `Pick up ${best.team} — ${slots - startable} DEF slot${slots - startable === 1 ? '' : 's'} unfilled`,
     why: [`This league starts ${slots} defenses and ${startable} of those slots can be filled from the roster.`],
     evidence: evidenceFor({ target: best, current: null, cost, gain: round2(best.thisWeek ?? 0), bar: 0 }),
     target: best,
