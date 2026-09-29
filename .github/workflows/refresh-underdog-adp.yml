@@ -50,7 +50,15 @@ on:
     # An hour after the Sleeper refresh, daily through the draft season. Both
     # markets move on news, and a blend built on last week's Underdog is a blend
     # that has quietly become Sleeper-only in everything but its label.
-    - cron: '0 12 * * *'
+    #
+    # July and August only. DOG prices the draft board and nothing else, and
+    # Alex has said it is not needed again until next year's draft prep. From
+    # 15 September to 29 September 2026 it ran every day against sources with no
+    # current board, went red on all fifteen runs, and sat on "Scheduled job
+    # failures" for two weeks as a row nobody needed to act on -- on the same
+    # issue the Worker cron watch now uses to reach him. It comes back on its own
+    # on 1 July; run it by hand before then if a draft is scheduled earlier.
+    - cron: '0 12 * 7,8 *'
 
 jobs:
   refresh:
@@ -93,8 +101,12 @@ jobs:
           # exactly when a genuinely broken feed would go unnoticed.
           exit 0
 
+      # Only after a fetch that produced a file. The step above ends itself and
+      # not the job, so without this the import ran anyway and failed reading
+      # /tmp/dog.meta.json: every "nothing current to import" morning from
+      # 15 September went red, which is the opposite of what that step is for.
       - name: Import it
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.fetch.outcome == 'success' }}
         env:
           PASSPHRASE: ${{ secrets.APP_PASSPHRASE }}
         run: |

@@ -165,8 +165,9 @@ Both are published pages and the script knows where they are:
 | primary | `https://www.bestballteambuilder.com/underdog-best-ball-average-draft-position` |
 | fallback | `https://www.4for4.com/underdog/adp` |
 
-Run **Actions → Refresh Underdog ADP**. It also runs daily at 12:00 UTC, an
-hour after the Sleeper refresh. Tick **dry run** on a manual run to see what
+Run **Actions → Refresh Underdog ADP**. It also runs daily at 12:00 UTC in
+July and August, an hour after the Sleeper refresh; outside draft prep it runs
+only by hand. Tick **dry run** on a manual run to see what
 each source returns without importing anything.
 
 ### Reading a board off a page
