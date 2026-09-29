@@ -355,7 +355,7 @@ export const SOLID_MULTIPLE = 1.35;
  *
  * Nothing about the threshold behind them changed — see `strengthOf`.
  */
-const STRENGTH_LABEL: Record<WaiverStrength, string> = {
+export const STRENGTH_LABEL: Record<WaiverStrength, string> = {
   strong: 'Highly rated',
   solid: 'Recommended',
   speculative: 'Worth a look',
@@ -363,8 +363,15 @@ const STRENGTH_LABEL: Record<WaiverStrength, string> = {
    * Not `Recommended`, which is the word above it and a stronger claim than
    * this row makes. A value add is the best thing available rather than an
    * answer to a hole, and the badge should not let the two read alike.
+   *
+   * And not `Value add`, which is what it said from 24 to 29 September 2026
+   * and is the `Strong add` mistake above in a different order: the badge sits
+   * inside a tappable row, so it read as a button offering to add him, and the
+   * production sweep's transaction check failed on it every morning. `Bench
+   * value` says what kind of recommendation this is (better than the weakest
+   * man on the bench, not an answer to a starting hole) and offers nothing.
    */
-  value: 'Value add',
+  value: 'Bench value',
   /*
    * Said as the app's own limitation, never as a judgement on the player.
    * `Unrated` would read as a verdict; this reads as an absence, which is what

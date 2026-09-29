@@ -38,8 +38,14 @@ const TONE: Record<DstPlan['decision'], string> = {
   unknown: 'tag-calm',
 };
 
+/*
+ * `add` reads `Pick up`, not `Add`. The line is a button inside the waiver
+ * card, and a button reading `Add` looks like it adds him — the rule
+ * `STRENGTH_LABEL` in `core/waivers/board.ts` is held to, and the one the
+ * production sweep checks every control on that card against.
+ */
 const SHORT: Record<DstPlan['decision'], string> = {
-  add: 'Add',
+  add: 'Pick up',
   stream: 'Stream',
   stream_and_stash: 'Stream + stash',
   stash: 'Stash',

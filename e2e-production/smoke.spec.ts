@@ -1595,7 +1595,15 @@ test.describe('the season features', () => {
     await page.goto('/');
     await open(page, 'team');
     const header = page.getByTestId('league-card').first();
-    await expect(header).toBeVisible();
+    /*
+     * 20 seconds, the loading allowance `open` already gives the screen.
+     *
+     * The header draws only once the roster answers, and on 28 September 2026
+     * the live API took over 10 seconds on the first attempt and 3.6 on the
+     * retry. Waiting for the element longer is not waiting blind: it still
+     * fails the moment nothing draws within the allowance.
+     */
+    await expect(header).toBeVisible({ timeout: 20_000 });
 
     // The metadata that left the header. Checked as words rather than as a
     // layout, so it stays true whatever the design does next.
@@ -2041,16 +2049,22 @@ test.describe('the decision intelligence', () => {
   });
 
   /**
-   * …once there is a week to optimise for.
+   * …and the app answers the posture question itself.
    *
-   * Balanced, Floor and Ceiling are three definitions of the best *lineup*, and
-   * the Team pass withholds them during a draft: there is no week yet and half
-   * the roster is unpicked. This deployment may legitimately be mid-draft on any
-   * given day, so the absence of the control is checked against the roster's own
-   * `live` flag rather than assumed either way — a missing control during a
-   * draft is the intended design, and a missing control outside one is a defect.
+   * Balanced, Floor and Ceiling used to be three chips on Team (`mode-row`),
+   * sent to the server as `?mode=`. #264 (10 September 2026) removed both on
+   * purpose: which posture a week calls for follows from the margin against
+   * the opponent, which the app can read, so the server resolves it and
+   * reports which one it chose. See `core/startsit/modeSuggest.ts`, and
+   * `e2e/team-startsit.spec.ts`, which asserts the chips stay gone.
+   *
+   * This test still asked for the chips, and failed every sweep that ran from
+   * then on. It went unnoticed until 23 September because the budget guard had
+   * declined every scheduled sweep since 3 September. It now checks the design
+   * as shipped: no chip row on a regular-season Team screen, and a lineup whose
+   * posture is one of the three, chosen by the server rather than by the query.
    */
-  test('Start/Sit offers three modes, and asking for one reaches the server', async ({ page }) => {
+  test('Start/Sit chooses its own mode, and asks the reader nothing', async ({ page }) => {
     await page.goto('/');
     await open(page, 'team');
 
@@ -2064,24 +2078,17 @@ test.describe('the decision intelligence', () => {
       return;
     }
 
-    const modes = page.getByTestId('mode-row');
-    await expect(modes).toBeVisible();
-    for (const mode of ['balanced', 'floor', 'ceiling']) {
-      await expect(page.getByTestId(`mode-${mode}`)).toBeVisible();
+    // The absence is the assertion: a chip row that came back would be the app
+    // asking a question it has already answered.
+    for (const id of ['mode-row', 'mode-balanced', 'mode-floor', 'mode-ceiling']) {
+      await expect(page.getByTestId(id)).toHaveCount(0);
     }
-    await expect(page.getByTestId('mode-balanced')).toHaveAttribute('aria-pressed', 'true');
 
-    // The mode is a question asked of the server, not a client-side sort.
+    // The posture is the server's answer, and a query string cannot override it.
     const id = await selectedLeagueId(page);
-    const answered = id
-      ? {
-          floor: (await apiJson<{ mode?: string }>(page, `/api/leagues/${id}/lineup?mode=floor`))?.mode,
-          ceiling: (await apiJson<{ mode?: string }>(page, `/api/leagues/${id}/lineup?mode=ceiling`))?.mode,
-        }
-      : null;
-    test.skip(!answered, 'no league selected on this deployment');
-    expect(answered!.floor).toBe('floor');
-    expect(answered!.ceiling).toBe('ceiling');
+    const answered = id ? await apiJson<{ mode?: string }>(page, `/api/leagues/${id}/lineup?mode=ceiling`) : null;
+    test.skip(!answered, 'no lineup on this deployment');
+    expect(['balanced', 'floor', 'ceiling']).toContain(answered!.mode);
   });
 
   /**
