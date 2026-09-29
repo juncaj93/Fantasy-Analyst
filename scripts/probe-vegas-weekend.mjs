@@ -100,7 +100,15 @@ const QUERIES = [
   ['stored games (vegas_events), upcoming', `SELECT event_id, kickoff, home_team, away_team, seen_at FROM vegas_events WHERE kickoff >= '2026-09-24' ORDER BY kickoff`],
   ['size of what persist() indexes', `SELECT COUNT(*) AS players FROM players`],
   ['size of the snapshots persist() writes', `SELECT event_id, fetched_at, length(raw_json) AS bytes FROM prop_snapshots ORDER BY id DESC LIMIT 12`],
+  // What those bytes are: the quotes this app reads, or the provider payload kept beside them.
+  ['what a snapshot holds', `SELECT event_id, length(raw_json) AS total, length(json_extract(raw_json, '$.raw')) AS provider_payload, length(json_extract(raw_json, '$.quotes')) AS quotes_bytes, json_array_length(json_extract(raw_json, '$.quotes')) AS quotes, (SELECT COUNT(*) FROM json_each(json_extract(raw_json, '$.raw.odds'))) AS provider_odds FROM prop_snapshots WHERE scope = 'week' ORDER BY id DESC LIMIT 3`],
+  ['weekly snapshots stored, and their bytes', `SELECT scope, COUNT(*) AS n, SUM(length(raw_json)) AS bytes FROM prop_snapshots GROUP BY scope`],
 ];
+
+// How large the database is against the plan's ceiling for one database.
+const info = await call(`/accounts/${ACCOUNT}/d1/database/${DB}`);
+console.log('');
+console.log(`=== database size: ${info.json?.result?.file_size ?? '?'} bytes, ${info.json?.result?.num_tables ?? '?'} tables ===`);
 
 for (const [title, sql] of QUERIES) {
   // This probe may only ever read.
