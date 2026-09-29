@@ -203,6 +203,29 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Time rather than rows: which queries own the database's time, and which
+      # hours were slow. The row lens above cannot see a cheap query that waited
+      # behind a long one. See scripts/probe-d1-latency.mjs.
+      - name: How long the queries took
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HOURS: '72'
+        run: |
+          set -euo pipefail
+          id="${CLOUDFLARE_ACCOUNT_ID:-}"
+          if [ -z "$id" ]; then
+            id=$(npx wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || true)
+          fi
+          ACCOUNT_ID="$id" node scripts/probe-d1-latency.mjs | tee latency.txt
+          {
+            echo '### D1 and Worker time'
+            echo ''
+            echo '```'
+            cat latency.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: d1-insights
