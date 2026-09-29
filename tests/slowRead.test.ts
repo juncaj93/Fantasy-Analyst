@@ -107,15 +107,19 @@ describe('the counts behind the diagnostics', () => {
     expect(times(asked, 'draft_rank IS NOT NULL')).toBe(1);
   });
 
-  it('collapses concurrent askers onto one query', async () => {
+  it('shares the answer once it has landed, never the read in flight', async () => {
     const { db, asked } = counting(await createTestDb());
     const repo = new PlayerRepo(db);
     await repo.upsertMany(TEST_PLAYERS);
     asked.length = 0;
 
-    // `/api/setup/status` asks for these inside one `Promise.all`.
-    await Promise.all([repo.count(), repo.count(), repo.count(), repo.count()]);
-    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(1);
+    // Two misses at the same instant each read: a pending read belongs to the
+    // request that started it. See the note on SlowRead.
+    await Promise.all([repo.count(), repo.count()]);
+    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(2);
+    // After that, everyone is served the settled answer.
+    await Promise.all([repo.count(), repo.count(), repo.count()]);
+    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(2);
   });
 
   /*
@@ -314,6 +318,38 @@ describe('SlowRead', () => {
     expect(await memo.get(one, 'k', async () => 'one')).toBe('one');
     expect(await memo.get(two, 'k', async () => 'two')).toBe('two');
     expect(await memo.get(one, 'k', async () => 'changed')).toBe('one');
+  });
+
+  /*
+   * The September 2026 hang, as a contract.
+   *
+   * On Workers a promise is settled by the request that started its I/O, and
+   * when that request is cancelled every other request awaiting the promise is
+   * cancelled with it. Modelled here as a read that never settles: a second
+   * caller must not be handed it, and must get its own answer.
+   */
+  it('never hands one caller a read another caller started', async () => {
+    const memo = new SlowRead<string>();
+    const db = {} as Database;
+    const abandoned = memo.get(db, 'k', () => new Promise<string>(() => {}));
+    void abandoned;
+    const second = memo.get(db, 'k', async () => 'own read');
+    await expect(Promise.race([second, new Promise((r) => setTimeout(() => r('hung'), 50))])).resolves.toBe(
+      'own read',
+    );
+    // And the answer that did land is the one shared from here on.
+    expect(await memo.get(db, 'k', async () => 'not asked')).toBe('own read');
+  });
+
+  it('does not let a read that began before a forget land after it', async () => {
+    const memo = new SlowRead<string>();
+    const db = {} as Database;
+    let release!: (v: string) => void;
+    const early = memo.get(db, 'k', () => new Promise<string>((r) => (release = r)));
+    memo.forget(db);
+    release('stale');
+    await early;
+    expect(await memo.get(db, 'k', async () => 'fresh')).toBe('fresh');
   });
 
   it('forgets on request', async () => {

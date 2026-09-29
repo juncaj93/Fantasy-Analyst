@@ -5,7 +5,7 @@
  * passphrase, and that prompt lives inside Setup.
  */
 
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { api, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { ScreenLoadBoundary } from './components/screenLoad.tsx';
@@ -29,6 +29,8 @@ import { SetupScreen } from './screens/SetupScreen.tsx';
 import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
+import { type TabSource as SeasonTabSource, fromOverview, recallSeasonTabs, rememberSeasonTabs, resolveSeasonTabs } from './seasonTabs.ts';
+import { currentWorld } from './world.ts';
 
 /*
  * The Draft screen is fetched only when it is actually drawn.
@@ -172,19 +174,28 @@ export function App() {
    */
   const world = useDemoWorld();
 
+  /*
+   * The overview and the league list, each applied the moment it lands.
+   *
+   * They used to wait for each other in one `Promise.all`, so the bar's season
+   * answer sat unused for as long as the slower of the two took. Asked together
+   * still, applied separately; an error from either is the same banner.
+   */
   const refresh = useCallback(async () => {
-    try {
-      const [ov, lg] = await Promise.all([
-        api.get<Overview>('/api/overview'),
-        api.get<{ leagues: LeagueSummary[] }>('/api/leagues'),
-      ]);
+    const world = currentWorld();
+    const overviewRead = api.get<Overview>('/api/overview').then((ov) => {
       setOverview(ov);
-      setLeagues(lg.leagues);
-      setError(null);
+      // Only a real answer, and only for the world it was asked in.
+      if (currentWorld() === world) rememberSeasonTabs(world, fromOverview(ov));
       setLanded((already) => {
         if (!already && !ov.selectedLeague) setTab('setup');
         return true;
       });
+    });
+    const leaguesRead = api.get<{ leagues: LeagueSummary[] }>('/api/leagues').then((lg) => setLeagues(lg.leagues));
+    try {
+      await Promise.all([overviewRead, leaguesRead]);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -219,18 +230,15 @@ export function App() {
   /*
    * Which destinations the bar carries right now.
    *
-   * Unknown keeps Draft: the overview says nothing about the season on an older
-   * deployment, and losing the board because a field was absent would be the
-   * worst possible failure mode for a seasonal tab.
+   * A slow overview is not a missing season. While the answer is in flight the
+   * bar keeps the last one the server gave on this device, and with none it
+   * leaves the seasonal slots out rather than drawing a pre-season bar; see
+   * `seasonTabs.ts`. An answer that says nothing about the season still keeps
+   * Draft, and a field absent on an older deployment still reads as it did.
    */
-  const draftVisible = overview?.season?.draftVisible ?? true;
-  /*
-   * Whether the draft has finished, which is when a head-to-head starts to mean
-   * anything. Absent on a deployment older than Matchup, and absent is read as
-   * "no" — a tab leading to an endpoint that does not exist is worse than a tab
-   * that arrives a deploy later.
-   */
-  const matchupVisible = overview?.lifecycle?.matchupVisible ?? false;
+  const remembered = useMemo(() => recallSeasonTabs(world), [world]);
+  const seasonTabs = resolveSeasonTabs({ overview, failed: error != null, remembered });
+  const { draftVisible, matchupVisible } = seasonTabs;
   /*
    * The seasonal slots, decided in one place.
    *
@@ -240,8 +248,15 @@ export function App() {
    * slot exactly as they always did; Matchup adds one, and only from the moment
    * a draft is complete.
    */
+  const seasonPending = seasonTabs.source === 'pending';
   const tabs = TABS.filter((t) =>
-    t.id === 'draft' ? draftVisible : t.id === 'waivers' ? !draftVisible : t.id === 'matchup' ? matchupVisible : true,
+    t.id === 'draft'
+      ? draftVisible
+      : t.id === 'waivers'
+        ? !draftVisible && !seasonPending
+        : t.id === 'matchup'
+          ? matchupVisible
+          : true,
   );
 
   /*
@@ -253,9 +268,10 @@ export function App() {
    * somebody who went there deliberately.
    */
   useEffect(() => {
-    if (draftVisible || chosen.current) return;
+    // Waiting is not an answer: nothing is known about the season yet.
+    if (seasonPending || draftVisible || chosen.current) return;
     setTab((current) => (current === 'draft' ? 'team' : current));
-  }, [draftVisible]);
+  }, [draftVisible, seasonPending]);
 
   /*
    * Whether the Draft screen is drawn at all, which is also whether its code and
@@ -428,6 +444,7 @@ export function App() {
         reviewPending={reviewPending}
         newslettersPending={newslettersPending}
         viewOnly={viewOnly}
+        seasonSource={seasonTabs.source}
       />
     </div>
   );
@@ -457,6 +474,7 @@ function FloatingToolbar({
   reviewPending,
   newslettersPending,
   viewOnly,
+  seasonSource,
 }: {
   tabs: typeof TABS;
   active: Tab;
@@ -466,6 +484,8 @@ function FloatingToolbar({
   /** Newsletters received and not yet scored, which also live inside Setup. */
   newslettersPending: number;
   viewOnly: boolean;
+  /** Where the seasonal slots came from; `pending` while nothing is known. */
+  seasonSource: SeasonTabSource;
 }) {
   const measure = useToolbarHeight();
   const keyboardOpen = useKeyboardOpen();
@@ -486,6 +506,13 @@ function FloatingToolbar({
        * is rediscovering it from the DOM every time the seasonal slot moves.
        */
       data-count={tabs.length}
+      /*
+       * Whether the seasonal slots are the server's answer, the last one this
+       * device saw, or not known yet. Busy only in the last case, so a screen
+       * reader hears that the bar is still settling rather than a short bar.
+       */
+      data-season={seasonSource}
+      aria-busy={seasonSource === 'pending' ? true : undefined}
       /*
        * Out of the way while the keyboard is up — see the stylesheet. The
        * attribute rather than a class so the state is legible in the inspector
