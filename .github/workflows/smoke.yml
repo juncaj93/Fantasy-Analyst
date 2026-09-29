@@ -31,7 +31,7 @@ on:
       ceiling_percent:
         description: 'Decline a full run when today has already read this much of the D1 allowance'
         required: false
-        default: '50'
+        default: '30'
         type: string
       url:
         description: 'Site to check'
@@ -81,7 +81,7 @@ on:
       ceiling_percent:
         description: 'Decline when today has already read this much of the D1 allowance. 100 to override.'
         required: false
-        default: '50'
+        default: '30'
         type: string
       url:
         description: 'Site to check (defaults to the live one)'
@@ -143,7 +143,18 @@ jobs:
       - id: guard
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CEILING_PERCENT: ${{ inputs.ceiling_percent || '50' }}
+          # 30, not 50, because of what one full pass was measured to cost.
+          #
+          # The ceiling is only safe if ceiling + one sweep stays well under the
+          # allowance, and 50 was set before anyone had measured a sweep. They
+          # have now: 0.64M rows on 28 Sep, 1.92M on 25 Sep and 2.0M on Sunday
+          # 27 Sep, when retries on failing specs made it re-crawl -- up to 40%
+          # of the day in one run. On 25 Sep this guard read 41.5%, proceeded,
+          # and the sweep took the day to 82% and Cloudflare's alert email. At
+          # 30 the worst sweep seen still ends near 70%, and a normal day is
+          # nowhere near the line: the sweep starts at 1-2% on a day without
+          # deploys. See docs/DATA_HEALTH.md.
+          CEILING_PERCENT: ${{ inputs.ceiling_percent || '30' }}
         run: |
           set -euo pipefail
           # The account tag from the secret when it is set, and from the token

@@ -414,8 +414,16 @@ count — eight specs at one width is not this check.
 
 **Every full pass asks first.** `scripts/d1-budget-guard.mjs` reads today's
 usage before the suite starts and declines when the day is already past a
-ceiling (50% by default, raisable per run). Being over the ceiling is an
-ordinary green outcome reported in the summary. *Not being able to tell* is a
+ceiling (30% by default, raisable per run). Being over the ceiling is an
+ordinary green outcome reported in the summary.
+
+The number comes from what a sweep costs, not from a round figure. Measured
+with `D1 read insights`: 0.64M rows on 28 September, 1.92M on 25 September and
+2.0M on Sunday 27 September, when failing specs retried and re-crawled. That is
+up to 40% of a day in one run, so a 50% ceiling allowed a sweep to take a day
+to 90%. It very nearly did: on 25 September the guard read 41.5%, proceeded,
+and the sweep took the day to 82%, which is what sent Cloudflare's quota
+alert. At 30% the worst sweep seen ends near 70%. *Not being able to tell* is a
 loud failure, because a full sweep is never urgent and a guard that quietly
 disabled the sweep for a month would be worse than no guard.
 
