@@ -188,27 +188,41 @@ describe('a sell-high read, and the touchdowns it turns on', () => {
     expect(regressionRisk('WR', assessTdDependency('WR', hotOnVolume))).toBe(0);
   });
 
-  it('never treats a quarterback’s scoring as a sell signal', () => {
-    // TD rate is his offence rather than his luck. The read survives on the
-    // size of the overperformance alone.
-    expect(regressionRisk('QB', assessTdDependency('WR', hotOnScores))).toBe(1);
+  /*
+   * Quarterbacks follow the same rule as everyone else since 29 September 2026.
+   * They used to read a risk of 1 whatever the line was made of, beside a
+   * reason calling the same production "a real gain".
+   */
+  const passerWeek = (n: number, over: Partial<UsageWeek>): UsageWeek => ({
+    ...week(n),
+    targets: null,
+    receptions: null,
+    recYards: null,
+    recTds: null,
+    ...over,
+  });
 
-    const passer = read({
-      position: 'QB',
-      preseasonPoints: 16 * 18,
-      weeks: [1, 2, 3, 4, 5].map((n) => ({
-        ...week(n),
-        targets: null,
-        receptions: null,
-        recYards: null,
-        recTds: null,
-        passAttempts: 38,
-        passYards: 330,
-        passTds: 3,
-      })),
-    })!;
-    expect(passer.kind).toBe('sell_high');
-    expect(passer.reasons.join(' ')).toMatch(/offence rather than his luck/i);
+  it('does not sell a quarterback whose line is a full workload scoring every week', () => {
+    const workhorse = [1, 2, 3, 4, 5].map((n) => passerWeek(n, { passAttempts: 38, passYards: 330, passTds: 3 }));
+    expect(regressionRisk('QB', assessTdDependency('QB', workhorse))).toBeLessThan(1);
+    expect(read({ position: 'QB', preseasonPoints: 16 * 18, weeks: workhorse })).toBeNull();
+  });
+
+  it('does not sell a quarterback whose overperformance is made of yardage', () => {
+    const volume = [1, 2, 3, 4, 5].map((n) => passerWeek(n, { passAttempts: 40, passYards: 420, passTds: 0 }));
+    expect(regressionRisk('QB', assessTdDependency('QB', volume))).toBe(0);
+    expect(read({ position: 'QB', preseasonPoints: 16 * 12, weeks: volume })).toBeNull();
+  });
+
+  it('sells a quarterback on a thin workload whose line is touchdowns', () => {
+    // Few attempts, scores in two games of five: the part that regresses.
+    const lucky = [1, 2, 3, 4, 5].map((n) =>
+      passerWeek(n, { passAttempts: 22, passYards: 150, passTds: n === 2 || n === 4 ? 6 : 0 }),
+    );
+    const sell = read({ position: 'QB', preseasonPoints: 16 * 10, weeks: lucky })!;
+    expect(sell.kind).toBe('sell_high');
+    expect(sell.reasons.join(' ')).toMatch(/touchdown rate does not carry forward/);
+    expect(sell.reasons.join(' ')).not.toMatch(/real gain/);
   });
 
   it('scales with how much of the line is end zone, rather than switching at a line', () => {
@@ -217,6 +231,56 @@ describe('a sell-high read, and the touchdowns it turns on', () => {
     expect(risk(0.35)).toBeGreaterThan(0);
     expect(risk(0.35)).toBeLessThan(1);
     expect(risk(0.6)).toBe(1);
+  });
+});
+
+/*
+ * Alex, 29 September 2026, on Kenneth Walker: outperforming expectations is not
+ * automatically "sell before it disappears" when usage supports the production.
+ * The touchdown gate above already asked *why* once four games exist. These
+ * cover the two places it did not.
+ */
+describe('a sell-high has to say why, and a real workload weakens it', () => {
+  it('waits for the touchdown read instead of selling on three games with no reason', () => {
+    // Three games, far over expectation, and the touchdown model needs four.
+    // This used to survive at 0.4 as "running over expectation. Sell into it."
+    const threeHot = [1, 2, 3].map((n) => week(n, { targets: 4, recYards: 35, recTds: 3 }));
+    expect(assessTdDependency('WR', threeHot).share).toBeNull();
+    expect(regressionRisk('WR', assessTdDependency('WR', threeHot))).toBe(0);
+    expect(read({ weeks: threeHot })).toBeNull();
+  });
+
+  /** A back with a starter's workload who scores in every game. */
+  const workhorse = [1, 2, 3, 4, 5].map((n) => ({
+    ...week(n),
+    targets: 3,
+    receptions: 2,
+    recYards: 15,
+    carries: 18,
+    rushYards: 70,
+    rushTds: n % 2 === 0 ? 2 : 1,
+  }));
+
+  it('does not call a goal-line workhorse a full-strength sell', () => {
+    const td = assessTdDependency('RB', workhorse);
+    expect(td.profile).toBe('td_driven_with_role');
+    // Half for the scoring role, and the read then falls under its floor once
+    // the workload halves it again.
+    expect(regressionRisk('RB', td)).toBe(0.5);
+    expect(read({ position: 'RB', weeks: workhorse })).toBeNull();
+  });
+
+  it('keeps a lucky scorer with volume as a sell, weakened and saying why', () => {
+    // Real targets, but the scores came in two games of five: that is not a
+    // scoring role, and the part of the line made of them still regresses.
+    const lucky = [1, 2, 3, 4, 5].map((n) =>
+      week(n, { targets: 10, recYards: 40, recTds: n === 2 || n === 4 ? 5 : 0 }),
+    );
+    const sell = read({ weeks: lucky })!;
+    expect(sell.kind).toBe('sell_high');
+    expect(sell.tdDependency.profile).toBe('td_dependent_weak_opportunity');
+    expect(sell.strength).toBeLessThanOrEqual(ARBITRAGE.roleDiscount);
+    expect(sell.reasons.join(' ')).toMatch(/workload backs part of it/);
   });
 });
 

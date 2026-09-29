@@ -36,13 +36,17 @@
  * ## Why touchdowns are the sell signal and not the buy signal
  *
  * Also Alex's, and it is a real property rather than a heuristic: touchdown
- * rate is **non-sticky** for every position except quarterback. A receiver
- * scoring on 12% of his catches is not a receiver who will keep scoring on 12%
- * of his catches; a quarterback throwing for three a game is describing his
- * offence. So a non-quarterback whose overperformance is *made of touchdowns*
- * is the sell, and the same overperformance made of yardage and volume is not —
- * that is a player whose role grew, and selling him is the mistake this module
- * would otherwise cause.
+ * rate is **non-sticky**. A receiver scoring on 12% of his catches is not a
+ * receiver who will keep scoring on 12% of his catches. So a player whose
+ * overperformance is *made of touchdowns* is the sell, and the same
+ * overperformance made of yardage and volume is not — that is a player whose
+ * role grew, and selling him is the mistake this module would otherwise cause.
+ *
+ * Quarterbacks included, since 29 September 2026. They used to be a full-
+ * strength sell whatever the line was made of, beside a reason printed on the
+ * card that called the same production a real gain. A passer's touchdowns are
+ * already weighted at four points to six in the dependency read, and a passer
+ * throwing 38 times a week has a workload like anyone else.
  *
  * The dependency read is `core/startsit/tdDependency.ts`, unchanged and
  * unreweighted. It already reconstructs production from stored volume and
@@ -70,7 +74,7 @@
  */
 
 import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
-import { RECENCY_WEIGHTS } from '../startsit/usageTrend.ts';
+import { RECENCY_WEIGHTS, assessUsage } from '../startsit/usageTrend.ts';
 import { TD_DEPENDENCY, assessTdDependency, type TdDependencyAssessment } from '../startsit/tdDependency.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
 import type { UsageWeek } from '../usage/role.ts';
@@ -133,6 +137,25 @@ export const ARBITRAGE = {
    * "manufacture filler" failure the trade board is written against.
    */
   minStrength: 0.34,
+  /**
+   * Usage score (−1 to 1, `assessUsage`) at which a workload backs the production.
+   *
+   * Half way from a streamer's volume to a full every-down role. Past it the
+   * player is getting the touches or targets a starter gets, and production
+   * built on that is a role rather than a streak.
+   */
+  roleSupported: 0.5,
+  /**
+   * What a real workload, or a real scoring role, does to a sell-high read.
+   *
+   * Halved for each, not zeroed: touchdown rate still regresses for a back
+   * with a goal-line job, so the read survives when the touchdown share is
+   * large. What it stops doing is calling a player whose usage explains his
+   * line a sell at full strength. Alex, 29 September 2026, on Kenneth Walker:
+   * outperforming expectations is not automatically "sell before it
+   * disappears" when the usage supports it.
+   */
+  roleDiscount: 0.5,
 } as const;
 
 export type ArbitrageKind = 'buy_low' | 'sell_high';
@@ -202,18 +225,19 @@ export function readArbitrage(input: ArbitrageInput): ArbitrageRead | null {
   /*
    * The touchdown gate, and it applies to exactly one direction.
    *
-   * A quarterback overperforming is not a sell — his touchdown rate is a fact
-   * about his offence and it holds. A non-quarterback overperforming *on
-   * touchdowns* is the sell this module exists for, and a non-quarterback
+   * Overperforming *on touchdowns* is the sell this module exists for, and
    * overperforming on yardage and volume is a player whose role grew, which is
-   * the opposite of a sell. `stickiness` is that distinction as a multiplier,
+   * the opposite of a sell. Every position, quarterback included. `stickiness` is that distinction as a multiplier,
    * and at 0 there is no sell-high read at all.
    *
    * Buy-low never reads it. A player underperforming his expectation is cheap
    * however the shortfall is composed, and asking "but was it touchdowns" of a
    * player who has not scored any would be asking nothing.
    */
-  const stickiness = kind === 'sell_high' ? regressionRisk(position, td) : 1;
+  const usage = assessUsage(position, input.weeks);
+  const roleBacked = kind === 'sell_high' && !usage.unknown && usage.score >= ARBITRAGE.roleSupported;
+  const stickiness =
+    kind === 'sell_high' ? regressionRisk(position, td) * (roleBacked ? ARBITRAGE.roleDiscount : 1) : 1;
   const strength = round2(clamp01(base * stickiness * tally.factor));
   if (strength < ARBITRAGE.minStrength) return null;
 
@@ -228,35 +252,48 @@ export function readArbitrage(input: ArbitrageInput): ArbitrageRead | null {
     tdDependency: td,
     tallyFactor: tally.factor,
     headline: headlineFor({ kind, name: input.name, residualPerGame, expectedPerGame, td, position }),
-    reasons: reasonsFor({ kind, residualPerGame, expectedPerGame, games: games.length, td, tally, position }),
+    reasons: reasonsFor({
+      kind,
+      residualPerGame,
+      expectedPerGame,
+      games: games.length,
+      td,
+      tally,
+      position,
+      role: roleBacked ? usage.display : null,
+    }),
   };
 }
 
 /**
  * How much a touchdown-driven overperformance is expected to give back.
  *
- * 1 for a quarterback, always — his scoring is his job and it repeats. For
- * everybody else it rises with the share of production that came from the end
- * zone, because that share is the part of his line that does not carry
- * forward. Below {@link TD_DEPENDENCY.independent} it is zero: a receiver
+ * It rises with the share of production that came from the end zone, because
+ * that share is the part of a line that does not carry forward. The same rule
+ * for every position: a quarterback used to read 1 here whatever his line was
+ * made of. Below {@link TD_DEPENDENCY.independent} it is zero: a receiver
  * running hot on yardage and volume is not a sell, he is a player whose role
  * grew, and this module has no business suggesting he be moved.
  *
- * `td_driven_with_role` is deliberately *not* exempted the way the start/sit
- * component exempts it. There the question is "should he be in my lineup this
- * week", and the answer for a goal-line back who scores every week is yes.
- * Here the question is "will the next manager pay what this line is worth", and
- * the answer for the same back is that he is being priced on a scoring rate
- * that regresses regardless of how repeatable his *role* is — which is the
- * whole of the non-stickiness argument.
+ * `td_driven_with_role` is not exempted the way the start/sit component
+ * exempts it, and it is not charged in full either. The scoring rate of a
+ * goal-line back regresses however repeatable his role is, which is why he
+ * stays a candidate; a back who scores in most games *with* the volume to do it
+ * is also a worse candidate than a receiver who caught two long ones, which is
+ * why it is halved ({@link ARBITRAGE.roleDiscount}). Until 29 September 2026
+ * the two were charged the same.
+ *
+ * Unmeasured is zero. The touchdown read needs four games and a sell-high read
+ * starts at three, and for that week the read used to survive at 0.4 with no
+ * reason behind it: "running over expectation, sell into it". That is the
+ * "outperforming is not a sell" case exactly, so it now waits a week for the
+ * number that says why.
  */
-export function regressionRisk(position: string, td: TdDependencyAssessment): number {
-  if ((position ?? '').toUpperCase() === 'QB') return 1;
-  if (td.share == null) return 0.4; // unmeasured: the read survives, weakened.
+export function regressionRisk(_position: string, td: TdDependencyAssessment): number {
+  if (td.share == null) return 0;
   if (td.share <= TD_DEPENDENCY.independent) return 0;
-  return round2(
-    clamp01((td.share - TD_DEPENDENCY.independent) / (TD_DEPENDENCY.dependent - TD_DEPENDENCY.independent)),
-  );
+  const risk = clamp01((td.share - TD_DEPENDENCY.independent) / (TD_DEPENDENCY.dependent - TD_DEPENDENCY.independent));
+  return round2(td.profile === 'td_driven_with_role' ? risk * ARBITRAGE.roleDiscount : risk);
 }
 
 /**
@@ -394,6 +431,8 @@ function reasonsFor(args: {
   td: TdDependencyAssessment;
   tally: { factor: number; net: number; items: number };
   position: string;
+  /** The usage line when a real workload discounted the sell, else null. */
+  role?: string | null;
 }): string[] {
   const out: string[] = [];
   const direction = args.kind === 'buy_low' ? 'under' : 'over';
@@ -402,12 +441,13 @@ function reasonsFor(args: {
   );
 
   if (args.kind === 'sell_high') {
-    if ((args.position ?? '').toUpperCase() === 'QB') {
-      out.push('A quarterback’s scoring rate is his offence rather than his luck, so this is priced as a real gain.');
-    } else if (args.td.share != null) {
+    if (args.td.share != null) {
       out.push(
         `${Math.round(args.td.share * 100)}% of his production came from ${round1(args.td.touchdowns)} scores in ${args.td.scoringGames} of ${args.td.games} games, and touchdown rate does not carry forward at his position.`,
       );
+    }
+    if (args.role) {
+      out.push(`His workload backs part of it (${args.role}), so this is a weaker sell than the touchdowns alone suggest.`);
     }
   }
 
