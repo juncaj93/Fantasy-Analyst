@@ -39,6 +39,7 @@ import { assessTdDependency, NO_TD_DATA, type TdDependencyAssessment } from './t
 import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
 import { assessWeather, type GameWeather, type WeatherAssessment } from './weather.ts';
 import { projectDst, type DstProjection } from './dstProjection.ts';
+import { decisionPoints, type DecisionPoints } from './decisionPoints.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -215,6 +216,15 @@ export interface StartSitEvaluation {
    * invite a reader — or a screen — to look for one. See `dstProjection.ts`.
    */
   dst?: DstProjection;
+  /**
+   * The number a decision between players is made on, and what it was built from.
+   *
+   * Set by `compareStartSit` and by the lineup, never by `evaluatePlayer`,
+   * because it needs Rotowire's published week, which a single evaluation does
+   * not see. Optional on the wire: cached responses from older workers lack it.
+   * See `decisionPoints.ts`.
+   */
+  decision?: DecisionPoints | null;
 }
 
 export interface StartSitComparison {
@@ -918,11 +928,26 @@ function resolveInjuryState(input: StartSitInput): InjuryState {
 export function compareStartSit(
   inputs: StartSitInput[],
   profile: ScoringProfile,
-  opts: { minMargin?: number; mode?: StartSitMode } = {},
+  opts: {
+    minMargin?: number;
+    mode?: StartSitMode;
+    /**
+     * Rotowire's published week by player id, the same map the Team screen's
+     * lineup reads. With it, a partly priced player is ranked on his whole
+     * published week plus the same adjustments `score` carries, which is the
+     * number the lineup's suggestions are printed with; see `decisionPoints.ts`.
+     * Without it, the ranking is `score`, as it always was.
+     */
+    published?: ReadonlyMap<string, number>;
+  } = {},
 ): StartSitComparison {
   const minMargin = opts.minMargin ?? 0.75;
   const mode = opts.mode ?? 'balanced';
-  const evaluations = inputs.map((i) => evaluatePlayer({ ...i, mode: i.mode ?? mode }, profile));
+  const evaluations = inputs.map((i) => {
+    const evaluation = evaluatePlayer({ ...i, mode: i.mode ?? mode }, profile);
+    return { ...evaluation, decision: decisionPoints(evaluation, opts.published) };
+  });
+  const pointsOf = (e: StartSitEvaluation): number => e.decision?.points ?? e.score ?? 0;
   const warnings: string[] = [];
   const reasons: string[] = [];
 
@@ -965,10 +990,10 @@ export function compareStartSit(
     };
   }
 
-  const sorted = [...scored].sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name));
+  const sorted = [...scored].sort((a, b) => pointsOf(b) - pointsOf(a) || a.name.localeCompare(b.name));
   const best = sorted[0]!;
   const runnerUp = sorted[1];
-  const margin = runnerUp ? round2((best.score ?? 0) - (runnerUp.score ?? 0)) : null;
+  const margin = runnerUp ? round2(pointsOf(best) - pointsOf(runnerUp)) : null;
 
   const missingVegas = evaluations.filter((e) => e.expectation.points == null);
   if (missingVegas.length > 0) {
@@ -986,7 +1011,13 @@ export function compareStartSit(
    * A total market blackout was already warned about; a *partial* one was not,
    * and partial is the common case. See `comparability.ts`.
    */
-  const comparability = runnerUp
+  /*
+   * Unless either side was ranked on a published week, which is a whole week
+   * whatever the books posted: the coverage gap this guards against is the one
+   * `decisionPoints` has already stepped around.
+   */
+  const onPublished = best.decision?.basis === 'published' || runnerUp?.decision?.basis === 'published';
+  const comparability = runnerUp && !onPublished
     ? assessMarketComparability(
         { name: best.name, position: best.position, expectation: best.expectation },
         { name: runnerUp.name, position: runnerUp.position, expectation: runnerUp.expectation },
@@ -1007,7 +1038,21 @@ export function compareStartSit(
   }
   if (missingVegas.length > 0 && confidence === 'high') confidence = 'medium';
 
-  if (best.expectation.points != null) {
+  /*
+   * Only said when it is true. A player ranked on a published week can lead
+   * with a smaller market sum than the man behind him (RJ Harvey led Mark
+   * Andrews on 30 September with 0.46 posted against 5.00), and "carries the
+   * higher market expectation" was then printed about the lower of the two.
+   */
+  if (best.decision?.basis === 'published') {
+    reasons.push(
+      `no book has priced ${best.name}'s whole week, so he is ranked on Rotowire's published ` +
+        `${best.decision.base.toFixed(1)} plus the same status, usage and matchup reads as everybody else`,
+    );
+  } else if (
+    best.expectation.points != null &&
+    (runnerUp?.expectation.points == null || best.expectation.points > runnerUp.expectation.points)
+  ) {
     reasons.push(`${best.name} carries the higher market expectation (${best.expectation.points.toFixed(1)} pts)`);
   }
   const newsComp = best.components.find((c) => c.key === 'news_recent');
@@ -1036,17 +1081,17 @@ export function compareStartSit(
     sorted
       .slice(1)
       .filter((e) => e.lock.kickoff && best.lock.kickoff && Date.parse(e.lock.kickoff) < Date.parse(best.lock.kickoff))
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
+      .sort((a, b) => pointsOf(b) - pointsOf(a))[0] ?? null;
 
   const lateSwap = assessLateSwap(
     {
-      preferred: { name: best.name, kickoff: best.lock.kickoff, status: best.statusFlag, score: best.score },
+      preferred: { name: best.name, kickoff: best.lock.kickoff, status: best.statusFlag, score: pointsOf(best) },
       alternative: earlierAlternative
         ? {
             name: earlierAlternative.name,
             kickoff: earlierAlternative.lock.kickoff,
             status: earlierAlternative.statusFlag,
-            score: earlierAlternative.score,
+            score: pointsOf(earlierAlternative),
           }
         : null,
     },

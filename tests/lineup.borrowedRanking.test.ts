@@ -152,11 +152,21 @@ describe('the discount on somebody else’s model', () => {
     const andrewsScore = contest(0).bench.find((e) => e.playerId === 'andrews')?.score
       ?? contest(0).slots.find((s) => s.playerId === 'andrews')!.score!;
 
-    const inside = contest(andrewsScore + BORROWED_RANKING_DISCOUNT - 0.5);
+    /*
+     * And what it adds to the challenger's borrowed week. Since 30 September a
+     * published figure ranks with the same status, news and usage reads the
+     * incumbent's score carries (see `decisionPoints.ts`), so the line he has to
+     * clear is the incumbent's score plus the discount, less his own reads.
+     */
+    const concepcion = [...contest(0).bench, ...contest(0).undecidable].find((e) => e.playerId === 'concepcion');
+    const adjustments = concepcion?.decision?.adjustments ?? 0;
+    expect(adjustments).not.toBe(0);
+
+    const inside = contest(andrewsScore + BORROWED_RANKING_DISCOUNT - adjustments - 0.5);
     expect(inside.slots.map((s) => s.playerId)).toContain('andrews');
     expect(inside.slots.map((s) => s.playerId)).not.toContain('concepcion');
 
-    const beyond = contest(andrewsScore + BORROWED_RANKING_DISCOUNT + 0.5);
+    const beyond = contest(andrewsScore + BORROWED_RANKING_DISCOUNT - adjustments + 0.5);
     expect(beyond.slots.map((s) => s.playerId)).toContain('concepcion');
   });
 });
