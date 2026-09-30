@@ -62,33 +62,49 @@ console.log('== Claim plan');
 if (!plan) console.log('  (none)');
 else {
   console.log(`  ${plan.headline} [${plan.state}]${plan.instruction ? ` · ${plan.instruction}` : ''}`);
-  for (const g of plan.groups ?? []) {
-    console.log(`  group: ${g.headline}${g.keepNote ? ` · ${g.keepNote}` : ''}`);
+  const groups = plan.groups ?? [];
+  if (groups.length === 0) {
+    for (const c of plan.claims ?? []) {
+      console.log(`  ${c.rank}. ${c.headline}${c.qualifier ? `  (${c.qualifier})` : ''}`);
+    }
   }
-  for (const c of plan.claims ?? []) {
-    console.log(`  ${c.rank}. ${c.headline}${c.qualifier ? `  (${c.qualifier})` : ''}${c.detail ? `  · ${c.detail}` : ''}`);
+  for (const g of groups) {
+    console.log(`  ${g.headline}`);
+    for (const c of (plan.claims ?? []).filter((x) => x.group === g.index)) {
+      console.log(`    ${c.rank}. ${c.headline}${c.qualifier ? `  (${c.qualifier})` : ''}`);
+      if (c.detail) console.log(`       ${c.detail}`);
+    }
+    for (const k of g.keep ?? []) console.log(`    ${k}`);
   }
+  if (plan.budget) console.log(`  budget: ${plan.budget}`);
   for (const line of plan.protectedPlayers ?? []) console.log(`  protected: ${line}`);
   if (plan.note) console.log(`  note: ${plan.note}`);
 }
-if (W.refreshedAt || W.updatedAt) console.log(`  updated: ${W.refreshedAt ?? W.updatedAt}`);
+console.log(`  updatedAt: ${W.updatedAt ?? '(field absent)'}`);
 
 // ----------------------------------------------------------------- the cards
 console.log('\n== Cards (value adds)');
-const planDrops = new Set((plan?.claims ?? []).map((c) => c.dropName).filter(Boolean));
+/* The invariant: for every card the plan claims, the plan's drop for that player is the card's name. */
+const planDropFor = new Map();
+for (const c of plan?.claims ?? []) if (!planDropFor.has(c.addPlayerId)) planDropFor.set(c.addPlayerId, c.dropName);
+let disagreements = 0;
 for (const a of W.valueAdds ?? []) {
   const b = a.basis ?? {};
   const yard = b.yardstick ? ` basis=${b.yardstick}` : '';
-  const agree = a.overName == null ? '' : planDrops.size === 0 ? '' : planDrops.has(a.overName) ? ' [plan agrees]' : ' [PLAN CUTS SOMEONE ELSE]';
+  const planned = planDropFor.has(a.playerId);
+  const agree = !planned ? ' [not in plan]' : planDropFor.get(a.playerId) === a.overName ? ' [plan drops the same player]' : ' [PLAN CUTS SOMEONE ELSE]';
+  if (planned && planDropFor.get(a.playerId) !== a.overName) disagreements += 1;
   console.log(
     `  ${a.position} ${a.name} over ${a.overName ?? '—'}${agree}: proj ${fmt(b.projection)} vs ${fmt(b.overProjection)} gap ${fmt(b.projectionGap)}${yard} gain ${fmt(a.gain)} prio ${fmt(a.priority)}`,
   );
   for (const r of a.reasons ?? []) console.log(`      · ${r}`);
   if (a.notes) for (const n of a.notes) console.log(`      ! ${n}`);
+  if (a.planExcluded) console.log(`      kept out of plan: ${a.planExcluded}`);
 }
+console.log(`  card/plan disagreements: ${disagreements}`);
 console.log('\n== Cards (starter upgrades)');
 for (const u of W.upgrades ?? []) {
-  for (const c of u.candidates ?? []) console.log(`  ${u.slot}: ${c.name} over ${u.currentName ?? '—'} gain ${fmt(c.gain)}`);
+  for (const c of u.candidates ?? []) console.log(`  ${u.slot}: ${c.name} over ${u.currentName ?? '—'} gain ${fmt(c.gain)} cut ${c.cut?.name ?? '—'}`);
 }
 console.log('\n== Unknowns');
 for (const u of W.unknowns ?? []) console.log(`  ${u.position} ${u.name}: ${u.trending ?? ''}`);
