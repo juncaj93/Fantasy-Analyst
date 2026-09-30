@@ -105,6 +105,8 @@ export interface WeeklyEvaluationLike {
   confidence: string;
   statusFlag: string | null;
   ruledOut: boolean;
+  /** Ruled out by the IR slot he sits in rather than by a designation. */
+  onReserve?: true;
   opponent?: string | null;
   expectation?: {
     points: number | null;
@@ -359,7 +361,9 @@ function headlineFor(
     return {
       verdict: 'not_playable',
       label: 'Not playable',
-      detail: evaluation.statusFlag ?? evaluation.availability?.label ?? null,
+      detail: evaluation.onReserve
+        ? 'In your IR slot.'
+        : (evaluation.statusFlag ?? evaluation.availability?.label ?? null),
       tone: 'warn',
     };
   }

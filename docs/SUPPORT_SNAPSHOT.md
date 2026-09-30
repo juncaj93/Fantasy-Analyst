@@ -318,6 +318,18 @@ carrying one throws instead of emitting a partly-redacted file. The scan runs at
 capture **and again at replay**, because the copy being replayed is not
 necessarily the copy that was emitted.
 
+**The seal also checks for the real ids a capture aliased.** Aliasing and
+scrubbing are opt-in per field, so a field copied through verbatim skips both.
+On 30 September 2026 a production probe found two: the waiver lane's
+`strategy.leagueId` (the strategy service's context, spread in whole) and the
+matchup lane's `previousForecast.fingerprint` (the league id composed into a
+stored string). The check that caught them then found a third in the trade
+lane: `repeatPartners[].userId` held real manager ids. `sealSnapshot` now takes
+the capture's `SnapshotAliases` and refuses any file where a real user, league
+or draft id it replaced still appears, as a value, inside a string or as a key.
+Ids under eight characters are skipped, since a test fixture's `u1` collides
+with ordinary text and a real Sleeper id is eighteen digits.
+
 ### The reproduction contract
 
 Every term is compared exactly. No numeric tolerance anywhere.

@@ -301,6 +301,60 @@ export class SnapshotAliases {
     return this.replaceIn(text, [this.byId, this.byScope, this.byLabel]);
   }
 
+  /**
+   * Every place a real identifier this capture aliased is still sitting.
+   *
+   * The backstop behind {@link scrubIdentifiers}, run by `sealSnapshot` over the
+   * finished file. Aliasing and scrubbing are both opt-in per field: a capture
+   * scrubs the engine's output and aliases the inputs it knows about, and a
+   * field copied through verbatim is copied past both. That happened twice in
+   * the same week. `strategy.leagueId` on the waiver lane rode in on a spread of
+   * the strategy context, and `previousForecast.fingerprint` on the matchup lane
+   * was stored with the league id composed into it — both real, both in files
+   * that said `league-1` everywhere else. This finds the next one before it is
+   * emitted, whatever it is called.
+   *
+   * User ids and league or draft ids only. A display name is ordinary words and
+   * a league name can be too, so a refusal on either would fire on sentences
+   * that merely share a word with them.
+   *
+   * Identifiers shorter than {@link MIN_LEAK_CHECK_LENGTH} are skipped. A real
+   * Sleeper id is an eighteen-digit number and cannot collide with anything
+   * else in the file; a test fixture's `u1` or `1` collides with every
+   * `slot 1` in it.
+   */
+  leaks(value: unknown): RedactionViolation[] {
+    const patterns = [...this.byId.keys(), ...this.byScope.keys()]
+      .filter((real) => real.length >= MIN_LEAK_CHECK_LENGTH)
+      .map((real) => boundedPattern(real));
+    if (patterns.length === 0) return [];
+    const hit = (text: string): boolean =>
+      patterns.some((pattern) => {
+        pattern.lastIndex = 0;
+        return pattern.test(text);
+      });
+
+    const found: RedactionViolation[] = [];
+    const walk = (node: unknown, at: string): void => {
+      if (typeof node === 'string') {
+        if (hit(node)) found.push({ path: at, reason: 'carries a real Sleeper id the snapshot aliased everywhere else' });
+        return;
+      }
+      if (node == null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, `${at}[${i}]`));
+        return;
+      }
+      for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+        const here = at === '' ? key : `${at}.${key}`;
+        if (hit(key)) found.push({ path: here, reason: 'is keyed by a real Sleeper id' });
+        walk(child, here);
+      }
+    };
+    walk(value, '');
+    return found;
+  }
+
   private replaceIn(text: string, sources: ReadonlyMap<string, string>[]): string {
     let out = text;
     for (const source of sources) {
@@ -349,6 +403,9 @@ export class SnapshotRedactionError extends Error {
     this.violations = violations;
   }
 }
+
+/** The shortest aliased identifier {@link SnapshotAliases.leaks} looks for. */
+export const MIN_LEAK_CHECK_LENGTH = 8;
 
 /**
  * One identifier, as a global pattern that will not match inside a longer word.

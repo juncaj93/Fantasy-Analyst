@@ -155,7 +155,7 @@ export async function gatherLineupInputs(
    * fixture and defence reads.
    */
   const context = await buildStartSitContext(db);
-  const inputs = await startSitInputsFor(db, base.mine.playerIds, { context });
+  const inputs = await startSitInputsFor(db, base.mine.playerIds, { context, reserveIds: base.mine.reserveIds });
 
   /*
    * Rotowire's published week, for the players this app could not price.
@@ -537,7 +537,7 @@ export async function gatherWaiverInputs(
   const week = base.nflState?.week ?? 1;
 
   const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints] = await Promise.all([
-    startSitInputsFor(db, mine.playerIds, { context }),
+    startSitInputsFor(db, mine.playerIds, { context, reserveIds: mine.reserveIds }),
     startSitInputsFor(db, candidateIds, { context }),
     /*
      * The season market for the candidates, and only the candidates.

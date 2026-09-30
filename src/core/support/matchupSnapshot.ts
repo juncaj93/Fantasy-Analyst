@@ -309,7 +309,13 @@ export async function captureMatchupSnapshot(
         startSitRequested: seen.startSitRequested,
         published: Object.fromEntries(seen.published),
         publishedAvailable: seen.publishedAvailable,
-        previousForecast: seen.previousForecast,
+        /*
+         * Scrubbed like the output, and for the same reason: the stored forecast
+         * carries its own fingerprint, which has the league id composed into
+         * it. The live fingerprint in `output` is scrubbed the same way, so the
+         * two still compare equal on replay.
+         */
+        previousForecast: scrubAliases(seen.previousForecast, aliases) as typeof seen.previousForecast,
       },
       output,
       /*
@@ -324,7 +330,7 @@ export async function captureMatchupSnapshot(
         ? ['The forecast is degraded: no distribution could be built, so only the scoreboard stands.']
         : [],
     },
-  });
+  }, aliases);
 }
 
 /**

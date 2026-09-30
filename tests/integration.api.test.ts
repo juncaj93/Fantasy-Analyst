@@ -10,6 +10,7 @@ import { createApp, type AppEnv } from '../src/server/app.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { UsageRepo } from '../src/server/repos/usage.ts';
+import { LeagueRepo } from '../src/server/repos/league.ts';
 import { createTestDb } from './helpers/db.ts';
 
 function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEnv {
@@ -783,6 +784,31 @@ describe('API with seeded data', () => {
       expect(swap.inPlayerId).not.toBe(swap.outPlayerId);
       expect(swap.gain).toBeGreaterThan(0);
     }
+  });
+
+  it('never starts a player sitting in the IR slot, whatever his designation says', async () => {
+    const before = await json<{ slots: { playerId: string | null }[] }>(get('/api/leagues/demo-league/lineup', cookie));
+    const started = before.slots.map((s) => s.playerId).filter((id): id is string => id != null);
+    const moved = started.find((id) => id !== '1030');
+    expect(moved, 'the seed has to start somebody who is not already on IR').toBeDefined();
+
+    /* The same roster, with one of today's healthy starters put in the IR slot. */
+    const leagues = new LeagueRepo(db);
+    const rosters = await leagues.listRosters('demo-league');
+    await leagues.replaceRosters(
+      'demo-league',
+      rosters.map((roster) =>
+        roster.isMine
+          ? { ...roster, starterIds: roster.starterIds.filter((id) => id !== moved), reserveIds: [moved!] }
+          : roster,
+      ),
+    );
+
+    const after = await json<{ slots: { playerId: string | null }[]; bench: { playerId: string }[] }>(
+      get('/api/leagues/demo-league/lineup', cookie),
+    );
+    expect(after.slots.map((s) => s.playerId)).not.toContain(moved);
+    expect(after.bench.map((e) => e.playerId)).toContain(moved);
   });
 
   it('carries expected points on the lineup once usage exists for a player', async () => {

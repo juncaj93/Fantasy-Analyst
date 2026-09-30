@@ -21,6 +21,7 @@ import { findScenario } from '../src/core/demo/registry.ts';
 import { captureDraftSnapshot, SnapshotRedactionError } from '../src/core/support/draftSnapshot.ts';
 import { readSnapshot, replayDraftSnapshot, SnapshotRejected } from '../src/core/support/replay.ts';
 import { SnapshotAliases, findRedactionViolations } from '../src/core/support/redaction.ts';
+import { sealSnapshot } from '../src/core/support/emit.ts';
 import type { DraftBoardSources } from '../src/core/draft/boardBuilder.ts';
 
 /**
@@ -275,5 +276,52 @@ describe('aliases are stable and one-way', () => {
     expect(aliases.scrub('juncaj93 takes backs early (467803924117221376)')).toBe(
       'Manager 1 takes backs early (manager-1)',
     );
+  });
+});
+
+describe('the seal refuses a real id that a capture aliased everywhere else', () => {
+  const LEAGUE = '1124839283047628800';
+  const USER = '467803924117221376';
+
+  function allocated(): SnapshotAliases {
+    const aliases = new SnapshotAliases();
+    aliases.scope('league', LEAGUE);
+    aliases.id(USER);
+    return aliases;
+  }
+
+  it('finds one in a copied field, in a composed string and in a key', () => {
+    const leaks = allocated().leaks({
+      strategy: { leagueId: LEAGUE },
+      previous: { fingerprint: `${LEAGUE}|2026|4` },
+      byUser: { [USER]: 1 },
+    });
+    expect(leaks.map((leak) => leak.path)).toEqual([
+      'strategy.leagueId',
+      'previous.fingerprint',
+      `byUser.${USER}`,
+    ]);
+  });
+
+  it('passes a file that carries only the aliases', () => {
+    expect(allocated().leaks({ leagueId: 'league-1', owner: 'manager-1', week: 4 })).toEqual([]);
+  });
+
+  it('does not match an id inside a longer number', () => {
+    expect(allocated().leaks({ other: `${LEAGUE}9` })).toEqual([]);
+  });
+
+  it('skips an id too short to be told apart from ordinary text', () => {
+    const aliases = new SnapshotAliases();
+    aliases.scope('league', '77');
+    aliases.id('u1');
+    expect(aliases.leaks({ note: 'slot 77 and u1' })).toEqual([]);
+  });
+
+  it('is enforced by the seal itself, not left to each lane', () => {
+    const aliases = allocated();
+    const snapshot = { schema: 'x', decision: { inputs: { strategy: { leagueId: LEAGUE } } } } as never;
+    expect(() => sealSnapshot(snapshot, aliases)).toThrow(SnapshotRedactionError);
+    expect(() => sealSnapshot(snapshot, aliases)).toThrow(/decision\.inputs\.strategy\.leagueId/);
   });
 });

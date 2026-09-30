@@ -75,7 +75,7 @@ import {
   type SnapshotDataHealth,
   type SupportSnapshot,
 } from './schema.ts';
-import type { WaiverPlanPayload } from './payloads.ts';
+import type { WaiverPlanInputs, WaiverPlanPayload } from './payloads.ts';
 
 export interface WaiverCaptureInput {
   gitSha: string;
@@ -269,7 +269,20 @@ export async function captureWaiverSnapshot(
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
-        strategy: strategy == null ? null : { ...strategy, trending: [...strategy.trending.entries()] },
+        /*
+         * Scrubbed, because the strategy is the league-strategy service's whole
+         * context and not only the four fields the pricing pass reads. It
+         * carries the league it was built for as `leagueId`, and a spread copied
+         * that real id into a file that said `league-1` everywhere else. The
+         * Map is turned into pairs first so the walk has plain data to copy.
+         */
+        strategy:
+          strategy == null
+            ? null
+            : (scrubAliases(
+                { ...strategy, trending: [...strategy.trending.entries()] },
+                aliases,
+              ) as WaiverPlanInputs['strategy']),
         budgets,
         prices: input.request.prices,
         observations: input.request.observations,
@@ -299,7 +312,7 @@ export async function captureWaiverSnapshot(
       output,
       warnings: output.notes,
     },
-  });
+  }, aliases);
 }
 
 /**

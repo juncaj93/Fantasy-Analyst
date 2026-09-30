@@ -243,7 +243,14 @@ const WALLET: LeagueBudgetState = {
   notes: [],
 };
 
-function waiverSnapshot(over: { wire?: StartSitInput[]; trending?: Map<string, TrendingVelocity> } = {}) {
+function waiverSnapshot(
+  over: {
+    wire?: StartSitInput[];
+    trending?: Map<string, TrendingVelocity>;
+    /** More of the strategy context, the way production hands over the whole of it. */
+    strategyExtra?: Record<string, unknown>;
+  } = {},
+) {
   const mine = roster({ playerIds: MY_PLAYERS, starterIds: MY_STARTERS });
   const theirs = roster({
     rosterId: 2,
@@ -277,7 +284,14 @@ function waiverSnapshot(over: { wire?: StartSitInput[]; trending?: Map<string, T
       rosters: [mine, theirs],
       week: 6,
       season: '2026',
-      strategy: { week: 6, finalWeek: 14, budget: WALLET, prices: NO_PRICES, trending: over.trending ?? new Map() },
+      strategy: {
+        week: 6,
+        finalWeek: 14,
+        budget: WALLET,
+        prices: NO_PRICES,
+        trending: over.trending ?? new Map(),
+        ...over.strategyExtra,
+      },
       trending: over.trending ?? new Map(),
       budgets: WALLET,
       prices: NO_PRICES,
@@ -291,6 +305,22 @@ function waiverSnapshot(over: { wire?: StartSitInput[]; trending?: Map<string, T
 }
 
 describe('Waivers', () => {
+  /*
+   * Reported from a real capture on 30 September 2026: `strategy.leagueId` held
+   * the real Sleeper league id. Production passes the league-strategy service's
+   * whole context as the strategy, and that context says which league it is
+   * for. The fixture used to pass only the four fields the pricing pass reads,
+   * which is why no test saw it.
+   */
+  it('does not carry the league id in through the strategy context', async () => {
+    const snapshot = await waiverSnapshot({
+      strategyExtra: { leagueId: 'sleeper-league-77', season: '2026', notes: [] },
+    });
+    sealed(snapshot);
+    expect(snapshot.decision.inputs.strategy).toMatchObject({ leagueId: 'league-1' });
+    expect((await replayWaiverSnapshot(snapshot)).outcome).toBe('reproduced');
+  });
+
   /*
    * The tier a replay is likeliest to lose, pinned.
    *
@@ -543,7 +573,9 @@ describe('DST', () => {
  * distribution can be built, and the forecast has to admit it rather than
  * produce a confident afternoon out of nothing.
  */
-function matchupSources(over: { priced?: boolean; lockAll?: boolean } = {}): MatchupSources {
+function matchupSources(
+  over: { priced?: boolean; lockAll?: boolean; previous?: Awaited<ReturnType<MatchupSources['previousForecast']>> } = {},
+): MatchupSources {
   const mine = roster({ playerIds: MY_PLAYERS, starterIds: MY_STARTERS });
   const theirs = roster({
     rosterId: 2,
@@ -577,7 +609,7 @@ function matchupSources(over: { priced?: boolean; lockAll?: boolean } = {}): Mat
       ] as never,
     nflState: async () => ({ season: '2026', seasonType: 'regular', week: 6 }),
     startSitInputs: async (ids) => pool.filter((input) => ids.includes(input.player.id)),
-    previousForecast: async () => null,
+    previousForecast: async () => over.previous ?? null,
     cached: () => null,
     remember: () => {},
     now: () => NOW,
@@ -600,6 +632,23 @@ function theirSquad(): StartSitInput[] {
 }
 
 describe('Matchup / Best Move', () => {
+  /*
+   * Found by the same production probe that found the waiver leak: the stored
+   * forecast the matchup reads for "changed since you looked" has the league id
+   * composed into its fingerprint, and it was copied into the inputs verbatim.
+   */
+  it('does not carry the league id in through the previous forecast', async () => {
+    const snapshot = await captureMatchupSnapshot(
+      matchupSources({
+        previous: { fingerprint: 'sleeper-league-77|2026|6|1|abc', winProbability: 0.5, relevantSince: {} },
+      }),
+      { gitSha: SHA, leagueId: league().id, week: null, props },
+    );
+    sealed(snapshot);
+    expect(snapshot.decision.inputs.previousForecast).toMatchObject({ fingerprint: 'league-1|2026|6|1|abc' });
+    expect((await replayMatchupSnapshot(snapshot)).outcome).toBe('reproduced');
+  });
+
   it('reproduces the projected final, the win probability and the Best Move', async () => {
     const snapshot = await captureMatchupSnapshot(matchupSources(), {
       gitSha: SHA,
