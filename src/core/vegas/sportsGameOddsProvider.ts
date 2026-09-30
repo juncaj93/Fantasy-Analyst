@@ -434,12 +434,13 @@ export class SportsGameOddsProvider implements VegasProvider {
     const results: { teamId: string; set: RawPropSet }[] = [];
     const unmapped: string[] = [];
     const refused: string[] = [];
-    const seen = new Set<string>();
+    const seen = new Map<string, RawPropSet>();
     let requests = 0;
     let entities = 0;
 
     for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
-      if (results.length >= maxEvents) break;
+      // Distinct games, not rows: a game two teams share is one event.
+      if (seen.size >= maxEvents) break;
 
       /*
        * Callers speak Sleeper; the filter only answers to this provider's ids.
@@ -480,12 +481,26 @@ export class SportsGameOddsProvider implements VegasProvider {
       entities += Math.max(1, events.length);
 
       for (const event of events) {
-        if (!event.eventID || seen.has(event.eventID) || event.status?.cancelled) continue;
-        seen.add(event.eventID);
+        if (!event.eventID || event.status?.cancelled) continue;
+        /*
+         * A game a second rostered team is also in is still that team's game.
+         *
+         * It used to be dropped here, so the second team was never recorded as
+         * playing in it, looked unscheduled on the next pass, and was asked
+         * about — and billed — again. The set already built is reused, so this
+         * parses nothing twice and returns one set per game.
+         */
+        const already = seen.get(event.eventID);
+        if (already) {
+          results.push({ teamId, set: already });
+          continue;
+        }
+        const set = this.toPropSet(event, event.eventID, wanted);
+        seen.set(event.eventID, set);
         // Keyed by the code the caller asked with, not the id we translated to:
         // that pairing is how a rostered player's team becomes an event id, and
         // the caller only holds the one vocabulary.
-        results.push({ teamId, set: this.toPropSet(event, event.eventID, wanted) });
+        results.push({ teamId, set });
       }
     }
 

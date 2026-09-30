@@ -319,6 +319,17 @@ describe('team ids are translated, not passed through', () => {
     expect(result.unmapped).toEqual(['XXX']);
   });
 
+  it('reports a game two asked-about teams share for both of them', async () => {
+    // Before, the second team's copy was dropped, so that team never got an
+    // event, looked unscheduled on the next pass, and was bought again.
+    const { provider } = providerFor({ data: [EVENT] });
+    const result = await provider.getPropsForTeams(['SF', 'TEN']);
+    expect(result.results.map((r) => r.teamId)).toEqual(['SF', 'TEN']);
+    expect(result.results[0]!.set).toBe(result.results[1]!.set);
+    // Billing is the provider's, per response, and is unchanged by this.
+    expect(result.entities).toBe(2);
+  });
+
   it('does not silently drop a team it could not place', async () => {
     const { provider } = providerFor({ data: [] });
     const result = await provider.getPropsForTeams(['NOT_A_TEAM']);

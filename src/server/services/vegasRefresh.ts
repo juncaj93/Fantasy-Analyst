@@ -109,6 +109,15 @@ const HORIZON_DAYS = 8;
  */
 const NEXT_SLATE_MAX_DAYS = 28;
 
+/**
+ * How long a team the provider had no game for is left alone.
+ *
+ * Six hours, the same age at which a stored line counts as stale: long enough
+ * that a thumb on the refresh button cannot re-buy the same empty answer, short
+ * enough that lines posted during the day are found by the next evening's look.
+ */
+const EMPTY_TEAM_RETRY_HOURS = 6;
+
 export class VegasRefreshService {
   private readonly usage: VegasUsageRepo;
   private readonly events: VegasEventsRepo;
@@ -340,17 +349,14 @@ export class VegasRefreshService {
      *
      * It buys nothing extra. `canSpend` below is untouched and still has the
      * final say on the month's allowance, so what this bypasses is the
-     * politeness interval and never the budget.
+     * politeness interval and never the budget. And past the interval, a
+     * person reaches only the teams whose next game is not on file — see
+     * `teamsWithoutAFixture` — so a second tap cannot re-buy the week.
      */
     const settings = new SettingsRepo(this.db);
     const attempted = await settings.get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
     const attemptedAge = attempted ? (now - Date.parse(attempted)) / 3_600_000 : Infinity;
     if (!sink.manual && attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
-
-    const unmapped = players.filter((p) => !p.eventId).length;
-    const lastSeen = await this.events.lastSeenAt();
-    const ageHours = lastSeen ? (now - Date.parse(lastSeen)) / 3_600_000 : Infinity;
-    if (unmapped === 0 && ageHours < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
 
     const fetchTeams = (this.provider as VegasProvider).getPropsForTeams;
     if (typeof fetchTeams !== 'function') {
@@ -358,7 +364,42 @@ export class VegasRefreshService {
       return { entities: 0, requests: 0, events: 0 };
     }
 
-    const teams = this.discoveryOrder(players, await this.rosterTeams());
+    const ordered = this.discoveryOrder(players, await this.rosterTeams());
+    if (ordered.length === 0) return { entities: 0, requests: 0, events: 0 };
+    const to = await this.discoveryWindowEnd(now, ordered);
+
+    /*
+     * Only the teams whose next game is genuinely unknown.
+     *
+     * This used to re-ask about every roster team whenever *any* player lacked
+     * a game, and one always does: a player on a bye has no game this week and
+     * will have none in an hour. So every pass re-bought the whole week. Read
+     * off production's ledger on 30 September 2026: seventeen manual refreshes
+     * since the first of the month, 195 entities between them, and 155 of those
+     * were this discovery re-buying nine games the app had already stored. The
+     * interval stamp above could not stop it — a person is let past it, and the
+     * clock's stamp had been stuck at 8 September because a roster spanning
+     * more teams than one run may buy never completes an ask.
+     *
+     * A team with a stored fixture inside the window is known; asking again
+     * costs an entity and answers with the game already on file. Its odds are
+     * the per-game fetch's job below, which is gated on how old they are. A
+     * team the nflverse schedule says is on a bye has nothing to find. What is
+     * left is the one case a person pressing the button needs rescued: a team
+     * whose next game really has not been learned yet.
+     */
+    const emptyAt = await settings.get<Record<string, string>>(SETTING_KEYS.vegasDiscoveryEmpty, {});
+    const teams = (await this.teamsWithoutAFixture(ordered, now, to)).filter((team) => {
+      /*
+       * And not a team asked about a few hours ago that had no game on offer.
+       *
+       * That ask was billed an entity for an empty answer, and asking again
+       * straight away buys the same empty answer — once per tap. Its lines
+       * appear when the books post them, which a later pass finds.
+       */
+      const at = Date.parse(emptyAt[team] ?? '');
+      return !(Number.isFinite(at) && (now - at) / 3_600_000 < EMPTY_TEAM_RETRY_HOURS);
+    });
     if (teams.length === 0) return { entities: 0, requests: 0, events: 0 };
 
     const decision = canSpend(budget, { entities: teams.length, priority: 'normal' });
@@ -375,7 +416,6 @@ export class VegasRefreshService {
     }
 
     const from = new Date(now).toISOString();
-    const to = await this.discoveryWindowEnd(now, teams);
     const asking = teams.slice(0, decision.entities);
     /*
      * Stamped before the call, and only when the ask covers the whole roster.
@@ -446,7 +486,8 @@ export class VegasRefreshService {
        * `nextFixturePerTeam` for the invariant it is holding, and why a window
        * that can reach two of a team's games makes it load-bearing.
        */
-      const fixtures = nextFixturePerTeam(result.results);
+      const perTeam = nextFixturePerTeam(result.results);
+      const fixtures = distinctEvents(perTeam.values());
 
       /*
        * The team we asked about is the mapping.
@@ -459,13 +500,25 @@ export class VegasRefreshService {
        * at home.
        */
       const sides = new Map<string, { row: (typeof result.results)[number]; teams: string[] }>();
-      for (const entry of fixtures) {
+      /*
+       * Every team whose next game this is, merged with the teams already on
+       * file for it. Writing only this ask's team would overwrite the one a
+       * previous ask stored — `home_team` is replaced, not appended — so that
+       * team would look unscheduled on the next pass and be bought again.
+       */
+      const stored = await this.events.forEvents(fixtures.map((f) => f.set.eventId));
+      for (const [teamId, entry] of perTeam) {
         const bucket = sides.get(entry.set.eventId);
         if (bucket) {
-          if (!bucket.teams.includes(entry.teamId)) bucket.teams.push(entry.teamId);
+          if (!bucket.teams.includes(teamId)) bucket.teams.push(teamId);
         } else {
-          sides.set(entry.set.eventId, { row: entry, teams: [entry.teamId] });
+          sides.set(entry.set.eventId, { row: entry, teams: [teamId] });
         }
+      }
+      for (const [eventId, bucket] of sides) {
+        const row = stored.get(eventId);
+        const onFile = [row?.homeTeam, row?.awayTeam].filter((t): t is string => t != null && t !== '');
+        bucket.teams = [...new Set([...onFile, ...bucket.teams])];
       }
       await this.events.upsertMany(
         [...sides.values()].map(({ row, teams }) => ({
@@ -499,12 +552,34 @@ export class VegasRefreshService {
         await this.persist(set);
       }
 
+      /*
+       * Remember which teams had nothing on offer, so the next tap does not
+       * pay to hear it again. Only when every team in the ask was reached:
+       * an ask cut short by the game cap or by a refusal never asked about
+       * the tail, and "not asked" is not "no game".
+       */
+      const gamesReturned = new Set(result.results.map((r) => r.set.eventId)).size;
+      const reachedAll = (result.refused?.length ?? 0) === 0 && gamesReturned < decision.entities;
+      const answered = new Set(result.results.map((r) => r.teamId));
+      const unmappedTeams = new Set(result.unmapped ?? []);
+      const nextEmpty: Record<string, string> = {};
+      for (const [team, at] of Object.entries(emptyAt)) {
+        const age = (now - Date.parse(at)) / 3_600_000;
+        if (Number.isFinite(age) && age < EMPTY_TEAM_RETRY_HOURS && !answered.has(team)) nextEmpty[team] = at;
+      }
+      if (reachedAll) {
+        for (const team of asking) {
+          if (!answered.has(team) && !unmappedTeams.has(team)) nextEmpty[team] = new Date(now).toISOString();
+        }
+      }
+      await settings.set(SETTING_KEYS.vegasDiscoveryEmpty, nextEmpty);
+
       await this.usage.record({
         source: 'schedule',
         entities: result.entities,
         requests: result.requests,
         outcome: 'fetched',
-        reason: `${teams.length} roster team(s) -> ${fixtures.length} game(s)`,
+        reason: `${teams.length} of ${ordered.length} roster team(s) unscheduled -> ${fixtures.length} game(s)`,
       });
 
       return {
@@ -583,6 +658,47 @@ export class VegasRefreshService {
       return new Date(Math.max(ordinary, stretched)).toISOString();
     } catch {
       return new Date(ordinary).toISOString();
+    }
+  }
+
+  /**
+   * The roster teams discovery still has to ask about, in the order given.
+   *
+   * A team is left out when either is true:
+   *
+   *   - **its next game is already stored** — a `vegas_events` row naming it
+   *     kicks off inside the window, so the provider's answer would be the
+   *     game on file, billed again;
+   *   - **the schedule says it has no game in the window** — a bye. The
+   *     schedule has rows for the team, and none of them kicks off in time.
+   *
+   * Anything this cannot read is asked about, as before: no league, no stored
+   * schedule, or a team code the schedule does not use. Not knowing is a
+   * reason to behave as the app always did, never a reason to go without.
+   */
+  private async teamsWithoutAFixture(teams: readonly string[], now: number, to: string): Promise<string[]> {
+    const known = await this.events.teamIndex(new Date(now).toISOString(), to);
+    const unknown = teams.filter((team) => (known.get(team.toUpperCase()) ?? matchTeam(known, team.toUpperCase())) == null);
+    if (unknown.length === 0) return [];
+
+    const end = Date.parse(to);
+    try {
+      const league = await new LeagueRepo(this.db).getSelectedLeague();
+      if (!league?.season) return unknown;
+      const fixtures = await new NflScheduleRepo(this.db).forTeams(league.season, unknown, { from: 1, to: 22 });
+      return unknown.filter((team) => {
+        const own = fixtures.filter((f) => f.team.toUpperCase() === team.toUpperCase());
+        if (own.length === 0) return true;
+        return own.some((f) => {
+          // A bye is stored as a row with no opponent, and it is not a game.
+          if (f.opponent == null) return false;
+          const kickoff = f.kickoff == null ? NaN : Date.parse(f.kickoff);
+          // A fixture with no kickoff yet is not evidence of a bye.
+          return !Number.isFinite(kickoff) || (kickoff > now && kickoff <= end);
+        });
+      });
+    } catch {
+      return unknown;
     }
   }
 
@@ -887,18 +1003,23 @@ export class VegasRefreshService {
  */
 function nextFixturePerTeam<T extends { teamId: string; set: { eventId: string; gameStart?: string | null } }>(
   results: readonly T[],
-): T[] {
+): Map<string, T> {
   const byTeam = new Map<string, T>();
   for (const entry of results) {
     const held = byTeam.get(entry.teamId);
     if (!held || startsBefore(entry.set.gameStart, held.set.gameStart)) byTeam.set(entry.teamId, entry);
   }
+  return byTeam;
+}
 
-  // Deduplicated by event: two rostered teams playing each other is one game,
-  // and it must be stored once whichever of them reached it first.
+/**
+ * Deduplicated by event: two rostered teams playing each other is one game,
+ * and it must be stored once whichever of them reached it first.
+ */
+function distinctEvents<T extends { set: { eventId: string } }>(entries: Iterable<T>): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
-  for (const entry of byTeam.values()) {
+  for (const entry of entries) {
     if (seen.has(entry.set.eventId)) continue;
     seen.add(entry.set.eventId);
     out.push(entry);
