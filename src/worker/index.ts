@@ -659,9 +659,13 @@ export default {
        * Separately caught — this is the layer above lineups, and it must never
        * take a lineup feed down.
        */
-      await run.step('trending', 'Trending adds', async () => {
+      await run.step('trending', 'Trending adds and drops', async () => {
         const captured = await new LeagueStrategyService(env.DB, { sleeper: cronEnv.sleeper }).captureTrending();
-        return { outcome: 'succeeded', items: captured.captured };
+        return {
+          outcome: 'succeeded',
+          items: captured.captured + (captured.drops ?? 0),
+          note: captured.drops == null ? 'drops list could not be read' : null,
+        };
       });
 
       await run.step('matchup-calibration', 'Matchup calibration', () => refreshMatchupCalibration(env, cronEnv));

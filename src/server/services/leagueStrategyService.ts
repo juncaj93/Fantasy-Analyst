@@ -22,6 +22,7 @@ import { buildBudgetState, type LeagueBudgetState } from '../../core/faab/budget
 import { collectBids, losingBidNote, summarisePrices, type BidHistory, type PriceSummary } from '../../core/faab/bids.ts';
 import { toSnapshot, velocity, trendingHeadline, type TrendingVelocity } from '../../core/market/trending.ts';
 import { readFinalWeek } from '../../core/league/planning.ts';
+import { isTransactionWeekSettled } from '../../core/league/transactionSettling.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import { TrendingRepo } from '../repos/trending.ts';
@@ -99,9 +100,11 @@ export class LeagueStrategyService {
   /**
    * Fetch the weeks that are missing or still in play, and store them.
    *
-   * A week before the current one can never change again, so it is marked
-   * settled and never fetched a second time. The current week is always
-   * refetched, because a waiver run can land between two page loads.
+   * The current week is always refetched, because a waiver run can land
+   * between two page loads, and so is the week before it until Thursday:
+   * Sleeper files that week's Wednesday-morning waiver claims under it after
+   * the week number has already moved on. See
+   * `core/league/transactionSettling.ts`.
    */
   async syncTransactions(opts: {
     leagueId: string;
@@ -109,6 +112,7 @@ export class LeagueStrategyService {
     season: string;
     week: number;
     maxWeeks?: number;
+    now?: Date;
   }): Promise<{ weeksFetched: number[]; transactions: number }> {
     const throughWeek = Math.max(1, Math.min(opts.week, 18));
     const wanted = await this.transactions.weeksToFetch({
@@ -127,7 +131,12 @@ export class LeagueStrategyService {
         season: opts.season,
         week,
         transactions: rows,
-        settled: week < throughWeek,
+        settled: isTransactionWeekSettled({
+          week,
+          currentWeek: throughWeek,
+          finishedSeason: false,
+          now: opts.now ?? new Date(),
+        }),
       });
       fetched.push(week);
     }
@@ -144,17 +153,34 @@ export class LeagueStrategyService {
   async captureTrending(opts: { lookbackHours?: number; limit?: number; now?: Date } = {}): Promise<{
     captured: number;
     capturedAt: string;
+    /** Rows of the drops list stored, or null when that read failed. */
+    drops: number | null;
   }> {
     const lookbackHours = opts.lookbackHours ?? 24;
+    const capturedAt = (opts.now ?? new Date()).toISOString();
     const rows = await this.sleeper.getTrendingPlayers('add', { lookbackHours, limit: opts.limit ?? 50 });
-    const snapshot = toSnapshot(rows, {
-      capturedAt: (opts.now ?? new Date()).toISOString(),
-      type: 'add',
-      lookbackHours,
-    });
+    const snapshot = toSnapshot(rows, { capturedAt, type: 'add', lookbackHours });
     const captured = await this.trending.save(snapshot);
+
+    /*
+     * The drops list, one more request on the same clock.
+     *
+     * Same shape, same table (`trend_type` is part of the key), same window. It
+     * answers the one question the adds list cannot: is the rest of Sleeper
+     * cutting this free agent today, which usually means news the projections
+     * have not caught up with. Caught on its own, because a failed drop read is
+     * no reason to lose the adds that already landed.
+     */
+    let drops: number | null = null;
+    try {
+      const dropRows = await this.sleeper.getTrendingPlayers('drop', { lookbackHours, limit: opts.limit ?? 50 });
+      drops = await this.trending.save(toSnapshot(dropRows, { capturedAt, type: 'drop', lookbackHours }));
+    } catch {
+      drops = null;
+    }
+
     await this.trending.prune(undefined, opts.now ?? new Date());
-    return { captured, capturedAt: snapshot.capturedAt };
+    return { captured, capturedAt, drops };
   }
 
   /**
