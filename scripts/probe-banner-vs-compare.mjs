@@ -13,9 +13,12 @@
  * least one side with an incomplete market, a gain equal to the difference of
  * the two published figures, and a `score` ordering that points the other way.
  *
- * The compare route is a POST and needs the passphrase, but it ranks on the
- * same `score` the lineup response carries for every rostered player, so this
- * reads both numbers from the public lineup GET. Reads only, GET only.
+ * Fixed in #309: both surfaces now rank on `decisionPoints`, which the lineup
+ * response carries on every evaluation as `decision`. The compare route is a
+ * POST behind the passphrase, but it ranks on that same `decision.points`, so
+ * this reads it from the public lineup GET. A worker older than #309 sends no
+ * `decision`, and this falls back to `score`, the old sheet's number.
+ * Reads only, GET only.
  */
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
@@ -61,7 +64,7 @@ function describe(e) {
     .join(' ');
   return [
     `  ${e.name} (${e.position}, ${e.team}) status=${e.statusFlag ?? 'none'} ruledOut=${e.ruledOut ?? false}`,
-    `    score=${fmt(e.score)}  marketPts=${fmt(e.expectation?.points)}  missingMarkets=[${missing(e).join(', ')}]`,
+    `    score=${fmt(e.score)}  decision=${fmt(e.decision?.points)} (${e.decision?.basis ?? 'none'})  marketPts=${fmt(e.expectation?.points)}  missingMarkets=[${missing(e).join(', ')}]`,
     `    projection=${fmt(e.projection)} source=${e.projectionSource ?? '—'} confidence=${e.confidence}`,
     `    components: ${comps || '(none)'}`,
   ].join('\n');
@@ -77,12 +80,13 @@ for (const s of swaps) {
   console.log(describe(inE));
   if (s.outPlayerId) console.log(describe(outE));
   if (inE && outE) {
-    const scoreSays = (inE.score ?? -Infinity) > (outE.score ?? -Infinity) ? inE.name : outE.name;
+    const sheetPoints = (e) => e.decision?.points ?? e.score ?? -Infinity;
+    const scoreSays = sheetPoints(inE) > sheetPoints(outE) ? inE.name : outE.name;
     const projGap = inE.projection != null && outE.projection != null ? inE.projection - outE.projection : null;
-    const scoreGap = inE.score != null && outE.score != null ? inE.score - outE.score : null;
-    console.log(`    card gain=${s.gain}  projection gap=${fmt(projGap)}  score gap=${fmt(scoreGap)}`);
-    console.log(`    compare (ranks on score) would say: start ${scoreSays}`);
-    if (scoreSays !== inE.name) {
+    const scoreGap = sheetPoints(inE) - sheetPoints(outE);
+    console.log(`    card gain=${s.gain}  projection gap=${fmt(projGap)}  sheet gap=${fmt(scoreGap)}`);
+    console.log(`    compare (ranks on decision points) would say: start ${scoreSays}`);
+    if (scoreSays !== inE.name || Math.abs(scoreGap - s.gain) > 0.01) {
       contradictions += 1;
       console.log('    >>> CONTRADICTION: the card and the Compare sheet disagree on this pair');
     }
