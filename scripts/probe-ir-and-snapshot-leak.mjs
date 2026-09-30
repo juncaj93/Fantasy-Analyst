@@ -72,7 +72,7 @@ if (reserveIds == null) {
   console.log('reserve ids unknown (no waiver snapshot)');
   process.exit(0);
 }
-const rosterInputs = waiverSnapshot.decision.inputs.roster ?? [];
+const rosterInputs = waiverSnapshot.decision.inputs.roster?.inputs ?? [];
 const nameOf = new Map(rosterInputs.map((i) => [i.player?.id, i.player?.fullName]));
 console.log(`reserve slot: ${reserveIds.length === 0 ? '(empty)' : ''}`);
 for (const rid of reserveIds) {
