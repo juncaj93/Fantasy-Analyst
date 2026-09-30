@@ -63,6 +63,7 @@ import { evaluatePlayer } from '../core/startsit/engine.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
 import {
   matchesOwner,
+  resolveOwnerFilter,
   narrowsByOwner,
   ownerTeams,
   parseOwnerFilter,
@@ -2154,7 +2155,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * shown three of them under a total of a hundred, with the next page
      * arriving already filtered to nothing.
      */
-    const filtered = narrowsByOwner(owner) ? byPosition.filter((p) => matchesOwner(p.id, owner, owned)) : byPosition;
+    const resolvedOwner = resolveOwnerFilter(owner, rosters);
+    const filtered = narrowsByOwner(resolvedOwner)
+      ? byPosition.filter((p) => matchesOwner(p.id, resolvedOwner, owned))
+      : byPosition;
 
     /*
      * Scored deep enough to serve this page, then some.

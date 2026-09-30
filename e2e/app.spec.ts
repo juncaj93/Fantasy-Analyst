@@ -1595,10 +1595,14 @@ test.describe('team, ADP import and start/sit', () => {
      * table a screen reader can navigate rather than a pile of divs that looks
      * like one.
      */
-    // The projection has its own card since the 25 September redesign, under the score.
-    await expect(comparison.getByRole('region', { name: 'Projected points' })).toBeVisible();
-    await expect(comparison.getByRole('rowheader', { name: 'Market coverage' })).toBeVisible();
-    await expect(comparison.getByRole('rowheader', { name: 'Vegas market expectation' })).toBeVisible();
+    /*
+     * The flat sheet (30 September 2026): the sportsbooks' prop lines are the
+     * headline section and this app's signals sit under them, both real tables.
+     */
+    await expect(comparison.getByRole('region', { name: 'Vegas props' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Rec yards' })).toBeVisible();
+    await expect(comparison.getByRole('region', { name: 'Our signals' })).toBeVisible();
+    await expect(comparison.getByRole('rowheader', { name: 'Status' })).toBeVisible();
     // And the players are the columns.
     await expect(page.getByTestId('compare-column')).toHaveCount(2);
   });
@@ -1695,22 +1699,22 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(comparison).toContainText('no Vegas data for');
 
     /*
-     * The honest state is a dash and a 0%, not the word "unknown".
+     * The honest state is `no line` in every prop he is priced on, never a
+     * number and never the word "unknown".
      *
-     * This asserted `toContainText('unknown')`, which the old summary table
-     * printed in its Vegas cell. The grid draws `—` there instead, for the
-     * reason the whole 22 September pass exists: a reader cannot tell a bold
-     * `0.00` from a real zero, and "unknown" spelled out in every cell of a
-     * grid is the paragraph of grey caveat text this replaced.
-     *
-     * The assertion is aimed at the two cells that carry the claim rather than
-     * at the card's text, so it cannot be satisfied by the word turning up in a
-     * collapsed disclosure somewhere below — which is what it would have been
-     * doing had it kept passing.
+     * Since the flat sheet (30 September 2026) the sportsbooks' own lines are
+     * the headline section, so the claim lives in his cells there: each market
+     * his position is priced on says no book posted it. The assertion is aimed
+     * at those cells rather than at the card's text, so it cannot be satisfied
+     * by the words turning up in the collapsed breakdown below.
      */
-    const vegas = comparison.locator('tr[data-factor="vegas"] td[data-player-id="1011"]');
-    await expect(vegas.getByTestId('compare-missing')).toBeVisible();
-    await expect(comparison.locator('tr[data-row="coverage"] td[data-player-id="1011"]')).toHaveText('0%');
+    const props = page.getByTestId('compare-props');
+    const cells = props.locator('td[data-player-id="1011"]');
+    expect(await cells.count()).toBeGreaterThan(0);
+    for (const cell of await cells.all()) {
+      await expect(cell).toHaveAttribute('data-prop', /^(missing|na)$/);
+    }
+    await expect(props.locator('td[data-player-id="1011"][data-prop="missing"]').first()).toHaveText('no line');
   });
 });
 

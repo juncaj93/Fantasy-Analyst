@@ -20,6 +20,7 @@ import {
   ownerFilterParam,
   ownerTeams,
   parseOwnerFilter,
+  resolveOwnerFilter,
   rosterOwnership,
 } from '../src/core/roster/ownership.ts';
 
@@ -52,9 +53,26 @@ describe('reading the owner parameter', () => {
    * as a bad question.
    */
   it('falls back to everybody rather than to nothing', () => {
-    for (const nonsense of ['roster-3', '3.5', 'NaN', 'AVAILABLE', 'mine']) {
+    for (const nonsense of ['roster-3', '3.5', 'NaN', 'AVAILABLE', 'MINE']) {
       expect(parseOwnerFilter(nonsense), nonsense).toEqual(ANY_OWNER);
     }
+  });
+
+  /*
+   * `mine` since 30 September 2026: the Compare picker's `My roster` chip. It
+   * is resolved against the roster rows the server already read for the
+   * `Your roster` tag, never matched unresolved.
+   */
+  it('reads mine, and resolves it to the reader\'s own roster', () => {
+    expect(parseOwnerFilter('mine')).toEqual({ kind: 'mine' });
+    const rosters = [
+      { rosterId: 1, isMine: false },
+      { rosterId: 4, isMine: true },
+    ];
+    expect(resolveOwnerFilter({ kind: 'mine' }, rosters)).toEqual({ kind: 'roster', rosterId: 4 });
+    expect(resolveOwnerFilter({ kind: 'mine' }, [{ rosterId: 1, isMine: false }])).toEqual({ kind: 'roster', rosterId: -1 });
+    expect(resolveOwnerFilter({ kind: 'available' }, rosters)).toEqual({ kind: 'available' });
+    expect(matchesOwner('p', { kind: 'mine' }, new Map([['p', 4]]))).toBe(false);
   });
 
   /** Whitespace around a value is a transport artefact, not a different answer. */

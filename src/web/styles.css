@@ -141,6 +141,18 @@
   --paper-teal-tint: #eaf3ef;
   --paper-warn: #b4552f;
   --paper-control: #e9e5d9;
+  /*
+   * The flat sheet (30 September 2026, `reference-mockup-v2.html`). The
+   * mockup's own values, except the faint grey, which reuses `--paper-faint`
+   * because #A39D8B reads 2.6:1 on white.
+   */
+  --paper-bg: #f5f4f0;
+  --paper-hair: #f0eee7;
+  --paper-track: #efede6;
+  --paper-trail: #c9c4b3;
+  --paper-green: #1f7a3b;
+  --paper-red: #b0294a;
+  --paper-blue: #2f62c4;
   --verdict-surface: #14140f;
   --verdict-line: #14140f;
   --verdict-text: #ffffff;
@@ -235,7 +247,6 @@
    * strength is two tokens and not one — and why Team says so on the rule that
    * spends it rather than by inventing a colour of its own.
    */
-
 
   /* -- elevation and focus ---------------------------------------------- */
   /*
@@ -785,6 +796,13 @@
   --paper-teal-tint: #14302a;
   --paper-warn: #f0a27f;
   --paper-control: #262d37;
+  --paper-bg: #151a21;
+  --paper-hair: #262d37;
+  --paper-track: #2a323d;
+  --paper-trail: #566070;
+  --paper-green: #6fd08a;
+  --paper-red: #f28ba3;
+  --paper-blue: #8fb0ff;
   --verdict-surface: #0a0c0f;
   --verdict-line: #2a323d;
   --verdict-text: #ffffff;
@@ -888,6 +906,13 @@
   --paper-teal-tint: #14302a;
   --paper-warn: #f0a27f;
   --paper-control: #262d37;
+  --paper-bg: #151a21;
+  --paper-hair: #262d37;
+  --paper-track: #2a323d;
+  --paper-trail: #566070;
+  --paper-green: #6fd08a;
+  --paper-red: #f28ba3;
+  --paper-blue: #8fb0ff;
   --verdict-surface: #0a0c0f;
   --verdict-line: #2a323d;
   --verdict-text: #ffffff;
@@ -1009,6 +1034,35 @@ body,
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+/*
+ * The scroll edge under the floating toolbar.
+ *
+ * The pill floats, so rows scroll past on either side of it and under it, and
+ * on 30 September 2026 that read as the Waiver section being clipped by the
+ * navigation: half a card and a green pill poking out beside the bar. The
+ * page's own reservation (`--content-inset`) was already right, and the end of
+ * every page clears the bar; what was missing is the fade iOS draws at a
+ * scroll edge, so content passing behind the bar dissolves into the page
+ * instead of being sliced by it. Paint only: no height, no spacer, nothing that
+ * reserves pixels, so it cannot become the strip this file keeps warning about.
+ */
+.app::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--content-inset);
+  pointer-events: none;
+  z-index: 29;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--bg) 0%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 88%, transparent) 55%,
+    var(--bg) 100%
+  );
 }
 
 .app-main {
@@ -2363,6 +2417,27 @@ body,
   border-color: color-mix(in srgb, var(--pos-line, var(--separator)) 40%, transparent);
   background: var(--pos-tint-bg, var(--surface-sunken));
   color: var(--pos-line, var(--text-dim));
+}
+
+/*
+ * The position and the slot he fills, as one label. See `PositionPill`.
+ *
+ * Same width as every pill, so names stay on one column; the slot is a second,
+ * smaller line in the same capsule rather than a chip of its own.
+ */
+.pos-pill.pos-pill-slot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+  padding: 2px 1px;
+}
+
+.pos-pill-slot-name {
+  font-size: 0.48rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
 }
 
 /* The trailing word or date on a list row: what tapping it does, said quietly. */
@@ -6436,6 +6511,47 @@ table.compact tr:last-child td {
 }
 
 /*
+ * A figure for a player who may not play. See `src/web/rowFigure.ts`.
+ *
+ * Out is a dash in the faint colour: there is no week to forecast. A
+ * questionable or doubtful player's figure is the one the start/sit score
+ * charges him, in the caution colour, stacked over the undiscounted figure
+ * struck through, so the discount is on the face of the row rather than only
+ * in a two-letter tag beside it. Colour is never the only signal: the struck
+ * number and the tooltip say it too.
+ */
+.proj-out {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.proj-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  line-height: 1.1;
+}
+
+.proj.proj-risk {
+  color: var(--warn);
+}
+
+.proj-was {
+  font-size: 0.66rem;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  text-decoration-thickness: 1px;
+}
+
+.proj-risk-inline {
+  color: var(--warn);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
  * The trailing field: the row's one value, on its own.
  *
  * This used to hold the club's mark as well, on the argument that a number and
@@ -8450,7 +8566,6 @@ div.matchup-result {
  * selectors are how a stylesheet stops being readable.
  */
 
-
 /* ------------------------------------------------------------- best move */
 /*
  * The one lineup change worth making, between the score and the lineup.
@@ -9717,9 +9832,11 @@ div.matchup-result {
  * The defence line: one tappable row, three parts, and it fits at 360.
  *
  * The identity cluster and the state tag are fixed columns; the sentence
- * between them is the only thing that shrinks, and it truncates rather than
- * wrapping — a two-line defence row on the Team screen would be louder than
- * the lineup slot above it, which is not what a defence is worth. The whole
+ * between them is the only thing that shrinks. It used to truncate to one
+ * line, on the argument that a two-line defence row is louder than it is
+ * worth; the owner read `Stream CLE — MIN cannot be scored...` as the screen
+ * cutting the sentence off (30 September 2026), so it now wraps to two lines
+ * before an ellipsis. The whole
  * thing is a button because the answer is the surface and the reasoning is one
  * tap away; see `components/dst.tsx`.
  */
@@ -9738,9 +9855,10 @@ div.matchup-result {
 .dst-line-text {
   flex: 1 1 auto;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 0.92rem;
   font-weight: 600;
 }
@@ -10257,10 +10375,61 @@ div.matchup-result {
 .lineup-change {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-1) 0;
-  min-height: 28px;
+  min-height: 44px;
+  /* A button since it opens Compare; drawn exactly as the line it was. */
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lineup-change:active {
+  opacity: 0.6;
+}
+
+.lineup-change-chevron {
+  color: var(--text-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+/*
+ * `My roster` in the Compare picker: one toggle under the position filter.
+ *
+ * A 44px target with a pill face, the reader's own list in the accent colour
+ * the Draft queue filter uses for the same idea. The pressed state says so in
+ * a tick as well as a fill, so it never depends on colour alone.
+ */
+.cmp-owner-row {
+  display: flex;
+  margin: var(--sp-1) 0 0;
+}
+
+.owner-chip {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-3);
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--surface);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.owner-chip[aria-pressed='true'] {
+  background: var(--accent-tint, var(--surface-sunken));
+  border-color: var(--accent-text);
 }
 
 /*
@@ -10273,9 +10442,14 @@ div.matchup-result {
  */
 .lineup-change-names {
   min-width: 0;
+  /*
+   * Two lines before an ellipsis. The chevron that marks the line as a way
+   * into Compare costs a few points, and "over Mark And…" was the result.
+   */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 0.94rem;
   letter-spacing: -0.01em;
   color: var(--text-dim);
@@ -10353,18 +10527,22 @@ div.matchup-result {
   --neg: var(--paper-warn);
   --pos: var(--paper-teal);
   --pos-tint: var(--paper-teal-tint);
-  --cmp-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
-  --cmp-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
-  --cmp-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The system face since 30 September 2026: the approved flat mockup uses it. */
+  --cmp-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --cmp-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+  --cmp-mono: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --surface: var(--paper-bg);
 
   font-family: var(--cmp-sans);
 }
 
+/* `Done` as the mockup draws it: a word in the accent colour, still a full tap target. */
 .sheet-compare .sheet-header .btn {
-  background: var(--paper-control);
-  color: var(--paper-ink);
+  background: none;
+  color: var(--paper-blue);
+  font-weight: 500;
   min-height: var(--tap);
-  padding: 0 var(--sp-4);
+  padding: 0 var(--sp-2);
   border-radius: var(--radius-pill);
 }
 
@@ -10390,15 +10568,6 @@ div.matchup-result {
   color: var(--paper-faint);
 }
 
-.cmp-num {
-  font-family: var(--cmp-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.cmp-num-neg {
-  color: var(--paper-warn);
-}
-
 .cmp-eyebrow {
   font-size: 0.72rem;
   font-weight: 600;
@@ -10420,49 +10589,6 @@ div.matchup-result {
 }
 
 /* ------------------------------------------------------------- who */
-
-.cmp-players {
-  list-style: none;
-  margin: var(--sp-1) 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--paper-line);
-  border: 1px solid var(--paper-line);
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-/*
- * Two across, always. A third and fourth player wrap to a second row rather
- * than squeezing four cards into a 360px phone, where the tag and the name
- * both broke mid-word. An odd one out spans the row, so no empty cell shows.
- */
-.cmp-player:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
-
-.cmp-player {
-  background: var(--paper-card);
-  padding: var(--sp-1) var(--sp-1) var(--sp-3) var(--sp-3);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.cmp-player-mine {
-  background: var(--paper-teal-tint);
-}
-
-.cmp-player-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-1);
-  min-height: var(--tap);
-}
 
 .cmp-owner {
   display: inline-flex;
@@ -10511,315 +10637,15 @@ div.matchup-result {
   box-shadow: var(--focus-ring);
 }
 
-.cmp-player-name {
-  font-family: var(--cmp-display);
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--paper-ink);
-  overflow-wrap: break-word;
-}
-
-.cmp-player-meta {
-  font-size: 0.75rem;
-  color: var(--paper-dim);
-  overflow-wrap: break-word;
-}
-
 /* A third and fourth player share the row, so the names come down a size. */
 
 /* ------------------------------------------------------------- the answer */
 
-.cmp-verdict {
-  background: var(--verdict-surface);
-  border: 1px solid var(--verdict-line);
-  border-radius: 16px;
-  padding: var(--sp-4) var(--sp-4) var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  color: var(--verdict-body);
-}
-
-.cmp-verdict-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--verdict-accent);
-}
-
-.cmp-verdict-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.cmp-verdict-score {
-  font-family: var(--cmp-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 2.125rem;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--verdict-text);
-}
-
-.cmp-verdict-name {
-  font-family: var(--cmp-display);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--verdict-text);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.cmp-bars {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.cmp-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  row-gap: 4px;
-  font-size: 0.8rem;
-}
-
-.cmp-bar-name {
-  color: var(--verdict-name);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmp-bar-value {
-  font-family: var(--cmp-mono);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--verdict-muted);
-}
-
-.cmp-bar-value .compare-missing {
-  color: var(--verdict-muted);
-}
-
-.cmp-bars-quiet .cmp-bar-value .compare-missing {
-  color: var(--paper-faint);
-}
-
-.cmp-bar-pick .cmp-bar-name,
-.cmp-bar-pick .cmp-bar-value {
-  color: var(--verdict-text);
-}
-
-.cmp-bar-track {
-  grid-column: 1 / -1;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--verdict-track);
-  overflow: hidden;
-}
-
-.cmp-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--verdict-bar-muted);
-}
-
-.cmp-bar-pick .cmp-bar-fill {
-  background: var(--verdict-bar);
-}
-
-.cmp-verdict-why {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: var(--verdict-body);
-}
-
-.cmp-verdict-why .cmp-num {
-  color: var(--verdict-text);
-  font-weight: 600;
-}
-
-.cmp-verdict-meta {
-  font-size: 0.72rem;
-  color: var(--verdict-muted);
-}
-
-/* The confidence badge keeps its words; on the dark card it drops its fill. */
-.cmp-verdict-meta .badge {
-  background: none;
-  color: var(--verdict-name);
-  padding: 0;
-}
-
 /* ------------------------------------------------------------- the projection */
-
-.cmp-proj-card {
-  background: var(--paper-card);
-  border: 1px solid var(--paper-line);
-  border-radius: 14px;
-  padding: var(--sp-3) var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.cmp-bars-quiet .cmp-bar-name {
-  color: var(--paper-dim);
-}
-
-.cmp-bars-quiet .cmp-bar-value {
-  color: var(--paper-ink);
-  font-weight: 600;
-}
-
-.cmp-bars-quiet .cmp-bar-track {
-  height: 6px;
-  background: var(--paper-line-soft);
-}
-
-.cmp-bars-quiet .cmp-bar-fill {
-  background: var(--paper-line);
-}
 
 /* ------------------------------------------------------------- the working */
 
-.cmp-stats {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-/* Names once, on the same column shares as the tables below them. */
-.cmp-stats-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) repeat(var(--cmp-cols, 2), minmax(0, 1fr));
-  align-items: end;
-  padding: 0 17px;
-}
-
-.cmp-stats-name {
-  text-align: right;
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--paper-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding-left: var(--sp-1);
-}
-
-.cmp-stats-title {
-  padding: var(--sp-1) 2px 0;
-}
-
-.cmp-group {
-  background: var(--paper-card);
-  border: 1px solid var(--paper-line);
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.cmp-group-title {
-  padding: 9px var(--sp-4);
-  background: var(--paper-head);
-  border-bottom: 1px solid var(--paper-line);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--paper-label);
-}
-
-.cmp-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.cmp-label,
-.cmp-cell {
-  padding: 9px 0;
-  border-bottom: 1px solid var(--paper-line-soft);
-  vertical-align: middle;
-}
-
-.cmp-label {
-  padding-left: var(--sp-4);
-  padding-right: var(--sp-1);
-  text-align: left;
-  font-size: 0.78rem;
-  font-weight: 400;
-  line-height: 1.3;
-  color: var(--paper-label);
-}
-
-.cmp-cell {
-  padding-right: var(--sp-4);
-  text-align: right;
-  font-size: 0.82rem;
-  color: var(--paper-ink);
-  white-space: nowrap;
-}
-
-.cmp-cell + .cmp-cell {
-  padding-left: var(--sp-1);
-}
-
-.cmp-table tr:last-child .cmp-label,
-.cmp-table tr:last-child .cmp-cell {
-  border-bottom: none;
-}
-
-.cmp-cell .compare-missing {
-  color: var(--paper-faint);
-}
-
-.cmp-untracked {
-  margin: 0;
-  padding: 2px var(--sp-1);
-  font-size: 0.75rem;
-  font-style: italic;
-  line-height: 1.45;
-  color: var(--paper-faint);
-}
-
 /* ------------------------------------------------------------- the note */
-
-.cmp-insight {
-  display: flex;
-  gap: 9px;
-  padding: var(--sp-3) 14px;
-  background: var(--insight-tint);
-  border: 1px solid var(--insight-line);
-  border-radius: 12px;
-  color: var(--paper-teal);
-}
-
-.cmp-insight svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-
-.cmp-insight p {
-  margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--insight-text);
-}
 
 .cmp-reasons {
   margin: 0;
@@ -10903,9 +10729,347 @@ div.matchup-result {
   text-decoration: none;
 }
 
-
 .compare-provenance {
   margin: var(--sp-1) 2px;
   font-size: 0.72rem;
   line-height: 1.45;
+}
+
+/* ============================================== the flat compare sheet */
+/*
+ * `reference-mockup-v2.html`, approved by the owner on 30 September 2026: white
+ * cards on warm grey, hairlines between rows, one thin bar per player, the
+ * sportsbooks' own lines first and this app's signals under them, one quiet
+ * note. No dark hero card. Every colour is a `--paper-*` token, so Dark is the
+ * same layout with the dark values from the theme blocks.
+ */
+.cmpf {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmpf-card {
+  background: var(--paper-card);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cmpf-ids {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--paper-card);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cmpf-id {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.cmpf-id + .cmpf-id {
+  border-left: 1px solid var(--paper-hair);
+}
+
+.cmpf-id-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cmpf-status-tag {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--paper-dim);
+  background: var(--paper-track);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.cmpf-swap {
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  margin-block: -12px;
+  margin-right: -12px;
+  border: 0;
+  background: none;
+  color: var(--paper-faint);
+  cursor: pointer;
+}
+
+.cmpf-id-name {
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: var(--paper-ink);
+  overflow-wrap: anywhere;
+}
+
+.cmpf-id-meta {
+  font-size: 0.72rem;
+  color: var(--paper-faint);
+}
+
+.cmpf-id .cmp-owner {
+  font-size: 0.66rem;
+}
+
+.cmpf-rec {
+  padding: 13px 16px 14px;
+}
+
+.cmpf-rec-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 9px;
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--paper-green);
+}
+
+.cmpf-rec-label-none {
+  color: var(--paper-dim);
+}
+
+.cmpf-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cmpf-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cmpf-bar-name {
+  flex: 0 0 64px;
+  font-size: 0.78rem;
+  color: var(--paper-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmpf-bar-track {
+  flex: 1;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--paper-track);
+  overflow: hidden;
+}
+
+.cmpf-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--paper-trail);
+}
+
+.cmpf-bar-lead .cmpf-bar-fill {
+  background: var(--paper-green);
+}
+
+.cmpf-bar-value {
+  flex: 0 0 38px;
+  text-align: right;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--paper-faint);
+}
+
+.cmpf-bar-lead .cmpf-bar-value {
+  color: var(--paper-ink);
+}
+
+.cmpf-rec-why {
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--paper-dim);
+}
+
+.cmpf-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.cmpf-eyebrow {
+  padding: 0 14px 3px;
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+}
+
+.cmpf-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cmpf-table tbody,
+.cmpf-table thead {
+  display: block;
+}
+
+.cmpf-row {
+  display: grid;
+  align-items: center;
+  padding: 7px 16px;
+}
+
+.cmpf-table tbody .cmpf-row + .cmpf-row,
+.cmpf-table thead + tbody .cmpf-row:first-child {
+  border-top: 1px solid var(--paper-hair);
+}
+
+.cmpf-row th,
+.cmpf-row td {
+  padding: 0;
+  font-weight: inherit;
+  min-width: 0;
+}
+
+.cmpf-row th[scope='row'] {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--paper-label);
+}
+
+.cmpf-row td {
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--paper-ink);
+}
+
+.cmpf-head {
+  padding-top: 9px;
+  padding-bottom: 5px;
+}
+
+.cmpf-head th[scope='col'] {
+  text-align: right;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmpf-num-strong {
+  font-weight: 600;
+}
+
+.cmpf-na {
+  color: var(--paper-trail);
+}
+
+.cmpf-noline {
+  font-size: 0.7rem;
+  color: var(--paper-faint);
+  font-style: italic;
+}
+
+.cmpf-good {
+  color: var(--paper-green);
+  font-size: 0.76rem;
+}
+
+.cmpf-bad {
+  color: var(--paper-red);
+}
+
+.cmpf-row .cmpf-bad {
+  font-size: 0.76rem;
+}
+
+.cmpf-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.cmpf-sub {
+  font-size: 0.66rem;
+  color: var(--paper-faint);
+}
+
+.cmpf-fine {
+  margin: 0;
+  padding: 5px 14px 0;
+  font-size: 0.69rem;
+  line-height: 1.4;
+  color: var(--paper-faint);
+}
+
+.cmpf-rec .cmpf-fine {
+  padding: 6px 0 0;
+}
+
+.cmpf-italic {
+  font-style: italic;
+}
+
+.cmpf-empty {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 0.78rem;
+  color: var(--paper-dim);
+}
+
+.cmpf-note {
+  display: flex;
+  gap: 9px;
+  padding: 0 2px;
+}
+
+.cmpf-note::before {
+  content: '';
+  flex: 0 0 2.5px;
+  border-radius: 2px;
+  background: var(--paper-blue);
+}
+
+.cmpf-note p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--paper-dim);
+}
+
+.cmpf-details > summary {
+  font-size: 0.75rem;
+  color: var(--paper-faint);
+}
+
+.cmpf-breakdown {
+  margin-top: 10px;
+}
+
+.cmpf-breakdown-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--paper-ink);
 }

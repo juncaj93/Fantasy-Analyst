@@ -33,6 +33,16 @@
 export type OwnerFilter =
   | { kind: 'anyone' }
   | { kind: 'available' }
+  /**
+   * The reader's own roster, before anybody has looked up its id.
+   *
+   * The Compare picker's `My roster` chip (30 September 2026). The picker knows
+   * whose roster is "mine" only as a tag on each row, and the server already
+   * reads the same roster rows to write that tag, so it resolves this to a
+   * roster id there rather than the screen making a second lookup for it. See
+   * {@link resolveOwnerFilter}.
+   */
+  | { kind: 'mine' }
   | { kind: 'roster'; rosterId: number };
 
 /** The unfiltered list, which is what every screen opens on. */
@@ -40,6 +50,8 @@ export const ANY_OWNER: OwnerFilter = { kind: 'anyone' };
 
 /** The wire word for "unrostered". A roster is named by its own id. */
 export const AVAILABLE_OWNER = 'available';
+
+export const MINE_OWNER = 'mine';
 
 /**
  * The word a *control* uses for the unfiltered state.
@@ -86,6 +98,7 @@ export function parseOwnerFilter(raw: string | null | undefined): OwnerFilter {
   const value = (raw ?? '').trim();
   if (value === '' || value === ANYONE_OWNER) return ANY_OWNER;
   if (value === AVAILABLE_OWNER) return { kind: 'available' };
+  if (value === MINE_OWNER) return { kind: 'mine' };
   const rosterId = Number(value);
   if (!Number.isInteger(rosterId)) return ANY_OWNER;
   return { kind: 'roster', rosterId };
@@ -95,6 +108,7 @@ export function parseOwnerFilter(raw: string | null | undefined): OwnerFilter {
 export function ownerFilterParam(filter: OwnerFilter): string {
   if (filter.kind === 'anyone') return '';
   if (filter.kind === 'available') return AVAILABLE_OWNER;
+  if (filter.kind === 'mine') return MINE_OWNER;
   return String(filter.rosterId);
 }
 
@@ -120,11 +134,25 @@ export function rosterOwnership(rosters: readonly RosterHolding[]): Map<string, 
   return owned;
 }
 
+/**
+ * `mine`, turned into the roster it means, from the rows the caller already read.
+ *
+ * A league with no roster marked as the reader's resolves to a roster id no
+ * roster has, so the list is honestly empty rather than quietly everybody.
+ */
+export function resolveOwnerFilter(filter: OwnerFilter, rosters: readonly { rosterId: number; isMine: boolean }[]): OwnerFilter {
+  if (filter.kind !== 'mine') return filter;
+  const mine = rosters.find((r) => r.isMine);
+  return { kind: 'roster', rosterId: mine ? mine.rosterId : -1 };
+}
+
 /** Does this player survive the filter? */
 export function matchesOwner(playerId: string, filter: OwnerFilter, owned: Map<string, number>): boolean {
   if (filter.kind === 'anyone') return true;
   const holder = owned.get(playerId);
   if (filter.kind === 'available') return holder === undefined;
+  /* Unresolved `mine` has no roster to match; resolve it first. */
+  if (filter.kind === 'mine') return false;
   return holder === filter.rosterId;
 }
 

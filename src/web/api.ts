@@ -1249,6 +1249,13 @@ export interface StartSitEvaluation {
   tdDependency?: { profile: string; share: number | null; touchdowns: number; scoringGames: number; games: number; display: string };
   gameScript?: { points: number; impliedTeamTotal: number | null; favoured: boolean | null; display: string; unknown: boolean };
   weather?: { points: number; unknown: boolean; indoor: boolean; display: string };
+  /**
+   * The number a decision between players is made on, and what it was built
+   * from: the same one the Team card's suggestion and the Compare sheet rank
+   * on. Absent from workers before 30 September 2026. See
+   * `core/startsit/decisionPoints.ts`.
+   */
+  decision?: { points: number; basis: 'market' | 'published' | 'partial' | 'unpriced'; base: number; adjustments: number } | null;
   matchup?: { points: number; unknown: boolean; rating: string; sample: number; display: string };
   availability?: { state: string; label: string; detail: string | null; risky: boolean };
   /** The two to four things that decided it, biggest first. */

@@ -506,10 +506,19 @@ export function PositionBadge({ position, team }: { position: string | null; tea
  * the shrink-and-truncate behaviour that stops a long name pushing anything off
  * the row — putting it inside a `flex: none` cluster would take that away.
  */
-export function PlayerIdentity({ position, team }: { position: string | null; team?: string | null }) {
+export function PlayerIdentity({
+  position,
+  team,
+  slot,
+}: {
+  position: string | null;
+  team?: string | null;
+  /** The lineup slot he fills, only where it differs from his position. See {@link PositionPill}. */
+  slot?: string | null;
+}) {
   return (
     <span className="player-identity">
-      <PositionPill position={position} />
+      <PositionPill position={position} slot={slot ?? null} />
       {team === undefined ? null : <TeamLogo team={team} />}
     </span>
   );
@@ -532,14 +541,52 @@ export function PlayerIdentity({ position, team }: { position: string | null; te
  * mark followed the pill it would have started them on two as well. The box is
  * now the column and the letters are centred in it.
  */
-export function PositionPill({ position }: { position: string | null }) {
+export function PositionPill({ position, slot = null }: { position: string | null; slot?: string | null }) {
   const pos = (position ?? '').toUpperCase();
   const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
+  const cls = known ? `pos-pill pos-${pos}` : 'pos-pill';
+  /*
+   * A player filling a slot that is not his position: one label, two lines.
+   *
+   * A tight end at FLEX used to carry a `TE` pill here and a separate grey
+   * `FLEX` chip after his name, which read as the row labelling one slot
+   * twice (reported 30 September 2026). The slot now sits under the position
+   * inside the same pill, so the column stays one width and every name still
+   * starts on the same x.
+   */
+  if (slot && slot.toUpperCase() !== pos) {
+    const label = slotShortLabel(slot);
+    return (
+      <span
+        className={`${cls} pos-pill-slot`}
+        data-position={pos || 'UNKNOWN'}
+        data-slot={slot.toUpperCase()}
+        data-testid="slot-pill"
+        title={`${pos || 'Player'} starting at ${slot.toUpperCase()}`}
+        aria-label={`${pos || 'Player'} at ${slot.toUpperCase()}`}
+      >
+        <span aria-hidden="true">{pos || '—'}</span>
+        <span className="pos-pill-slot-name" aria-hidden="true">
+          {label}
+        </span>
+      </span>
+    );
+  }
   return (
-    <span className={known ? `pos-pill pos-${pos}` : 'pos-pill'} data-position={pos || 'UNKNOWN'}>
+    <span className={cls} data-position={pos || 'UNKNOWN'}>
       {pos || '—'}
     </span>
   );
+}
+
+/** A slot's name, short enough for the pill: `SUPER_FLEX` is `SFLX`. */
+function slotShortLabel(slot: string): string {
+  const s = slot.toUpperCase();
+  if (s === 'FLEX') return 'FLEX';
+  if (s === 'SUPER_FLEX') return 'SFLX';
+  if (s === 'REC_FLEX') return 'RFLX';
+  if (s === 'WRRB_FLEX') return 'W/R';
+  return s.slice(0, 4);
 }
 
 /** The positions the palette has a hue for. Anything else stays neutral. */

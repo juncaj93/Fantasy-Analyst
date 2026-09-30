@@ -44,12 +44,12 @@ import {
   Notice,
   PlayerIdentity,
   PositionBadge,
+  PositionPill,
   TeamLogo,
   positionAccentClass,
 } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import {
-  AlertCircleIcon,
   CheckIcon,
   CompareIcon,
   DisclosureChevronIcon,
@@ -57,7 +57,20 @@ import {
   StarIcon,
   SwapIcon,
 } from '../components/icons.tsx';
-import { barWidths, explainGap, layoutFactors, shortName } from '../compareLayout.ts';
+import {
+  barWidths,
+  explainGap,
+  gapSentence,
+  layoutFactors,
+  matchupCell,
+  plain,
+  propRows,
+  shortName,
+  signed,
+  splitStatus,
+  standoutNote,
+} from '../compareLayout.ts';
+import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
@@ -71,10 +84,10 @@ import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCar
 import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
-import { Estimated } from '../components/estimate.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
+import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 
 interface OpenSlot {
   slot: string;
@@ -578,7 +591,9 @@ export function TeamScreen({
                 cards of equal weight at the top has no primary
                 recommendation at all.
               */}
-              {!roster.live && lineup?.found ? <LineupCard lineup={lineup} /> : null}
+              {!roster.live && lineup?.found ? (
+                <LineupCard lineup={lineup} onOpen={(slot, seed) => setCompare({ slot, seed })} />
+              ) : null}
 
               {hasRecommendation && !roster.live ? (
                 <>
@@ -625,6 +640,13 @@ export function TeamScreen({
                        * same way the projection beside it is, so the chip and
                        * the number are always about the same man.
                        */
+                      subjectEvaluation={(() => {
+                        const id = verdictSubjectId(row);
+                        return id ? (evaluations.get(id) ?? null) : null;
+                      })()}
+                      recommendedEvaluation={
+                        row.recommendedPlayerId ? (evaluations.get(row.recommendedPlayerId) ?? null) : null
+                      }
                       fixture={(() => {
                         const id = verdictSubjectId(row);
                         return id ? (evaluations.get(id)?.fixture ?? null) : null;
@@ -697,6 +719,7 @@ export function TeamScreen({
                     source: evaluations.get(playerId)?.projectionSource ?? null,
                   })}
                   fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
+                  evaluationOf={(playerId) => evaluations.get(playerId) ?? null}
                   summary={benchSummary}
                   onOpen={(playerId) => openPlayer(playerId, { starting: false })}
                 />
@@ -762,6 +785,7 @@ export function TeamScreen({
           seed={compare.seed}
           nameOf={(id) => byId.get(id)?.name ?? id}
           ownedByMe={(id) => byId.has(id)}
+          mode={lineup?.found ? (lineup.mode ?? null) : null}
           onClose={() => setCompare(null)}
         />
       ) : null}
@@ -865,6 +889,8 @@ function VerdictCard({
   current,
   recommended,
   currentProjection,
+  subjectEvaluation,
+  recommendedEvaluation,
   fixture,
   onOpen,
 }: {
@@ -881,6 +907,10 @@ function VerdictCard({
    * row that could print Rotowire's model as this app's.
    */
   currentProjection: { points: number | null; source: RowProjectionSource };
+  /** The row subject's evaluation, for whether he can play; see `rowFigure`. */
+  subjectEvaluation: RowFigureEvaluation | null;
+  /** The challenger's, for the same rule on the verdict line. */
+  recommendedEvaluation: RowFigureEvaluation | null;
   /** The row subject's fixture, resolved by the caller from the same map. */
   fixture: SlotFixture | null;
   onOpen: () => void;
@@ -948,6 +978,8 @@ function VerdictCard({
    * suppressing on the presence of a number alone would reintroduce it.
    */
   const denialBesideAFigure = (blocked?.kind ?? 'unscorable') === 'unscorable' && shown.points != null;
+  const figure = rowFigure(shown.points, subjectEvaluation);
+  const challenger = rowFigure(row.projection, recommendedEvaluation);
 
   if (!subject) {
     /*
@@ -1065,7 +1097,7 @@ function VerdictCard({
         (row.verdict === 'no_pick' && !denialBesideAFigure
           ? `, ${blocked?.reason ?? 'cannot be scored this week'}`
           : '') +
-        spokenProjection(shown.points, shown.source) +
+        spokenRowFigure(figure, (points) => spokenProjection(points, shown.source)) +
         (row.locked ? ', locked' : '') +
         (subject.status ? `, ${subject.status}` : '')
       }
@@ -1083,22 +1115,22 @@ function VerdictCard({
           not even shift them by the same amount — the column goes ragged, which
           is what `e2e/row-alignment.spec.ts` exists to catch and did.
         */}
-        <PlayerIdentity position={position} team={subject.team ?? ''} />
+        <PlayerIdentity
+          position={position}
+          team={subject.team ?? ''}
+          slot={position && position.toUpperCase() !== row.slot.toUpperCase() ? row.slot : null}
+        />
         <span className="player-name">{subject.name}</span>
         <InjuryTag status={subject.status} />
         {/*
-          The tags about the *slot*, after the name, for the reason above.
+          The tags about the week, after the name.
 
-          The slot is named only where the pill has not already said it: a back
-          in an RB spot would be the row saying `RB` twice, and a back in a FLEX
-          spot is the one case where the slot carries something the pill cannot.
+          The slot is not one of them any more. A back in a FLEX spot used to
+          carry a grey `FLEX` chip here beside his `RB` pill, which read as the
+          row naming one slot twice; the slot now sits inside the pill, under
+          the position (see `PositionPill`).
         */}
         <span className="row-tags">
-          {position && position.toUpperCase() !== row.slot.toUpperCase() ? (
-            <span className="tag tag-calm tag-mini" data-testid="slot-tag" title={`Starting at ${row.slot}`}>
-              {row.slot}
-            </span>
-          ) : null}
           {row.locked ? (
             <span className="tag tag-calm tag-mini" data-testid="locked-tag">
               Locked
@@ -1120,14 +1152,7 @@ function VerdictCard({
             where it reads as part of the proposal rather than as a correction
             to the figure above it.
           */}
-          <span
-            className="proj"
-            data-testid="starter-proj"
-            data-projection-source={shown.source ?? 'none'}
-            title={projectionTitle(shown.points, shown.source)}
-          >
-            {shown.points == null ? '—' : shown.points.toFixed(1)}
-          </span>
+          <RowFigureValue figure={figure} source={shown.source} testId="starter-proj" />
         </span>
       </div>
       {/*
@@ -1141,7 +1166,15 @@ function VerdictCard({
         <div className="verdict-line" data-testid="verdict-swap">
           <span className="verdict-arrow" aria-hidden="true">→</span> Start{' '}
           <span className="verdict-name">{row.recommendedName}</span> instead
-          {row.projection != null ? <span className="faint"> · {row.projection.toFixed(1)}</span> : null}
+          {challenger.kind === 'plain' ? <span className="faint"> · {challenger.points.toFixed(1)}</span> : null}
+          {challenger.kind === 'risk' ? (
+            <span className="faint">
+              {' · '}
+              <span className="proj-risk-inline" data-testid="verdict-risk" title={riskTitle(challenger)}>
+                {challenger.points.toFixed(1)} {injuryCode(challenger.label)}
+              </span>
+            </span>
+          ) : null}
         </div>
       ) : null}
       {row.verdict === 'fill' ? (
@@ -1172,6 +1205,81 @@ function VerdictCard({
         </div>
       ) : null}
     </button>
+  );
+}
+
+/** `Questionable` → `Q`, for the one place a figure carries its reason inline. */
+function injuryCode(label: string): string {
+  const word = label.trim().toLowerCase();
+  if (word.startsWith('doubt')) return 'D';
+  if (word.startsWith('question')) return 'Q';
+  return label.slice(0, 1).toUpperCase();
+}
+
+function riskTitle(figure: Extract<RowFigure, { kind: 'risk' }>): string {
+  return (
+    `${figure.points.toFixed(1)} after the ${figure.label.toLowerCase()} discount the start/sit score applies ` +
+    `(${figure.charge.toFixed(1)}). ${figure.was.toFixed(1)} if he plays.`
+  );
+}
+
+/**
+ * The trailing figure on a Team row, for a player who may not play.
+ *
+ * See `rowFigure.ts`. Out is a dash, never a forecast; questionable is the
+ * discounted figure in the caution colour over the struck-through one it came
+ * from; everybody else is the plain projection with its source, as before.
+ */
+function RowFigureValue({
+  figure,
+  source,
+  testId,
+}: {
+  figure: RowFigure;
+  source: RowProjectionSource;
+  testId: string;
+}) {
+  if (figure.kind === 'out') {
+    return (
+      <span
+        className="proj proj-out"
+        data-testid={testId}
+        data-figure="out"
+        data-projection-source={source ?? 'none'}
+        title={`${figure.label}: no projection shown` + (figure.was != null ? ` (${figure.was.toFixed(1)} if he played)` : '')}
+      >
+        —
+      </span>
+    );
+  }
+  if (figure.kind === 'risk') {
+    return (
+      <span className="proj-stack" data-figure="risk">
+        <span
+          className="proj proj-risk"
+          data-testid={testId}
+          data-projection-source={source ?? 'none'}
+          title={riskTitle(figure)}
+        >
+          {figure.points.toFixed(1)}
+        </span>
+        <s className="proj-was" data-testid={`${testId}-was`} aria-hidden="true">
+          {figure.was.toFixed(1)}
+        </s>
+      </span>
+    );
+  }
+  const points = figure.kind === 'plain' ? figure.points : null;
+  return (
+    <span
+      className="proj"
+      data-testid={testId}
+      data-figure={figure.kind}
+      data-projection-source={source ?? 'none'}
+      title={projectionTitle(points, source)}
+    >
+      {points == null ? '—' : points.toFixed(1)}
+    </span>
   );
 }
 
@@ -1229,9 +1337,12 @@ function BenchCard({
   fixture,
   projection,
   projectionSource,
+  evaluation,
   onOpen,
 }: {
   player: RosterPlayer;
+  /** His evaluation, for whether he can play; see `rowFigure`. */
+  evaluation: RowFigureEvaluation | null;
   /** His fixture, resolved by the caller from the evaluation map. */
   fixture: SlotFixture | null;
   /** The weekly projection, never the ranking score — see `StarterCard`. */
@@ -1241,6 +1352,7 @@ function BenchCard({
   onOpen: () => void;
 }) {
   const position = player.position ?? '';
+  const figure = rowFigure(projection, evaluation);
   return (
     <button
       className="player-row bench-row"
@@ -1250,7 +1362,7 @@ function BenchCard({
       data-player-id={player.playerId}
       aria-label={
         `${player.name}${position ? `, ${position}` : ''}, on your bench` +
-        spokenProjection(projection, projectionSource) +
+        spokenRowFigure(figure, (points) => spokenProjection(points, projectionSource)) +
         `${player.status ? `, ${player.status}` : ''}`
       }
       onClick={onOpen}
@@ -1293,14 +1405,7 @@ function BenchCard({
 
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
-          <span
-            className="proj"
-            data-testid="bench-proj"
-            data-projection-source={projectionSource ?? 'none'}
-            title={projectionTitle(projection, projectionSource)}
-          >
-            {projection == null ? '—' : projection.toFixed(1)}
-          </span>
+          <RowFigureValue figure={figure} source={projectionSource} testId="bench-proj" />
         </span>
       </div>
     </button>
@@ -1325,6 +1430,7 @@ function BenchSection({
   players,
   projectionOf,
   fixtureOf,
+  evaluationOf,
   summary,
   onOpen,
 }: {
@@ -1338,6 +1444,7 @@ function BenchSection({
    */
   projectionOf: (playerId: string) => { points: number | null; source: RowProjectionSource };
   fixtureOf: (playerId: string) => SlotFixture | null;
+  evaluationOf: (playerId: string) => RowFigureEvaluation | null;
   /** `1 strong alternative` / `No better option`, or nothing worth saying. */
   summary: string | null;
   onOpen: (playerId: string) => void;
@@ -1369,6 +1476,7 @@ function BenchSection({
               fixture={fixtureOf(p.playerId)}
               projection={projectionOf(p.playerId).points}
               projectionSource={projectionOf(p.playerId).source}
+              evaluation={evaluationOf(p.playerId)}
               onOpen={() => onOpen(p.playerId)}
             />
           ))}
@@ -1527,10 +1635,19 @@ function CompareSheet({
   seed,
   nameOf,
   ownedByMe,
+  mode,
   onClose,
 }: {
   leagueId: string;
   rosterPositions: string[];
+  /**
+   * The posture the Team screen's lineup was computed under.
+   *
+   * Sent with the comparison so a suggestion made in Ceiling is checked in
+   * Ceiling: the sheet used to run Balanced whatever the card had used, which
+   * is a second way for the two to disagree. Null lets the server default.
+   */
+  mode: string | null;
   /** The slot this was launched from, or null when launched from the header. */
   slot: string | null;
   seed: string[];
@@ -1540,6 +1657,15 @@ function CompareSheet({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
+  /*
+   * Only the reader's own players, when asked.
+   *
+   * Beside the position filter rather than inside it, because it is a
+   * different question: "which of my guys" can be asked of any position. The
+   * server narrows on the same roster rows it writes each row's `Your roster`
+   * tag from, before the page is cut; see `resolveOwnerFilter`.
+   */
+  const [mineOnly, setMineOnly] = useState(false);
   const [position, setPosition] = useState(() => {
     // Launched from a slot that takes exactly one position, the picker starts
     // narrowed to it; from a flex slot, to the flex view. Both are a starting
@@ -1576,8 +1702,6 @@ function CompareSheet({
   const [swapping, setSwapping] = useState<string | null>(null);
   const search = useRef<HTMLDivElement | null>(null);
 
-  useComparisonFonts();
-
   useEffect(() => {
     setOwners((current) => {
       let next = current;
@@ -1605,8 +1729,9 @@ function CompareSheet({
       setLoading(true);
       try {
         const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
+        const owner = mineOnly ? '&owner=mine' : '';
         const res = await api.get<{ players: PickerPlayer[] }>(
-          `/api/players?q=${encodeURIComponent(query)}&leagueId=${encodeURIComponent(leagueId)}${filter}&limit=${PICKER_ROWS}`,
+          `/api/players?q=${encodeURIComponent(query)}&leagueId=${encodeURIComponent(leagueId)}${filter}${owner}&limit=${PICKER_ROWS}`,
         );
         if (!cancelled) setResults(res.players);
       } catch {
@@ -1619,7 +1744,7 @@ function CompareSheet({
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, position, leagueId]);
+  }, [query, position, leagueId, mineOnly]);
 
   /**
    * Add or remove one player.
@@ -1697,6 +1822,7 @@ function CompareSheet({
           leagueId,
           playerIds,
           slot,
+          ...(mode ? { mode } : {}),
         }),
       );
     } catch (err) {
@@ -1808,6 +1934,18 @@ function CompareSheet({
         }))}
       />
 
+      <div className="cmp-owner-row">
+        <button
+          type="button"
+          className="owner-chip"
+          data-testid="compare-mine-filter"
+          aria-pressed={mineOnly}
+          onClick={() => setMineOnly((on) => !on)}
+        >
+          {mineOnly ? '✓ ' : ''}My roster
+        </button>
+      </div>
+
       {error ? <Notice tone="warn">{error}</Notice> : null}
 
       {swapping ? null : (
@@ -1826,7 +1964,7 @@ function CompareSheet({
       {loading && results.length === 0 ? (
         <SkeletonRows rows={5} testId="compare-skeleton" />
       ) : results.length === 0 ? (
-        <Empty>Nobody matching that search.</Empty>
+        <Empty>{mineOnly ? 'Nobody on your roster matches that.' : 'Nobody matching that search.'}</Empty>
       ) : (
         <div role="list" aria-label={swapping ? 'Players to swap in' : 'Players to compare'}>
           {results.map((p) => {
@@ -1889,31 +2027,6 @@ function CompareSheet({
       {picker}
     </Sheet>
   );
-}
-
-/**
- * The compare sheet's three faces, loaded when the sheet first opens.
- *
- * Space Grotesk for headings, IBM Plex Sans for text and IBM Plex Mono for
- * every number, as approved in the redesign mockup. Requested here rather
- * than in the page head so the rest of the app pays nothing for them: one
- * stylesheet link, added once, the first time anybody compares. `swap` means
- * the sheet draws immediately in the system face and changes face when the
- * files arrive, so an offline phone just keeps the system face.
- */
-const COMPARISON_FONTS =
-  'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap';
-
-function useComparisonFonts() {
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (document.querySelector('link[data-fonts="comparison"]')) return;
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = COMPARISON_FONTS;
-    link.dataset.fonts = 'comparison';
-    document.head.appendChild(link);
-  }, []);
 }
 
 interface PickerPlayer {
@@ -1979,7 +2092,14 @@ function LineupSourcing({ lineup }: { lineup: LineupRecommendation }) {
   );
 }
 
-function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
+function LineupCard({
+  lineup,
+  onOpen,
+}: {
+  lineup: LineupRecommendation;
+  /** Open the Compare sheet on this change's players, in its slot. */
+  onOpen: (slot: string, seed: string[]) => void;
+}) {
   /*
    * The change worth making, and everything else.
    *
@@ -1997,8 +2117,8 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
   const [fill = null] = lineup.fills ?? [];
   const change =
     fill != null && (best == null || fill.gain >= best.gain)
-      ? { ...fill, tail: `at ${fill.slot}, empty in Sleeper`, testId: 'lineup-fill' }
-      : best && { ...best, tail: `over ${best.outName}`, testId: 'lineup-swap' };
+      ? { ...fill, tail: `at ${fill.slot}, empty in Sleeper`, testId: 'lineup-fill', seed: [fill.inPlayerId] }
+      : best && { ...best, tail: `over ${best.outName}`, testId: 'lineup-swap', seed: [best.outPlayerId, best.inPlayerId] };
   const risks = lineup.lateSwapRisks ?? [];
   const material = risks.filter((r) => r.starting);
 
@@ -2032,15 +2152,32 @@ function LineupCard({ lineup }: { lineup: LineupRecommendation }) {
          * actually actionable. The full recommended lineup is that list of rows.
          * Repeating both above them was the card competing with the screen.
          */
-        <div className="lineup-change" data-testid={change.testId}>
+        /*
+         * And one tap from its reasoning (30 September 2026).
+         *
+         * The same Compare sheet a swap row opens, on the same two players in
+         * the same slot. Since both rank on `decisionPoints` it cannot argue
+         * with the sentence that opened it.
+         */
+        <button
+          type="button"
+          className="lineup-change"
+          data-testid={change.testId}
+          data-seed={change.seed.join(',')}
+          aria-label={`Start ${change.inName} ${change.tail}, plus ${change.gain} at ${change.slot}. Compare them.`}
+          onClick={() => onOpen(change.slot, change.seed)}
+        >
           <span className="lineup-change-names">
             Start <strong>{change.inName}</strong> {change.tail}
           </span>
           <span className="lineup-change-meta">
             <span className="lineup-change-gain">+{change.gain}</span>
             <span className="lineup-change-slot">{change.slot}</span>
+            <span className="lineup-change-chevron" aria-hidden="true">
+              ›
+            </span>
           </span>
-        </div>
+        </button>
       )}
 
       {/*
@@ -2146,7 +2283,14 @@ function ComparisonCard({
    * a question nobody asked.
    */
   const comparable = comparison.slot?.comparable ?? true;
-  const ranked = [...comparison.evaluations].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
+  /*
+   * The number the verdict was made on, per player: `decisionPoints` where the
+   * server sent it (every worker since 30 September 2026), `score` from an
+   * older cached answer. The bars and the order read the same number the
+   * recommendation did, so the sheet cannot rank one way and draw another.
+   */
+  const pointsOf = (e: StartSitEvaluation): number | null => e.decision?.points ?? e.score;
+  const ranked = [...comparison.evaluations].sort((a, b) => (pointsOf(b) ?? -Infinity) - (pointsOf(a) ?? -Infinity));
   /*
    * Column order is the ranking when there is one, and the reader's own order
    * when there is not: the eye starts at the first column, and the recommended
@@ -2154,164 +2298,173 @@ function ComparisonCard({
    */
   const columns = comparable ? ranked : comparison.evaluations;
   const pick = comparable && winner ? winner : null;
-  const runnerUp = pick ? ranked.find((e) => e.playerId !== pick.playerId && e.score != null) ?? null : null;
+  const runnerUp = pick ? (ranked.find((e) => e.playerId !== pick.playerId && pointsOf(e) != null) ?? null) : null;
 
-  const { groups, untracked } = layoutFactors(columns);
-  const componentOf = (e: StartSitEvaluation, key: string) => e.components.find((c) => c.key === key) ?? null;
-
-  const scoreBars = barWidths(columns.map((e) => e.score));
-  const projectionBars = barWidths(columns.map((e) => e.projection ?? null));
+  const bars = barWidths(columns.map((e) => pointsOf(e)));
   const gap = pick && runnerUp ? explainGap(pick, runnerUp) : null;
+  const sentence =
+    pick && runnerUp && comparison.margin != null
+      ? gapSentence({
+          leader: pick,
+          runnerUp,
+          margin: comparison.margin,
+          drivers: gap?.drivers ?? [],
+          projectionShortfall: gap?.projectionShortfall ?? null,
+        })
+      : null;
+
+  const props = propRows(columns);
+  const cols = columns.length;
+  const grid = { gridTemplateColumns: `minmax(0, 1.3fr) repeat(${cols}, minmax(0, 1fr))` };
 
   /*
-   * The closing note is the engine's own sentence about market coverage,
-   * written by `assessMarketComparability` — the "Market coverage differs"
-   * line this app already prints. Pulled out of `reasons` and `warnings` so it
-   * is said once, in the callout, rather than twice.
+   * Our signals: four rows, in the mockup's order, each read off a field the
+   * engine already filled. Weather is drawn only when a game is indoors, the
+   * one weather fact this app has; there is no forecast source connected (see
+   * `StartSitRefreshService.weatherStatus`), so an outdoor game has nothing to
+   * say and the row would be a line of dashes pretending to be a reading.
    */
+  const componentOf = (e: StartSitEvaluation, key: string) => e.components.find((c) => c.key === key) ?? null;
+  const anyIndoor = columns.some((e) => e.weather?.indoor);
+  /*
+   * A signal nobody here has a reading for is a word in the closing line, not
+   * a row of dashes: the same rule the factor tables kept since 22 September.
+   */
+  const anyUsage = columns.some((e) => {
+    const c = componentOf(e, 'usage_level');
+    return c != null && !c.unknown;
+  });
+  const anyFixture = columns.some((e) => e.fixture != null);
+  const shownKeys = new Set(['vegas', 'uncertainty', 'status', 'usage_level', 'matchup_role', 'weather']);
+  const { untracked } = layoutFactors(columns);
+  const notTracked = [
+    ...untracked.filter((f) => !shownKeys.has(f.key)).map((f) => f.label.toLowerCase()),
+    ...(anyUsage ? [] : ['opportunity']),
+    ...(anyFixture ? [] : ['matchup']),
+    ...(anyIndoor ? [] : ['weather forecasts']),
+  ];
+
+  const statusOf = (e: StartSitEvaluation) => splitStatus(e.statusFlag);
   const insight = comparison.comparability?.detail ?? null;
-  const warnings = comparison.warnings.filter((w) => w !== insight);
-  const reasons = comparison.reasons.filter((r) => r !== insight);
-
-  const cols = columns.length;
-  /* The label column takes 1.3 shares and each player one, as in the approved mockup. */
-  const labelShare = `${((1.3 / (1.3 + cols)) * 100).toFixed(2)}%`;
-  const playerShare = `${((1 / (1.3 + cols)) * 100).toFixed(2)}%`;
-
-  const showLateSwap =
-    comparison.lateSwap != null && comparison.lateSwap.verdict !== 'no_risk' && comparison.lateSwap.verdict !== 'unknown';
-  const moving = comparison.evaluations.filter((e) => e.movement?.headline);
-  const locked = comparison.evaluations.filter((e) => e.lock?.locked);
-
-  const valueTone = (value: number) => (value < 0 ? 'cmp-num cmp-num-neg' : 'cmp-num');
+  const note = standoutNote({
+    players: columns.map((e) => ({ name: e.name, statusWord: statusOf(e)?.word ?? null, locked: e.lock?.locked ?? false })),
+    lateSwap: comparison.lateSwap ?? null,
+    coverageNote: insight,
+  });
+  /*
+   * Warnings the sections below already say are not said twice: a status is
+   * its own row, the coverage note may be the closing note, and a locked game
+   * is the closing note when there is one.
+   */
+  const warnings = comparison.warnings.filter(
+    (w) => w !== insight && w !== note && !/ is listed /.test(w) && !/already kicked off/.test(w),
+  );
+  const source = [
+    comparison.dataFreshness?.provider ?? 'no odds provider',
+    comparison.dataFreshness?.fetchedAt ? `updated ${formatAge(comparison.dataFreshness.fetchedAt)}` : null,
+    `${comparison.confidence} confidence`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
-    <div
-      className="cmp"
-      data-testid="comparison"
-      data-columns={cols}
-      style={{ ['--cmp-cols' as string]: String(cols) }}
-    >
-      {/* 1. Who. */}
-      <ul className="cmp-players" aria-label="Players in this comparison">
+    <div className="cmp cmpf" data-testid="comparison" data-columns={cols}>
+      {/* 1. Who: position and status, name, club and fixture. */}
+      <ul className="cmpf-ids" aria-label="Players in this comparison" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {columns.map((e) => {
-          const owner = availability[e.playerId];
+          const status = statusOf(e);
+          const code = injuryStatusTag(e.statusFlag);
+          const matchup = matchupCell(e.fixture ?? null);
           return (
             <li
               key={e.playerId}
-              className={owner === 'mine' ? 'cmp-player cmp-player-mine' : 'cmp-player'}
+              className="cmpf-id"
               data-testid="compare-column"
               data-player-id={e.playerId}
               data-pick={pick?.playerId === e.playerId ? 'true' : 'false'}
             >
-              <div className="cmp-player-top">
-                <OwnerTag owner={owner} />
+              <div className="cmpf-id-top">
+                <PositionPill position={e.position} />
+                {code ? (
+                  <span className="cmpf-status-tag" title={status?.word ?? e.statusFlag ?? ''}>
+                    {code.code}
+                  </span>
+                ) : null}
                 <button
                   type="button"
-                  className="cmp-swap"
+                  className="cmpf-swap"
                   data-testid="compare-swap"
                   data-player-id={e.playerId}
                   aria-label={`Swap ${e.name} for another player`}
                   onClick={() => onSwap(e.playerId)}
                 >
-                  <SwapIcon size={16} />
+                  <SwapIcon size={15} />
                 </button>
               </div>
-              <div className="cmp-player-name">{e.name}</div>
+              <div className="cmpf-id-name">{e.name}</div>
               {/*
-                Position, club and fixture, from the label `fixtureOf` already
-                wrote. Not re-derived from `opponent` and `home` here: `vs` and
-                `@` have been swapped once in this codebase by exactly that
-                second derivation.
+                Club and fixture from the label `fixtureOf` already wrote, and
+                the matchup word the Team row's chip prints. Not re-derived from
+                `opponent` and `home`: `vs` and `@` were swapped once in this
+                codebase by exactly that second derivation.
               */}
-              <div className="cmp-player-meta">
-                {e.position}
-                {e.team ? ` · ${e.team}` : ''}
-                {e.fixture?.label ? ` · ${e.fixture.label}` : ''}
+              <div className="cmpf-id-meta">
+                {[e.team, e.fixture?.label, matchup && matchup.tone !== 'unknown' ? matchup.text.split(' · ')[0]!.toLowerCase() : null]
+                  .filter(Boolean)
+                  .join(' · ')}
               </div>
+              <OwnerTag owner={availability[e.playerId]} />
             </li>
           );
         })}
       </ul>
 
-      {/* 2. The answer. */}
-      <section className="cmp-verdict" aria-label="Start/sit score">
-        <div className="cmp-verdict-label">
-          {pick ? <CheckIcon size={14} /> : null}
-          <span>{pick ? 'Recommended · start/sit score' : 'Start/sit score'}</span>
-        </div>
-        <div className="cmp-verdict-head">
-          {pick && pick.score != null ? <span className="cmp-verdict-score">{pick.score.toFixed(1)}</span> : null}
-          <span className="cmp-verdict-name" data-testid="comparison-verdict">
-            {!comparable ? 'Not the same lineup decision' : pick ? `Start ${pick.name}` : 'No recommendation'}
+      {/* 2. The answer: one line, a thin bar each, one sentence. */}
+      <section className="cmpf-card cmpf-rec" aria-label="Recommendation">
+        <div className={pick ? 'cmpf-rec-label' : 'cmpf-rec-label cmpf-rec-label-none'}>
+          {pick ? <CheckIcon size={13} /> : null}
+          <span data-testid="comparison-verdict">
+            {!comparable
+              ? 'Not the same lineup decision'
+              : pick
+                ? `Recommended · Start ${pick.name}`
+                : 'No recommendation'}
           </span>
         </div>
-
-        <ul className="cmp-bars" data-row="score">
-          {columns.map((e, i) => (
-            <li key={e.playerId} className={pick?.playerId === e.playerId ? 'cmp-bar cmp-bar-pick' : 'cmp-bar'}>
-              <span className="cmp-bar-name">{shortName(e.name)}</span>
-              <span className="cmp-bar-value" data-player-id={e.playerId}>
-                {e.score == null ? (
-                  <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
-                ) : (
-                  <span title="The comparable figure this verdict was made on: the market expectation plus this app's own bounded adjustments. Not a forecast.">
-                    {e.score.toFixed(1)}
-                  </span>
-                )}
-              </span>
-              <span className="cmp-bar-track" aria-hidden="true">
-                {scoreBars[i] != null ? <span className="cmp-bar-fill" style={{ width: `${scoreBars[i]}%` }} /> : null}
-              </span>
-            </li>
-          ))}
+        <ul className="cmpf-bars" data-row="score">
+          {columns.map((e, i) => {
+            const points = pointsOf(e);
+            const lead = pick?.playerId === e.playerId;
+            return (
+              <li key={e.playerId} className={lead ? 'cmpf-bar cmpf-bar-lead' : 'cmpf-bar'}>
+                <span className="cmpf-bar-name">{shortName(e.name)}</span>
+                <span className="cmpf-bar-track" aria-hidden="true">
+                  {bars[i] != null ? <span className="cmpf-bar-fill" style={{ width: `${bars[i]}%` }} /> : null}
+                </span>
+                <span className="cmpf-bar-value" data-player-id={e.playerId}>
+                  {points == null ? (
+                    <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
+                  ) : (
+                    <span title="The start/sit score this verdict was made on, the same number the Team screen's suggestions use. Not a forecast.">
+                      {plain(points)}
+                    </span>
+                  )}
+                </span>
+              </li>
+            );
+          })}
         </ul>
-
-        {/*
-          Why the leader leads, in the engine's own factors.
-
-          The score is the sum of the known components, so naming the biggest
-          gaps between them is a decomposition of the number above, not a
-          story about it. When the leader's raw projection is the lower one,
-          the line says so first, because that is the case the reader cannot
-          reconcile alone.
-        */}
-        {pick && comparison.margin != null ? (
-          <p className="cmp-verdict-why" data-testid="comparison-margin">
-            {comparison.margin === 0 ? (
-              'Level on the score. The tie is broken by the reasons below.'
-            ) : (
-              <>
-                {shortName(pick.name)} is ahead by <span className="cmp-num">{comparison.margin.toFixed(1)}</span>
-                {gap?.projectionShortfall != null ? (
-                  <>
-                    {' '}
-                    despite a projection <span className="cmp-num">{gap.projectionShortfall.toFixed(1)}</span> lower
-                  </>
-                ) : null}
-                .
-                {gap && gap.drivers.length > 0 ? (
-                  <>
-                    {' '}
-                    Most of the gap:{' '}
-                    {gap.drivers.map((d, i) => (
-                      <span key={d.label}>
-                        {i > 0 ? ', ' : ''}
-                        {d.label} <span className="cmp-num">+{d.delta.toFixed(1)}</span>
-                      </span>
-                    ))}
-                    .
-                  </>
-                ) : null}
-              </>
-            )}
+        {sentence ? (
+          <p className="cmpf-rec-why" data-testid="comparison-margin">
+            {sentence}
           </p>
         ) : null}
-
-        <div className="cmp-verdict-meta">
-          <Confidence level={comparison.confidence} /> · Vegas data {comparison.dataFreshness.provider ?? 'none'} ·{' '}
-          {formatAge(comparison.dataFreshness.fetchedAt)}
-        </div>
+        {/* Whose weekly figures those are, when some are borrowed. See `assembleComparison`. */}
+        {(comparison.projectionNotes ?? []).map((n) => (
+          <p className="cmpf-fine" key={n} data-testid="compare-projection-note">
+            {n}
+          </p>
+        ))}
       </section>
 
       {!comparable && comparison.slot ? (
@@ -2319,253 +2472,222 @@ function ComparisonCard({
           {comparison.slot.detail}
         </div>
       ) : null}
-
-      {/*
-        Compact tags for the things a score cannot express: whether kickoff
-        timing is a problem, whether the market has moved, whether a game has
-        started.
-      */}
-      {showLateSwap || moving.length > 0 || locked.length > 0 ? (
-        <div className="tag-row">
-          {showLateSwap ? (
-            <span
-              className={comparison.lateSwap.verdict === 'consider_early_option' ? 'tag tag-urgent' : 'tag tag-calm'}
-              title={comparison.lateSwap.detail}
-              data-testid="late-swap-tag"
-            >
-              ⏱ {comparison.lateSwap.label}
-            </span>
-          ) : null}
-          {moving.map((e) => (
-            <span
-              key={`move-${e.playerId}`}
-              className={e.movement.direction === 'up' ? 'tag tag-star' : 'tag tag-warn'}
-              title={e.movement.significant.map((m) => m.display).join('; ')}
-              data-testid="movement-tag"
-            >
-              {e.movement.direction === 'up' ? '↑' : '↓'} {e.name}: {e.movement.headline}
-            </span>
-          ))}
-          {locked.map((e) => (
-            <span key={`lock-${e.playerId}`} className="tag tag-calm" data-testid="locked-tag">
-              🔒 {e.name} locked
-            </span>
-          ))}
-        </div>
-      ) : null}
-
       {warnings.map((w) => (
         <div className="hint hint-caution" key={w}>
           {w}
         </div>
       ))}
 
-      {/* 3. The projection: context, drawn quieter than the answer. */}
-      <section className="cmp-proj-card" aria-label="Projected points">
-        <div className="cmp-eyebrow">Projected points</div>
-        <ul className="cmp-bars cmp-bars-quiet" data-row="projection">
-          {columns.map((e, i) => (
-            <li key={e.playerId} className="cmp-bar">
-              <span className="cmp-bar-name">{shortName(e.name)}</span>
-              <span className="cmp-bar-value" data-player-id={e.playerId}>
-                <CompareProjection evaluation={e} />
-              </span>
-              <span className="cmp-bar-track" aria-hidden="true">
-                {projectionBars[i] != null ? (
-                  <span className="cmp-bar-fill" style={{ width: `${projectionBars[i]}%` }} />
-                ) : null}
-              </span>
-            </li>
-          ))}
-        </ul>
-        {/*
-          Whose numbers these are, said once under them rather than per value.
-          Composed on the server, where the published feed's own assumptions
-          are legible. See `assembleComparison`.
-        */}
-        {(comparison.projectionNotes ?? []).map((note) => (
-          <div className="faint compare-provenance" key={note} data-testid="compare-projection-note">
-            {note}
-          </div>
-        ))}
-      </section>
-
-      {/* 4. The working. */}
-      <div className="cmp-stats" data-testid="compare-grid" data-columns={cols}>
-        <div className="cmp-eyebrow cmp-stats-title">Why the scores differ</div>
-        <div className="cmp-stats-head" aria-hidden="true">
-          <span />
-          {columns.map((e) => (
-            <span key={e.playerId} className="cmp-stats-name">
-              {shortName(e.name)}
-            </span>
-          ))}
-        </div>
-
-        {groups.map((group) => {
-          // Coverage is a market fact about every player, so the market card
-          // always has at least that row.
-          if (group.factors.length === 0 && group.id !== 'market') return null;
-          return (
-            <section key={group.id} className="cmp-group" data-group={group.id}>
-              <div className="cmp-group-title" aria-hidden="true">
-                {group.title}
-              </div>
-              <table className="cmp-table">
-                <caption className="sr-only">{group.title}</caption>
-                <colgroup>
-                  <col style={{ width: labelShare }} />
+      {/* 3. The sportsbooks' own lines: the headline evidence. */}
+      <section className="cmpf-section" aria-label="Vegas props" data-testid="compare-props">
+        <div className="cmpf-eyebrow">Vegas props</div>
+        <div className="cmpf-card cmpf-table">
+          {props.length === 0 ? (
+            <p className="cmpf-empty">
+              {columns.every((e) => e.position.toUpperCase() === 'DEF')
+                ? 'Defences are priced from the game line, not player props.'
+                : 'No player props apply to these positions.'}
+            </p>
+          ) : (
+            <table>
+              <caption className="sr-only">Sportsbook prop lines</caption>
+              <thead>
+                <tr className="cmpf-row cmpf-head" style={grid}>
+                  <th scope="col">
+                    <span className="sr-only">Market</span>
+                  </th>
                   {columns.map((e) => (
-                    <col key={e.playerId} style={{ width: playerShare }} />
+                    <th scope="col" key={e.playerId}>
+                      {shortName(e.name)}
+                    </th>
                   ))}
-                </colgroup>
-                <thead className="sr-only">
-                  <tr>
-                    <th scope="col">Factor</th>
-                    {columns.map((e) => (
-                      <th scope="col" key={e.playerId}>
-                        {e.name}
-                      </th>
+                </tr>
+              </thead>
+              <tbody>
+                {props.map((row) => (
+                  <tr key={row.market} className="cmpf-row" style={grid} data-market={row.market}>
+                    <th scope="row">{row.label}</th>
+                    {row.cells.map((cell, i) => (
+                      <td key={columns[i]!.playerId} data-player-id={columns[i]!.playerId} data-prop={cell.kind}>
+                        {cell.kind === 'line' ? (
+                          <span className={row.market === 'anytime_td' ? 'cmpf-num cmpf-num-strong' : 'cmpf-num'}>{cell.text}</span>
+                        ) : cell.kind === 'na' ? (
+                          <span className="cmpf-na" title={`${row.label} is not a market for his position`} aria-label="does not apply">
+                            —
+                          </span>
+                        ) : (
+                          <span className="cmpf-noline" title="Priced for his position, but no book has posted this line">
+                            no line
+                          </span>
+                        )}
+                      </td>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  {group.id === 'market' ? (
-                    <tr data-row="coverage">
-                      <th scope="row" className="cmp-label">
-                        Market coverage
-                      </th>
-                      {columns.map((e) => (
-                        <td key={e.playerId} className="cmp-cell" data-player-id={e.playerId}>
-                          <span
-                            className={e.expectation.coverage > 0 ? 'cmp-num' : 'cmp-num compare-zero-coverage'}
-                            title={
-                              e.expectation.missingMarkets.length > 0
-                                ? `No line for: ${e.expectation.missingMarkets.join(', ')}`
-                                : 'Every market this position is priced on has a line'
-                            }
-                          >
-                            {Math.round(e.expectation.coverage * 100)}%
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ) : null}
-                  {group.factors.map((factor) => (
-                    <tr key={factor.key} data-factor={factor.key}>
-                      <th scope="row" className="cmp-label">
-                        {factor.label}
-                      </th>
-                      {columns.map((e) => {
-                        const component = componentOf(e, factor.key);
-                        return (
-                          <td key={e.playerId} className="cmp-cell" data-testid="compare-cell" data-player-id={e.playerId}>
-                            {component == null ? (
-                              <CompareMissing
-                                reason={`${factor.label.toLowerCase()} is not part of how he is scored`}
-                                label={factor.label}
-                                name={e.name}
-                              />
-                            ) : component.unknown ? (
-                              <CompareMissing reason={component.display} label={factor.label} name={e.name} />
-                            ) : (
-                              <span className={valueTone(component.value)} title={component.display}>
-                                {component.value.toFixed(2)}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <p className="cmpf-fine" data-testid="compare-source">
+          {source}
+        </p>
+      </section>
+
+      {/* 4. This app's own reads, quieter, under the market. */}
+      <section className="cmpf-section" aria-label="Our signals" data-testid="compare-grid" data-columns={cols}>
+        <div className="cmpf-eyebrow">Our signals</div>
+        <div className="cmpf-card cmpf-table">
+          <table>
+            <caption className="sr-only">This app&apos;s signals</caption>
+            <thead className="sr-only">
+              <tr>
+                <th scope="col">Signal</th>
+                {columns.map((e) => (
+                  <th scope="col" key={e.playerId}>
+                    {e.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="cmpf-row" style={grid} data-factor="status">
+                <th scope="row">Status</th>
+                {columns.map((e) => {
+                  const status = statusOf(e);
+                  return (
+                    <td key={e.playerId} data-player-id={e.playerId}>
+                      {status ? (
+                        <span className="cmpf-status" data-testid="startsit-injury" title={e.statusFlag ?? ''}>
+                          <span className="cmpf-bad">{status.word}</span>
+                          {status.detail ? <span className="cmpf-sub">{status.detail}</span> : null}
+                        </span>
+                      ) : (
+                        <span className="cmpf-num">Active</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+              {anyUsage ? (
+              <tr className="cmpf-row" style={grid} data-factor="usage_level">
+                <th scope="row">Opportunity</th>
+                {columns.map((e) => {
+                  const c = componentOf(e, 'usage_level');
+                  return (
+                    <td key={e.playerId} data-testid="compare-cell" data-player-id={e.playerId}>
+                      {c == null || c.unknown ? (
+                        <CompareMissing reason={c?.display ?? 'no usage data'} label="Opportunity" name={e.name} />
+                      ) : (
+                        <span className="cmpf-num" title={c.display}>
+                          {signed(c.value)}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+              ) : null}
+              {anyFixture ? (
+              <tr className="cmpf-row" style={grid} data-factor="matchup">
+                <th scope="row">Matchup</th>
+                {columns.map((e) => {
+                  const m = matchupCell(e.fixture ?? null);
+                  return (
+                    <td key={e.playerId} data-player-id={e.playerId}>
+                      {m == null ? (
+                        <CompareMissing reason="no fixture on file" label="Matchup" name={e.name} />
+                      ) : (
+                        <span
+                          className={m.tone === 'good' ? 'cmpf-good' : m.tone === 'bad' ? 'cmpf-bad' : 'cmpf-num'}
+                          title={e.fixture?.note ?? ''}
+                        >
+                          {m.text}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+              ) : null}
+              {anyIndoor ? (
+                <tr className="cmpf-row" style={grid} data-factor="weather">
+                  <th scope="row">Weather</th>
+                  {columns.map((e) => (
+                    <td key={e.playerId} data-player-id={e.playerId}>
+                      {e.weather?.indoor ? (
+                        <span className="cmpf-num">Dome</span>
+                      ) : (
+                        <CompareMissing reason="no forecast source is connected" label="Weather" name={e.name} />
+                      )}
+                    </td>
                   ))}
-                </tbody>
-              </table>
-            </section>
-          );
-        })}
-
-        {/*
-          The factors nobody in this comparison has a value for, said once.
-
-          Five rows of `— —` on the photographed sheet said "we could not read
-          this" five times. It is still worth knowing which factors were not
-          read, so they are named, in one line, instead of drawn.
-        */}
-        {untracked.length > 0 ? (
-          <p className="cmp-untracked" data-testid="compare-untracked">
-            Not tracked for this matchup: {untracked.map((f) => f.label.toLowerCase()).join(', ')}.
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {notTracked.length > 0 ? (
+          <p className="cmpf-fine cmpf-italic" data-testid="compare-untracked">
+            Not tracked for this matchup: {notTracked.join(', ')}.
           </p>
         ) : null}
-      </div>
+      </section>
 
-      {/* 5. The engine's note about coverage, when the two were priced differently. */}
-      {insight ? (
-        <div className="cmp-insight" role="note" data-testid="compare-insight">
-          <AlertCircleIcon size={16} />
-          <p>{insight}</p>
+      {/* 5. One note, the one that matters most for this pair. */}
+      {note ? (
+        <div className="cmpf-note" role="note" data-testid="compare-insight">
+          <p>{note}</p>
         </div>
       ) : null}
 
-      {reasons.length > 0 ? (
-        <ul className="reason-list cmp-reasons">
-          {reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      ) : null}
-
       {/*
-        Availability, per player, in the terms a lineup decision is made in.
-        `Q · hamstring · limited → full` is the whole difference between two
-        players who are both "Questionable". Nothing shows for anybody healthy.
+        The whole working, for the reader who wants it and out of the way of the
+        one who does not: every component with the engine's own sentence, the
+        market contributions and the expectation's notes.
       */}
-      {comparison.evaluations
-        .filter((e) => e.statusFlag)
-        .map((e) => (
-          <div className="injury-line" key={`inj-${e.playerId}`} data-testid="startsit-injury">
-            {e.name}: {e.statusFlag}
-            {e.injury?.conflictNote ? <span className="faint"> — sources disagree ({e.injury.conflictNote})</span> : null}
-          </div>
-        ))}
-
-      {/*
-        The long view: every component with the engine's own sentence beside
-        it, the market contributions, the expectation's notes. Collapsed, for
-        the reader who wants one player's whole profile.
-      */}
-      {comparison.evaluations.map((e) => (
-        <details className="disclosure" key={e.playerId}>
-          <summary>{e.name} breakdown</summary>
-          <div className="components">
-            {e.components.map((c) => (
-              <div className="component" key={c.key}>
-                <span className="component-label">
-                  {c.label}
-                  {c.unknown ? ' (unknown)' : ''}
-                </span>
-                <span className="component-value">{c.unknown ? '—' : c.value.toFixed(2)}</span>
-                <span className="component-detail">{c.display}</span>
-              </div>
+      <details className="disclosure cmpf-details">
+        <summary>How the score is built</summary>
+        {comparison.reasons.length > 0 ? (
+          <ul className="reason-list cmp-reasons">
+            {comparison.reasons.map((r) => (
+              <li key={r}>{r}</li>
             ))}
-          </div>
-          {e.expectation.contributions.length > 0 ? (
+          </ul>
+        ) : null}
+        {columns.map((e) => (
+          <div key={e.playerId} className="cmpf-breakdown">
+            <div className="cmpf-breakdown-name">{e.name}</div>
             <div className="components">
-              {e.expectation.contributions.map((c) => (
-                <div className="component" key={c.market}>
-                  <span className="component-label">{marketLabel(c.market)}</span>
-                  <span className="component-value">{c.points.toFixed(2)}</span>
-                  <span className="component-detail">{c.detail}</span>
+              {e.components.map((c) => (
+                <div className="component" key={c.key}>
+                  <span className="component-label">
+                    {c.label}
+                    {c.unknown ? ' (unknown)' : ''}
+                  </span>
+                  <span className="component-value">{c.unknown ? '—' : c.value.toFixed(2)}</span>
+                  <span className="component-detail">{c.display}</span>
                 </div>
               ))}
             </div>
-          ) : null}
-          {e.expectation.notes.map((n) => (
-            <div className="faint" key={n}>
-              {n}
-            </div>
-          ))}
-        </details>
-      ))}
+            {e.expectation.contributions.length > 0 ? (
+              <div className="components">
+                {e.expectation.contributions.map((c) => (
+                  <div className="component" key={c.market}>
+                    <span className="component-label">{marketLabel(c.market)}</span>
+                    <span className="component-value">{c.points.toFixed(2)}</span>
+                    <span className="component-detail">{c.detail}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {e.expectation.notes.map((n) => (
+              <div className="faint" key={n}>
+                {n}
+              </div>
+            ))}
+          </div>
+        ))}
+      </details>
     </div>
   );
 }
@@ -2609,57 +2731,6 @@ function CompareMissing({ reason, label, name }: { reason: string; label: string
       aria-label={`${label} for ${name}: no data. ${reason}.`}
     >
       —
-    </span>
-  );
-}
-
-/**
- * The projection, with the tier it came from marked on it.
- *
- * Three tiers and three treatments, and the vocabulary is deliberately the one
- * the Matchup screen already uses rather than a second one invented here: plain
- * for this app's own market-derived figure, a dotted rule for Rotowire's
- * published week, a dashed rule and an `EST` tag for a preseason season total
- * over a full season of games (a tilde until it was read as a minus sign; see
- * `components/estimate.tsx`). See `core/startsit/projection.ts` for the ladder
- * and `.matchup-player-proj-estimated` for where the marks came from.
- *
- * The mark is the corroboration; the title and the accessible name are the
- * claim. Neither the rule nor the tag is carrying the meaning on its own,
- * which is the rule this app keeps everywhere colour or ornament says something.
- */
-function CompareProjection({ evaluation }: { evaluation: StartSitEvaluation }) {
-  const points = evaluation.projection;
-  const source = evaluation.projectionSource ?? null;
-  if (points == null) {
-    return (
-      <CompareMissing
-        reason="no betting market, no published weekly figure and no preseason projection for him"
-        label="Projected points"
-        name={evaluation.name}
-      />
-    );
-  }
-
-  /*
-   * The words come from the two helpers the Team rows already use.
-   *
-   * They said the same three things in slightly different sentences, which is
-   * two vocabularies for one idea on one screen — and the reader can have both
-   * open at once, because Compare is a sheet over the Team screen. One set of
-   * strings, said the same way in the row and in the grid.
-   */
-  return (
-    <span
-      className={`compare-proj${source === 'market' || source == null ? '' : ' compare-proj-borrowed'}${
-        source === 'preseason' ? ' compare-proj-preseason' : ''
-      }`}
-      data-testid="compare-projection"
-      data-projection-source={source ?? 'none'}
-      title={projectionTitle(points, source)}
-      aria-label={`${evaluation.name}${spokenProjection(points, source)}.`}
-    >
-      {source === 'preseason' ? <Estimated value={points} digits={1} /> : points.toFixed(1)}
     </span>
   );
 }

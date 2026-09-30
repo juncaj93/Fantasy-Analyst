@@ -55,6 +55,7 @@ import {
   narrowsByOwner,
   ownerTeams,
   parseOwnerFilter,
+  resolveOwnerFilter,
   rosterOwnership,
 } from '../../roster/ownership.ts';
 import { groupByVerdict, rankTrades } from '../../trades/engine.ts';
@@ -686,7 +687,10 @@ function playerList(data: ScenarioData, params: URLSearchParams) {
    */
   const rosters = leagueId ? data.rosters : [];
   const owned = rosterOwnership(rosters);
-  const filtered = narrowsByOwner(owner) ? byPosition.filter((p) => matchesOwner(p.id, owner, owned)) : byPosition;
+  const resolvedOwner = resolveOwnerFilter(owner, rosters);
+  const filtered = narrowsByOwner(resolvedOwner)
+    ? byPosition.filter((p) => matchesOwner(p.id, resolvedOwner, owned))
+    : byPosition;
 
   const availability = new Map<string, 'mine' | 'rostered' | 'available'>();
   for (const roster of rosters) {

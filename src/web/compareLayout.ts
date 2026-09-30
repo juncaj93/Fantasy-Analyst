@@ -191,3 +191,177 @@ export function explainGap(leader: LayoutEvaluation, runnerUp: LayoutEvaluation,
   const projectionShortfall = lp != null && rp != null && lp < rp ? Math.round((rp - lp) * 10) / 10 : null;
   return { projectionShortfall, drivers };
 }
+
+/* ======================================== the flat sheet (30 September 2026) */
+/*
+ * What the rebuilt Compare sheet draws, worked out away from React so each
+ * rule has a test. The sheet was redrawn to the owner's approved mockup
+ * (`reference-mockup-v2.html`): identity, a plain recommendation card, the
+ * sportsbook's own prop lines, then this app's signals, then one note. Every
+ * value below is read off the comparison the server sent; nothing here scores
+ * anybody.
+ */
+
+/** A betting market as the sheet names it, in the order a reader expects them. */
+const PROP_ORDER: { market: string; label: string }[] = [
+  { market: 'pass_yards', label: 'Pass yards' },
+  { market: 'pass_tds', label: 'Pass TDs' },
+  { market: 'rush_yards', label: 'Rush yards' },
+  { market: 'receiving_yards', label: 'Rec yards' },
+  { market: 'receptions', label: 'Receptions' },
+  { market: 'anytime_td', label: 'Anytime TD' },
+];
+
+/** Which markets a position is priced on. Mirrors `EXPECTED_MARKETS` in core. */
+const PROP_MARKETS: Record<string, readonly string[]> = {
+  QB: ['pass_yards', 'pass_tds', 'rush_yards'],
+  RB: ['rush_yards', 'receiving_yards', 'receptions', 'anytime_td'],
+  WR: ['receiving_yards', 'receptions', 'anytime_td'],
+  TE: ['receiving_yards', 'receptions', 'anytime_td'],
+};
+
+export interface PropEvaluation {
+  playerId: string;
+  position: string;
+  expectation: {
+    contributions: readonly { market: string; line: number | null; probability?: number }[];
+    missingMarkets: readonly string[];
+  };
+}
+
+/**
+ * One prop cell: a posted line, a market this position is not priced on, or a
+ * market it is priced on that no book has posted. The last two are different
+ * facts and are never drawn the same way; neither is ever a number.
+ */
+export type PropCell = { kind: 'line'; text: string } | { kind: 'na' } | { kind: 'missing' };
+
+export interface PropRow {
+  market: string;
+  label: string;
+  cells: PropCell[];
+}
+
+export function propRows(columns: readonly PropEvaluation[]): PropRow[] {
+  const wanted = new Set(columns.flatMap((e) => PROP_MARKETS[e.position.toUpperCase()] ?? []));
+  return PROP_ORDER.filter((p) => wanted.has(p.market)).map(({ market, label }) => ({
+    market,
+    label,
+    cells: columns.map((e): PropCell => {
+      if (!(PROP_MARKETS[e.position.toUpperCase()] ?? []).includes(market)) return { kind: 'na' };
+      const posted = e.expectation.contributions.find((c) => c.market === market);
+      if (!posted) return { kind: 'missing' };
+      if (market === 'anytime_td') {
+        return posted.probability != null
+          ? { kind: 'line', text: `${Math.round(posted.probability * 100)}%` }
+          : { kind: 'missing' };
+      }
+      return posted.line != null ? { kind: 'line', text: posted.line.toFixed(1) } : { kind: 'missing' };
+    }),
+  }));
+}
+
+/** `Questionable · practised fully` → `Questionable`, and the rest. */
+export function splitStatus(statusFlag: string | null | undefined): { word: string; detail: string | null } | null {
+  if (!statusFlag) return null;
+  const [word = '', ...rest] = statusFlag.split('·').map((s) => s.trim());
+  return { word, detail: rest.length > 0 ? rest.join(' · ') : null };
+}
+
+export type MatchupTone = 'good' | 'bad' | 'neutral' | 'unknown';
+
+/** `Favorable · SF`, `Tough · TEN`: the same rating the Team row's chip prints. */
+export function matchupCell(
+  fixture: { opponent: string; rating: string } | null | undefined,
+): { text: string; tone: MatchupTone } | null {
+  if (!fixture) return null;
+  if (fixture.rating === 'soft') return { text: `Favorable · ${fixture.opponent}`, tone: 'good' };
+  if (fixture.rating === 'tough') return { text: `Tough · ${fixture.opponent}`, tone: 'bad' };
+  if (fixture.rating === 'neutral') return { text: `Neutral · ${fixture.opponent}`, tone: 'neutral' };
+  return { text: fixture.opponent, tone: 'unknown' };
+}
+
+/** A signed number the way the sheet prints one: `+1.7`, `−0.4`, `0.0`. */
+export function signed(value: number): string {
+  const v = Math.round(value * 10) / 10;
+  if (v === 0) return '0.0';
+  return v > 0 ? `+${v.toFixed(1)}` : `−${Math.abs(v).toFixed(1)}`;
+}
+
+/** A plain number with a real minus sign. */
+export function plain(value: number): string {
+  const v = Math.round(value * 10) / 10;
+  return v < 0 ? `−${Math.abs(v).toFixed(1)}` : v.toFixed(1);
+}
+
+export interface DecisionLike {
+  points: number;
+  basis: 'market' | 'published' | 'partial' | 'unpriced';
+  base: number;
+  adjustments: number;
+}
+
+/**
+ * The one sentence under the bars: why the leader leads, in plain words.
+ *
+ * When either side is ranked on a published week, the honest decomposition is
+ * the two starting weeks and the two sets of adjustments, which is exactly how
+ * `decisionPoints` built the numbers. Otherwise the engine's own largest
+ * component gaps, as the sheet has said since 25 September.
+ */
+export function gapSentence(input: {
+  leader: { name: string; decision?: DecisionLike | null };
+  runnerUp: { name: string; decision?: DecisionLike | null };
+  margin: number;
+  drivers: readonly { label: string; delta: number }[];
+  projectionShortfall: number | null;
+}): string {
+  const lead = shortName(input.leader.name);
+  if (input.margin === 0) return `${lead} and ${shortName(input.runnerUp.name)} are level; the notes below break the tie.`;
+  const head = `${lead} leads by ${plain(input.margin)}`;
+  const a = input.leader.decision;
+  const b = input.runnerUp.decision;
+  if (a && b && (a.basis === 'published' || b.basis === 'published')) {
+    return (
+      `${head}: a ${plain(a.base)} week against ${plain(b.base)} before adjustments, ` +
+      `${signed(a.adjustments)} against ${signed(b.adjustments)} for status, usage and matchup.`
+    );
+  }
+  const despite = input.projectionShortfall != null ? ' despite a lower raw projection' : '';
+  if (input.drivers.length === 0) return `${head}${despite}.`;
+  const why = input.drivers.map((d) => `${d.label.toLowerCase()} ${signed(d.delta)}`).join(', ');
+  return `${head}${despite}. Most of the gap: ${why}.`;
+}
+
+/**
+ * The one quiet note at the bottom, chosen, not listed.
+ *
+ * In order of what changes Sunday: a game already started, a kickoff-timing
+ * problem, both players carrying an injury designation, the engine's own
+ * market-coverage note, one player's designation. Null when none applies; the
+ * sheet then draws nothing rather than a filler line.
+ */
+export function standoutNote(input: {
+  players: readonly { name: string; statusWord: string | null; locked: boolean }[];
+  lateSwap: { verdict: string; detail: string } | null;
+  coverageNote: string | null;
+}): string | null {
+  const locked = input.players.filter((p) => p.locked);
+  if (locked.length > 0) {
+    return `${locked.map((p) => p.name).join(' and ')} ${locked.length === 1 ? 'has' : 'have'} already kicked off, so that spot is fixed.`;
+  }
+  if (input.lateSwap?.verdict === 'consider_early_option') return input.lateSwap.detail;
+  const flagged = input.players.filter((p) => p.statusWord);
+  if (flagged.length >= 2 && flagged.length === input.players.length) {
+    const words = new Set(flagged.map((p) => p.statusWord!.toLowerCase()));
+    const shared = words.size === 1 ? [...words][0] : 'on the injury report';
+    const phrase = input.players.length === 2 ? 'Both players are' : 'Every player here is';
+    return `${phrase} ${words.size === 1 ? shared!.replace(/^./, (c) => c.toUpperCase()) : shared} this week. Check the injury report before your lineup locks.`;
+  }
+  if (input.coverageNote) return input.coverageNote;
+  if (flagged.length === 1) {
+    const p = flagged[0]!;
+    return `${p.name} is ${p.statusWord!.toLowerCase()} this week. Check the injury report before your lineup locks.`;
+  }
+  return null;
+}
