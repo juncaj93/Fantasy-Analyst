@@ -224,7 +224,7 @@ export async function captureDraftSnapshot(
    * Draft gets the two checks it never had: nothing the wire would silently
    * change, and nothing `readSnapshot` would refuse.
    */
-  return sealSnapshot<DraftBoardPayload>(snapshot);
+  return sealSnapshot<DraftBoardPayload>(snapshot, aliases);
 }
 
 // ------------------------------------------------------------- the recorder

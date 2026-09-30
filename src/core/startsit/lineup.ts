@@ -651,7 +651,16 @@ export function recommendLineup(
   }
   // Said once, plainly: these were held out of the lineup rather than ranked
   // low in it, and a currently-starting one is a lineup the user should change.
+  //
+  // A player in an IR slot is the exception unless he is also starting. He is
+  // there because the owner put him there, and a warning every week that he is
+  // not a playable starter would be telling them what they did on purpose.
   for (const e of ruledOut) {
+    if (e.onReserve && !currentStarters.has(e.playerId)) continue;
+    if (e.onReserve) {
+      warnings.push(`${e.name} is in your IR slot and is currently in your lineup — not a playable starter`);
+      continue;
+    }
     warnings.push(
       `${e.name} is ${e.injury.designation === 'ir' ? 'on injured reserve' : e.injury.designation}` +
         `${currentStarters.has(e.playerId) ? ' and is currently in your lineup' : ''} — not a playable starter`,
@@ -1086,6 +1095,9 @@ function unscorableReason(
   locked: boolean,
   publishedProjection: number | null,
 ): { reason: string; detail: string | null; kind: VacancyKind } {
+  if (evaluation.onReserve) {
+    return { reason: 'is in your IR slot, so he is not a playable starter', detail: null, kind: 'unavailable' };
+  }
   if (evaluation.ruledOut) {
     const designation = evaluation.injury.designation === 'ir' ? 'on injured reserve' : evaluation.injury.designation;
     return { reason: `is ${designation}, so he is not a playable starter`, detail: null, kind: 'unavailable' };

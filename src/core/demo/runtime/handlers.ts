@@ -568,7 +568,7 @@ function bench(data: ScenarioData) {
   const { profile, shape, mine } = demoLeagueContext(data);
   if (!mine || mine.playerIds.length === 0) return { found: false, dropCandidates: [], ranked: [], notes: [] };
 
-  const rosterInputs = startSitInputsFrom(data, mine.playerIds);
+  const rosterInputs = startSitInputsFrom(data, mine.playerIds, { reserveIds: mine.reserveIds });
   const candidateInputs = startSitInputsFrom(data, demoCandidateIds(data));
   const currentLineup = recommendLineup(rosterInputs, shape, profile, { currentStarterIds: mine.starterIds });
 

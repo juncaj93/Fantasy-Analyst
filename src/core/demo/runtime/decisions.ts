@@ -84,7 +84,7 @@ export function demoWaiverRequest(data: ScenarioData, mine: RosterRecord): DemoW
     request: {
       shape,
       profile,
-      rosterInputs: startSitInputsFrom(data, mine.playerIds),
+      rosterInputs: startSitInputsFrom(data, mine.playerIds, { reserveIds: mine.reserveIds }),
       candidateInputs: startSitInputsFrom(data, candidateIds),
       rosteredIds,
       currentStarterIds: mine.starterIds,
@@ -122,7 +122,7 @@ export function demoWaiverRequest(data: ScenarioData, mine: RosterRecord): DemoW
 /** The roster, evaluated for the Team screen's question. */
 export function demoLineupInputs(data: ScenarioData, mine: RosterRecord, mode: StartSitMode) {
   const { profile, shape } = demoLeagueContext(data);
-  return { profile, shape, inputs: startSitInputsFrom(data, mine.playerIds, { mode }), mode };
+  return { profile, shape, inputs: startSitInputsFrom(data, mine.playerIds, { mode, reserveIds: mine.reserveIds }), mode };
 }
 
 export function demoTradeRequest(data: ScenarioData): TradeAssemblyRequest {

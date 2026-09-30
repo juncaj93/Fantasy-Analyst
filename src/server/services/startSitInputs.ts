@@ -57,9 +57,18 @@ export async function startSitInputsFor(
      * Defaults to now, so nothing in production changes.
      */
     now?: Date;
+    /**
+     * The owner's injured-reserve slot, when these are his roster's players.
+     *
+     * Marked on each input as `onReserve`, which rules him out as a starter in
+     * every lineup built from these — the Team screen's, the waiver planner's
+     * and the drop list's alike. Absent for callers with no roster in hand.
+     */
+    reserveIds?: readonly string[];
   } = {},
 ): Promise<StartSitInput[]> {
   if (playerIds.length === 0) return [];
+  const reserved = new Set(opts.reserveIds ?? []);
   const propsRepo = new PropsRepo(db);
   /*
    * This week's games, and only this week's.
@@ -214,6 +223,11 @@ export async function startSitInputsFor(
        * it resolves the week's posture *after* gathering these.
        */
       ...(opts.mode ? { mode: opts.mode } : {}),
+      /*
+       * In an IR slot, whatever his designation says. Only when true, so an
+       * input for anybody else is exactly what it was.
+       */
+      ...(reserved.has(id) ? { onReserve: true } : {}),
       propsStale: false,
     });
   }

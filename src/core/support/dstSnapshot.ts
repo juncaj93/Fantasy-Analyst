@@ -234,7 +234,7 @@ export async function captureDstSnapshot(input: DstCaptureInput): Promise<Suppor
        */
       warnings: warningsFor(plan),
     },
-  });
+  }, aliases);
 }
 
 /**

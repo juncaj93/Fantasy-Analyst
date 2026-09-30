@@ -152,8 +152,10 @@ export function draftBoardSourcesFrom(data: ScenarioData): DraftBoardSources {
 export function startSitInputsFrom(
   data: ScenarioData,
   playerIds: string[],
-  opts: { mode?: StartSitMode } = {},
+  /** `reserveIds`: the owner's IR slot, as the live `startSitInputsFor` takes it. */
+  opts: { mode?: StartSitMode; reserveIds?: readonly string[] } = {},
 ): StartSitInput[] {
+  const reserved = new Set(opts.reserveIds ?? []);
   const bySpecId = new Map(data.specs.map((s) => [s.id, s]));
   const byPlayerId = new Map(data.players.map((p) => [p.id, p]));
   const defense: DefenseTendencyIndex = new Map();
@@ -192,6 +194,7 @@ export function startSitInputsFrom(
       ...(week?.home == null ? {} : { home: week.home }),
       defenseTendencies: defense,
       mode: opts.mode ?? 'balanced',
+      ...(reserved.has(id) ? { onReserve: true } : {}),
       propsStale: data.freshness.vegas === 'stale',
       // The scenario's clock, not the device's. This is §6 in one line.
       now: data.clock.now(),

@@ -104,9 +104,20 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
    */
   const history = {
     measured: input.request.history.measured,
+    /*
+     * Each partner link too. `repeatPartners` names the other manager by id and
+     * display name, one level below the profile's own pair, and was copied
+     * through real until the seal's leak check found it.
+     */
     tendencies: [...input.request.history.tendencies.entries()].map(
       ([userId, tendencies]) =>
-        [aliases.id(userId) ?? userId, aliasManagerProfile(tendencies, aliases)] as [string, ManagerTradeTendencies],
+        [
+          aliases.id(userId) ?? userId,
+          {
+            ...aliasManagerProfile(tendencies, aliases),
+            repeatPartners: tendencies.repeatPartners.map((partner) => aliasManagerProfile(partner, aliases)),
+          },
+        ] as [string, ManagerTradeTendencies],
     ),
     seasonsByUser: [...input.request.history.seasonsByUser.entries()].map(
       ([userId, seasons]) => [aliases.id(userId) ?? userId, seasons] as [string, { observed: number; complete: boolean }],
@@ -214,7 +225,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
       output,
       warnings: output.warnings,
     },
-  });
+  }, aliases);
 }
 
 export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>): ReplayReport {

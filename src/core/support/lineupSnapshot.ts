@@ -191,7 +191,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
        */
       warnings: output.warnings,
     },
-  });
+  }, aliases);
 }
 
 export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): ReplayReport {

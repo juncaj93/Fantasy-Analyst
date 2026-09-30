@@ -1195,7 +1195,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     const startSitContext = await buildStartSitContext(db);
     const [rosterInputs, candidateInputs] = await Promise.all([
-      startSitInputsFor(db, mine.playerIds, { context: startSitContext }),
+      startSitInputsFor(db, mine.playerIds, { context: startSitContext, reserveIds: mine.reserveIds }),
       startSitInputsFor(db, candidateIds, { context: startSitContext }),
     ]);
 

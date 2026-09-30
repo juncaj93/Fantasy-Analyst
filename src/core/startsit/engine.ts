@@ -128,6 +128,20 @@ export interface StartSitInput {
   mode?: StartSitMode;
   /** Reference time; defaults to now. Injected so tests are deterministic. */
   now?: string | Date;
+  /**
+   * True when he sits in one of the roster's injured-reserve slots.
+   *
+   * A fact about the roster, not about the player, which is why the injury
+   * fields above cannot carry it. Sleeper lets a Questionable player into an IR
+   * slot, and on 30 September 2026 that is exactly where Nico Collins was: the
+   * designation said Questionable, nothing said IR, and the optimiser started
+   * him at receiver. A player in that slot cannot be put in the lineup without
+   * first being moved out of it, so he is not a starter this week.
+   *
+   * Absent means not known to be reserved, which is every caller that has no
+   * roster in hand.
+   */
+  onReserve?: boolean;
 }
 
 export interface StartSitComponent {
@@ -163,8 +177,17 @@ export interface StartSitEvaluation {
   statusFlag: string | null;
   /** Everything known about his availability, for the card and the reasons. */
   injury: InjuryState;
-  /** True when he must not be recommended as a starter: Out, IR, PUP, suspended. */
+  /**
+   * True when he must not be recommended as a starter: Out, IR, PUP,
+   * suspended, or sitting in an injured-reserve slot whatever his designation.
+   */
   ruledOut: boolean;
+  /**
+   * Present, and true, when he is ruled out by the slot he sits in rather than
+   * by a designation. Carried so a sentence about him can say "in your IR slot"
+   * instead of repeating a designation that does not rule anybody out.
+   */
+  onReserve?: true;
   /** Whether this player's game has already kicked off. */
   lock: LockState;
   /** The defence he faces, when the schedule is known. */
@@ -584,7 +607,8 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
     injury,
-    ruledOut: availability.gate,
+    ruledOut: availability.gate || input.onReserve === true,
+    ...(input.onReserve === true ? { onReserve: true as const } : {}),
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
     home: input.home ?? null,
@@ -747,7 +771,8 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
     injury,
-    ruledOut: availability.gate,
+    ruledOut: availability.gate || input.onReserve === true,
+    ...(input.onReserve === true ? { onReserve: true as const } : {}),
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
     home: input.home ?? null,

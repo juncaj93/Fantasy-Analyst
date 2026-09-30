@@ -45,7 +45,7 @@
  * catches it, rather than quietly, in a file somebody is waiting on.
  */
 
-import { SnapshotRedactionError, findRedactionViolations } from './redaction.ts';
+import { SnapshotRedactionError, findRedactionViolations, type SnapshotAliases } from './redaction.ts';
 import { SnapshotLossyError, findLossyValues } from './lossless.ts';
 import { SnapshotRejected, readSnapshot } from './contract.ts';
 import type { DecisionPayload, SupportSnapshot } from './schema.ts';
@@ -58,8 +58,16 @@ import type { DecisionPayload, SupportSnapshot } from './schema.ts';
  * the wire would change has to be found *before* anything is put on the wire.
  * Readability last, on what the wire produced.
  */
-export function sealSnapshot<P extends DecisionPayload>(snapshot: SupportSnapshot<P>): SupportSnapshot<P> {
-  const violations = findRedactionViolations(snapshot);
+export function sealSnapshot<P extends DecisionPayload>(
+  snapshot: SupportSnapshot<P>,
+  /**
+   * The capture's alias map, so the file can be checked for the real ids it
+   * replaced. Every adapter passes it; it is optional only so a hand-built
+   * snapshot in a test can still be sealed.
+   */
+  aliases?: SnapshotAliases,
+): SupportSnapshot<P> {
+  const violations = [...findRedactionViolations(snapshot), ...(aliases?.leaks(snapshot) ?? [])];
   if (violations.length > 0) throw new SnapshotRedactionError(violations);
 
   const lossy = findLossyValues(snapshot);
