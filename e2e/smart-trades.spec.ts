@@ -688,9 +688,25 @@ test.describe('value arbitrage, told apart from a lineup upgrade', () => {
      * lineup points are near zero by construction, so printing the roster
      * reasoning first and this underneath would bury the only claim being made.
      */
-    const caseBox = (await arbitrage.boundingBox())!;
-    const reasons = (await page.getByTestId('smart-trade-reasons').boundingBox())!;
-    expect(caseBox.y).toBeLessThan(reasons.y);
+    /*
+     * Both boxes read in one frame, and retried until the sheet has arrived.
+     *
+     * Two `boundingBox()` calls are two frames, and the sheet is still opening
+     * when the first one runs: on WebKit it moved between them and put the
+     * case 7px under the reasons (iphone-375, 29 September), then read the two
+     * 0.05px apart while the content was still expanding (small-360, 30
+     * September, which stood down a deploy). Measuring once mid-animation is a
+     * race, and this is a positive assertion, so it waits for the layout to
+     * arrive rather than for a timer. A genuinely wrong order never comes true.
+     */
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const top = (id: string) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect();
+          return top('smart-trade-reasons').top - top('smart-trade-arbitrage').bottom;
+        }),
+      )
+      .toBeGreaterThanOrEqual(0);
   });
 
   test('does not overflow at any supported width with a tag on the row', async ({ page }) => {
