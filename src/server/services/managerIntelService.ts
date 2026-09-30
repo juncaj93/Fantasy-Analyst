@@ -72,6 +72,7 @@ import {
 import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../core/managers/draftProfile.ts';
 import { buildTradeProfile, type TradeEvent } from '../../core/managers/tradeProfile.ts';
 import { buildBudgetState } from '../../core/faab/budget.ts';
+import { isTransactionWeekSettled } from '../../core/league/transactionSettling.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import { LeagueRepo } from '../repos/league.ts';
@@ -216,6 +217,8 @@ export class ManagerIntelService {
     budget?: RequestBudget;
     /** Skip the derivation, for tests that want to inspect the raw ledger. */
     skipDerive?: boolean;
+    /** The clock, for the day-of-week half of the settle rule. */
+    now?: Date;
   }): Promise<AdvanceReport> {
     const budget = opts.budget ?? new RequestBudget(MAX_SLEEPER_SUBREQUESTS_PER_BATCH);
     const client = this.sleeper.withFetch((inner) => budgetedFetch(budget, inner));
@@ -391,7 +394,7 @@ export class ManagerIntelService {
    */
   private async execute(
     unit: WorkUnit,
-    ctx: { leagueId: string; season: string; week: number; client: SleeperClient; state: BackfillState },
+    ctx: { leagueId: string; season: string; week: number; client: SleeperClient; state: BackfillState; now?: Date },
   ): Promise<string> {
     switch (unit.kind) {
       case 'discover':
@@ -578,7 +581,7 @@ export class ManagerIntelService {
 
   private async ingestWeek(
     unit: Extract<WorkUnit, { kind: 'transactions' }>,
-    ctx: { leagueId: string; season: string; week: number; client: SleeperClient; state: BackfillState },
+    ctx: { leagueId: string; season: string; week: number; client: SleeperClient; state: BackfillState; now?: Date },
   ): Promise<string> {
     const seasonState = ctx.state.seasons.find((s) => s.sleeperLeagueId === unit.sleeperLeagueId);
     const throughWeek = seasonState?.transactions.throughWeek ?? MAX_TRANSACTION_WEEK;
@@ -588,12 +591,17 @@ export class ManagerIntelService {
     /*
      * Settled means "this can never change again".
      *
-     * Every week of a finished season qualifies. In a live season only the
-     * weeks strictly before the current one do — the week in play is re-read
-     * every batch, because a waiver run lands between two of them, and it is
-     * the one case where "we already have it" is wrong.
+     * Every week of a finished season qualifies. In a live season the week in
+     * play never does, and neither does the week before it until Thursday:
+     * Sleeper posts that week's waiver claims on Wednesday morning, after the
+     * week number has already moved on. See `core/league/transactionSettling.ts`.
      */
-    const settled = finished || unit.week < throughWeek;
+    const settled = isTransactionWeekSettled({
+      week: unit.week,
+      currentWeek: throughWeek,
+      finishedSeason: finished,
+      now: ctx.now ?? new Date(),
+    });
     const stored = await this.transactions.saveWeek({
       leagueId: ctx.leagueId,
       season: unit.season,

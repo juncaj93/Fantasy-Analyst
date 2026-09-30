@@ -81,6 +81,12 @@ describe('transaction storage', () => {
     await seedDemoData(db);
   });
 
+  /* A Thursday: last week's Wednesday waiver run has posted. */
+  const THURSDAY = new Date('2026-10-01T09:00:00Z');
+  /* Tuesday and Wednesday: the week number has moved on and the run has not posted yet. */
+  const TUESDAY = new Date('2026-09-29T09:00:00Z');
+  const WEDNESDAY = new Date('2026-09-30T09:00:00Z');
+
   it('marks a finished week settled and never fetches it again', async () => {
     const { client, calls } = stubSleeper({ transactions: { 1: [waiver({ leg: 1 })], 2: [], 3: [waiver({ leg: 3 })] } });
     const service = new LeagueStrategyService(db, { sleeper: client });
@@ -90,6 +96,7 @@ describe('transaction storage', () => {
       sleeperLeagueId: 'demo-league',
       season: '2026',
       week: 3,
+      now: THURSDAY,
     });
     expect(first.weeksFetched.sort()).toEqual([1, 2, 3]);
 
@@ -99,10 +106,69 @@ describe('transaction storage', () => {
       sleeperLeagueId: 'demo-league',
       season: '2026',
       week: 3,
+      now: THURSDAY,
     });
     // Weeks 1 and 2 are over and can never change; week 3 still can.
     expect(second.weeksFetched).toEqual([3]);
     expect(calls).toHaveLength(1);
+  });
+
+  /*
+   * The 30 September 2026 bug, replayed.
+   *
+   * Sleeper moved to week 3 on Tuesday; week 2's waiver claims posted at 07:10
+   * UTC on Wednesday under week 2. The old rule locked week 2 on the Tuesday
+   * read, so the Wednesday claims were never seen and the price model held one
+   * bid all season.
+   */
+  it('keeps last week open until Thursday, so the Wednesday waiver run is read', async () => {
+    const script: Record<number, SleeperTransaction[]> = { 1: [], 2: [], 3: [] };
+    const { client } = stubSleeper({ transactions: script });
+    const service = new LeagueStrategyService(db, { sleeper: client });
+    const sync = (now: Date) =>
+      service.syncTransactions({ leagueId: 'demo-league', sleeperLeagueId: 'demo-league', season: '2026', week: 3, now });
+
+    // Tuesday: week 2 is read before its run and must not lock.
+    expect((await sync(TUESDAY)).weeksFetched.sort()).toEqual([1, 2, 3]);
+
+    // Wednesday 07:10: the run posts under week 2.
+    script[2] = [waiver({ transaction_id: 'wed-run', leg: 2, settings: { waiver_bid: 11 } })];
+    expect((await sync(WEDNESDAY)).weeksFetched.sort()).toEqual([2, 3]);
+
+    // Thursday: one more read of week 2 locks it, with the Wednesday claim in it.
+    expect((await sync(THURSDAY)).weeksFetched.sort()).toEqual([2, 3]);
+    expect((await sync(THURSDAY)).weeksFetched).toEqual([3]);
+
+    const stored = await new TransactionRepo(db).list('demo-league', { season: '2026', type: 'waiver' });
+    expect(stored.map((t) => t.transaction_id)).toContain('wed-run');
+  });
+
+  it('stores Sleeper\'s trending drops beside the adds, on the same capture', async () => {
+    const { client, calls } = stubSleeper({ trending: [{ player_id: '1005', count: 900 }, { player_id: '1006', count: 400 }] });
+    const result = await new LeagueStrategyService(db, { sleeper: client }).captureTrending({ now: THURSDAY });
+    expect(result).toMatchObject({ captured: 2, drops: 2 });
+    expect(calls.filter((u) => u.includes('/trending/add'))).toHaveLength(1);
+    expect(calls.filter((u) => u.includes('/trending/drop'))).toHaveLength(1);
+
+    const drops = await new TrendingRepo(db).capture('drop');
+    expect(drops?.capturedAt).toBe(result.capturedAt);
+    expect(drops?.rows.map((r) => [r.playerId, r.rank])).toEqual([
+      ['1005', 1],
+      ['1006', 2],
+    ]);
+  });
+
+  it('keeps the adds when the drops read fails', async () => {
+    const client = new SleeperClient({
+      retries: 0,
+      fetch: async (url: string) =>
+        url.includes('/trending/drop')
+          ? new Response('nope', { status: 500 })
+          : new Response(JSON.stringify([{ player_id: '1005', count: 900 }]), { status: 200 }),
+    });
+    const result = await new LeagueStrategyService(db, { sleeper: client }).captureTrending({ now: THURSDAY });
+    expect(result).toMatchObject({ captured: 1, drops: null });
+    expect((await new TrendingRepo(db).capture('add'))?.rows).toHaveLength(1);
   });
 
   it('bounds how many weeks one refresh may fetch, newest first', async () => {

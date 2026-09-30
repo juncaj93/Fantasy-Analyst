@@ -184,7 +184,18 @@ async function seedLeague(db: NodeSqliteDatabase): Promise<void> {
   );
 }
 
-const RUN = { leagueId: 'tony', sleeperLeagueId: 'L2026', season: '2026', week: 5 } as const;
+/*
+ * A Thursday, pinned. From Thursday to Monday last week's waiver run has
+ * posted and only the week in play is re-read; on Tuesday and Wednesday the
+ * week before it is re-read too. See `core/league/transactionSettling.ts`.
+ */
+const RUN = {
+  leagueId: 'tony',
+  sleeperLeagueId: 'L2026',
+  season: '2026',
+  week: 5,
+  now: new Date('2026-10-01T09:00:00Z'),
+} as const;
 
 describe('the backfill respects the free-plan request budget', () => {
   let db: NodeSqliteDatabase;
@@ -253,6 +264,17 @@ describe('the backfill respects the free-plan request budget', () => {
      * history is stored — against a free-plan ceiling of fifty.
      */
     expect(calls.length).toBeLessThanOrEqual(2);
+    expect(calls.some((u) => u.includes('L2025') || u.includes('L2024'))).toBe(false);
+
+    /*
+     * And on a Wednesday, one more: last week is re-read because its waiver
+     * claims post that morning under it. Three requests, still nothing
+     * historical.
+     */
+    await db.prepare('UPDATE league_transaction_weeks SET settled = 0 WHERE season = ? AND week = 4').bind('2026').run();
+    calls.length = 0;
+    await service.advance({ ...RUN, now: new Date('2026-09-30T09:00:00Z') });
+    expect(calls.filter((u) => u.includes('/transactions/')).map((u) => u.split('/').pop()).sort()).toEqual(['4', '5']);
     expect(calls.some((u) => u.includes('L2025') || u.includes('L2024'))).toBe(false);
   });
 });

@@ -1,0 +1,17 @@
+-- Reopen the 2026 season's transaction weeks, once, so their waiver claims are read.
+--
+-- Until this change a week was marked settled as soon as Sleeper's week number
+-- moved past it. Sleeper moves the week on Tuesday and posts the previous
+-- week's waiver claims about 07:10 UTC on Wednesday, filed under that previous
+-- week. So each week was locked on the Tuesday read, before its own waiver run,
+-- and those claims were never read. On 30 September 2026 the price model held
+-- 1 winning bid against the 17 paid winning bids Sleeper publishes for weeks 1-3.
+--
+-- The rule is fixed in `core/league/transactionSettling.ts`. This clears the
+-- flag on the weeks that were locked under the old rule, so the next read
+-- fetches them again (three or four Sleeper requests, once) and settles them
+-- under the new one. Rows are upserts, so nothing is duplicated.
+--
+-- Only the live season. Older seasons were read after they finished, when every
+-- claim had long since posted.
+UPDATE league_transaction_weeks SET settled = 0 WHERE season = '2026';
