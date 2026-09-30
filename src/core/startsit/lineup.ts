@@ -67,6 +67,7 @@ import { assessReplacement, type ReplacementAssessment } from './replacement.ts'
 import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
+import { decisionPoints } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -555,6 +556,12 @@ export function recommendLineup(
   const recommendedPoints = round2(
     [...assignment.values()].reduce((total, e) => total + (e.score ?? 0), 0),
   );
+
+  /*
+   * The number each player's suggestion is printed with, and the number the
+   * Compare sheet ranks him on: one function, so the two cannot disagree.
+   */
+  for (const evaluation of evaluations) evaluation.decision = decisionPoints(evaluation, opts.published);
 
   const { swaps, fills } = buildSwaps(filled, slots, currentStarters, evaluations, minGain, opts.published);
 
@@ -1505,21 +1512,21 @@ export const BORROWED_RANKING_DISCOUNT = 2;
 function rankingPoints(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
+  opts: { rosterRisk?: boolean } = {},
 ): { points: number; borrowed: boolean } | null {
-  if (hasCompleteMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
-  const figure = published?.get(evaluation.playerId);
-  if (figure != null && Number.isFinite(figure)) return { points: Math.max(0, figure), borrowed: true };
   /*
-   * A partial market, and nobody published him: the partial score, as before.
+   * Read from `decisionPoints`, the number the Compare sheet ranks on too.
    *
-   * Reached by every caller that passes no published map — the trade engine's
-   * lineups are all of them — so their ordering is exactly what it was. Where a
-   * published figure exists, the Team screen now ranks on it instead, because
-   * on 24 September 2026 a 0.75 built from a touchdown line alone was benching
-   * a back whose published week was a whole game.
+   * Until 30 September 2026 a borrowed figure ranked here *bare*: Rotowire's
+   * week with none of the status, usage or matchup reads `score` carries, while
+   * the Compare sheet ranked on `score` alone. The two disagreed about RJ Harvey
+   * and Mark Andrews on the same screen; see `decisionPoints.ts`. The tiers are
+   * unchanged: a complete market, then a published week, then a partial
+   * market, and a player with none of them is still unrankable.
    */
-  if (hasMarket(evaluation)) return { points: evaluation.score ?? 0, borrowed: false };
-  return null;
+  const decision = decisionPoints(evaluation, published, opts);
+  if (decision == null || decision.basis === 'unpriced') return null;
+  return { points: decision.points, borrowed: decision.basis === 'published' };
 }
 
 /** The same, already discounted, which is the form the ordering uses. */
@@ -1527,7 +1534,7 @@ function rankingKey(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
 ): number | null {
-  const basis = rankingPoints(evaluation, published);
+  const basis = rankingPoints(evaluation, published, { rosterRisk: true });
   if (basis == null) return null;
   return basis.borrowed ? basis.points - BORROWED_RANKING_DISCOUNT : basis.points;
 }

@@ -37,6 +37,31 @@ So the split is explicit: **the engines decide, this layer explains and plans.**
 
 ---
 
+## One decision number — `core/startsit/decisionPoints.ts`
+
+Added 30 September 2026, after the Team card said `Start RJ Harvey over Mark
+Andrews · +2.31` while the Compare sheet for the same two players said start
+Andrews, 3.9 against −1.6. Measured on production
+(`scripts/probe-banner-vs-compare.mjs`): the card ranked on Rotowire's
+published weeks with nothing added (9.53 − 7.22), and the sheet ranked on
+`score`, whose 5.4-point gap was almost all market coverage (one of Harvey's
+four lines posted, three of Andrews').
+
+Both now rank on `decisionPoints`:
+
+| Market | Number |
+| --- | --- |
+| Complete | `score`, unchanged |
+| Partial, with a published week | Rotowire's week + the same status, news, usage and matchup reads `score` carries (not the partial market sum or its coverage penalty) |
+| Partial, nothing published | `score`, as before |
+| None | `unpriced`: the sheet prints `score` under its warning; the lineup treats him as unrankable |
+
+`replacement_risk` needs the whole roster, so it orders the lineup but stays
+out of the number a suggestion is printed with. Every suggestion therefore
+equals the Compare sheet it opens: same winner, same margin
+(`tests/startsit.suggestionAgreesWithCompare.test.ts`). The sheet also runs in
+the lineup's own mode rather than always Balanced.
+
 ## xFP and FPOE — `core/xfp/model.ts`
 
 *What was the opportunity worth before anybody caught anything?*

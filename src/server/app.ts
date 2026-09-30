@@ -63,6 +63,7 @@ import { evaluatePlayer } from '../core/startsit/engine.ts';
 import { buildHeldPlayers } from '../core/roster/held.ts';
 import {
   matchesOwner,
+  resolveOwnerFilter,
   narrowsByOwner,
   ownerTeams,
   parseOwnerFilter,
@@ -2154,7 +2155,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * shown three of them under a total of a hundred, with the next page
      * arriving already filtered to nothing.
      */
-    const filtered = narrowsByOwner(owner) ? byPosition.filter((p) => matchesOwner(p.id, owner, owned)) : byPosition;
+    const resolvedOwner = resolveOwnerFilter(owner, rosters);
+    const filtered = narrowsByOwner(resolvedOwner)
+      ? byPosition.filter((p) => matchesOwner(p.id, resolvedOwner, owned))
+      : byPosition;
 
     /*
      * Scored deep enough to serve this page, then some.
@@ -3212,17 +3216,15 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       body?.slot ?? null,
     );
 
-    const comparison = compareStartSit(inputs, profile, { mode });
 
     /*
-     * The verdict is decided; now say what each man is actually worth.
+     * What each man is actually worth, read before the ranking now.
      *
-     * Two separate acts, in that order, and the order is the design. `compareStartSit`
-     * has already ranked on `score`, which is the market expectation plus this app's
-     * own bounded nudges and reaches no borrowed number — so nothing below can move
-     * the recommendation, and `startsit.compareProjection.test.ts` holds that.
+     * The preseason total below is still display only and cannot move the
+     * recommendation. The published week can, deliberately, and only through
+     * `decisionPoints`; see the ranking call below.
      *
-     * What it can do is stop the sheet printing nothing. Until today this route
+     * It also stops the sheet printing nothing. Until 22 September this route
      * was the only place a player got priced with no fallback at all: the Matchup
      * screen read three tiers and the Team screen two, and Compare read the market
      * or gave up. A probe of production on 22 September 2026 found eight of ten
@@ -3241,6 +3243,22 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       nflState,
       positions,
     }).catch(() => null);
+
+    /*
+     * Ranked with the published week in hand, since 30 September 2026.
+     *
+     * This used to rank first and read Rotowire's figures only for display, so
+     * nothing borrowed could move the answer. That wall is what let the Team
+     * screen's card and this sheet disagree about the same two players: the
+     * lineup ranks a partly priced player on his published week, this ranked
+     * him on the lines a book happened to post. Both now read
+     * `decisionPoints`, so a suggestion and the sheet it opens are the same
+     * arithmetic.
+     */
+    const comparison = compareStartSit(inputs, profile, {
+      mode,
+      ...(display ? { published: display.published } : {}),
+    });
 
     const projected = assembleComparison({
       evaluations: comparison.evaluations,

@@ -46,5 +46,10 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@1';
  * a swap names only a starter the incoming player can legally replace, and a
  * player whose market is missing lines ranks on his published figure where
  * one exists. Scores are unchanged, which is why `startsit@1` is.
+ *
+ * `lineup@3`, 30 September 2026: a published figure ranks with the same
+ * status, news, usage and matchup reads `score` carries, not bare, through
+ * `decisionPoints`, which the Compare sheet now ranks on too. `score` itself
+ * is unchanged, so `startsit@1` still is.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@2', STARTSIT_ENGINE_VERSION);
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@3', STARTSIT_ENGINE_VERSION);

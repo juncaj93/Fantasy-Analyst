@@ -87,8 +87,18 @@ test.describe('the recommended lineup, at a glance', () => {
       const own = await card.evaluate((el) => getComputedStyle(el).backgroundColor);
       // Transparent is the group's surface showing through, which is the point.
       expect([surface, 'rgba(0, 0, 0, 0)'], `a starter paints ${own}`).toContain(own);
-      // The chip is on the leading edge, and it names what he plays.
-      await expect(card.locator('.player-identity .pos-pill')).toHaveText(position);
+      // The chip is on the leading edge, and it names what he plays first.
+      const pill = card.locator('.player-identity .pos-pill');
+      await expect(pill).toHaveAttribute('data-position', position);
+      await expect(pill).toHaveText(new RegExp(`^${position}`));
+      /*
+       * And, on a slot he does not play natively, the slot under it in the same
+       * pill rather than as a second chip (30 September 2026: `TE` and `FLEX`
+       * read as the row labelling one slot twice).
+       */
+      const slot = (await card.getAttribute('data-slot'))!;
+      if (slot !== position) await expect(pill).toHaveAttribute('data-slot', slot);
+      await expect(card.getByTestId('slot-tag')).toHaveCount(0);
     }
 
     await page.getByTestId('bench-toggle').click();
