@@ -183,12 +183,13 @@
   --pos-DEF-line: #ab2f68;
   --pos-DEF-tint: #fbdcea;
   /*
-   * A lineup slot, not a position. Solid slate with light letters, so it can
-   * never be mistaken for one of the tinted position pills above it: those are
-   * a colour wash with coloured letters, this is a filled block.
+   * A lineup slot, not a position. Drawn like the position pills above it (a
+   * light wash with darker letters) but in a neutral grey, the one hue no
+   * position uses. It was solid slate for a day; the owner found it too heavy
+   * beside the tinted pills (30 September 2026).
    */
-  --slot-flex-bg: #3d4654;
-  --slot-flex-ink: #ffffff;
+  --slot-flex-bg: #e6e8ec;
+  --slot-flex-ink: #4a5260;
 
   /*
    * How much of the position's hue the card actually shows.
@@ -776,8 +777,8 @@
     --pos-K-tint: #10393f;
     --pos-DEF-line: #f492bd;
     --pos-DEF-tint: #44172c;
-    --slot-flex-bg: #c9d1dc;
-    --slot-flex-ink: #141922;
+    --slot-flex-bg: #2a2f37;
+    --slot-flex-ink: #c3c9d2;
 
     --pos-mix: 0%;
     --pos-mix-open: 14%;
@@ -888,8 +889,8 @@
   --pos-K-tint: #10393f;
   --pos-DEF-line: #f492bd;
   --pos-DEF-tint: #44172c;
-  --slot-flex-bg: #c9d1dc;
-  --slot-flex-ink: #141922;
+  --slot-flex-bg: #2a2f37;
+  --slot-flex-ink: #c3c9d2;
 
   --pos-mix: 0%;
   --pos-mix-open: 14%;
@@ -2433,12 +2434,13 @@ body,
 /*
  * A player filling a slot, labelled by the slot alone. See `PositionPill`.
  *
- * Same 32px box as every pill, so names stay on one column. Filled slate
- * rather than a position tint, and the letters a touch smaller so four of them
- * fit the box the two- and three-letter codes were sized for.
+ * Same 32px box as every pill, so names stay on one column. The same wash,
+ * edge and letter treatment as a position pill, in the slot's neutral grey,
+ * and the letters a touch smaller so four of them fit the box the two- and
+ * three-letter codes were sized for.
  */
 .pos-pill.pos-pill-slot {
-  border-color: var(--slot-flex-bg);
+  border-color: color-mix(in srgb, var(--slot-flex-ink) 40%, transparent);
   background: var(--slot-flex-bg);
   color: var(--slot-flex-ink);
   font-size: 0.54rem;
