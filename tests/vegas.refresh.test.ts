@@ -18,6 +18,15 @@ import { PropsRepo } from '../src/server/repos/props.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { createTestDb } from './helpers/db.ts';
+import { VegasEventsRepo } from '../src/server/repos/vegasEvents.ts';
+import { NflScheduleRepo } from '../src/server/repos/nflSchedule.ts';
+
+/** A provider with no games on offer, as before the books post a week. */
+class EmptyProvider extends MockVegasProvider {
+  constructor() {
+    super([]);
+  }
+}
 
 /** A provider that counts what was asked of it, so spending is observable. */
 class CountingProvider extends MockVegasProvider {
@@ -132,26 +141,77 @@ describe('a weekly refresh', () => {
   });
 
   /**
-   * The discovery interval is a politeness rule, and a person may skip it.
+   * The discovery interval is a politeness rule, and a person may skip it —
+   * but only to learn a schedule the app does not have.
    *
    * `lastVegasSchedule` is stamped *before* the provider is called, so a
-   * discovery that came back with nothing — which is every discovery run in the
-   * fortnight between a draft and week one, before the window learned to stretch
-   * to the next slate — locks the app out of re-asking for three days. For a
-   * clock that is correct; it comes round again on its own. For somebody looking
-   * at a screen that says the lines are nine days old, it makes the refresh
-   * control a button that does nothing and gives no reason.
+   * discovery that came back with nothing locks the clock out of re-asking for
+   * three days. A person looking at a stale screen may go past that. What they
+   * may not do is re-buy the games already on file, which is what every manual
+   * refresh did until 30 September 2026: 155 of the 195 entities seventeen
+   * manual refreshes spent that month were the same nine games bought again.
    */
-  it('lets a person re-ask for the schedule inside the interval a clock must wait out', async () => {
-    await new VegasRefreshService(db, new CountingProvider()).refresh();
+  it('lets a person re-ask for a schedule that is genuinely unknown', async () => {
+    const t0 = Date.now();
+    // The first look finds nothing: the books have not posted the week.
+    await new VegasRefreshService(db, new EmptyProvider()).refresh({ now: t0 });
 
     const scheduled = new CountingProvider();
-    await new VegasRefreshService(db, scheduled).refresh();
+    await new VegasRefreshService(db, scheduled).refresh({ now: t0 + 3_600_000 });
     expect(scheduled.teamCalls, 'a scheduled pass still waits out the interval').toHaveLength(0);
 
-    const manual = new CountingProvider();
-    await new VegasRefreshService(db, manual).refresh({ manual: true });
-    expect(manual.teamCalls, 'a person asking gets a fresh discovery').toHaveLength(1);
+    const soon = new CountingProvider();
+    await new VegasRefreshService(db, soon).refresh({ manual: true, now: t0 + 3_600_000 });
+    expect(soon.teamCalls, 'an hour later, the same empty answer is not bought again').toHaveLength(0);
+
+    const later = new CountingProvider();
+    await new VegasRefreshService(db, later).refresh({ manual: true, now: t0 + 7 * 3_600_000 });
+    expect(later.teamCalls, 'a person asking later gets a fresh discovery').toHaveLength(1);
+  });
+
+  it('does not re-buy the week on a second manual refresh', async () => {
+    const first = new CountingProvider();
+    await new VegasRefreshService(db, first).refresh({ manual: true });
+    expect(first.teamCalls).toHaveLength(1);
+
+    const second = new CountingProvider();
+    const report = await new VegasRefreshService(db, second).refresh({ manual: true });
+    expect(second.teamCalls, 'every roster team is either scheduled or known to have nothing').toHaveLength(0);
+    expect(report.discovered).toBe(0);
+
+    const ledger = await new VegasUsageRepo(db).recent(50);
+    expect(ledger.filter((r) => r.source === 'schedule' && r.outcome === 'fetched')).toHaveLength(1);
+  });
+
+  it('files a game two roster teams share under both of them', async () => {
+    // KC and DAL both have a demo player in demo-game-1.
+    await new VegasRefreshService(db, new CountingProvider()).refresh({ manual: true });
+    const row = (await new VegasEventsRepo(db).forEvents(['demo-game-1'])).get('demo-game-1');
+    expect([row?.homeTeam, row?.awayTeam].sort()).toEqual(['DAL', 'KC']);
+  });
+
+  it('does not ask about a team the schedule says is on a bye', async () => {
+    const now = Date.now();
+    const week = (team: string, w: number, opponent: string | null, days: number | null) => ({
+      season: '2026',
+      week: w,
+      team,
+      opponent,
+      home: true,
+      kickoff: days == null ? null : new Date(now + days * 86_400_000).toISOString(),
+      roof: null,
+    });
+    await new NflScheduleRepo(db).save(
+      [week('KC', 4, 'CIN', 3), week('DET', 4, null, null), week('DET', 5, 'GB', 10)],
+      new Date(now).toISOString(),
+    );
+
+    const provider = new CountingProvider();
+    await new VegasRefreshService(db, provider).refresh({ manual: true, now });
+    expect(provider.teamCalls).toHaveLength(1);
+    expect(provider.teamCalls[0]).not.toContain('DET');
+    // No schedule stored for NYJ: not knowing is a reason to ask, as before.
+    expect(provider.teamCalls[0]).toContain('NYJ');
   });
 
   /**

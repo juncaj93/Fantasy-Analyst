@@ -108,23 +108,25 @@ export class MockVegasProvider implements VegasProvider {
     opts: { from?: string; to?: string; markets?: MarketKey[]; maxEvents?: number } = {},
   ): Promise<TeamPropsResult> {
     const results: { teamId: string; set: RawPropSet }[] = [];
-    const seen = new Set<string>();
+    const seen = new Map<string, RawPropSet>();
     for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
-      if (results.length >= (opts.maxEvents ?? 12)) break;
+      if (seen.size >= (opts.maxEvents ?? 12)) break;
       const key = teamId.toUpperCase();
       for (const game of this.games) {
-        if (seen.has(game.eventId)) continue;
         // A team is in a game if the game names it or if one of its players is
         // on that team — the fixtures carry both spellings, and so does life.
         const involved =
           [game.homeTeam, game.awayTeam].some((t) => t.toUpperCase() === key) ||
           game.players.some((p) => (p.team ?? '').toUpperCase() === key);
         if (!involved) continue;
-        seen.add(game.eventId);
-        results.push({ teamId, set: await this.getPlayerProps(game.eventId, opts.markets) });
+        // A game two asked-about teams share is reported for both, as the real
+        // adapter does, and counted once.
+        const set = seen.get(game.eventId) ?? (await this.getPlayerProps(game.eventId, opts.markets));
+        seen.set(game.eventId, set);
+        results.push({ teamId, set });
       }
     }
-    return { results, requests: Math.max(1, teamIds.length), entities: Math.max(1, results.length) };
+    return { results, requests: Math.max(1, teamIds.length), entities: Math.max(1, seen.size) };
   }
 
   async getPlayerProps(eventId: string, markets: MarketKey[] = MARKET_KEYS): Promise<RawPropSet> {

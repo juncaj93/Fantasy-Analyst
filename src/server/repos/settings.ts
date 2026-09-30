@@ -89,4 +89,13 @@ export const SETTING_KEYS = {
    * on every pass.
    */
   lastVegasSchedule: 'vegas.lastSchedule',
+  /**
+   * Roster teams discovery asked about and found no game for, with when.
+   *
+   * `{ "NYJ": "2026-09-30T12:00:00.000Z" }`. Each of those asks is billed an
+   * entity for an empty answer, so a team on this list is not asked again
+   * until its entry is a few hours old — otherwise every tap on a refresh
+   * button re-buys the same nothing. See `VegasRefreshService.discoverIfNeeded`.
+   */
+  vegasDiscoveryEmpty: 'vegas.discoveryEmpty',
 } as const;
