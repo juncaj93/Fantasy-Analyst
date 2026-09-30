@@ -13,14 +13,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
-import type { StartSitEvaluation } from '../src/core/startsit/engine.ts';
-import {
-  recommendWaiverUpgrades,
-  MEANINGFUL_UPGRADE_GAIN,
-  ROSTER_SPOT_GAIN,
-  upgradeBar,
-} from '../src/core/startsit/waivers.ts';
-import { candidate, signalWithNet } from './helpers/startsit.ts';
+import { recommendWaiverUpgrades, MEANINGFUL_UPGRADE_GAIN, ROSTER_SPOT_GAIN } from '../src/core/startsit/waivers.ts';
+/*
+ * Every player here is fully priced unless a test says otherwise: since the
+ * waiver yardstick (30 September 2026), a single posted line is a partial
+ * market and is not compared against anybody. See `core/waivers/yardstick.ts`.
+ */
+import { pricedCandidate as candidate, signalWithNet } from './helpers/startsit.ts';
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -174,16 +173,6 @@ describe('a value add', () => {
 
     expect(advice.valueAdds).toEqual([]);
   });
-
-  it('shares one threshold with the planner that consumes it', async () => {
-    const { DEFAULT_LIMITS } = await import('../src/core/waivers/planner/types.ts');
-    /*
-     * The bug behind this assertion: the planner declared a half-point bar and
-     * took its targets from a board that admitted nobody under 2.5, so its own
-     * threshold could never be reached. One constant, read by both.
-     */
-    expect(DEFAULT_LIMITS.minNetGain).toBe(ROSTER_SPOT_GAIN);
-  });
 });
 
 /**
@@ -251,7 +240,8 @@ describe('who may be recommended', () => {
     expect(te!.currentName).toBe('End One');
     expect(te!.need).toBe('upgrade');
     expect(te!.candidates[0]!.gain).toBeGreaterThanOrEqual(MEANINGFUL_UPGRADE_GAIN);
-    expect(te!.candidates[0]!.reasons.join(' ')).toContain('Market rising');
+    // Both numbers, and which yardstick they came from.
+    expect(te!.candidates[0]!.reasons.join(' ')).toContain("Projects 15.0 pts to End One's 9.0 (Vegas lines for both)");
   });
 
   /*
@@ -477,13 +467,19 @@ describe('the same intelligence as everywhere else', () => {
     expect(questionable.upgrades[0]!.candidates[0]!.gain).toBeLessThan(strong.upgrades[0]!.candidates[0]!.gain);
     expect(questionable.upgrades[0]!.candidates[0]!.statusFlag).toMatch(/Questionable/i);
 
-    // The tally: positive recent news lifts him, and is named as a reason.
+    /*
+     * The tally does not move a waiver call any more, and that is the point.
+     *
+     * Until 30 September 2026 a free agent with no props was ranked on news and
+     * usage alone and subtracted from a bench player's betting-line total: two
+     * different kinds of number. The yardstick compares projections only, so a
+     * news surge on a priced player changes nothing about the gap.
+     */
     const newsy = recommendWaiverUpgrades({
       ...base,
       candidates: [candidate('fa', 'Free End', 'TE', 20, { signal: signalWithNet(5) })],
     });
-    expect(newsy.upgrades[0]!.candidates[0]!.gain).toBeGreaterThan(strong.upgrades[0]!.candidates[0]!.gain);
-    expect(newsy.upgrades[0]!.candidates[0]!.reasons.join(' ')).toContain('Recent news');
+    expect(newsy.upgrades[0]!.candidates[0]!.gain).toBe(strong.upgrades[0]!.candidates[0]!.gain);
   });
 
   it('reports the size of the pool it actually looked at', () => {
@@ -500,38 +496,64 @@ describe('the same intelligence as everywhere else', () => {
 });
 
 describe('the threshold itself', () => {
-  const wellCovered = { confidence: 'high' } as StartSitEvaluation;
-  const thin = { confidence: 'low' } as StartSitEvaluation;
-  const partial = { confidence: 'medium' } as StartSitEvaluation;
-
   it('is one number, in one place', () => {
     expect(MEANINGFUL_UPGRADE_GAIN).toBe(2.5);
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, wellCovered)).toBe(MEANINGFUL_UPGRADE_GAIN);
   });
 
-  /** An empty slot is a need, not a preference: any playable body clears it. */
+  /** An empty slot is a need, not a preference: any readable body clears it. */
   it('does not apply to a slot nobody is starting in', () => {
-    expect(upgradeBar('unfilled', MEANINGFUL_UPGRADE_GAIN, null, thin)).toBe(0);
+    const advice = recommendWaiverUpgrades({
+      roster: healthyRoster().filter((p) => p.player.id !== 'te1'),
+      candidates: [candidate('fa-te', 'Free End', 'TE', 3)],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS.filter((id) => id !== 'te1'),
+    });
+    expect(advice.upgrades[0]!.bar).toBe(0);
   });
 
   /**
-   * The rule that keeps the card quiet.
+   * Half a point more on a borrowed number.
    *
-   * A gap measured against a player the market has not priced is mostly the
-   * missing side showing through, so it has to be bigger before it is worth
-   * saying. Either side being thin is enough — the weaker half is what limits
-   * what the subtraction can be trusted to mean.
+   * Sleeper's projection is Rotowire's model, never checked against this app's
+   * own, so a starter upgrade measured on it has to clear 3.0 rather than 2.5.
    */
-  it('asks more of a gap measured against thin data, on either side', () => {
-    const solid = upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, wellCovered);
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, wellCovered)).toBeGreaterThan(solid);
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, wellCovered, thin)).toBeGreaterThan(solid);
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, partial, wellCovered)).toBeGreaterThan(solid);
-    // The worse of the two decides, so one thin side is not softened by a
-    // well-covered one.
-    expect(upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, wellCovered)).toBe(
-      upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, thin, thin),
-    );
+  it('asks more of a gap measured on Sleeper projections than on betting lines', () => {
+    const published = new Map([
+      ['te1', 9],
+      ['fa-te', 11.8],
+    ]);
+    const advice = recommendWaiverUpgrades({
+      // No betting lines for either tight end; a news tally so the lineup can place him.
+      roster: healthyRoster().map((p) =>
+        p.player.id === 'te1' ? candidate('te1', 'End One', 'TE', null, { signal: signalWithNet(1) }) : p,
+      ),
+      candidates: [candidate('fa-te', 'Free End', 'TE', null, { signal: signalWithNet(1) })],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS,
+      published,
+    });
+    // 2.8 clears the Vegas bar and not the Sleeper one.
+    expect(advice.upgrades.find((u) => u.slot === 'TE')).toBeUndefined();
+
+    // 3.2 clears it, and the card names the yardstick.
+    const clears = recommendWaiverUpgrades({
+      roster: healthyRoster().map((p) =>
+        p.player.id === 'te1' ? candidate('te1', 'End One', 'TE', null, { signal: signalWithNet(1) }) : p,
+      ),
+      candidates: [candidate('fa-te', 'Free End', 'TE', null, { signal: signalWithNet(1) })],
+      shape: SHAPE,
+      profile: HALF_PPR,
+      rosteredPlayerIds: MY_IDS,
+      published: new Map([
+        ['te1', 9],
+        ['fa-te', 12.2],
+      ]),
+    });
+    const te = clears.upgrades.find((u) => u.slot === 'TE')!;
+    expect(te.bar).toBe(3);
+    expect(te.candidates[0]!.reasons.join(' ')).toContain('(Sleeper projection for both)');
   });
 
   it('suppresses an add whose apparent edge is only the missing half', () => {

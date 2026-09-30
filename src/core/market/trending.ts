@@ -167,10 +167,14 @@ export function trendingHeadline(v: TrendingVelocity, opts: { availableInLeague?
     return `Add rate accelerated ${formatMultiple(v.acceleration)}`;
   }
   if (v.rank != null && v.rank <= 5) {
-    const base = `#${v.rank} trending add`;
+    /*
+     * A rank, said as one. Never "adds across Sleeper" or "leagues": the count
+     * behind it is undocumented and larger than the number of Sleeper leagues.
+     */
+    const base = `#${v.rank} most-added on Sleeper today`;
     return opts.availableInLeague ? `${base} · still available in your league` : base;
   }
-  if (v.entered && v.rank != null && v.rank <= 15) return `New to the trending list at #${v.rank}`;
+  if (v.entered && v.rank != null && v.rank <= 15) return `New to Sleeper's most-added list at #${v.rank}`;
   return null;
 }
 

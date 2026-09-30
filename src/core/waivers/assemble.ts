@@ -62,7 +62,8 @@ import { waiverLeagueIntel, withCompetition, type WaiverIntelRoster } from './in
 import { trendingHeadline, type TrendingVelocity } from '../market/trending.ts';
 import { priceWaiverUpgrades, type PricedBid, type WaiverPricingContext } from './pricing.ts';
 import { buildWaiverClaimPlan, type WaiverClaimPlan } from './claimPlan.ts';
-import { marketHoldFor } from './planner/rosterState.ts';
+import { marketHoldFor } from './marketHold.ts';
+import { findHandcuffs } from './yardstick.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
@@ -148,6 +149,24 @@ export interface WaiverAssemblyRequest {
    * offered as cuts. Optional, and absent is the previous behaviour.
    */
   draftRankOf?: ReadonlyMap<string, number> | undefined;
+  /**
+   * Sleeper's published weekly projection, for the roster and the scanned wire.
+   *
+   * The fallback yardstick: two players who are not both fully priced by Vegas
+   * are compared on this, for both. Owner-approved for waivers on 30 September
+   * 2026. Absent means no fallback, so only fully priced pairs compare.
+   */
+  published?: ReadonlyMap<string, number> | undefined;
+  /**
+   * Where the stored depth chart puts each rostered player at his position,
+   * by player id. Read for one thing: whether a bench player is the backup to
+   * one of your starters. Absent falls back to same club and position.
+   */
+  depth?: ReadonlyMap<string, { rank: number }> | undefined;
+  /** Sleeper's trending drops, as velocity. The top ten are kept out of the plan. */
+  trendingDrops?: ReadonlyMap<string, TrendingVelocity> | undefined;
+  /** Players this roster dropped recently, with when. Said on the card, never hidden. */
+  recentlyDropped?: ReadonlyMap<string, string> | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -210,7 +229,9 @@ export interface WaiverAssembly extends WaiverAdvice {
  */
 function lineFor(trending: ReadonlyMap<string, TrendingVelocity>, playerId: string): string | null {
   const v = trending.get(playerId);
-  return v ? trendingHeadline(v, { availableInLeague: true }) : null;
+  const line = v ? trendingHeadline(v, { availableInLeague: true }) : null;
+  /* The rank is already on the row, from the scan. Only a velocity line adds anything. */
+  return line != null && !line.startsWith('#') ? line : null;
 }
 
 /**
@@ -243,11 +264,16 @@ export function roomIsAdding(trending: ReadonlyMap<string, TrendingVelocity>): M
  * until somebody changes one of the two.
  */
 export function waiverLineup(
-  request: Pick<WaiverAssemblyRequest, 'rosterInputs' | 'shape' | 'profile' | 'currentStarterIds' | 'now'>,
+  request: Pick<WaiverAssemblyRequest, 'rosterInputs' | 'shape' | 'profile' | 'currentStarterIds' | 'now' | 'published'>,
 ): LineupRecommendation {
+  /*
+   * With Sleeper's published week, the way the Team screen builds it, so the
+   * lineup a waiver claim is measured against is the lineup the reader sees.
+   */
   return recommendLineup(request.rosterInputs, request.shape, request.profile, {
     currentStarterIds: request.currentStarterIds,
     now: request.now,
+    ...(request.published ? { published: request.published } : {}),
   });
 }
 
@@ -272,13 +298,46 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    * plan cannot disagree about who is on the table.
    */
   const draftCapitalRank = request.rosters.length > 0 ? request.rosters.length * shape.totalStarters : undefined;
-  const heldIds = new Set(
-    marketHoldFor({
-      ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
-      ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
-      roomIsAdding: roomIsAdding(trending),
-      week: request.week,
-    }).keys(),
+  const heldIds = new Map(
+    [
+      ...marketHoldFor({
+        ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
+        ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
+        roomIsAdding: roomIsAdding(trending),
+        week: request.week,
+      }),
+    ].map(([id, hold]) => [
+      id,
+      hold.condition === 'trending' ? `#${hold.rank} add in Sleeper this week` : `drafted around pick ${Math.round(hold.rank)}`,
+    ]),
+  );
+
+  /*
+   * The backups to your own starters, cut only when nothing else can go.
+   *
+   * On 30 September 2026 the plan cut Emmett Johnson three times; he was the
+   * direct backup to Kenneth Walker, the starting back on the same roster.
+   */
+  const starterIds = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+  const handcuffs = findHandcuffs({
+    roster: rosterInputs.map((i) => ({
+      playerId: i.player.id,
+      name: i.player.fullName,
+      position: i.player.position,
+      team: i.player.team,
+    })),
+    starterIds,
+    depth: request.depth ?? new Map(),
+  });
+
+  /*
+   * Free spots, so a claim that needs no drop is not handed one. IR slots hold
+   * their own players and are not bench spots.
+   */
+  const reserved = new Set(request.reserveIds);
+  const openSpots = Math.max(
+    0,
+    shape.totalStarters + shape.benchSlots - rosterInputs.filter((i) => !reserved.has(i.player.id)).length,
   );
 
   const advice = recommendWaiverUpgrades({
@@ -293,6 +352,12 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     calendar: { week: request.week, playoffWeeks: request.playoff.weeks },
     attention: new Map([...trending].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
     heldIds,
+    ...(request.published === undefined ? {} : { published: request.published }),
+    handcuffs,
+    trendingDrops: new Map([...(request.trendingDrops ?? new Map<string, TrendingVelocity>())].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
+    ...(request.recentlyDropped === undefined ? {} : { recentlyDropped: request.recentlyDropped }),
+    openSpots,
+    now: request.now,
   });
 
   /*
@@ -368,7 +433,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   }));
 
   const intel = waiverLeagueIntel({
-    advice,
+    /* Bench adds need a rival count too: they are priced now. */
+    advice: { upgrades: advice.upgrades, valueAdds: advice.valueAdds },
     rosters: request.rosters,
     players: request.players,
     shape,
@@ -379,7 +445,12 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   });
 
   const bids = request.strategy
-    ? priceWaiverUpgrades({ advice, strategy: request.strategy, rosteredIds, competition: intel.competition })
+    ? priceWaiverUpgrades({
+        advice: { upgrades: advice.upgrades, valueAdds: advice.valueAdds },
+        strategy: request.strategy,
+        rosteredIds,
+        competition: intel.competition,
+      })
     : [];
 
   /*
@@ -444,7 +515,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   const defenceIsPlanned = dst != null;
   const ownsDefence = (position: string) => defenceIsPlanned && position === DEFENCE_POSITION;
 
-  const valueAdds = advice.valueAdds.filter((add) => !ownsDefence(add.position)).map((add) => {
+  const valueAddsWithIntel = advice.valueAdds.filter((add) => !ownsDefence(add.position)).map((add) => {
     const season = seasonOutlook.get(add.playerId);
     const value = multiWeek.get(add.playerId);
     const line = lineFor(trending, add.playerId);
@@ -455,6 +526,18 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       ...(line ? { reasons: [...add.reasons, line] } : {}),
     };
   });
+  /*
+   * The same competition fold the upgrades get: the rival count, the named
+   * bidders when the evidence supports naming them, and the rivals' history.
+   * A bench add is priced now, so the people who would bid against it belong
+   * on its sheet as much as on an upgrade's.
+   */
+  const valueAdds = withCompetition(
+    [{ candidates: valueAddsWithIntel }],
+    intel.competition,
+    intel.bidders,
+    intel.pressure,
+  )[0]!.candidates;
 
   /*
    * The unscored, narrowed to the ones the room is actually chasing.
@@ -482,7 +565,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         trending: trendingHeadline(v, { availableInLeague: true }),
         adds: v.count,
         heat: v.heat,
-        leagueRank: v.rank,
+        leagueRank: v.rank as number,
       };
     })
     .filter((u): u is NonNullable<typeof u> => u != null)
@@ -497,19 +580,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   const claimPlan = (() => {
     try {
       return buildWaiverClaimPlan({
-        roster: rosterInputs,
-        candidates: candidateInputs,
         advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids } },
-        shape,
-        profile,
-        ...(request.preseasonPoints === undefined ? {} : { preseasonPoints: request.preseasonPoints }),
-        ...(request.draftRankOf === undefined ? {} : { draftRankOf: request.draftRankOf }),
-        roomIsAdding: roomIsAdding(trending),
-        ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
-        week: request.week,
-        reserveIds: request.reserveIds,
         budget: request.budgets,
-        now: request.now,
         ...(request.generatedAt === undefined ? {} : { generatedAt: request.generatedAt }),
       });
     } catch {

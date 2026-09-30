@@ -27,7 +27,10 @@
 import type { LeagueBudgetState, RosterBudget } from './budget.ts';
 import { myBudget, standingAfterSpend } from './budget.ts';
 import type { PriceSummary } from './bids.ts';
-import { MIN_PRICE_SAMPLE } from './bids.ts';
+import { MIN_PRICE_SAMPLE, percentile } from './bids.ts';
+
+/** How much of the league's bid distribution a price band spans either side of its centre. */
+export const PRICE_BAND_WIDTH = 0.15;
 
 /**
  * The largest share of a season budget any single player may be recommended at.
@@ -246,6 +249,24 @@ export function expectedMarketPrice(
   budget: { total: number },
   demand: number,
 ): { low: number; high: number; basis: 'league_history' | 'estimate' } {
+  const amounts = prices.amounts ?? [];
+  if (amounts.length >= MIN_PRICE_SAMPLE) {
+    /*
+     * A band from where this player sits in the league's own winning bids.
+     *
+     * Demand picks the centre — an uncontested add near the cheap end, a hot
+     * one near the dear end — and the band is {@link PRICE_BAND_WIDTH} of the
+     * distribution either side of it. Measured on this league's 17 winning bids
+     * of 2026 ($1 to $16, quartiles $1 and $10): the whole quartile range on
+     * every card read `$1–13` for everybody, and this reads `$1–6` for a quiet
+     * add and `$2–10` for a contested one. Still a range, because a bid is a
+     * distribution, and still the league's own dollars.
+     */
+    const centre = 0.25 + 0.5 * clamp01(demand);
+    const low = Math.max(1, percentile(amounts, centre - PRICE_BAND_WIDTH) ?? 1);
+    const high = Math.max(low + 1, percentile(amounts, centre + PRICE_BAND_WIDTH) ?? low + 1);
+    return { low, high, basis: 'league_history' };
+  }
   if (prices.sample >= MIN_PRICE_SAMPLE && prices.low != null && prices.high != null) {
     /*
      * The league's own quartiles, pushed by how contested *this* player is.

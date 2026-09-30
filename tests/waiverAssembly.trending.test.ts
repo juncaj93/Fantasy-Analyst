@@ -17,7 +17,8 @@ import { describe, expect, it } from 'vitest';
 import { assembleWaiverPlan, type WaiverAssemblyRequest } from '../src/core/waivers/assemble.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { TrendingVelocity } from '../src/core/market/trending.ts';
-import { candidate } from './helpers/startsit.ts';
+/* Fully priced: a single posted line is not compared on the waiver yardstick. */
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -100,7 +101,7 @@ describe('the unscorable half of the wire', () => {
 
     expect(plan.unknowns.map((u) => u.name)).toEqual(['Chased Rookie']);
     expect(plan.unknowns[0]!.adds).toBe(18400);
-    expect(plan.unknowns[0]!.trending).toContain('#3 trending add');
+    expect(plan.unknowns[0]!.trending).toContain('#3 most-added on Sleeper today');
   });
 
   it('says nothing at all when no capture has been taken', async () => {
@@ -157,6 +158,6 @@ describe('what attention may not do', () => {
     );
 
     expect(plan.valueAdds).toHaveLength(1);
-    expect(plan.valueAdds[0]!.reasons.join(' · ')).toContain('#2 trending add');
+    expect(plan.valueAdds[0]!.reasons.join(' · ')).toContain('#2 most-added on Sleeper today');
   });
 });

@@ -389,7 +389,15 @@ describe('the three tiers', () => {
     const board = buildWaiverBoard({
       upgrades: [],
       unknowns: [
-        { playerId: 'un', name: 'Trending Nobody', position: 'RB', team: 'CHI', trending: '#2 trending add', adds: 9100 },
+        {
+          playerId: 'un',
+          name: 'Trending Nobody',
+          position: 'RB',
+          team: 'CHI',
+          trending: '#2 most-added on Sleeper today',
+          adds: 9100,
+          leagueRank: 2,
+        },
       ],
     });
 
@@ -397,9 +405,14 @@ describe('the three tiers', () => {
     expect(row.score).toBeNull();
     expect(row.faab).toBeNull();
     expect(row.multiWeek).toBeNull();
-    /* The add count is a reason, never a number under `Proj.` or `This week`. */
+    /* The rank is a reason, never a number under `Proj.` or `This week`. */
     expect(row.shortTerm.label).toBe('Not scored');
-    expect(row.reasons.join(' · ')).toContain('9,100 adds across Sleeper');
+    expect(row.reasons.join(' · ')).toContain('#2 most-added on Sleeper today');
+    /*
+     * And never the count. Sleeper's count is not leagues: on 30 September
+     * 2026 one player showed more adds in a day than there are Sleeper leagues.
+     */
+    expect(row.reasons.join(' · ')).not.toMatch(/9,100|9100|adds across Sleeper/);
     expect(row.strength.label).toBe('No data yet');
     expect(row.reasons.join(' ')).toContain('Unknown, not ruled out');
   });

@@ -1600,6 +1600,19 @@ export interface WaiverAdvice {
    * the screen reads as "no plan" and never as "no move".
    */
   claimPlan?: WaiverClaimPlan | null;
+  /**
+   * When the Sleeper-side inputs — the trending lists and the league's
+   * transactions — were last read. Drawn as `Updated 5:00 AM`. Null before the
+   * first read; absent on an older payload.
+   */
+  updatedAt?: string | null;
+}
+
+/** What the Waivers screen's own refresh reports. Sleeper only. */
+export interface WaiverRefreshReport {
+  transactions: { weeksFetched: number[]; transactions: number } | null;
+  trending: { captured: number; capturedAt: string; drops: number | null } | null;
+  refreshedAt: string;
 }
 
 /** A roster's budget position, in dollars and as a share of the league. */
@@ -1640,7 +1653,7 @@ export interface FaabBid {
     comparable: number;
     droppedBelow: string[];
   } | null;
-  /** `#2 trending add · still available in your league`, or nothing. */
+  /** `#2 most-added on Sleeper today · still available in your league`, or nothing. */
   trending: string | null;
   /** Whether the market and our own read agree, and what that is allowed to change. */
   disagreement: {

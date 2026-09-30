@@ -61,6 +61,8 @@ import type { NflState } from '../../core/sleeper/phase.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
+import { DepthChartRepo } from '../repos/nflverse.ts';
+import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
 
 /** How old the betting market is, in the shape every screen already prints. */
 export type PropsFreshness = { fetchedAt: string | null; provider: string | null; events: number };
@@ -591,6 +593,28 @@ export async function gatherWaiverInputs(
     })
     .catch(() => undefined);
 
+  /*
+   * Sleeper's published week for the roster and the scanned wire: the
+   * fallback yardstick for any pair Vegas has not fully priced. Owner-approved
+   * for waivers on 30 September 2026. Read from the stored feed, never from
+   * Sleeper on a page load; a failure is an empty map, which leaves only fully
+   * priced pairs comparable.
+   */
+  const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
+  const published = await new SleeperProjectionService(db, sleeper)
+    .publishedFor({
+      season: league.season,
+      week,
+      playerIds: [...mine.playerIds, ...candidateIds],
+      profile,
+      positionOf: (id) => positionOfId.get(id) ?? null,
+    })
+    .catch((): ReadonlyMap<string, number> => new Map<string, number>());
+
+  const depth = await rosterDepthRanks(db, league.season, rosterInputs).catch(
+    () => new Map<string, { rank: number }>(),
+  );
+
   const draft = league.draftId ? await new LeagueRepo(db).getDraft(league.draftId).catch(() => null) : null;
   const format = detectBestBall({ leagueSettings: league.leagueSettings, draftSettings: draft?.settings ?? null });
   const playoffs = playoffContextFor({
@@ -624,6 +648,10 @@ export async function gatherWaiverInputs(
       strategy,
       /* The same capture the pricing pass reads, handed over for surfacing too. */
       trending: strategy?.trending,
+      trendingDrops: strategy?.trendingDrops,
+      recentlyDropped: strategy?.recentlyDropped,
+      published,
+      depth,
       /*
        * The season market for the candidates on the board, for the
        * rest-of-season column.
@@ -663,6 +691,31 @@ export async function gatherWaiverInputs(
       playoff: { weeks: playoffs.weeks, emphasis: playoffs.emphasis },
     },
   };
+}
+
+/**
+ * Where the stored depth chart puts each rostered skill player, by player id.
+ *
+ * Matched on club, position and normalised name, because Sleeper's dictionary
+ * leaves `gsis_id` empty for many current players. Players the chart does not
+ * name are simply absent, and the handcuff read falls back to club and
+ * position for them.
+ */
+export async function rosterDepthRanks(
+  db: Database,
+  season: string,
+  rosterInputs: readonly StartSitInput[],
+): Promise<Map<string, { rank: number }>> {
+  const skill = rosterInputs.filter((i) => ['QB', 'RB', 'TE', 'WR'].includes(i.player.position) && i.player.team);
+  const teams = [...new Set(skill.map((i) => normalizeTeam(i.player.team)))];
+  const rows = await new DepthChartRepo(db).latestRanksForTeams(season, teams);
+  const byKey = new Map(rows.map((r) => [`${normalizeTeam(r.team)}|${r.position}|${normalizeName(r.playerName)}`, r.rank] as const));
+  const out = new Map<string, { rank: number }>();
+  for (const i of skill) {
+    const rank = byKey.get(`${normalizeTeam(i.player.team)}|${i.player.position}|${normalizeName(i.player.fullName)}`);
+    if (rank != null && Number.isFinite(rank)) out.set(i.player.id, { rank });
+  }
+  return out;
 }
 
 /**

@@ -27,7 +27,7 @@ import type { PriceSummary } from '../faab/bids.ts';
 import type { TrendingVelocity } from '../market/trending.ts';
 import { trendingHeadline } from '../market/trending.ts';
 import { detectDisagreement, type Disagreement } from '../market/disagreement.ts';
-import type { WaiverAdvice, WaiverCandidate, WaiverUpgrade } from '../startsit/waivers.ts';
+import type { WaiverAdvice, WaiverCandidate, WaiverUpgrade, WaiverValueAdd } from '../startsit/waivers.ts';
 import type { CompetitionAssessment } from '../league/competition.ts';
 
 /**
@@ -60,7 +60,7 @@ export function priceWaiverUpgrades(opts: {
    * players nothing could be scored on: asking for the whole record would
    * make every future field of it a breaking change here.
    */
-  advice: Pick<WaiverAdvice, 'upgrades'>;
+  advice: Pick<WaiverAdvice, 'upgrades'> & { valueAdds?: readonly WaiverValueAdd[] };
   strategy: WaiverPricingContext;
   rosteredIds: Set<string>;
   /**
@@ -198,6 +198,53 @@ export function priceWaiverUpgrades(opts: {
         }),
       });
     }
+  }
+
+  /*
+   * The bench adds, priced the same way.
+   *
+   * Until 30 September 2026 this loop did not exist, so every bench-value card
+   * on the board showed a blank cost and the plan carried no bid at all. The
+   * inputs are the same ones an upgrade gets: the yardstick gap as the weekly
+   * gain, the next bench add at his position as the replacement, and the role
+   * read for shelf life and stability. Nothing is reserved for, because a bench
+   * add is not the slot the rest of the budget is being saved for.
+   */
+  const values = opts.advice.valueAdds ?? [];
+  for (const add of values) {
+    const trend = strategy.trending.get(add.playerId) ?? null;
+    const marketHeat = trend?.heat ?? null;
+    const others = values.filter((o) => o.playerId !== add.playerId && o.position === add.position);
+    const gainOverReplacement =
+      others.length === 0 ? null : Math.round((add.gain - Math.max(...others.map((o) => o.gain))) * 100) / 100;
+    const rec = recommendBid({
+      inputs: {
+        playerId: add.playerId,
+        name: add.name,
+        position: add.position,
+        weeklyGain: add.gain,
+        gainOverReplacement,
+        roleStability: roleStabilityOf(add),
+        shelfLife: shelfLifeOf(add),
+        futureOpportunity: 'normal',
+        marketHeat,
+        rivalsWithNeed: rivalsFor(add.playerId),
+      },
+      budgetState: strategy.budget,
+      prices: strategy.prices,
+      season,
+      reserveFor: null,
+    });
+    out.push({
+      ...rec,
+      opportunity: rec.recommended != null ? simulateOpportunityCost(strategy.budget, rec.recommended) : null,
+      trending: trend ? trendingHeadline(trend, { availableInLeague: !opts.rosteredIds.has(add.playerId) }) : null,
+      disagreement: detectDisagreement({
+        marketHeat,
+        modelStrength: add.score != null ? Math.max(0, Math.min(1, add.gain / 6)) : null,
+        modelObserved: add.score != null && add.role.games > 0,
+      }),
+    });
   }
 
   return out;

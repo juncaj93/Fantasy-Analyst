@@ -51,4 +51,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * `waiver@5`: a value add is measured against somebody the plan would cut —
  * the market hold now reaches the bar as well as the cut list.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@5', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@6`: one yardstick per comparison, and one cut for the card and the
+ * plan. Market against market only when both are fully priced (any-TD line),
+ * Sleeper's published projection for both otherwise; handcuffs protected; the
+ * top ten of Sleeper's drops kept out of the plan; bench adds priced; claims
+ * grouped by drop, up to two drops a week. See `core/waivers/yardstick.ts`.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@6', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

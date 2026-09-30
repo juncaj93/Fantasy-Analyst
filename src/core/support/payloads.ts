@@ -240,6 +240,14 @@ export interface WaiverPlanInputs {
    */
   preseasonPoints?: Record<string, number>;
   draftRankOf?: Record<string, number>;
+  /** Sleeper's published week, the waiver yardstick's fallback. Absent on older files. */
+  published?: Record<string, number>;
+  /** Depth-chart rank per rostered player, for the handcuff read. Absent on older files. */
+  depth?: Record<string, { rank: number }>;
+  /** Sleeper's trending drops, entry by entry. Absent on older files. */
+  trendingDrops?: [string, TrendingVelocity][];
+  /** This roster's recent cuts, with when. Absent on older files. */
+  recentlyDropped?: Record<string, string>;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.

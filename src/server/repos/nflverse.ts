@@ -383,6 +383,40 @@ export class DepthChartRepo {
     return removed;
   }
 
+  /**
+   * The newest capture's ranks for a handful of clubs, by name.
+   *
+   * The waiver scan's handcuff read: is a bench player #2 behind a starter who
+   * is #1 on the same club. Returned by name rather than by `gsis_id` because
+   * Sleeper's dictionary leaves `gsis_id` empty for many current players
+   * (Emmett Johnson and Kenneth Walker among them on 30 September 2026), so
+   * the caller matches on club, position and normalised name. Two indexed
+   * reads: the newest capture, then its rows for those clubs.
+   */
+  async latestRanksForTeams(
+    season: string,
+    teams: readonly string[],
+  ): Promise<{ team: string; playerName: string; position: string; rank: number }[]> {
+    if (teams.length === 0) return [];
+    const [latest] = await this.captures(season);
+    if (!latest) return [];
+    const holes = teams.map(() => '?').join(',');
+    const { results } = await this.db
+      .prepare(
+        `SELECT team, player_name, position, MIN(pos_rank) AS pos_rank FROM depth_chart_entries
+          WHERE season = ? AND captured_at = ? AND team IN (${holes}) AND player_name IS NOT NULL
+          GROUP BY team, player_name, position`,
+      )
+      .bind(season, latest, ...teams)
+      .all<Record<string, unknown>>();
+    return (results ?? []).map((row) => ({
+      team: String(row['team']),
+      playerName: String(row['player_name']),
+      position: String(row['position']),
+      rank: Number(row['pos_rank']),
+    }));
+  }
+
   /** One capture, as `DepthRole` per `gsis_id`, ready for the change detector. */
   async rolesAt(season: string, capturedAt: string): Promise<Map<string, DepthRole>> {
     const { results } = await this.db

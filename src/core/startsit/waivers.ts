@@ -22,6 +22,19 @@ import type { RoleAssessment } from './decisions.ts';
 import { DEFENCE_POSITION, evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { recommendLineup, type LineupRecommendation } from './lineup.ts';
 import { depthCap, depthLean } from '../waivers/depthPolicy.ts';
+import {
+  basisLabel,
+  buildCutPool,
+  planMoves,
+  compareOnYardstick,
+  readYardstick,
+  standingOf,
+  type MoveCandidate,
+  type WaiverMoveGroup,
+  type YardstickBasis,
+  type YardstickReading,
+} from '../waivers/yardstick.ts';
+import { dropSignal, mostAddedLine, propsEdge, recentDropNote, type PropsEdge } from '../waivers/signals.ts';
 
 /**
  * How much better an available player has to be before he is worth mentioning.
@@ -103,6 +116,15 @@ export interface WaiverCandidate {
    * games the trend rests on, and zero means the detector had nothing to read.
    */
   role: { trend: RoleAssessment['trend']; games: number };
+  /**
+   * Who a claim for him would drop: the plan's own choice, from
+   * `core/waivers/yardstick.ts`. Null when nothing on the roster can go.
+   */
+  cut?: { playerId: string; name: string } | null;
+  /** Short lines the card shows under the numbers: warnings and colour. */
+  notes?: string[];
+  /** Set when he is kept out of the plan, with the reason his card shows. */
+  planExcluded?: string | null;
 }
 
 export interface WaiverUpgrade {
@@ -181,6 +203,16 @@ export interface WaiverAddBasis {
   attention: { rank: number | null; heat: number; nudge: number } | null;
   /** The positional ordering lean applied, in points. Zero for most. */
   lean: number;
+  /**
+   * Which yardstick the comparison used: `market` when both players are fully
+   * priced, `sleeper` (Sleeper's published projection for both) otherwise.
+   * Absent on an older payload.
+   */
+  yardstick?: YardstickBasis;
+  /** The Vegas props comparison against your bench at his position, when one fired. */
+  props?: { verdict: PropsEdge['verdict']; line: string; nudge: number } | null;
+  /** Sleeper's trending drops, when he is on the list. */
+  dropped?: { rank: number; nudge: number } | null;
 }
 
 /** What the rest of Sleeper is adding. Heat is 0–1, rank is 1-based. */
@@ -243,6 +275,11 @@ export interface WaiverAdvice {
    */
   skipped: number;
   threshold: number;
+  /**
+   * The claims, grouped by the drop each would make. Read by the claim plan;
+   * the same object every card's `Better than` name came from.
+   */
+  moveGroups: WaiverMoveGroup[];
 }
 
 export function recommendWaiverUpgrades(opts: {
@@ -269,22 +306,40 @@ export function recommendWaiverUpgrades(opts: {
   /** Sleeper trending adds. Absent or empty moves nothing. */
   attention?: WaiverAttention;
   /**
-   * Rostered players the plan will not cut — the market hold in
-   * `core/waivers/planner/rosterState.ts`. A value add is never measured
-   * against one of them while somebody cuttable is available, because a bar
-   * set by a player nobody can drop describes a move nobody can make.
+   * Rostered players the market says to hold — the market hold in
+   * `core/waivers/planner/rosterState.ts` — each with its short reason. A claim
+   * cuts one only when nobody else can go.
    */
-  heldIds?: ReadonlySet<string>;
+  heldIds?: ReadonlySet<string> | ReadonlyMap<string, string>;
+  /**
+   * Sleeper's published weekly projection, by player id: the fallback
+   * yardstick when a pair is not both fully priced. Owner-approved for waivers
+   * on 30 September 2026 and labelled `Sleeper projection` wherever it shows.
+   * Absent means no fallback, so only fully priced pairs can be compared.
+   */
+  published?: ReadonlyMap<string, number>;
+  /** Bench players who back up one of your starters, and whom. Cut last. */
+  handcuffs?: ReadonlyMap<string, { playerId: string; name: string }>;
+  /** Sleeper trending drops. The top ten are kept out of the plan. */
+  trendingDrops?: WaiverAttention;
+  /** Free agents this roster dropped, with when. Said on the card, never hidden. */
+  recentlyDropped?: ReadonlyMap<string, string>;
+  /** Free roster spots, bench included and IR excluded. */
+  openSpots?: number;
+  now?: Date;
 }): WaiverAdvice {
   const base = opts.minGain ?? MEANINGFUL_UPGRADE_GAIN;
   const perSlot = opts.alternatives ?? DEFAULT_ALTERNATIVES;
   const rostered = new Set(opts.rosteredPlayerIds);
   const notes: string[] = [];
+  const now = opts.now ?? new Date();
+  const published = opts.published ?? new Map<string, number>();
 
   const lineup =
     opts.lineup ??
     recommendLineup(opts.roster, opts.shape, opts.profile, {
       ...(opts.currentStarterIds ? { currentStarterIds: opts.currentStarterIds } : {}),
+      ...(opts.published ? { published: opts.published } : {}),
     });
 
   /*
@@ -298,37 +353,68 @@ export function recommendWaiverUpgrades(opts: {
   const dropped = opts.candidates.length - unrostered.length;
   if (dropped > 0) notes.push(`${dropped} candidate(s) are already rostered in this league and were not considered`);
 
+  const propsOf = new Map([...opts.roster, ...unrostered].map((i) => [i.player.id, i.props ?? []] as const));
   const evaluated = unrostered.map((c) => evaluatePlayer(c, opts.profile));
+  const rosterEvaluations = new Map(opts.roster.map((i) => [i.player.id, evaluatePlayer(i, opts.profile)]));
+  const readings = new Map<string, YardstickReading>();
+  const readingOf = (e: StartSitEvaluation): YardstickReading => {
+    const hit = readings.get(e.playerId);
+    if (hit) return hit;
+    const reading = readYardstick(e, propsOf.get(e.playerId) ?? [], published.get(e.playerId));
+    readings.set(e.playerId, reading);
+    return reading;
+  };
+
   /*
-   * A candidate has to be scorable, playable and still movable.
+   * A candidate has to be readable, playable and still movable.
    *
-   * Ruled out is ruled out for a free agent exactly as it is for a roster
-   * player — adding somebody who is on injured reserve to fill this week's hole
-   * is not advice. And a player whose game has kicked off cannot be added into
-   * this week's lineup at all, so offering him would be offering an action the
-   * user cannot take.
+   * Readable now includes Sleeper's published projection: a free agent no book
+   * has priced and no news has touched is still comparable on the published
+   * figure, and on 30 September 2026 that was most of the wire. Ruled out is
+   * ruled out, and a player whose game has kicked off cannot be added into this
+   * week's lineup at all.
    */
-  const playable = evaluated.filter((e) => e.score != null && !e.ruledOut && !e.lock.locked);
+  const readable = (e: StartSitEvaluation) => {
+    const r = readingOf(e);
+    return r.market != null || r.sleeper != null;
+  };
+  const playable = evaluated.filter((e) => readable(e) && !e.ruledOut && !e.lock.locked);
   /*
    * The ones there was nothing to read on, counted apart from the ones ruled out.
-   *
-   * `skipped` below is the whole of what the scan dropped, and it mixes three
-   * different facts: a player with no market, usage or news to score him on; a
-   * player who is genuinely unavailable; and a player whose game has started.
-   * Only the first is an admission of ignorance, and only the first may be
-   * described to a reader as unknown rather than rejected. The other two were
-   * correctly excluded and need no explaining. See `emptyBoardHeadline`.
+   * Only these may be described to a reader as unknown. See `emptyBoardHeadline`.
    */
-  const unscored = evaluated.filter((e) => e.score == null).length;
+  const unscored = evaluated.filter((e) => !readable(e)).length;
 
-  const rosterEvaluations = new Map(opts.roster.map((i) => [i.player.id, evaluatePlayer(i, opts.profile)]));
+  const reserved = new Set(opts.reserveIds ?? []);
+  const heldNotes: ReadonlyMap<string, string> =
+    opts.heldIds instanceof Map
+      ? opts.heldIds
+      : new Map([...(opts.heldIds ?? new Set<string>())].map((id) => [id, 'the market still rates him'] as const));
+  const starterIds = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
+
+  /*
+   * Everyone a claim could drop, weakest first, on one scale.
+   *
+   * Built once, here, and read by every comparison below — the starter
+   * upgrades, the bench adds and the plan's grouping — so the card and the
+   * plan cannot name two different cuts.
+   */
+  const pool = buildCutPool({
+    roster: opts.roster.map((i) => readingOf(rosterEvaluations.get(i.player.id)!)),
+    starterIds,
+    reserveIds: reserved,
+    ruledOutIds: new Set([...rosterEvaluations.values()].filter((e) => e.ruledOut).map((e) => e.playerId)),
+    held: heldNotes,
+    handcuffs: opts.handcuffs ?? new Map(),
+    excludedPositions: new Set([DEFENCE_POSITION]),
+  });
 
   interface Considered {
     slot: (typeof lineup.slots)[number];
     need: 'unfilled' | 'upgrade';
     bar: number;
     current: StartSitEvaluation | null;
-    ranked: { evaluation: StartSitEvaluation; gain: number; bar: number }[];
+    ranked: { evaluation: StartSitEvaluation; gain: number; bar: number; basis: YardstickBasis | null }[];
   }
 
   const considered: Considered[] = [];
@@ -341,45 +427,33 @@ export function recommendWaiverUpgrades(opts: {
     /*
      * A defence may fill an empty slot. It may not yet replace a rostered one.
      *
-     * The distinction is the whole of it, and it is a scope line rather than a
-     * modelling one. Filling an empty DEF slot is the ordinary answer to an
-     * ordinary hole — a reader who owns no defence in a league that starts one
-     * should be told, in the same words a reader missing a tight end is told.
-     *
-     * Swapping one rostered defence for a better one *every week* is a
-     * different product, and it has a name: streaming. It arrives free the
-     * moment defences become scorable, because the gap between the best and
-     * worst defence on a slate is comfortably over the upgrade bar — so a
-     * reader would be told to drop and add a defence most weeks, on a card with
-     * no sense of how many transactions that costs, whether the add survives to
-     * next week, or what it does to a playoff plan. Those are exactly the
-     * questions the streaming lane exists to answer, and `assessStreaming`
-     * already exists and is deliberately not wired in.
-     *
-     * So the emergent version is switched off here, on purpose, and turning it
-     * on is a deliberate act in the lane that models it rather than a side
-     * effect of this one.
+     * Swapping one rostered defence for a better one every week is streaming,
+     * which is the defence planner's decision, so the emergent version is
+     * switched off here on purpose.
      */
     if (need === 'upgrade' && isDefenceOnlySlot(slot)) continue;
-    const currentScore = current?.score ?? null;
 
     /*
-     * The bar is per candidate, because thin data is per candidate.
+     * The starter comparison, on the same yardstick as every other one.
      *
-     * A gap measured between two well-covered players means what it says; the
-     * same gap measured against somebody with no market at all is mostly an
-     * artefact of the missing side, and asking more of it is the difference
-     * between advice and noise. `bar` on the upgrade is the strictest one that
-     * actually admitted somebody, so the card can show what was cleared.
+     * An empty slot has no bar: anybody readable beats nobody, ranked on his
+     * own projection. Otherwise the candidate is measured against the man in
+     * the slot with {@link compareOnYardstick} — market against market when
+     * both are fully priced, Sleeper against Sleeper when not — and has to
+     * clear the starter bar, half a point higher on a borrowed number.
      */
     const ranked = playable
       .filter((e) => slot.accepts.includes(e.position))
-      .map((e) => ({
-        evaluation: e,
-        gain: round2((e.score ?? 0) - (currentScore ?? 0)),
-        bar: upgradeBar(need, base, current, e),
-      }))
-      .filter((c) => c.gain >= c.bar && (c.evaluation.score ?? 0) > 0)
+      .map((e) => {
+        if (current == null) {
+          return { evaluation: e, gain: standingOf(readingOf(e)) ?? 0, bar: 0, basis: null };
+        }
+        const comparison = compareOnYardstick(readingOf(e), readingOf(current));
+        if (!comparison) return null;
+        const bar = round2(base + (comparison.basis === 'sleeper' ? 0.5 : 0));
+        return { evaluation: e, gain: comparison.gap, bar, basis: comparison.basis };
+      })
+      .filter((c): c is NonNullable<typeof c> => c != null && c.gain >= c.bar && c.gain > 0)
       .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name));
 
     if (ranked.length > 0) {
@@ -395,169 +469,241 @@ export function recommendWaiverUpgrades(opts: {
   considered.sort((a, b) => (b.ranked[0]?.gain ?? 0) - (a.ranked[0]?.gain ?? 0) || a.slot.slot.localeCompare(b.slot.slot));
 
   const spent = new Set<string>();
-  const upgrades: WaiverUpgrade[] = [];
+  const upgradeEntries: { entry: Considered; picked: Considered['ranked'] }[] = [];
   for (const entry of considered) {
     const available = entry.ranked.filter((c) => !spent.has(c.evaluation.playerId)).slice(0, perSlot);
     if (available.length === 0) continue;
     for (const c of available) spent.add(c.evaluation.playerId);
-    upgrades.push({
-      slot: entry.slot.slot,
-      accepts: entry.slot.accepts,
-      need: entry.need,
-      currentPlayerId: entry.slot.playerId,
-      currentName: entry.slot.name,
-      currentScore: entry.current?.score ?? null,
-      bar: entry.bar,
-      candidates: available.map((c) => ({
-        playerId: c.evaluation.playerId,
-        name: c.evaluation.name,
-        position: c.evaluation.position,
-        team: c.evaluation.team,
-        score: c.evaluation.score,
-        gain: c.gain,
-        reasons: upgradeReasons(c.evaluation, entry.current),
-        statusFlag: c.evaluation.statusFlag,
-        role: { trend: c.evaluation.role.trend, games: c.evaluation.role.games },
-      })),
-    });
+    upgradeEntries.push({ entry, picked: available });
   }
 
   /*
-   * The second question, asked of everybody the first one did not spend.
-   *
-   * Measured against the bench rather than against a starter, because that is
-   * who a claim actually costs: the add displaces the last player on the
-   * roster, not the one in the slot. A candidate already offered as the answer
-   * to a starting slot is not offered again here — he is one decision, and the
-   * stronger framing of it has already been made.
-   *
-   * The bench it is measured against is **his own**, per candidate, and that is
-   * load-bearing rather than a refinement: one floor for the whole wire ranked
-   * positions against each other instead of players. See `replacementFor`.
+   * The second question, asked of everybody the first one did not spend:
+   * worth a roster spot, measured against the player a claim would drop.
    */
-  const reserved = new Set(opts.reserveIds ?? []);
-  const held = opts.heldIds ?? new Set<string>();
   const depthContext = {
     shape: opts.shape,
     week: opts.calendar?.week ?? 1,
     playoffWeeks: opts.calendar?.playoffWeeks ?? [],
   };
   const attention = opts.attention ?? new Map();
+  const drops = opts.trendingDrops ?? new Map();
 
-  interface ValueCall {
+  const slotsFor = (position: string) => lineup.slots.filter((s) => s.accepts.includes(position));
+  const competesWith = (position: string) => {
+    const slots = slotsFor(position);
+    return (other: string) => slots.some((s) => s.accepts.includes(other));
+  };
+
+  interface Extra {
     evaluation: StartSitEvaluation;
-    floor: StartSitEvaluation;
-    gain: number;
-    priority: number;
-    basis: WaiverAddBasis;
+    atPosition: number;
+    cap: number | null;
+    heat: { heat: number; rank: number | null } | undefined;
+    lift: number;
+    lean: number;
+    props: PropsEdge | null;
+    dropped: ReturnType<typeof dropSignal>;
+    dropRank: number | null;
+    recent: string | null;
+  }
+  const extras = new Map<string, Extra>();
+  const moveCandidates: MoveCandidate[] = [];
+
+  const benchFor = (position: string) =>
+    pool.candidates
+      .filter((c) => !c.starting && c.reading.position === position)
+      .map((c) => ({ playerId: c.reading.playerId, name: c.reading.name, position, props: propsOf.get(c.reading.playerId) ?? [] }));
+
+  const extraFor = (e: StartSitEvaluation, atPosition: number, cap: number | null): Extra => {
+    const heat = attention.get(e.playerId);
+    const dropEntry = drops.get(e.playerId);
+    const props = propsEdge(
+      { playerId: e.playerId, name: e.name, position: e.position, props: propsOf.get(e.playerId) ?? [] },
+      benchFor(e.position),
+    );
+    const extra: Extra = {
+      evaluation: e,
+      atPosition,
+      cap,
+      heat,
+      lift: heat ? round2(ATTENTION_WEIGHT * Math.max(0, Math.min(1, heat.heat))) : 0,
+      lean: depthLean(e.position),
+      props,
+      dropped: dropSignal(dropEntry),
+      dropRank: dropEntry?.rank ?? null,
+      recent: recentDropNote(opts.recentlyDropped?.get(e.playerId), now),
+    };
+    extras.set(e.playerId, extra);
+    return extra;
+  };
+
+  /* The starter upgrades join the plan too: an upgrade still needs a drop. */
+  for (const { entry, picked } of upgradeEntries) {
+    for (const c of picked) {
+      const extra = extraFor(c.evaluation, 0, null);
+      moveCandidates.push({
+        reading: readingOf(c.evaluation),
+        tier: 'upgrade',
+        competes: competesWith(c.evaluation.position),
+        overCap: false,
+        nudges: { lift: 0, order: 0 },
+        planExcluded: extra.dropped.planExcluded,
+        cleared: true,
+        slot: entry.slot.slot,
+      });
+    }
   }
 
-  const calls: ValueCall[] = [];
   for (const e of playable) {
     if (spent.has(e.playerId)) continue;
-    if ((e.score ?? 0) <= 0) continue;
-
     /*
      * The positional depth policy, first, because it decides which comparison
-     * is the right one. See `core/waivers/depthPolicy.ts`.
-     *
-     * A position already at its cap is not asking for a spare body. The add
-     * would replace somebody at his own position, so that is who he is
-     * measured against, and the bar is the starter-upgrade one rather than the
-     * half point a free bench spot costs.
+     * is the right one. See `core/waivers/depthPolicy.ts`. A position already
+     * at its cap is not asking for a spare body: the add would replace somebody
+     * at his own position and has to clear the starter-upgrade bar to count.
      */
     const cap = depthCap(e.position, depthContext);
     const atPosition = heldAt(e.position, opts.roster, rosterEvaluations, reserved);
     const overCap = cap != null && atPosition.length >= cap;
-    /*
-     * Except a defence. Replacing the one you hold is streaming, which belongs
-     * to the defence planner for the reasons given at the upgrade tier above,
-     * and the positional comparison must not bring it back in by another door.
-     */
+    /* Except a defence: replacing the one you hold is the defence planner's call. */
     if (overCap && e.position === DEFENCE_POSITION) continue;
+    if (e.position === DEFENCE_POSITION) continue;
+    if (slotsFor(e.position).length === 0) continue;
 
-    const floor = overCap
-      ? weakestScored(cuttableFirst(atPosition, held))
-      : replacementFor(e, lineup, opts.roster, rosterEvaluations, opts.reserveIds ?? [], held);
-    if (floor == null) continue;
-
-    const gain = round2((e.score ?? 0) - (floor.score ?? 0));
-    const bar = overCap ? upgradeBar('upgrade', MEANINGFUL_UPGRADE_GAIN, floor, e) : ROSTER_SPOT_GAIN;
-
-    /*
-     * The supplementary signal, and exactly as far as it may go.
-     *
-     * The projection has to say he is better already — a positive gain — or
-     * attention moves nothing at all. Past that, it can lift a call that falls
-     * just short of the bar and it can reorder calls that are close.
-     */
-    const heat = attention.get(e.playerId);
-    const nudge = heat && gain > 0 ? round2(ATTENTION_WEIGHT * Math.max(0, Math.min(1, heat.heat))) : 0;
-    if (gain <= 0 || gain + nudge < bar) continue;
-
-    const lean = depthLean(e.position);
-    calls.push({
-      evaluation: e,
-      floor,
-      gain,
-      priority: round2(gain + nudge + lean),
-      basis: {
-        comparedTo: overCap ? 'position' : 'bench',
-        bar,
-        projection: e.expectation.points,
-        overProjection: floor.expectation.points,
-        projectionGap:
-          e.expectation.points == null || floor.expectation.points == null
-            ? null
-            : round2(e.expectation.points - floor.expectation.points),
-        depth: { position: e.position, held: atPosition.length, cap },
-        attention: heat ? { rank: heat.rank, heat: heat.heat, nudge } : null,
-        lean,
+    const extra = extraFor(e, atPosition.length, cap);
+    moveCandidates.push({
+      reading: readingOf(e),
+      tier: 'value',
+      competes: competesWith(e.position),
+      overCap,
+      ...(overCap ? { minBar: MEANINGFUL_UPGRADE_GAIN } : {}),
+      nudges: {
+        /*
+         * Sleeper's trending adds, exactly as far as they went before: a lift
+         * of up to three-quarters of a point, and only onto a gap the
+         * yardstick already says is positive.
+         */
+        lift: extra.lift,
+        /* Order only, never admission: the lean, Vegas props, and trending drops. */
+        order: round2(extra.lean + (extra.props?.nudge ?? 0) + extra.dropped.nudge),
       },
+      planExcluded: extra.dropped.planExcluded,
     });
   }
 
-  /*
-   * At most one over-cap suggestion per position: the best one.
-   *
-   * Four tight ends that each beat the tight end you hold are one decision —
-   * which tight end, if any — and printing all four crowds out the positions
-   * that actually need help.
-   */
-  calls.sort((a, b) => b.priority - a.priority || a.evaluation.name.localeCompare(b.evaluation.name));
-  const cappedSeen = new Set<string>();
+  const plan = planMoves({
+    candidates: moveCandidates,
+    pool,
+    ...(opts.openSpots === undefined ? {} : { openSpots: opts.openSpots }),
+  });
+
+  const noteLines = (extra: Extra | undefined): string[] => {
+    if (!extra) return [];
+    const lines: string[] = [];
+    if (extra.dropped.note) lines.push(extra.dropped.note);
+    if (extra.recent) lines.push(extra.recent);
+    if (extra.props) lines.push(extra.props.line);
+    return lines;
+  };
+
+  const upgrades: WaiverUpgrade[] = upgradeEntries.map(({ entry, picked }) => ({
+    slot: entry.slot.slot,
+    accepts: entry.slot.accepts,
+    need: entry.need,
+    currentPlayerId: entry.slot.playerId,
+    currentName: entry.slot.name,
+    currentScore: entry.current?.score ?? null,
+    bar: entry.bar,
+    candidates: picked.map((c) => {
+      const move = plan.moves.get(c.evaluation.playerId);
+      const extra = extras.get(c.evaluation.playerId);
+      return {
+        playerId: c.evaluation.playerId,
+        name: c.evaluation.name,
+        position: c.evaluation.position,
+        team: c.evaluation.team,
+        score: c.evaluation.score,
+        gain: c.gain,
+        reasons: yardstickReasons(readingOf(c.evaluation), entry.current ? readingOf(entry.current) : null, c.basis, extra),
+        statusFlag: c.evaluation.statusFlag,
+        role: { trend: c.evaluation.role.trend, games: c.evaluation.role.games },
+        cut: move?.cut ? { playerId: move.cut.reading.playerId, name: move.cut.reading.name } : null,
+        notes: noteLines(extra),
+        planExcluded: move?.planExcluded ?? null,
+      };
+    }),
+  }));
+
   const valueAdds: WaiverValueAdd[] = [];
-  for (const { evaluation, floor, gain, priority, basis } of calls) {
-    if (basis.comparedTo === 'position') {
+  const valueMoves = [...plan.moves.values()]
+    .filter((m) => m.tier === 'value' && m.clears && m.cut && m.comparison)
+    .sort((a, b) => b.priority - a.priority || a.playerId.localeCompare(b.playerId));
+  /*
+   * At most one over-cap suggestion per position: the best one. Four tight
+   * ends that each beat the tight end you hold are one decision.
+   */
+  const cappedSeen = new Set<string>();
+  for (const move of valueMoves) {
+    const extra = extras.get(move.playerId);
+    if (!extra) continue;
+    const evaluation = extra.evaluation;
+    const cut = move.cut!;
+    const comparison = move.comparison!;
+    const overCap = extra.cap != null && extra.atPosition >= extra.cap;
+    if (overCap) {
       if (cappedSeen.has(evaluation.position)) continue;
       cappedSeen.add(evaluation.position);
     }
+    const basis: WaiverAddBasis = {
+      comparedTo: overCap ? 'position' : 'bench',
+      bar: comparison.bar,
+      projection: comparison.addPoints,
+      overProjection: comparison.dropPoints,
+      projectionGap: comparison.projectionGap,
+      depth: { position: evaluation.position, held: extra.atPosition, cap: extra.cap },
+      attention: extra.heat ? { rank: extra.heat.rank, heat: extra.heat.heat, nudge: extra.lift } : null,
+      lean: extra.lean,
+      yardstick: comparison.basis,
+      props: extra.props ? { verdict: extra.props.verdict, line: extra.props.line, nudge: extra.props.nudge } : null,
+      dropped: extra.dropRank != null ? { rank: extra.dropRank, nudge: extra.dropped.nudge } : null,
+    };
     valueAdds.push({
       playerId: evaluation.playerId,
       name: evaluation.name,
       position: evaluation.position,
       team: evaluation.team,
       score: evaluation.score,
-      gain,
-      reasons: valueAddReasons(evaluation, floor, basis),
+      gain: comparison.gap,
+      reasons: valueAddReasons(readingOf(evaluation), cut.reading, basis, overCap, extra),
       statusFlag: evaluation.statusFlag,
       role: { trend: evaluation.role.trend, games: evaluation.role.games },
-      overPlayerId: floor.playerId,
-      overName: floor.name,
-      priority,
+      overPlayerId: cut.reading.playerId,
+      overName: cut.reading.name,
+      priority: move.priority,
       basis,
+      cut: { playerId: cut.reading.playerId, name: cut.reading.name },
+      notes: noteLines(extra),
+      planExcluded: move.planExcluded,
     });
   }
 
   /*
-   * And the ones there was nothing to say about, said anyway.
-   *
-   * Ruled out is left out: he is unavailable on a fact, which is an answer
-   * rather than an absence, and naming him under "not enough data" would
-   * describe a known thing as an unknown one.
+   * The plan's groups, trimmed to the players who survived onto the board —
+   * the over-cap rule above can drop a claim the grouping had taken.
+   */
+  const onBoard = new Set([...upgrades.flatMap((u) => u.candidates.map((c) => c.playerId)), ...valueAdds.map((a) => a.playerId)]);
+  const moveGroups = plan.groups
+    .map((g) => ({ ...g, addIds: g.addIds.filter((id) => onBoard.has(id)) }))
+    .filter((g) => g.addIds.length > 0);
+
+  /*
+   * And the ones there was nothing to say about, said anyway. Ruled out is
+   * left out: he is unavailable on a fact, which is an answer rather than an
+   * absence.
    */
   const unknowns: WaiverUnknown[] = evaluated
-    .filter((e) => e.score == null && !e.ruledOut)
+    .filter((e) => !readable(e) && !e.ruledOut)
     .map((e) => ({
       playerId: e.playerId,
       name: e.name,
@@ -579,8 +725,11 @@ export function recommendWaiverUpgrades(opts: {
     considered: evaluated.length,
     skipped: evaluated.length - playable.length,
     threshold: base,
+    moveGroups,
   };
 }
+
+
 
 /**
  * What an empty board actually means, rather than the flattering version of it.
@@ -634,96 +783,6 @@ function emptyBoardHeadline(counts: { upgrades: number; playable: number; unscor
 }
 
 /**
- * The player a candidate actually has to be better than, at his own position.
- *
- * This used to be one number for the whole wire: the weakest scorable man on
- * the bench, whoever he was and whatever he played. That is a comparison
- * between two different scales, and fantasy scoring makes the two scales very
- * far apart — a starting quarterback is a twenty-point week and a fourth
- * receiver is a five-point one, in a league that starts one quarterback. So
- * every startable quarterback on the wire "beat" the last man on the bench by
- * ten or more points, cleared a half-point bar without noticing it was there,
- * and sorted to the top of the board by the size of the artefact. The reported
- * symptom was a page that would not stop recommending backup quarterbacks; the
- * cause was that it was ranking positions against each other rather than
- * players.
- *
- * The bar is therefore drawn from the players who compete for the **same
- * slots** he does. For a quarterback in a one-quarterback league that is the
- * quarterbacks, and nobody else; for a running back in a league with two flexes
- * it is every back, receiver and tight end, because they genuinely contest the
- * same spots and comparing them is the comparison a manager makes. What a slot
- * accepts is read off the league's own shape rather than assumed from a name.
- *
- * Among those players the bar is the weakest one **not already starting** —
- * genuine depth at the position, and what a claim would actually displace. When
- * every one of them is starting there is no depth, and the answer is null
- * rather than the weakest starter: the only argument left for that player is
- * that he would start, which is the upgrade tier's question and carries the
- * upgrade tier's much higher bar. Asking it here would price displacing a
- * starter at the cost of a spare bench body, which is how a free agent a point
- * better than the quarterback you are already playing became a recommendation.
- *
- * The three exclusions the bench floor already had are kept, for the reasons it
- * had them. Reserve players are not the spot a Tuesday claim frees. A ruled-out
- * player's score is a penalty rather than a valuation, and left in he is the
- * weakest man by a distance and every free agent "beats" him. And a player the
- * market has not priced scores near zero for want of anything to read rather
- * than for want of ability — measured against him the whole wire looks like a
- * bargain, which is the same mistake in a different costume.
- *
- * Null when nobody qualifies, and the caller then offers no value add for him
- * at all. A position with nothing behind it is an empty slot, and an empty slot
- * is the upgrade tier's question, already asked and answered above.
- */
-function replacementFor(
-  candidate: StartSitEvaluation,
-  lineup: LineupRecommendation,
-  roster: StartSitInput[],
-  evaluations: Map<string, StartSitEvaluation>,
-  reserveIds: string[],
-  heldIds: ReadonlySet<string> = new Set(),
-): StartSitEvaluation | null {
-  const slots = lineup.slots.filter((s) => s.accepts.includes(candidate.position));
-  if (slots.length === 0) return null;
-
-  const starting = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
-  const reserved = new Set(reserveIds);
-
-  const usable: StartSitEvaluation[] = [];
-  for (const input of roster) {
-    const evaluation = evaluations.get(input.player.id);
-    if (!evaluation || reserved.has(evaluation.playerId)) continue;
-    if (evaluation.score == null || evaluation.ruledOut) continue;
-    if (evaluation.expectation.points == null) continue;
-    if (!slots.some((s) => s.accepts.includes(evaluation.position))) continue;
-    usable.push(evaluation);
-  }
-  if (usable.length === 0) return null;
-
-  const benched = cuttableFirst(
-    usable.filter((e) => !starting.has(e.playerId)),
-    heldIds,
-  );
-  if (benched.length === 0) return null;
-  return benched.reduce((worst, e) => ((e.score ?? 0) < (worst.score ?? 0) ? e : worst));
-}
-
-/**
- * The players a claim could actually cut, or everyone when nobody can be.
- *
- * The market hold keeps well-drafted and heavily-added players off the cut
- * list, and the bar a value add is measured against has to come from the same
- * list, or the board says `Better than RJ Harvey` beside a plan that refuses to
- * cut him. When every candidate is held the hold yields, exactly as the cut
- * planner's does, and the weakest of them is the bar again.
- */
-function cuttableFirst(players: StartSitEvaluation[], heldIds: ReadonlySet<string>): StartSitEvaluation[] {
-  const cuttable = players.filter((e) => !heldIds.has(e.playerId));
-  return cuttable.length > 0 ? cuttable : players;
-}
-
-/**
  * Everybody the roster holds at one position who could actually play.
  *
  * Off reserve and not ruled out: a tight end on injured reserve is not the
@@ -746,56 +805,6 @@ function heldAt(
   return out;
 }
 
-/**
- * The weakest of them who can be compared at all.
- *
- * A player with no market is left out for the reason `replacementFor` leaves
- * him out: his near-zero score is an absence of data, and measured against it
- * every free agent at the position looks like a bargain.
- */
-function weakestScored(held: StartSitEvaluation[]): StartSitEvaluation | null {
-  const scored = held.filter((e) => e.score != null && e.expectation.points != null);
-  if (scored.length === 0) return null;
-  return scored.reduce((worst, e) => ((e.score ?? 0) < (worst.score ?? 0) ? e : worst));
-}
-
-/**
- * Why he is worth a roster spot, in the terms that decision is made in.
- *
- * Deliberately not `upgradeReasons`: that one opens with how he compares to the
- * man in the slot, and there is no slot here. The comparison that matters is
- * the bench, and naming the player who would go is what turns "best available"
- * into a move the reader can actually picture making.
- */
-function valueAddReasons(candidate: StartSitEvaluation, floor: StartSitEvaluation, basis: WaiverAddBasis): string[] {
-  /*
-   * Which comparison was made, said in the words it was made in.
-   *
-   * The bench comparison is against the weakest man who competes for his
-   * slots, which for a flex-eligible player is often a different position — so
-   * the sentence names it as a flex option rather than calling a running back
-   * "your weakest tight end". The positional comparison names the position,
-   * because that is the whole of what changed.
-   */
-  const reasons: string[] =
-    basis.comparedTo === 'position'
-      ? [`Clear upgrade on ${floor.name}, the weaker ${floor.position} you hold`]
-      : floor.position === candidate.position
-        ? [`Worth more than ${floor.name}, your weakest ${floor.position} option on the bench`]
-        : [`Worth more than ${floor.name}, your weakest flex option on the bench`];
-
-  const points = candidate.expectation.points;
-  if (points != null) reasons.push(`Market priced — ${points.toFixed(1)} pts expected`);
-  if (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate') {
-    reasons.push('Role increasing');
-  }
-  if (candidate.movement.direction === 'up' && candidate.movement.headline) {
-    reasons.push(candidate.movement.headline);
-  }
-  if (reasons.length === 0) reasons.push('Scores higher on the evidence available');
-  return reasons;
-}
-
 /** `1 free agent` / `14 free agents`. */
 function freeAgents(count: number): string {
   return `${count} free agent${count === 1 ? '' : 's'}`;
@@ -806,91 +815,69 @@ function cap(text: string): string {
 }
 
 /**
- * How much better this candidate has to be before the add is worth mentioning.
+ * The comparison, said the way the card and the plan say it.
  *
- * One place, deliberately, so "meaningful" means one thing across the app.
- *
- * An empty slot has no bar at all — nobody is starting there, so any playable
- * body is an improvement and calling that noise would be pedantry.
- *
- * Everywhere else it is the standing threshold, **raised when either side's
- * data is thin**. A four-point gap between two players the market has priced is
- * four points; the same gap measured against somebody with no market at all is
- * mostly the missing side showing through, and treating the two as equally
- * convincing is how a waiver card fills up with adds nobody should make. The
- * worse of the two confidences decides, because the weaker half is what limits
- * what the subtraction can be trusted to say.
+ * `Projects 7.0 pts to Jaylen Wright's 3.5 (Sleeper projection for both)`, then
+ * what the availability charge is about, then Sleeper's attention as a rank.
+ * The yardstick is always named: a reader should never have to guess whether
+ * two numbers were the same kind of number.
  */
-export function upgradeBar(
-  need: 'unfilled' | 'upgrade',
-  base: number,
-  current: StartSitEvaluation | null,
-  candidate?: StartSitEvaluation | null,
-): number {
-  if (need === 'unfilled') return 0;
-  const confidences = [current?.confidence, candidate?.confidence].filter(
-    (c): c is 'high' | 'medium' | 'low' => c != null,
-  );
-  const worst = confidences.includes('low') ? 'low' : confidences.includes('medium') ? 'medium' : 'high';
-  const surcharge = worst === 'low' ? 1.5 : worst === 'medium' ? 0.5 : 0;
-  return round2(base + surcharge);
+function comparisonLines(
+  add: YardstickReading,
+  over: YardstickReading | null,
+  basis: YardstickBasis | null,
+  extra: { heat?: { rank: number | null } | undefined; evaluation?: StartSitEvaluation } | undefined,
+): string[] {
+  const lines: string[] = [];
+  const mine = basis === 'market' ? add.market : basis === 'sleeper' ? add.sleeper : (add.sleeper ?? add.market);
+  const theirs = over && basis ? (basis === 'market' ? over.market : over.sleeper) : null;
+  if (mine != null && over && theirs != null && basis) {
+    lines.push(`Projects ${mine.toFixed(1)} pts to ${possessive(over.name)} ${theirs.toFixed(1)} (${basisLabel(basis)})`);
+  } else if (mine != null) {
+    lines.push(`Projects ${mine.toFixed(1)} pts (${add.market != null ? 'Vegas lines' : 'Sleeper projection'})`);
+  }
+  if (over?.availabilityNote) lines.push(`${over.name}: ${over.availabilityNote}`);
+  if (add.availabilityNote) lines.push(add.availabilityNote);
+  else if (add.practiceNote) lines.push(capitalise(add.practiceNote));
+  const rank = extra?.heat?.rank ?? null;
+  if (rank != null) lines.push(mostAddedLine(rank));
+  const trend = extra?.evaluation?.role.trend;
+  if (trend === 'rising_high' || trend === 'rising_moderate') lines.push('Role increasing');
+  return lines;
 }
 
-/**
- * Why this player, in the terms the decision is made in.
- *
- * Short phrases rather than sentences: the card shows them separated by dots,
- * and a paragraph would defeat the point of a compact suggestion. Every one of
- * them comes from a component that is already on the player's own breakdown, so
- * nothing said here is unavailable to check.
- */
-function upgradeReasons(candidate: StartSitEvaluation, current: StartSitEvaluation | null): string[] {
-  const reasons: string[] = [];
+function yardstickReasons(
+  add: YardstickReading,
+  current: YardstickReading | null,
+  basis: YardstickBasis | null,
+  extra: { heat?: { rank: number | null } | undefined; evaluation?: StartSitEvaluation } | undefined,
+): string[] {
+  const lines = current == null ? ['Fills a slot nobody on your roster can start'] : [];
+  lines.push(...comparisonLines(add, current, basis, extra));
+  return lines.length > 0 ? lines : ['Scores higher on the evidence available'];
+}
 
-  if (current == null) {
-    reasons.push('Fills a slot nobody on your roster can start');
-  } else if (current.statusFlag && !candidate.statusFlag) {
-    reasons.push('Healthier than the man he replaces');
-  }
+function valueAddReasons(
+  add: YardstickReading,
+  cut: YardstickReading,
+  basis: WaiverAddBasis,
+  overCap: boolean,
+  extra: { heat?: { rank: number | null } | undefined; evaluation?: StartSitEvaluation } | undefined,
+): string[] {
+  const lead = overCap
+    ? `Clear upgrade on ${cut.name}, the weaker ${cut.position} you hold`
+    : cut.position === add.position
+      ? `Worth more than ${cut.name}, your weakest ${cut.position} option on the bench`
+      : `Worth more than ${cut.name}, your weakest flex option on the bench`;
+  return [lead, ...comparisonLines(add, cut, basis.yardstick ?? null, extra)];
+}
 
-  /*
-   * Said the way a reader would say it.
-   *
-   * These strings are printed on the waiver card and in its sheet, and they
-   * used to read as the engine describing its own inputs: `stronger market
-   * expectation (13.5 vs 9.2 pts)`, `role trending up`. The numbers behind them
-   * are worth keeping — they are the whole reason to believe the sentence — so
-   * the phrase leads with what it means and the figures follow it.
-   */
-  const mine = candidate.expectation.points;
-  const theirs = current?.expectation.points ?? null;
-  if (mine != null && theirs != null && mine > theirs) {
-    reasons.push(`Market rising — ${mine.toFixed(1)} vs ${theirs.toFixed(1)} pts expected`);
-  } else if (mine != null && theirs == null) {
-    reasons.push(`Market priced — ${mine.toFixed(1)} pts expected`);
-  }
+function possessive(name: string): string {
+  return name.endsWith('s') ? `${name}'` : `${name}'s`;
+}
 
-  if (candidate.role.trend === 'rising_high' || candidate.role.trend === 'rising_moderate') {
-    reasons.push('Role increasing');
-  }
-
-  const news = candidate.components.find((c) => c.key === 'news_recent');
-  if (news && !news.unknown && news.value > 0) reasons.push(`Recent news — ${news.display}`);
-
-  /*
-   * The movement headline as it was written, rather than de-capitalised.
-   *
-   * It was lower-cased to sit inside a sentence-cased list of fragments. The
-   * list is now a set of short statements that each begin with a capital, so
-   * `Multiple markets rising` belongs beside them exactly as the movement
-   * engine phrased it.
-   */
-  if (candidate.movement.direction === 'up' && candidate.movement.headline) {
-    reasons.push(candidate.movement.headline);
-  }
-
-  if (reasons.length === 0) reasons.push('Scores higher on the evidence available');
-  return reasons;
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function round2(v: number): number {

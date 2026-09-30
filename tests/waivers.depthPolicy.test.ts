@@ -28,10 +28,10 @@ import {
   type WaiverAttention,
 } from '../src/core/startsit/waivers.ts';
 import { DEPTH_LEAN, depthCap, inPlayoffPrep } from '../src/core/waivers/depthPolicy.ts';
-import { planWaiverClaims } from '../src/core/waivers/planner/index.ts';
 import { buildWaiverBoard } from '../src/core/waivers/board.ts';
 import { caseLines } from '../src/core/waivers/claimPlan.ts';
-import { candidate } from './helpers/startsit.ts';
+/* Fully priced players: a single posted line is not compared on the waiver yardstick. */
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -187,18 +187,24 @@ describe('the points a value add shows', () => {
     });
     const add = advice.valueAdds[0]!;
     expect(add.basis.projectionGap).toBeCloseTo(6, 5);
-    // The decision still sees the penalty: the grade gap is wider.
-    expect(add.gain).toBeGreaterThan(add.basis.projectionGap!);
+    // The decision sees the availability charge: half a point off a Questionable drop.
+    expect(add.gain).toBeCloseTo(6.5, 5);
 
     const row = buildWaiverBoard({ upgrades: [], valueAdds: advice.valueAdds }).rows[0]!;
-    expect(row.shortTerm.label).toBe('+6.0 pts');
+    // Both projections, as priced, on the one yardstick the row names.
+    expect(row.shortTerm.label).toBe('7.0 vs 1.0');
+    expect(row.yardstick?.label).toBe('Vegas lines for both');
     expect(row.shortTerm.gain).toBe(add.gain);
-    expect(caseLines('Wire Back', row).join(' ')).toMatch(/discounts injury status and thin data/);
+    expect(caseLines('Wire Back', row).join(' ')).toMatch(/Injury status moves the call/);
   });
 
   it('say so plainly when a side has no market line', () => {
     const advice = scan([candidate('fa-rb1', 'Wire Back', 'RB', 7)]);
-    const add = { ...advice.valueAdds[0]!, basis: { ...advice.valueAdds[0]!.basis, projectionGap: null } };
+    // An older payload: no yardstick, and a side with no line.
+    const add = {
+      ...advice.valueAdds[0]!,
+      basis: { ...advice.valueAdds[0]!.basis, projectionGap: null, yardstick: undefined },
+    };
     expect(buildWaiverBoard({ upgrades: [], valueAdds: [add] }).rows[0]!.shortTerm.label).toBe('No market line');
   });
 });
@@ -308,10 +314,9 @@ describe('See why', () => {
     const board = buildWaiverBoard({ upgrades: advice.upgrades, valueAdds: advice.valueAdds });
     const lines = caseLines('Wire Back', board.rows[0]!);
 
-    expect(lines.join('\n')).toMatch(/projects Wire Back for 7\.0 pts/);
-    expect(lines.join('\n')).toMatch(/and Weak Back for 1\.0/);
-    expect(lines.join('\n')).toMatch(/held for depth with no cap/);
-    expect(lines.join('\n')).toMatch(/#15 on Sleeper's trending adds.*does not change his projection/);
+    expect(lines.join('\n')).toMatch(/compared on the betting lines: Wire Back 7\.0 pts, Weak Back 1\.0/);
+    expect(lines.join('\n')).toMatch(/0\.5-pt bar/);
+    expect(lines.join('\n')).toMatch(/#15 most-added on Sleeper today.*does not change his projection/);
     expect(lines.join('\n')).toMatch(/lean/);
   });
 });
@@ -345,21 +350,23 @@ describe('the live board of 25 September 2026, rebuilt', () => {
   });
 
   it('never names the #1 add in Sleeper as the cut', () => {
-    const mine = [...roster(), candidate('wilson', 'Emanuel Wilson', 'RB', 1.3)];
-    const base = {
-      roster: mine,
-      targets: [{ input: candidate('allgeier', 'Tyler Allgeier', 'RB', 12), boardRank: 1 }],
-      shape: SHAPE,
-      profile: HALF_PPR,
-      week: 3,
-    };
-    const without = planWaiverClaims(base);
-    expect(without.claims[0]?.dropName).toBe('Weak Back');
+    const scanWith = (held?: Map<string, string>) =>
+      recommendWaiverUpgrades({
+        roster: [...roster().slice(0, -1), candidate('wilson', 'Emanuel Wilson', 'RB', 1), candidate('rb5', 'Cuttable Back', 'RB', 2)],
+        candidates: [candidate('allgeier', 'Tyler Allgeier', 'RB', 8)],
+        shape: SHAPE,
+        profile: HALF_PPR,
+        rosteredPlayerIds: [...ROSTER_IDS.slice(0, -1), 'wilson', 'rb5'],
+        calendar: { week: 3, playoffWeeks: [15, 16, 17] },
+        ...(held ? { heldIds: held } : {}),
+      });
 
-    const withRoom = planWaiverClaims({ ...base, roster: [...roster().slice(0, -1), candidate('wilson', 'Emanuel Wilson', 'RB', 1)], roomIsAdding: new Map([['wilson', 1]]) });
-    for (const claim of withRoom.claims) expect(claim.dropName).not.toBe('Emanuel Wilson');
-    expect(withRoom.protectedPlayers).toContainEqual(
-      expect.objectContaining({ name: 'Emanuel Wilson', reason: 'market_hold' }),
-    );
+    // Without the hold he is the weakest bench back, so he is the cut.
+    expect(scanWith().valueAdds[0]?.overName).toBe('Emanuel Wilson');
+
+    // With it, the card and the plan both name somebody else.
+    const advice = scanWith(new Map([['wilson', '#1 add in Sleeper this week']]));
+    expect(advice.valueAdds[0]?.overName).toBe('Cuttable Back');
+    expect(advice.moveGroups[0]?.drop?.name).toBe(advice.valueAdds[0]?.overName);
   });
 });

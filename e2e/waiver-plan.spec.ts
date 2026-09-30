@@ -535,3 +535,126 @@ test.describe('the defence keeps its own lane', () => {
     expect((await defenceRows.count()) + (await dstLine.count())).toBeGreaterThanOrEqual(0);
   });
 });
+
+/**
+ * The plan grouped by drop, as the waiver yardstick produces it.
+ *
+ * `Drop Jaylen Wright for the first one you win`, said once, then the claims
+ * that would spend it, each with the case for it on one line under the
+ * instruction. The 30 September 2026 shape: one drop, three tries, and the
+ * handcuff the plan chose not to cut, named with the reason.
+ */
+function groupedPlan() {
+  const claim = (rank: number, id: string, name: string, bid: string, qualifier: string | null, detail: string) => ({
+    rank,
+    claimId: `${id}>jw`,
+    group: 1,
+    addPlayerId: id,
+    addName: name,
+    addPosition: 'WR',
+    addTeam: 'IND',
+    dropPlayerId: 'jw',
+    dropName: 'Jaylen Wright',
+    bid: 5,
+    bidRange: bid,
+    headline: `Add ${name} · bid ${bid}`,
+    detail,
+    qualifier,
+    relation: rank === 1 ? 'primary' : 'fallback',
+    why: [`${name} projects higher.`],
+  });
+  return planFixture({
+    groups: [
+      {
+        index: 1,
+        drop: { playerId: 'jw', name: 'Jaylen Wright' },
+        headline: 'Drop Jaylen Wright for the first one you win',
+        keep: ['Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.'],
+        firstRank: 1,
+        lastRank: 3,
+      },
+    ],
+    claims: [
+      claim(1, 'ka', 'Keenan Allen', '$3–7', null, 'Proj. 7.0 vs 3.5 (Sleeper projection for both) · #11 most-added on Sleeper today · practised fully'),
+      claim(2, 'kc', 'KC Concepcion', '$2–5', 'Only if 1 loses', 'Proj. 7.6 vs 3.5 (Sleeper projection for both) · #22 most-dropped on Sleeper today · Dropped by you 7 days ago'),
+      claim(3, 'ta', 'Tyler Allgeier', '$1–3', 'Only if 1 and 2 lose', 'Proj. 6.6 vs 3.5 (Sleeper projection for both)'),
+    ],
+  });
+}
+
+test.describe('the plan grouped by drop', () => {
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await withPlan(page, groupedPlan());
+    await openWaivers(page);
+    await expect(page.getByTestId('waiver-plan')).toBeVisible();
+  });
+
+  test('says the drop once, then the claims that would spend it', async ({ page }) => {
+    await expect(page.getByTestId('waiver-plan-drop')).toHaveText('Drop Jaylen Wright for the first one you win');
+    const claims = page.getByTestId('waiver-plan-claim');
+    await expect(claims).toHaveCount(3);
+    await expect(claims.nth(0)).toContainText('Add Keenan Allen · bid $3–7');
+    await expect(claims.nth(0)).not.toContainText('Drop');
+    await expect(claims.nth(2)).toHaveAttribute('data-rank', '3');
+    await expect(page.getByTestId('waiver-plan-qualifier').nth(1)).toHaveText('Only if 1 and 2 lose');
+  });
+
+  test('puts the case for each claim under it, and names who it keeps', async ({ page }) => {
+    await expect(page.getByTestId('waiver-plan-claim-detail').first()).toContainText(
+      'Proj. 7.0 vs 3.5 (Sleeper projection for both)',
+    );
+    await expect(page.getByTestId('waiver-plan-keep')).toHaveText(
+      'Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.',
+    );
+  });
+
+  test('fits the phone', async ({ page }, testInfo) => {
+    const card = (await page.getByTestId('waiver-plan').boundingBox())!;
+    const width = testInfo.project.use.viewport?.width ?? 390;
+    expect(card.x).toBeGreaterThanOrEqual(0);
+    expect(card.x + card.width).toBeLessThanOrEqual(width + 0.5);
+    const scroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(scroll).toBeLessThanOrEqual(0);
+  });
+});
+
+/**
+ * How old the board is, and a refresh that reads Sleeper only.
+ *
+ * The Waivers pull used to run the start/sit refresh, which buys odds. The
+ * props behind the Vegas yardstick keep their own schedule and budget, and
+ * nothing on this screen spends it.
+ */
+test.describe('the refresh line', () => {
+  test('says when the board was updated and refreshes from Sleeper only', async ({ page }) => {
+    await inSeason(page);
+    const sleeperOnly: string[] = [];
+    const vegas: string[] = [];
+    await page.route('**/api/leagues/*/waivers/refresh', async (route) => {
+      sleeperOnly.push(route.request().method());
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ transactions: null, trending: null, refreshedAt: new Date().toISOString() }),
+      });
+    });
+    page.on('request', (request) => {
+      if (request.url().includes('/api/startsit/refresh')) vegas.push(request.url());
+    });
+    await openWaivers(page);
+
+    const line = page.getByTestId('waivers-updated');
+    await expect(line).toBeVisible();
+    await expect(line).toContainText(/Updated|Not updated yet/);
+    const button = page.getByTestId('waivers-refresh');
+    await expect(button).toHaveText('Refresh');
+    const box = (await button.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(40);
+
+    await button.click();
+    await expect.poll(() => sleeperOnly.length).toBeGreaterThan(0);
+    expect(sleeperOnly[0]).toBe('POST');
+    expect(vegas).toEqual([]);
+  });
+});

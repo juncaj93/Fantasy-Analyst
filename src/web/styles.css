@@ -9997,6 +9997,104 @@ div.matchup-result {
   margin: 2px 0 0 calc(1.1em + var(--sp-2));
 }
 
+/*
+ * One drop and the claims under it.
+ *
+ * The drop is the heading of its block, in the weight of an instruction,
+ * because it is one: the first claim below it that wins spends it. A second
+ * drop's block sits under a hairline so the two read as two decisions.
+ */
+.claim-plan-group + .claim-plan-group {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--separator-soft);
+}
+
+.claim-plan-drop {
+  margin-top: var(--sp-2);
+  font-size: 0.84rem;
+  font-weight: 680;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* The case for a claim, under it: both projections, then the signals. */
+.claim-plan-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.76rem;
+  font-weight: 450;
+  line-height: 1.35;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.claim-plan-keep {
+  margin-top: var(--sp-2);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+/* Warnings and colour on a waiver card, under its numbers. */
+.waiver-notes {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.waiver-notes-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* Which yardstick a card's numbers came from: present, never loud. */
+.tag-yardstick {
+  background: var(--surface-inset);
+  color: var(--text-dim);
+}
+
+/*
+ * `Updated 5:00 AM · Refresh`, under the title.
+ *
+ * Quiet on purpose: it answers "how old is this" for somebody who wonders,
+ * and a refresh is the one control on it. The control is a text button in the
+ * accent colour so it reads as tappable, with a 44px tap height from padding
+ * rather than from a box that would make the line look like a toolbar.
+ */
+.waivers-updated {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 var(--sp-1) var(--sp-1);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.waivers-updated-refresh {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 14px 8px;
+  margin: -14px 0;
+  font: inherit;
+  font-weight: 650;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.waivers-updated-refresh:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.waivers-updated-refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* ------------------------------------------------------------- mock draft */
 
 /*
