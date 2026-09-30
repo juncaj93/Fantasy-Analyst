@@ -1127,8 +1127,8 @@ function VerdictCard({
 
           The slot is not one of them any more. A back in a FLEX spot used to
           carry a grey `FLEX` chip here beside his `RB` pill, which read as the
-          row naming one slot twice; the slot now sits inside the pill, under
-          the position (see `PositionPill`).
+          row naming one slot twice; the pill now reads `FLEX` alone (see
+          `PositionPill`).
         */}
         <span className="row-tags">
           {row.locked ? (
@@ -1859,23 +1859,23 @@ function CompareSheet({
   const shownSlot = comparison?.slot?.comparable ? comparison.slot.slot : null;
   const subtitle = [
     comparison?.week != null ? `Week ${comparison.week}` : null,
-    shownSlot ? `${shownSlot} slot` : slot ? `${slot} slot` : 'Any lineup spot',
+    shownSlot ? `${shownSlot} slot` : slot ? `${slot} slot` : null,
   ]
     .filter(Boolean)
     .join(' · ');
 
   const picker = (
     <>
+      {/*
+        No instructions above the search any more. The owner asked for the
+        room to go to the list (30 September 2026): the button already says how
+        many are chosen, and the list itself shows the whole league.
+      */}
       {comparison ? (
         <div className="cmp-eyebrow cmp-picker-head" data-testid="compare-edit-head">
           Change players
         </div>
-      ) : (
-        <div className="faint" style={{ margin: '0 2px 8px' }} data-testid="compare-hint">
-          Choose 2–{MAX_COMPARE} players. Anyone in the league is fair game — your roster, the bench, or the
-          free-agent pool.
-        </div>
-      )}
+      ) : null}
 
       {ids.length > 0 ? (
         <div className="tag-row" data-testid="compare-selection">
@@ -1911,7 +1911,8 @@ function CompareSheet({
         </div>
       ) : null}
 
-      <div style={{ margin: '8px 0' }} ref={search}>
+      {/* First under the header, it needs no gap of its own: the header's padding is the gap. */}
+      <div style={{ margin: comparison || ids.length > 0 || swapping ? '8px 0' : '0 0 8px' }} ref={search}>
         <SearchField
           value={query}
           onChange={setQuery}
@@ -1934,7 +1935,20 @@ function CompareSheet({
         }))}
       />
 
-      <div className="cmp-owner-row">
+      {error ? <Notice tone="warn">{error}</Notice> : null}
+
+      {/* The action and the filter share one row, so the list starts a row higher. */}
+      <div className="cmp-action-row">
+        {swapping ? null : (
+          <button
+            className="btn btn-primary"
+            data-testid="compare-run"
+            disabled={ids.length < 2 || busy}
+            onClick={() => void compare()}
+          >
+            {busy ? 'Comparing…' : `Compare ${ids.length} player${ids.length === 1 ? '' : 's'}`}
+          </button>
+        )}
         <button
           type="button"
           className="owner-chip"
@@ -1945,21 +1959,6 @@ function CompareSheet({
           {mineOnly ? '✓ ' : ''}My roster
         </button>
       </div>
-
-      {error ? <Notice tone="warn">{error}</Notice> : null}
-
-      {swapping ? null : (
-        <div className="btn-row" style={{ margin: '8px 2px' }}>
-          <button
-            className="btn btn-primary"
-            data-testid="compare-run"
-            disabled={ids.length < 2 || busy}
-            onClick={() => void compare()}
-          >
-            {busy ? 'Comparing…' : `Compare ${ids.length} player${ids.length === 1 ? '' : 's'}`}
-          </button>
-        </div>
-      )}
 
       {loading && results.length === 0 ? (
         <SkeletonRows rows={5} testId="compare-skeleton" />
@@ -2001,12 +2000,14 @@ function CompareSheet({
       title={
         <span className="cmp-title">
           <span className="cmp-title-main">{title}</span>
-          <span
-            className="cmp-title-sub"
-            {...(comparison?.slot?.comparable ? { 'data-testid': 'comparison-slot', title: comparison.slot.detail } : {})}
-          >
-            {subtitle}
-          </span>
+          {subtitle ? (
+            <span
+              className="cmp-title-sub"
+              {...(comparison?.slot?.comparable ? { 'data-testid': 'comparison-slot', title: comparison.slot.detail } : {})}
+            >
+              {subtitle}
+            </span>
+          ) : null}
         </span>
       }
       accessibleLabel={title}

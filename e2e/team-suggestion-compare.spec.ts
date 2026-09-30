@@ -63,6 +63,42 @@ test.describe('the Team round of 30 September', () => {
     await expect(page.getByTestId('compare-candidate').filter({ hasText: 'Your roster' }).first()).toBeVisible();
   });
 
+  /*
+   * The picker's header gives its room to the list (owner's phone check, 30
+   * September 2026): no `Any lineup spot`, no paragraph of instructions, and
+   * `My roster` beside the Compare button rather than on a row of its own.
+   */
+  test('the picker header is one row of controls, with no instructions above it', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    const sheet = page.getByTestId('compare-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet).not.toContainText('Any lineup spot');
+    await expect(sheet).not.toContainText('fair game');
+    await expect(page.getByTestId('compare-hint')).toHaveCount(0);
+
+    /*
+     * Both boxes read in one frame, and polled: the sheet is still sliding up
+     * for its first few hundred milliseconds, and two separate reads taken
+     * mid-slide disagree by however far it moved in between.
+     */
+    const boxes = () =>
+      page.evaluate(() => {
+        const r = (id: string) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect();
+        const run = r('compare-run');
+        const chip = r('compare-mine-filter');
+        return { runRight: run.right, runMid: run.y + run.height / 2, chipLeft: chip.x, chipMid: chip.y + chip.height / 2 };
+      });
+    // Same row: their vertical centres agree, and the chip sits to the right.
+    await expect
+      .poll(async () => {
+        const b = await boxes();
+        return Math.abs(b.runMid - b.chipMid);
+      })
+      .toBeLessThan(2);
+    const b = await boxes();
+    expect(b.chipLeft).toBeGreaterThanOrEqual(b.runRight);
+  });
+
   test('never prints a plain forecast for a player who may not play', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
     const rows = page.locator('[data-testid="bench-row"], [data-testid="starter-row"][data-starter="true"]');

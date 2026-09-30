@@ -546,29 +546,25 @@ export function PositionPill({ position, slot = null }: { position: string | nul
   const known = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].includes(pos);
   const cls = known ? `pos-pill pos-${pos}` : 'pos-pill';
   /*
-   * A player filling a slot that is not his position: one label, two lines.
+   * A player filling a slot that is not his position: the slot, and only the slot.
    *
-   * A tight end at FLEX used to carry a `TE` pill here and a separate grey
-   * `FLEX` chip after his name, which read as the row labelling one slot
-   * twice (reported 30 September 2026). The slot now sits under the position
-   * inside the same pill, so the column stays one width and every name still
-   * starts on the same x.
+   * A tight end at FLEX used to carry a `TE` pill and a separate grey `FLEX`
+   * chip, then one pill with `TE` stacked over `FLEX`. The owner does not need
+   * the position on a FLEX row at all (30 September 2026), so the pill now reads
+   * `FLEX` alone, in the slot colour rather than any position's, and keeps the
+   * same width so every name still starts on the same x.
    */
   if (slot && slot.toUpperCase() !== pos) {
-    const label = slotShortLabel(slot);
+    const name = slot.toUpperCase();
     return (
       <span
-        className={`${cls} pos-pill-slot`}
-        data-position={pos || 'UNKNOWN'}
-        data-slot={slot.toUpperCase()}
+        className="pos-pill pos-pill-slot"
+        data-slot={name}
         data-testid="slot-pill"
-        title={`${pos || 'Player'} starting at ${slot.toUpperCase()}`}
-        aria-label={`${pos || 'Player'} at ${slot.toUpperCase()}`}
+        title={`${name} slot`}
+        aria-label={`${name} slot`}
       >
-        <span aria-hidden="true">{pos || '—'}</span>
-        <span className="pos-pill-slot-name" aria-hidden="true">
-          {label}
-        </span>
+        {slotShortLabel(slot)}
       </span>
     );
   }
