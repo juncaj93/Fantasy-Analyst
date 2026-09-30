@@ -182,6 +182,13 @@
   --pos-K-tint: #cfebee;
   --pos-DEF-line: #ab2f68;
   --pos-DEF-tint: #fbdcea;
+  /*
+   * A lineup slot, not a position. Solid slate with light letters, so it can
+   * never be mistaken for one of the tinted position pills above it: those are
+   * a colour wash with coloured letters, this is a filled block.
+   */
+  --slot-flex-bg: #3d4654;
+  --slot-flex-ink: #ffffff;
 
   /*
    * How much of the position's hue the card actually shows.
@@ -769,6 +776,8 @@
     --pos-K-tint: #10393f;
     --pos-DEF-line: #f492bd;
     --pos-DEF-tint: #44172c;
+    --slot-flex-bg: #c9d1dc;
+    --slot-flex-ink: #141922;
 
     --pos-mix: 0%;
     --pos-mix-open: 14%;
@@ -879,6 +888,8 @@
   --pos-K-tint: #10393f;
   --pos-DEF-line: #f492bd;
   --pos-DEF-tint: #44172c;
+  --slot-flex-bg: #c9d1dc;
+  --slot-flex-ink: #141922;
 
   --pos-mix: 0%;
   --pos-mix-open: 14%;
@@ -2420,24 +2431,18 @@ body,
 }
 
 /*
- * The position and the slot he fills, as one label. See `PositionPill`.
+ * A player filling a slot, labelled by the slot alone. See `PositionPill`.
  *
- * Same width as every pill, so names stay on one column; the slot is a second,
- * smaller line in the same capsule rather than a chip of its own.
+ * Same 32px box as every pill, so names stay on one column. Filled slate
+ * rather than a position tint, and the letters a touch smaller so four of them
+ * fit the box the two- and three-letter codes were sized for.
  */
 .pos-pill.pos-pill-slot {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.05;
-  padding: 2px 1px;
-}
-
-.pos-pill-slot-name {
-  font-size: 0.48rem;
-  font-weight: 750;
-  letter-spacing: 0.02em;
-  opacity: 0.8;
+  border-color: var(--slot-flex-bg);
+  background: var(--slot-flex-bg);
+  color: var(--slot-flex-ink);
+  font-size: 0.54rem;
+  letter-spacing: 0;
 }
 
 /* The trailing word or date on a list row: what tapping it does, said quietly. */
@@ -9019,8 +9024,8 @@ div.matchup-result {
 .slot-pill-superflex,
 .slot-pill-recflex,
 .slot-pill-wrrbflex {
-  background: var(--pos-DEF-tint);
-  color: var(--pos-DEF-line);
+  background: var(--slot-flex-bg);
+  color: var(--slot-flex-ink);
 }
 
 .slot-pill-k {
@@ -10401,15 +10406,23 @@ div.matchup-result {
 }
 
 /*
- * `My roster` in the Compare picker: one toggle under the position filter.
+ * `Compare N players` and `My roster` in the Compare picker: one row.
  *
- * A 44px target with a pill face, the reader's own list in the accent colour
- * the Draft queue filter uses for the same idea. The pressed state says so in
- * a tick as well as a fill, so it never depends on colour alone.
+ * They used to be two rows under the position filter; the owner wanted the
+ * room for the list (30 September 2026). The button leads because it is the
+ * action; the chip follows it as a filter on what the list shows.
+ *
+ * `My roster` is a 44px target with a pill face, the reader's own list in the
+ * accent colour the Draft queue filter uses for the same idea. The pressed
+ * state says so in a tick as well as a fill, so it never depends on colour
+ * alone.
  */
-.cmp-owner-row {
+.cmp-action-row {
   display: flex;
-  margin: var(--sp-1) 0 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 2px;
 }
 
 .owner-chip {
