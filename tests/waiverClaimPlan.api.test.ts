@@ -68,9 +68,13 @@ describe('the waiver plan on the live endpoint', () => {
       expect(claim.rank).toBe(index + 1);
       expect(claim.addName.length).toBeGreaterThan(0);
       expect(claim.headline).toContain(`Add ${claim.addName}`);
-      /* Either a named cut, or an honest statement that there is none. */
-      expect(claim.dropName != null || claim.headline.includes('No drop needed')).toBe(true);
-      if (claim.dropName) expect(claim.headline).toContain(`Drop ${claim.dropName}`);
+      /*
+       * The drop is said once, on the group the claim sits under: a named cut,
+       * or an honest statement that an open spot needs none.
+       */
+      const group = plan!.groups.find((g) => g.index === claim.group)!;
+      if (claim.dropName) expect(group.headline).toContain(`Drop ${claim.dropName}`);
+      else expect(group.headline).toMatch(/open roster spot/);
     }
   });
 

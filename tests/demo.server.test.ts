@@ -89,6 +89,7 @@ describe('the demo marker makes the server read-only', () => {
     '/api/leagues/demo-league/select',
     '/api/leagues/demo-league/sync',
     '/api/leagues/demo-league/strategy/refresh',
+    '/api/leagues/demo-league/waivers/refresh',
     '/api/leagues/demo-league/managers/refresh',
     '/api/drafts/demo-draft/sync',
     '/api/drafts/demo-draft/adp-snapshot',

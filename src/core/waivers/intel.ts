@@ -37,7 +37,7 @@ import { bidLikelihoodByRoster, type RivalBidLikelihood } from './bidLikelihood.
 import type { LeagueTransactionBaseline, ManagerTransactionProfile } from '../managers/transactionProfile.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
-import type { WaiverAdvice } from '../startsit/waivers.ts';
+import type { WaiverAdvice, WaiverCandidate } from '../startsit/waivers.ts';
 
 /**
  * What the assessment needs to know about a roster, and nothing more.
@@ -62,7 +62,7 @@ export function waiverLeagueIntel(opts: {
    * players nothing could be scored on: asking for the whole record would
    * make every future field of it a breaking change here.
    */
-  advice: Pick<WaiverAdvice, 'upgrades'>;
+  advice: Pick<WaiverAdvice, 'upgrades'> & { valueAdds?: readonly WaiverCandidate[] };
   rosters: WaiverIntelRoster[];
   players: CanonicalPlayer[];
   shape: RosterShape;
@@ -171,8 +171,14 @@ export function waiverLeagueIntel(opts: {
   const participationOf = (rosterId: number): number =>
     likelihood.get(rosterId)?.participation ?? 1;
 
-  for (const upgrade of opts.advice.upgrades) {
-    for (const candidate of upgrade.candidates) {
+  /*
+   * Starter upgrades and bench adds alike. A bench add is priced now (see
+   * `pricing.ts`), and a price with no rival count behind it is the blunt
+   * funded-roster fallback, which says nine rivals when two need the position.
+   */
+  const everyone = [...opts.advice.upgrades.flatMap((u) => u.candidates), ...(opts.advice.valueAdds ?? [])];
+  for (const candidate of everyone) {
+    {
       if (!needsByPosition.has(candidate.position)) {
         needsByPosition.set(candidate.position, teamNeedsFor(candidate.position, teams, meta, opts.shape));
       }

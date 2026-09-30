@@ -309,26 +309,32 @@ test.describe('the waivers page', () => {
     }
   });
 
-  /** No second way to ask. The gesture is the way. */
-  test('offers no refresh button, and does pull to refresh', async ({ page }) => {
-    const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
-    expect(labels).not.toContain('refresh');
+  /*
+   * One refresh control, beside how old the board is, and a pull that does
+   * the same thing. Both read Sleeper only.
+   *
+   * This asserted the opposite until 30 September 2026 — no refresh button,
+   * the gesture only — and the owner asked for the visible line: nothing on
+   * the screen said how old the board was, or that it could be refreshed.
+   * The pull used to run the start/sit refresh, which buys odds; neither
+   * control on this screen does now.
+   */
+  test('offers one refresh control, and both it and the pull read Sleeper only', async ({ page }) => {
+    const labels = (await page.locator('button:visible').allInnerTexts()).map((t) => t.trim().toLowerCase());
+    expect(labels.filter((l) => l === 'refresh')).toHaveLength(1);
 
-    let called = 0;
-    await page.route('**/api/startsit/refresh', async (route) => {
-      called += 1;
+    let sleeper = 0;
+    let odds = 0;
+    await page.route('**/api/leagues/*/waivers/refresh', async (route) => {
+      sleeper += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          deduped: false,
-          sources: [],
-          headline: 'Already current',
-          complete: true,
-        }),
+        body: JSON.stringify({ transactions: null, trending: null, refreshedAt: new Date().toISOString() }),
       });
+    });
+    page.on('request', (request) => {
+      if (request.url().includes('/api/startsit/refresh')) odds += 1;
     });
 
     const box = (await page.getByTestId('waivers-pull').boundingBox())!;
@@ -339,7 +345,8 @@ test.describe('the waivers page', () => {
     for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
     await page.mouse.up();
 
-    await expect.poll(() => called, { timeout: 10_000 }).toBe(1);
+    await expect.poll(() => sleeper, { timeout: 10_000 }).toBe(1);
+    expect(odds).toBe(0);
   });
 
   /**

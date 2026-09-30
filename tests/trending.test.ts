@@ -65,7 +65,7 @@ describe('trending snapshots (§5)', () => {
 
   it('says the sentence worth saying, and nothing when there is none', () => {
     const top = velocity(snapshot([['a', 9], ['b', 8]]), null).get('a');
-    expect(trendingHeadline(top!, { availableInLeague: true })).toBe('#1 trending add · still available in your league');
+    expect(trendingHeadline(top!, { availableInLeague: true })).toBe('#1 most-added on Sleeper today · still available in your league');
     const buried = velocity(snapshot(Array.from({ length: 40 }, (_, i) => [`p${i}`, 40 - i] as [string, number])), null).get('p30');
     expect(trendingHeadline(buried!)).toBeNull();
   });

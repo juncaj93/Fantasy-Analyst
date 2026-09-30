@@ -32,6 +32,7 @@ import {
   publishedRefusal,
 } from '../src/core/sleeper/weeklyProjections.ts';
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
+import { recommendWaiverUpgrades } from '../src/core/startsit/waivers.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
@@ -907,6 +908,68 @@ describe('no recommendation engine can reach the fallback', () => {
   });
 });
 
+
+/**
+ * The waiver yardstick may borrow, and names every comparison that did.
+ *
+ * The owner's decision of 30 September 2026: when Vegas has not fully priced
+ * both players in an add-versus-drop comparison, Waivers compares Sleeper's
+ * published projection for both, labelled `Sleeper projection`. That round
+ * found the alternative on production: a bench back scored −6.1 on one 2+ TD
+ * line read as an any-TD line, against a published 3.5, so every free agent
+ * looked like an upgrade.
+ *
+ * The shape of the exception, which is what this defends: the number arrives
+ * as a plain map from `server/services/decisionInputs.ts` (already sanctioned
+ * above), the waiver modules import nothing from the feed, and a market number
+ * is never set against a borrowed one.
+ */
+describe('the waiver yardstick borrows, and says so', () => {
+  const ROOT = path.resolve(import.meta.dirname, '..', 'src');
+
+  it('reaches the waiver modules as a value, never as an import', () => {
+    for (const relative of ['core/waivers/yardstick.ts', 'core/waivers/signals.ts', 'core/startsit/waivers.ts', 'core/waivers/assemble.ts']) {
+      const text = readFileSync(path.join(ROOT, ...relative.split('/')), 'utf8');
+      expect(/from '[^']*(weeklyProjections|sleeperProjection)[^']*'/.test(text), `${relative} imports the feed`).toBe(false);
+      expect(/\bimport\b[^;]*\bweeklyProjection\b/.test(text), `${relative} imports weeklyProjection`).toBe(false);
+    }
+  });
+
+  it('names the yardstick on every comparison it borrowed for', () => {
+    const roster = [
+      candidate('qb1', 'Jalen Hurts', 'QB', null, { signal: signalWithNet(3) }),
+      candidate('rb1', 'Christian McCaffrey', 'RB', null, { signal: signalWithNet(4) }),
+      candidate('wr1', 'Malik Nabers', 'WR', null, { signal: signalWithNet(2) }),
+      candidate('te1', 'Sam LaPorta', 'TE', null, { signal: signalWithNet(2) }),
+      candidate('rb2', 'Bench Back', 'RB', null, { signal: signalWithNet(1) }),
+    ];
+    const published = new Map([
+      ['qb1', 20],
+      ['rb1', 18],
+      ['wr1', 15],
+      ['te1', 10],
+      ['rb2', 3.5],
+      ['fa', 7],
+    ]);
+    const shape = buildRosterShape(['QB', 'RB', 'WR', 'TE', 'BN', 'BN']);
+    const scan = (map?: Map<string, number>) =>
+      recommendWaiverUpgrades({
+        roster,
+        candidates: [candidate('fa', 'Free Back', 'RB', null, { signal: signalWithNet(1) })],
+        shape,
+        profile: HALF_PPR,
+        rosteredPlayerIds: roster.map((r) => r.player.id),
+        ...(map ? { published: map } : {}),
+      });
+
+    // Without the feed nothing here can be compared, so nothing is recommended.
+    expect(scan().valueAdds).toEqual([]);
+    // With it, the comparison exists and says which yardstick it used.
+    const add = scan(published).valueAdds[0]!;
+    expect(add.basis.yardstick).toBe('sleeper');
+    expect(add.reasons.join(' ')).toContain('(Sleeper projection for both)');
+  });
+});
 
 /**
  * A defence nobody quoted, which is now a number rather than a dash.

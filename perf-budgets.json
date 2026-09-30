@@ -104,7 +104,7 @@
       "src/core/draft/nextpick/ownership.ts",
       "src/core/draft/provenance.ts",
       "src/core/draft/scoreBand.ts",
-    "src/core/draft/signalBalance.ts",
+      "src/core/draft/signalBalance.ts",
       "src/core/draft/survival.ts",
       "src/core/draft/tierBoard.ts",
       "src/core/dst/weeks.ts",
@@ -116,7 +116,7 @@
       "src/core/identity/normalize.ts",
       "src/core/nfl/teams.ts",
       "src/core/players/headshot.ts",
-    "src/core/roster/ownership.ts",
+      "src/core/roster/ownership.ts",
       "src/core/search/players.ts",
       "src/core/sleeper/eligibility.ts",
       "src/core/sleeper/rosterShape.ts",
@@ -127,6 +127,7 @@
       "src/core/trades/category.ts",
       "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",
+      "src/core/waivers/wording.ts",
       "src/web/demo/DemoIndicator.tsx",
       "src/web/demo/session.ts"
     ]

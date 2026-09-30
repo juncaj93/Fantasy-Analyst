@@ -19,7 +19,7 @@
 import { useState } from 'react';
 import type { FaabAdvice } from '../api.ts';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
-import type { WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
+import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
 import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 
@@ -116,7 +116,17 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
           </div>
         ) : null}
 
-        {plan.claims.length > 0 ? (
+        {/*
+          One block per drop: the drop, said once, then the claims that would
+          spend it in the order to enter them, numbered across the whole plan
+          because the numbers are the Sleeper order. An older cached payload
+          with no groups draws the flat list it always drew.
+        */}
+        {plan.claims.length > 0 && (plan.groups ?? []).length > 0 ? (
+          (plan.groups ?? []).map((group) => (
+            <ClaimGroup key={group.index} group={group} claims={plan.claims.filter((c) => c.group === group.index)} />
+          ))
+        ) : plan.claims.length > 0 ? (
           <ol className="claim-plan-list" data-testid="waiver-plan-claims">
             {plan.claims.map((claim) => (
               <ClaimLine key={claim.claimId} claim={claim} />
@@ -161,7 +171,46 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
           {claim.qualifier}
         </span>
       ) : null}
+      {/*
+        The case for him in one line: both projections on the one yardstick,
+        then Sleeper's attention and anything worth a warning. Block-level so
+        it sits under the instruction rather than running on from it.
+      */}
+      {claim.detail ? (
+        <span className="claim-plan-detail" data-testid="waiver-plan-claim-detail">
+          {claim.detail}
+        </span>
+      ) : null}
     </li>
+  );
+}
+
+/**
+ * One drop and the claims that would spend it.
+ *
+ * `Drop Jaylen Wright for the first one you win`, said once above the list
+ * rather than on every line: the claims under it share the cut, and Sleeper
+ * runs the first one that wins and skips the rest because the cut is gone.
+ * The `Keeping…` line says who the plan chose not to cut, and why, which is
+ * the question a reader asks the moment the drop is not who they expected.
+ */
+function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: WaiverClaimLine[] }) {
+  return (
+    <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
+      <div className="claim-plan-drop" data-testid="waiver-plan-drop">
+        {group.headline}
+      </div>
+      <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
+        {claims.map((claim) => (
+          <ClaimLine key={claim.claimId} claim={claim} />
+        ))}
+      </ol>
+      {group.keep.map((line) => (
+        <div key={line} className="faint claim-plan-keep" data-testid="waiver-plan-keep">
+          {line}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -352,6 +401,16 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
             {row.competition.label}
           </span>
         ) : null}
+        {/*
+          Which yardstick the two numbers below came from. Never absent on a
+          comparison: a reader should not have to guess whether a betting line
+          was set against a published projection, because it never is.
+        */}
+        {row.yardstick ? (
+          <span className="tag tag-yardstick" data-testid="waiver-yardstick" data-basis={row.yardstick.basis}>
+            {row.yardstick.basis === 'sleeper' ? 'Sleeper projection' : 'Vegas lines'}
+          </span>
+        ) : null}
       </div>
 
       <div className="waiver-summary" data-testid="waiver-summary">
@@ -370,6 +429,17 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
           · Proj. <strong>{row.shortTerm.label}</strong>
         </span>
       </div>
+
+      {/*
+        Warnings and colour, under the numbers: most-dropped first, then your
+        own recent cut, then what Vegas says against your bench. A row the plan
+        leaves out on purpose says why in the warning tone.
+      */}
+      {(row.notes ?? []).length > 0 ? (
+        <div className={`waiver-notes${row.planExcluded ? ' waiver-notes-warn' : ''}`} data-testid="waiver-notes">
+          {(row.notes ?? []).join(' · ')}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -462,10 +532,28 @@ export function WaiverDetailSheet({
           <div className="weekly-line">
             <dt>This week</dt>
             <dd>
-              {row.shortTerm.label}
-              {row.shortTerm.over ? <span className="faint"> over {row.shortTerm.over}</span> : null}
+              {row.yardstick && row.shortTerm.over ? (
+                <>
+                  {row.shortTerm.label}
+                  <span className="faint">
+                    {' '}
+                    vs {row.shortTerm.over} · {row.yardstick.label}
+                  </span>
+                </>
+              ) : (
+                <>
+                  {row.shortTerm.label}
+                  {row.shortTerm.over ? <span className="faint"> over {row.shortTerm.over}</span> : null}
+                </>
+              )}
             </dd>
           </div>
+          {(row.notes ?? []).length > 0 ? (
+            <div className="weekly-line" data-testid="waiver-detail-notes">
+              <dt>Heads up</dt>
+              <dd>{(row.notes ?? []).join(' · ')}</dd>
+            </div>
+          ) : null}
           <div className="weekly-line">
             <dt>Beyond this week</dt>
             <dd>

@@ -360,7 +360,16 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     const runtime = await runtimeFor('waivers-tuesday-active');
     const advice = (await runtime.request('GET', '/api/leagues/demo-league-2026/waivers')).body as WaiverAdvice;
 
-    const candidates = advice.upgrades.flatMap((u) => u.candidates);
+    /*
+     * Both tiers. Since the waiver yardstick (30 September 2026) the tight end
+     * on this wire is a bench add rather than a flex upgrade — his gap over the
+     * flex starter on betting lines is under the starter bar — and a bench add
+     * now carries the same competition read an upgrade does.
+     */
+    const candidates = [
+      ...advice.upgrades.flatMap((u) => u.candidates),
+      ...((advice as unknown as { valueAdds?: typeof advice.upgrades[number]['candidates'] }).valueAdds ?? []),
+    ];
     expect(candidates.length).toBeGreaterThan(1);
     expect(candidates.every((c) => c.competition != null)).toBe(true);
 
@@ -425,7 +434,10 @@ describe('the waiver scenarios price a bid with the real engine', () => {
      * know they exist, which is the point of the fold. Read as the screen reads
      * them.
      */
-    const contested = advice.upgrades.flatMap((u) => u.candidates).find((c) => c.position === 'TE') as unknown as {
+    const contested = [
+      ...advice.upgrades.flatMap((u) => u.candidates),
+      ...((advice as unknown as { valueAdds?: typeof advice.upgrades[number]['candidates'] }).valueAdds ?? []),
+    ].find((c) => c.position === 'TE') as unknown as {
       bidders: { displayName: string; remaining: number | null; needReason: string; basis: string; estimate: unknown }[] | null;
       managerPressure: { rivalsWithHistory: number; detail: string } | null;
     };

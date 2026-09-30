@@ -266,6 +266,13 @@ export async function captureWaiverSnapshot(
         ...(input.request.draftRankOf === undefined
           ? {}
           : { draftRankOf: Object.fromEntries(input.request.draftRankOf) }),
+        /* The waiver yardstick's inputs, so a replay measures on the same numbers. */
+        ...(input.request.published === undefined ? {} : { published: Object.fromEntries(input.request.published) }),
+        ...(input.request.depth === undefined ? {} : { depth: Object.fromEntries(input.request.depth) }),
+        ...(input.request.trendingDrops === undefined ? {} : { trendingDrops: [...input.request.trendingDrops.entries()] }),
+        ...(input.request.recentlyDropped === undefined
+          ? {}
+          : { recentlyDropped: Object.fromEntries(input.request.recentlyDropped) }),
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -275,12 +282,14 @@ export async function captureWaiverSnapshot(
          * carries the league it was built for as `leagueId`, and a spread copied
          * that real id into a file that said `league-1` everywhere else. The
          * Map is turned into pairs first so the walk has plain data to copy.
+         * Its trending drops and recent cuts are left out: they reach the
+         * request as top-level fields and are captured there, once.
          */
         strategy:
           strategy == null
             ? null
             : (scrubAliases(
-                { ...strategy, trending: [...strategy.trending.entries()] },
+                withoutWaiverMaps({ ...strategy, trending: [...strategy.trending.entries()] }),
                 aliases,
               ) as WaiverPlanInputs['strategy']),
         budgets,
@@ -313,6 +322,15 @@ export async function captureWaiverSnapshot(
       warnings: output.notes,
     },
   }, aliases);
+}
+
+/** The strategy context minus the two Maps the request carries on its own. */
+function withoutWaiverMaps<T extends object>(strategy: T): T {
+  const { trendingDrops: _drops, recentlyDropped: _recent, ...rest } = strategy as T & {
+    trendingDrops?: unknown;
+    recentlyDropped?: unknown;
+  };
+  return rest as T;
 }
 
 /**
@@ -368,6 +386,12 @@ export async function replayWaiverSnapshot(
     ...(inputs.draftRankOf === undefined
       ? {}
       : { draftRankOf: new Map(Object.entries(inputs.draftRankOf)) }),
+    ...(inputs.published === undefined ? {} : { published: new Map(Object.entries(inputs.published)) }),
+    ...(inputs.depth === undefined ? {} : { depth: new Map(Object.entries(inputs.depth)) }),
+    ...(inputs.trendingDrops === undefined ? {} : { trendingDrops: new Map(inputs.trendingDrops) }),
+    ...(inputs.recentlyDropped === undefined
+      ? {}
+      : { recentlyDropped: new Map(Object.entries(inputs.recentlyDropped)) }),
     rosters: inputs.rosters,
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,

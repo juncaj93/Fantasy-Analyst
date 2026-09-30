@@ -168,6 +168,19 @@ describe('no live surface can render a Projection v2 number', () => {
          * statement about a pipeline rather than about football.
          */
         'server/services/dataHealthService.ts',
+        /*
+         * The waiver scan's handcuff read, which reads a depth-chart *rank* and
+         * nothing else.
+         *
+         * `DepthChartRepo.latestRanksForTeams` returns club, name, position and
+         * `pos_rank` for the clubs on the reader's roster. It is used for one
+         * question — is this bench player #2 behind a starter who is #1 on the
+         * same club — and the answer can only ever keep a player off the cut
+         * list. No projection, usage share or score from the nflverse feeds
+         * crosses into it. Owner-approved as the handcuff source on 30
+         * September 2026.
+         */
+        'server/services/decisionInputs.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );
     const offenders = sourceFiles(ROOT).filter((file) => {

@@ -133,6 +133,16 @@ export interface PriceSummary {
   losingBidsComplete: boolean;
   /** Plain English, for the card, so a thin sample is never silently thin. */
   confidence: 'none' | 'low' | 'medium' | 'high';
+  /**
+   * Every winning amount the figures rest on, ascending.
+   *
+   * Carried so a price band can be drawn from where a player sits in the
+   * league's own distribution rather than from its whole interquartile range:
+   * with this league's 17 bids that range is $1–10, which as a band on every
+   * card says nothing about any one player. Optional, because a summary built
+   * before this existed has none, and then the quartiles are used as before.
+   */
+  amounts?: number[];
 }
 
 /**
@@ -179,6 +189,7 @@ export function summarisePrices(history: BidHistory, filter?: (o: BidObservation
     highestLosing,
     losingBidsComplete: history.losingBidsComplete,
     confidence: won.length >= 8 ? 'high' : won.length >= MIN_PRICE_SAMPLE ? 'medium' : 'low',
+    amounts: won,
   };
 }
 
@@ -188,7 +199,7 @@ export function summarisePrices(history: BidHistory, filter?: (o: BidObservation
  * Nearest-rank rather than interpolated, because every value here is a whole
  * number of dollars somebody really paid and $12.50 is not a bid.
  */
-function percentile(sorted: number[], p: number): number | null {
+export function percentile(sorted: readonly number[], p: number): number | null {
   if (sorted.length === 0) return null;
   const rank = Math.ceil(p * sorted.length);
   return sorted[Math.min(sorted.length - 1, Math.max(0, rank - 1))] ?? null;

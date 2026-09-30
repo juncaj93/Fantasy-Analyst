@@ -21,7 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type LeagueSummary, type StartSitRefreshReport, type WaiverAdvice } from '../api.ts';
+import { api, type LeagueSummary, type WaiverAdvice, type WaiverRefreshReport } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { BudgetFooter, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
@@ -75,20 +75,26 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   }, [load]);
 
   /*
-   * The same pull, the same pipeline, the same single-flight guard as Team.
+   * Sleeper, and nothing else.
    *
-   * And deliberately no control in the navigation bar: a second way to ask for
-   * the same thing is what this app has just finished removing from the screen
-   * next door.
+   * The trending lists and this week's and last week's transactions: about
+   * four Sleeper requests and no paid provider. This used to run the start/sit
+   * refresh, which buys odds; the props behind the Vegas yardstick keep their
+   * own schedule and budget, and nothing on this screen spends it. The pull
+   * gesture and the Refresh control below do the same thing.
    */
+  const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(async () => {
+    if (!selected) return;
+    setRefreshing(true);
     try {
-      await api.post<StartSitRefreshReport>('/api/startsit/refresh', {});
+      await api.post<WaiverRefreshReport>(`/api/leagues/${selected.id}/waivers/refresh`, {});
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
     await load();
-  }, [load]);
+    setRefreshing(false);
+  }, [load, selected]);
 
   const board = useMemo(() => (advice?.found ? buildWaiverBoard(advice) : null), [advice]);
 
@@ -144,6 +150,29 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       <NavBar title="Waivers" testId="waivers-nav" />
 
       {error ? <Notice tone="error">{error}</Notice> : null}
+
+      {/*
+        How old the board is, and the one way to make it newer.
+
+        The pull gesture was the only refresh on this screen and nothing said
+        how old the answer was. This says both in one line. A text button, not
+        an icon: `Refresh` is the word, and it is the only control on the line.
+      */}
+      {advice?.found ? (
+        <div className="waivers-updated" data-testid="waivers-updated">
+          <span>{advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}</span>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            className="waivers-updated-refresh"
+            data-testid="waivers-refresh"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      ) : null}
 
       {!selected ? (
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
@@ -266,6 +295,23 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       ) : null}
     </PullToRefresh>
   );
+}
+
+/**
+ * `5:00 AM` today, `Tue 5:00 AM` this week, `Sep 23` before that.
+ *
+ * In the reader's own clock. The instant is the server's; the words are the
+ * phone's.
+ */
+export function formatUpdated(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return 'recently';
+  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const sameDay = at.toDateString() === now.toDateString();
+  if (sameDay) return time;
+  const days = (now.getTime() - at.getTime()) / 86_400_000;
+  if (days < 6) return `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+  return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /**

@@ -25,7 +25,7 @@ import { recommendWaiverUpgrades } from '../src/core/startsit/waivers.ts';
 import { evaluatePlayer } from '../src/core/startsit/engine.ts';
 import { marketProjection, weeklyProjection } from '../src/core/startsit/projection.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
-import { candidate, defence } from './helpers/startsit.ts';
+import { candidate, defence, pricedCandidate } from './helpers/startsit.ts';
 import { DST_ROSTER_POSITIONS, DST_SCORING, DST_SCORING_CUSTOM } from '../src/core/demo/fixtures/dst.ts';
 
 const SHAPE = buildRosterShape(DST_ROSTER_POSITIONS);
@@ -254,19 +254,20 @@ describe('the wire can fill an empty DEF slot, and cannot yet stream one', () =>
   });
 
   it('still offers upgrades at every other position', () => {
+    // Fully priced: the waiver yardstick compares full boards only.
     const thin = [
-      candidate('qb1', 'Quarterback One', 'QB', 19),
-      candidate('rb1', 'Back One', 'RB', 15),
-      candidate('rb2', 'Back Two', 'RB', 3),
-      candidate('wr1', 'Receiver One', 'WR', 16),
-      candidate('wr2', 'Receiver Two', 'WR', 13),
-      candidate('wr3', 'Receiver Three', 'WR', 11),
-      candidate('te1', 'Tight End One', 'TE', 9),
-      candidate('fx1', 'Flex One', 'WR', 10),
+      pricedCandidate('qb1', 'Quarterback One', 'QB', 19),
+      pricedCandidate('rb1', 'Back One', 'RB', 15),
+      pricedCandidate('rb2', 'Back Two', 'RB', 3),
+      pricedCandidate('wr1', 'Receiver One', 'WR', 16),
+      pricedCandidate('wr2', 'Receiver Two', 'WR', 13),
+      pricedCandidate('wr3', 'Receiver Three', 'WR', 11),
+      pricedCandidate('te1', 'Tight End One', 'TE', 9),
+      pricedCandidate('fx1', 'Flex One', 'WR', 10),
     ];
     const advice = recommendWaiverUpgrades({
       roster: thin,
-      candidates: [candidate('freeRb', 'Free Back', 'RB', 14)],
+      candidates: [pricedCandidate('freeRb', 'Free Back', 'RB', 14)],
       shape: SHAPE,
       profile: PROFILE,
       rosteredPlayerIds: thin.map((r) => r.player.id),

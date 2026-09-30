@@ -990,9 +990,20 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const decision = await assembleWaiverPlan({ ...request, now: new Date() });
 
     const { lineup: _lineup, bids, ...board } = decision;
+    /*
+     * When the Sleeper-side inputs were last read: the trending lists and the
+     * league's transactions. The screen prints it as `Updated 5:00 AM`, beside
+     * the control that reads them again. Props keep their own clock.
+     */
+    const updatedAt =
+      [strategy?.trendingCapturedAt ?? null, strategy?.transactionsReadAt ?? null]
+        .filter((t): t is string => t != null)
+        .sort()
+        .at(-1) ?? null;
     return jsonResponse({
       league: { id: league.id, name: league.name, scoringLabel: profile.label },
       found: true,
+      updatedAt,
       dataFreshness: props,
       /* The same window the Team screen gets, from the same kickoffs. */
       gameWindow: gameWindowFrom(request.rosterInputs.map((i) => i.kickoff)),
@@ -1011,6 +1022,45 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
             trendingCapturedAt: strategy.trendingCapturedAt,
           }
         : null,
+    });
+  });
+
+  /**
+   * The Waivers screen's own refresh: Sleeper, and nothing else.
+   *
+   * This week's and last week's transactions (last week's waiver claims post
+   * on Wednesday morning), and the trending adds and drops lists: about four
+   * Sleeper requests, no paid provider. The props behind the Vegas yardstick
+   * stay on their own schedule and budget and are never bought from here; the
+   * pull-to-refresh on this screen used to run the start/sit refresh, which
+   * did.
+   *
+   * Rate limited like every other manual refresh. A write, so a POST.
+   */
+  router.post('/api/leagues/:id/waivers/refresh', async (ctx) => {
+    const limit = refreshLimiter.check('waivers');
+    if (!limit.allowed) return errorResponse(`refresh on cooldown; retry in ${limit.retryAfterSeconds}s`, 429);
+
+    const db = ctx.env.db;
+    const league = await new LeagueRepo(db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const service = new LeagueStrategyService(db, { sleeper: ctx.env.sleeper });
+    const transactions = await service
+      .syncTransactions({
+        leagueId: league.id,
+        sleeperLeagueId: league.sleeperLeagueId,
+        season: league.season,
+        week: state?.week ?? 1,
+        maxWeeks: 2,
+      })
+      .catch(() => null);
+    const trending = await service.captureTrending().catch(() => null);
+    return jsonResponse({
+      transactions,
+      trending,
+      refreshedAt: new Date().toISOString(),
     });
   });
 

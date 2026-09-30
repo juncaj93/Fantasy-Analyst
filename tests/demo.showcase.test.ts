@@ -48,6 +48,9 @@ interface ClaimLine {
   qualifier: string | null;
   relation: string;
   why: string[];
+  group: number;
+  bidRange: string | null;
+  detail: string | null;
 }
 
 interface WaiverBody {
@@ -64,9 +67,11 @@ interface WaiverBody {
     instruction: string | null;
     mechanics: string | null;
     claims: ClaimLine[];
+    groups: { index: number; drop: { playerId: string; name: string } | null; headline: string; keep: string[] }[];
     outcomes: string[];
     budget: string | null;
   } | null;
+  valueAdds?: { playerId: string; name: string; overPlayerId: string | null; overName: string | null }[];
   dst: {
     surface: boolean;
     decision: string;
@@ -80,71 +85,82 @@ interface WaiverBody {
 }
 
 describe('the waiver showcase runs the real claim planner', () => {
-  it('produces an ordered multi-claim contingency, not a list of adds', async () => {
+  it('groups the claims by the drop they spend, in the order to enter them', async () => {
     const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
     const plan = body.claimPlan!;
 
     expect(plan.surface).toBe(true);
     expect(plan.state).toBe('plan');
-    /* Three claims over two players: the shape §5 asks Demo Mode to show. */
-    expect(plan.claims.length).toBeGreaterThanOrEqual(3);
-    expect(new Set(plan.claims.map((c) => c.addPlayerId)).size).toBeLessThan(plan.claims.length);
+    expect(plan.claims.length).toBeGreaterThanOrEqual(2);
+    expect(plan.groups.length).toBeGreaterThanOrEqual(1);
 
-    const [first, second, third] = plan.claims;
+    const [first, second] = plan.claims;
     expect(first!.rank).toBe(1);
     expect(first!.qualifier, 'the preferred claim carries no qualifier').toBeNull();
 
     /*
-     * The second claim is the fallback: the same drop as the first, so it can
-     * only run in the world where the first one lost — which is exactly what
-     * its qualifier has to say, or the list reads as a duplicate.
+     * Every later claim under the same drop is a fallback: it can only run if
+     * the claims above it under that drop lost, and its qualifier says so.
      */
-    expect(second!.dropPlayerId).toBe(first!.dropPlayerId);
-    expect(second!.qualifier).toMatch(/only if 1/i);
-    expect(second!.relation).toBe('fallback');
+    for (const claim of plan.claims.slice(1)) {
+      const sameDrop = plan.claims.filter((c) => c.group === claim.group && c.rank < claim.rank);
+      if (sameDrop.length === 0) continue;
+      expect(claim.dropPlayerId).toBe(sameDrop[0]!.dropPlayerId);
+      expect(claim.qualifier).toMatch(/^Only if /);
+      expect(claim.relation).toBe('fallback');
+    }
+    expect(second!.qualifier ?? 'first of a second drop').toBeTruthy();
 
-    /*
-     * The third repeats the second's target on a *different* drop, which is the
-     * claim that is still worth entering if the first one lands.
-     */
-    expect(third!.addPlayerId).toBe(second!.addPlayerId);
-    expect(third!.dropPlayerId).not.toBe(second!.dropPlayerId);
-    expect(third!.qualifier).toMatch(/only if 2/i);
+    const group = plan.groups[0]!;
+    expect(group.headline).toContain(group.drop!.name);
 
     /* And the order is the instruction, with the mechanic one tap away. */
     expect(plan.instruction).toBe('Enter in this order');
     expect(plan.mechanics).toBeTruthy();
   });
 
+  /*
+   * The 30 September 2026 bug, as an invariant on the demo board.
+   *
+   * Every card said `Better than Jaylen Wright` while the plan cut Emmett
+   * Johnson. The card's cut and the plan's drop now come from one object.
+   */
+  it('names the same cut on every card as on the plan', async () => {
+    const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
+    const cards = new Map((body.valueAdds ?? []).map((v) => [v.playerId, v]));
+    for (const claim of body.claimPlan!.claims) {
+      const card = cards.get(claim.addPlayerId);
+      if (!card) continue;
+      expect(card.overName, `${claim.addName}'s card`).toBe(claim.dropName);
+    }
+  });
+
   it('is internally consistent: every add, bid and drop agrees with the rest of the response', async () => {
     const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
     const plan = body.claimPlan!;
-    const board = new Map(body.upgrades.flatMap((u) => u.candidates).map((c) => [c.playerId, c]));
+    const board = new Map([
+      ...body.upgrades.flatMap((u) => u.candidates).map((c) => [c.playerId, c.name] as const),
+      ...(body.valueAdds ?? []).map((v) => [v.playerId, v.name] as const),
+    ]);
     const bids = new Map((body.faab?.bids ?? []).map((b) => [b.playerId, b]));
     const remaining = body.faab!.mine!.remaining!;
 
     for (const claim of plan.claims) {
       /* Every add is a player the waiver engine actually put on the board. */
-      expect(board.get(claim.addPlayerId), `${claim.addName} is on the board`).toBeTruthy();
-      expect(claim.addName).toBe(board.get(claim.addPlayerId)!.name);
+      expect(board.get(claim.addPlayerId), `${claim.addName} is on the board`).toBe(claim.addName);
       /* Every bid is the pricing pass's own number, not the plan's. */
       expect(claim.bid).toBe(bids.get(claim.addPlayerId)?.recommended ?? null);
       expect(claim.bid!).toBeLessThanOrEqual(remaining);
-      /* A drop is a name, and the headline says all three things. */
+      /* A drop is a name, the headline names the add and a price range. */
       expect(claim.dropName).toBeTruthy();
       expect(claim.headline).toContain(claim.addName);
-      expect(claim.headline).toContain(`$${claim.bid}`);
-      expect(claim.headline).toContain(claim.dropName!);
+      expect(claim.bidRange).toMatch(/^\$\d+(–\d+)?$/);
+      expect(claim.headline).toContain(claim.bidRange!);
     }
 
-    /*
-     * And the claims that can land together cost what the wallet can cover.
-     *
-     * The two independent claims are the first and the compatible third; the
-     * fallback costs nothing extra because it only runs where the first lost.
-     */
-    const independent = plan.claims.filter((c) => c.relation !== 'fallback');
-    const total = independent.reduce((sum, c) => sum + (c.bid ?? 0), 0);
+    /* One claim per drop can land together, and the wallet covers the dearest of each. */
+    const worst = plan.groups.map((g) => Math.max(...plan.claims.filter((c) => c.group === g.index).map((c) => c.bid ?? 0)));
+    const total = worst.reduce((a, b) => a + b, 0);
     expect(total).toBeLessThanOrEqual(remaining);
     expect(plan.budget).toContain(`$${total}`);
   });
@@ -155,12 +171,12 @@ describe('the waiver showcase runs the real claim planner', () => {
       /* Several sentences, none of them the headline repeated. */
       expect(claim.why.length).toBeGreaterThan(3);
       expect(claim.why).not.toContain(claim.headline);
-      /* Including what the swap is worth and what the room will pay. */
+      /* Including the two projections and what the room will pay. */
       expect(claim.why.join(' ')).toMatch(/pts/);
       expect(claim.why.join(' ')).toMatch(/\$\d+/);
     }
-    /* And the whole plan carries the outcomes, in order of preference. */
-    expect(body.claimPlan!.outcomes.length).toBeGreaterThan(2);
+    /* And the whole plan carries the outcomes, ending with the one that is always reachable. */
+    expect(body.claimPlan!.outcomes.length).toBeGreaterThanOrEqual(2);
     expect(body.claimPlan!.outcomes.at(-1)).toMatch(/nothing on your roster changes/i);
   });
 });

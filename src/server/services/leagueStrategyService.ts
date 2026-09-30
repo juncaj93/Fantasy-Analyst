@@ -74,6 +74,15 @@ export interface StrategyContext {
   losingBids: string;
   trending: Map<string, TrendingVelocity>;
   trendingCapturedAt: string | null;
+  /** When this season's transactions were last read from Sleeper. Null before the first read. */
+  transactionsReadAt: string | null;
+  /** Sleeper's trending drops, from the same daily capture. Empty before the first one. */
+  trendingDrops: Map<string, TrendingVelocity>;
+  /**
+   * Players this league's own roster dropped in the last few weeks, with when.
+   * Read off stored transactions; the waiver board says so on the card.
+   */
+  recentlyDropped: Map<string, string>;
   notes: string[];
 }
 
@@ -196,7 +205,9 @@ export class LeagueStrategyService {
 
     const rosters = await this.leagues.listRosters(leagueId);
     const stored = await this.transactions.list(leagueId, { season: opts.season });
-    const weeksRead = (await this.transactions.weeksRead(leagueId, opts.season)).map((w) => w.week);
+    const weekRows = await this.transactions.weeksRead(leagueId, opts.season);
+    const weeksRead = weekRows.map((w) => w.week);
+    const transactionsReadAt = weekRows.reduce<string | null>((latest, w) => (latest == null || w.fetchedAt > latest ? w.fetchedAt : latest), null);
 
     const budget = buildBudgetState({
       leagueSettings: league.leagueSettings,
@@ -214,6 +225,26 @@ export class LeagueStrategyService {
 
     const current = await this.trending.capture('add');
     const previous = current ? await this.trending.comparablePrevious(current) : null;
+    const dropCapture = await this.trending.capture('drop').catch(() => null);
+
+    /*
+     * Your own cuts, newest first, keyed by player. Completed transactions only:
+     * a failed claim dropped nobody. Four weeks back is plenty for a note that
+     * reaches back two.
+     */
+    const mine = rosters.find((r) => r.isMine)?.rosterId ?? null;
+    const recentlyDropped = new Map<string, string>();
+    const since = Date.now() - 28 * 86_400_000;
+    for (const txn of stored) {
+      if (mine == null || txn.status !== 'complete' || !txn.drops || typeof txn.created !== 'number') continue;
+      if (txn.created < since) continue;
+      for (const [playerId, rosterId] of Object.entries(txn.drops)) {
+        if (Number(rosterId) !== mine) continue;
+        const at = new Date(txn.created).toISOString();
+        const known = recentlyDropped.get(playerId);
+        if (!known || known < at) recentlyDropped.set(playerId, at);
+      }
+    }
 
     const notes = [...budget.notes];
     if (weeksRead.length === 0) {
@@ -236,6 +267,9 @@ export class LeagueStrategyService {
       losingBids: losingBidNote(prices),
       trending: current ? velocity(current, previous) : new Map(),
       trendingCapturedAt: current?.capturedAt ?? null,
+      transactionsReadAt,
+      trendingDrops: dropCapture ? velocity(dropCapture, null) : new Map(),
+      recentlyDropped,
       notes,
     };
   }

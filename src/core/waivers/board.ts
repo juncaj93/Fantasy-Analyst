@@ -48,6 +48,8 @@ import { weekRange } from '../dst/weeks.ts';
 import type { SeasonOutlook } from './seasonOutlook.ts';
 import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
 import type { WaiverAddBasis } from '../startsit/waivers.ts';
+import type { WaiverMoveGroup, YardstickBasis } from './yardstick.ts';
+import { basisLabel, mostAddedLine } from './wording.ts';
 
 export interface WaiverLeagueIntel {
   /**
@@ -122,6 +124,12 @@ export interface WaiverCandidateLike extends WaiverLeagueIntel {
   gain: number;
   reasons: string[];
   statusFlag?: string | null;
+  /** Who a claim for him would drop, as the plan decided it. */
+  cut?: { playerId: string; name: string } | null;
+  /** Warnings and colour for the card: most-dropped, your own recent cut, Vegas. */
+  notes?: string[];
+  /** Set when the plan leaves him out, with the reason. */
+  planExcluded?: string | null;
 }
 
 export interface WaiverUpgradeLike {
@@ -181,9 +189,13 @@ export interface WaiverUnknownLike {
   position: string;
   team: string;
   statusFlag?: string | null;
-  /** Sleeper's own line: `#3 trending add`, `Add rate accelerated 6×`. */
+  /** Sleeper's own line: `#3 most-added on Sleeper today`, `Add rate accelerated 6×`. */
   trending?: string | null;
-  /** Adds across Sleeper in the published window, for the row's one number. */
+  /**
+   * Sleeper's raw count in the published window. Carried for diagnostics and
+   * never printed: it is not a count of leagues, and Sleeper does not say what
+   * it counts. The row says the rank instead.
+   */
   adds?: number | null;
   /** 0–1 attention, kept for anything that wants one number. */
   heat?: number | null;
@@ -224,6 +236,8 @@ export interface WaiverAdviceLike {
    * there is one surface rather than a defence dashboard.
    */
   dst?: DstPlan | null;
+  /** The claims grouped by drop, from `core/waivers/yardstick.ts`. Absent on an older payload. */
+  moveGroups?: WaiverMoveGroup[];
 }
 
 /**
@@ -298,6 +312,18 @@ export interface WaiverBoardRow {
   /** Present only on a value-add row: the engine's order, and every factor behind it. */
   priority?: number;
   basis?: WaiverAddBasis;
+  /**
+   * Who a claim for him would drop. The same object the plan's `Drop` line
+   * reads, so the card and the plan cannot name two people. Null when there is
+   * no cut (an unknown row, a defence row, an older payload).
+   */
+  cut: { playerId: string; name: string } | null;
+  /** Short lines under the numbers: warnings first. Empty for most rows. */
+  notes: string[];
+  /** Set when the plan deliberately leaves him out, with the reason. */
+  planExcluded: string | null;
+  /** Which yardstick the numbers on the card came from, in words. Null when not a comparison. */
+  yardstick: { basis: YardstickBasis; label: string } | null;
 }
 
 export interface WaiverBoard {
@@ -622,6 +648,10 @@ function dstRow(option: DstOption, plan: DstPlan, role: WaiverDstRole): WaiverBo
     leagueRank: null,
     bid: null,
     dst: role,
+    cut: null,
+    notes: [],
+    planExcluded: null,
+    yardstick: null,
   };
 }
 
@@ -702,15 +732,28 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
     score: candidate.score,
     leagueRank: candidate.leagueRank ?? null,
     bid: null,
+    cut: candidate.cut ?? null,
+    notes: candidate.notes ?? [],
+    planExcluded: candidate.planExcluded ?? null,
+    yardstick: null,
   };
 }
 
-/** `+6.7 pts`, `−0.4 pts`, or `No market line` when a side has none. */
+/**
+ * The card's number: both projections, side by side, on the one yardstick.
+ *
+ * `7.0 vs 3.5` rather than `+3.5 pts`, because the reader is deciding between
+ * two players and both numbers are the argument. The yardstick is named on the
+ * row beside it. An older payload with no yardstick keeps its gap.
+ */
 function valueAddLabel(add: WaiverValueAddLike): string {
   if (!add.basis) return `+${add.gain.toFixed(1)} pts`;
-  const gap = add.basis.projectionGap;
-  if (gap == null) return 'No market line';
-  return `${gap < 0 ? '\u2212' : '+'}${Math.abs(gap).toFixed(1)} pts`;
+  const { projection, overProjection, projectionGap } = add.basis;
+  if (add.basis.yardstick && projection != null && overProjection != null) {
+    return `${projection.toFixed(1)} vs ${overProjection.toFixed(1)}`;
+  }
+  if (projectionGap == null) return 'No market line';
+  return `${projectionGap < 0 ? '\u2212' : '+'}${Math.abs(projectionGap).toFixed(1)} pts`;
 }
 
 /**
@@ -761,6 +804,10 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
     bid: null,
     ...(add.priority === undefined ? {} : { priority: add.priority }),
     ...(add.basis === undefined ? {} : { basis: add.basis }),
+    cut: add.cut ?? (add.overPlayerId && add.overName ? { playerId: add.overPlayerId, name: add.overName } : null),
+    notes: add.notes ?? [],
+    planExcluded: add.planExcluded ?? null,
+    yardstick: add.basis?.yardstick ? { basis: add.basis.yardstick, label: basisLabel(add.basis.yardstick) } : null,
   };
 }
 
@@ -774,8 +821,13 @@ function valueRow(add: WaiverValueAddLike): WaiverBoardRow {
  * number; `label` is the word, and the word is what the screen prints.
  */
 function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
-  const adds = unknown.adds ?? null;
-  const addLine = adds == null ? null : `${formatAdds(adds)} adds across Sleeper`;
+  /*
+   * The rank, never the count. Sleeper's count is not leagues — on 30
+   * September 2026 one player showed more adds in a day than Sleeper has
+   * leagues — and Sleeper does not say what it counts.
+   */
+  const rank = unknown.leagueRank ?? null;
+  const addLine = rank == null ? null : mostAddedLine(rank);
   return {
     playerId: unknown.playerId,
     name: unknown.name,
@@ -814,12 +866,11 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
     score: null,
     leagueRank: unknown.leagueRank ?? null,
     bid: null,
+    cut: null,
+    notes: [],
+    planExcluded: null,
+    yardstick: null,
   };
-}
-
-/** `18,400` rather than `18400`, which is a different number to read at a glance. */
-function formatAdds(count: number): string {
-  return count.toLocaleString('en-US');
 }
 
 /**
