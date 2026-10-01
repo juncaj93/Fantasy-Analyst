@@ -608,6 +608,9 @@ test.describe('the same expanded player, opened from Trades', () => {
     await expect(row).toBeVisible();
     await expect(row).toContainText('30d');
     await expect(row, 'the stale twenty-one-day label is back').not.toContainText('21d');
+    const text = (await row.textContent()) ?? '';
+    expect(text.indexOf('7d'), 'the row reads this week before the month').toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('7d')).toBeLessThan(text.indexOf('30d'));
 
     await openTab(page, 'trades');
     await exploreMarket(page);

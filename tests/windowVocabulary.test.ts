@@ -63,6 +63,15 @@ describe('the recent-window label says what the window is', () => {
     expect(row, 'the stale twenty-one-day label is back on Players').not.toContain("label: '21d'");
   });
 
+  /** And `7d` ahead of it, from `last7`, so the row reads this week first. */
+  it('puts a 7d reading from last7 ahead of 30d on the Players row', () => {
+    const row = source('src/web/screens/PlayersScreen.tsx');
+    const seven = "{ label: '7d', value: <SignedValue net={player.signal?.last7.net ?? 0} /> }";
+    const thirty = `{ label: '${RECENT}', value: <SignedValue net={player.signal?.last30.net ?? 0} /> }`;
+    expect(row).toContain(seven);
+    expect(row.indexOf(seven)).toBeLessThan(row.indexOf(thirty));
+  });
+
   /** The Trades row, which has always had this right and must keep it. */
   it('labels the Trades row from last30, and the lifetime one Life', () => {
     const row = source('src/web/screens/TradesScreen.tsx');
