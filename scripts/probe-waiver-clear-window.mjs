@@ -95,6 +95,8 @@ for (const r of rows) {
       `bid=${bid?.recommended ?? '-'} expected=${bid?.expected ? `${bid.expected.low}-${bid.expected.high}` : '-'} ` +
       `pickup=${JSON.stringify(W.pickup?.[r.playerId] ?? null)}`,
   );
+  /* Every note the engine wrote, in its order. The card prints the first only. */
+  if ((r.notes ?? []).length > 0) console.log(`      notes: ${r.notes.join('  |  ')}`);
 }
 
 /* Every scanned free agent still inside the window, whether or not he made the board. */
