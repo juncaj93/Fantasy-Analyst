@@ -3330,7 +3330,8 @@ body,
  * Two numbers are a cluster, not a grid. See the note where this is set.
  */
 .dense-row-metrics[data-columns='1'],
-.dense-row-metrics[data-columns='2'] {
+.dense-row-metrics[data-columns='2'],
+.dense-row-metrics[data-layout='cluster'] {
   grid-auto-columns: max-content;
   justify-content: start;
   gap: var(--sp-4);

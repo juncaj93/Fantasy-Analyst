@@ -256,6 +256,33 @@ export class LeagueRepo {
     await this.db.prepare('DELETE FROM draft_picks WHERE draft_id = ? AND pick_no = ?').bind(draftId, pickNo).run();
   }
 
+  /**
+   * Every pick of a league's own draft, with the room size its labels need,
+   * in one statement: the league names the draft, the draft holds the picks.
+   * Empty for a league with no draft. See `leagueDraftPicks`.
+   */
+  async listLeagueDraftPicks(
+    leagueId: string,
+  ): Promise<{ pickNo: number; playerId: string; teams: number }[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT dp.pick_no AS pick_no, dp.player_id AS player_id,
+                COALESCE(NULLIF(d.teams, 0), NULLIF(l.total_rosters, 0), 12) AS teams
+           FROM leagues l
+           JOIN drafts d ON d.id = l.draft_id
+           JOIN draft_picks dp ON dp.draft_id = d.id
+          WHERE l.id = ? AND dp.player_id IS NOT NULL
+          ORDER BY dp.pick_no`,
+      )
+      .bind(leagueId)
+      .all<Record<string, unknown>>();
+    return rows.results.map((r) => ({
+      pickNo: Number(r['pick_no']),
+      playerId: String(r['player_id']),
+      teams: Number(r['teams']),
+    }));
+  }
+
   async listPicks(draftId: string): Promise<DraftPickRecord[]> {
     const rows = await this.db
       .prepare('SELECT * FROM draft_picks WHERE draft_id = ? ORDER BY pick_no')

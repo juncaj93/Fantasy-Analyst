@@ -241,3 +241,43 @@ describe('Demo Mode answers the same question the same way', () => {
     for (const player of held) expect(ids, player.id).toContain(player.id);
   });
 });
+
+/**
+ * Where this league's draft took each player, through the same wire.
+ *
+ * The row prints it in place of ADP once the draft is over, so what matters
+ * here is that it is the stored pick in the room's own form (`1.01`), null for
+ * a player the draft never reached, and absent when no league was named.
+ */
+describe('the Players list carries each player’s pick in this league', () => {
+  let env: AppEnv;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    const db = await createTestDb();
+    env = makeEnv(db);
+    app = createApp();
+    await seedDemoData(db);
+  });
+
+  const players = async (query: string) => {
+    const res = await app(new Request(`https://app.test/api/players?${query}`), env);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { players: { id: string; draftPick?: string | null }[] }).players;
+  };
+
+  it('labels drafted players by round and pick, and leaves the rest null', async () => {
+    const page = await players(`leagueId=${LEAGUE}&limit=200`);
+    const byId = new Map(page.map((p) => [p.id, p.draftPick]));
+    expect(byId.get('1001')).toBe('1.01');
+    expect(byId.get('1002')).toBe('1.02');
+    const undrafted = page.filter((p) => p.draftPick === null);
+    expect(undrafted.length).toBeGreaterThan(0);
+    for (const p of page) expect(p.draftPick === null || /^\d+\.\d{2}$/.test(p.draftPick ?? '')).toBe(true);
+  });
+
+  it('sends no pick at all when no league was named', async () => {
+    const page = await players('limit=50');
+    for (const p of page) expect(p).not.toHaveProperty('draftPick');
+  });
+});

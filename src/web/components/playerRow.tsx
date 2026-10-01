@@ -46,6 +46,7 @@ export function CompactPlayerRow({
   trailing,
   trailingBelow,
   metrics,
+  cluster = false,
   onOpen,
   testId,
 }: {
@@ -90,6 +91,15 @@ export function CompactPlayerRow({
   trailing?: ReactNode;
   trailingBelow?: ReactNode;
   metrics?: RowMetric[];
+  /**
+   * Keep the numbers together at the leading edge however many there are.
+   *
+   * Three or more otherwise become equal columns across the row, which is
+   * right for a board scanned down a column and wrong for a short line of
+   * readings: on Players it spread `7d`, `30d` and the third number to the
+   * far ends of the row with a hand's width of nothing between.
+   */
+  cluster?: boolean;
   onOpen: () => void;
   testId: string;
 }) {
@@ -204,6 +214,7 @@ export function CompactPlayerRow({
           <span
             className="dense-row-metrics"
             data-columns={metrics.length}
+            data-layout={cluster ? 'cluster' : 'grid'}
             data-aside={trailingBelow ? 'yes' : 'no'}
           >
             {metrics.map((m) => (
