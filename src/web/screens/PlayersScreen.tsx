@@ -170,7 +170,21 @@ function OwnerPill({ label }: { label: string | null }) {
   );
 }
 
-export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
+export function PlayersScreen({
+  leagues,
+  resetNonce,
+  draftAhead = false,
+}: {
+  leagues: LeagueSummary[];
+  resetNonce: number;
+  /**
+   * Whether this league still has a draft to hold: `season.draftVisible`, the
+   * same answer that puts Draft in the bar, decided on the server from Sleeper's
+   * own draft status. It decides what the card's corner holds — see
+   * {@link cardCorner}.
+   */
+  draftAhead?: boolean;
+}) {
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState(ALL_FILTER);
   /**
@@ -448,6 +462,26 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 
   const open = openId == null ? null : (players.find((p) => p.id === openId) ?? null);
 
+  /**
+   * The card's top corner, beside Done: the heart while a draft is ahead, the
+   * owner once it is over.
+   *
+   * The heart only ever moved the draft board, so it belongs here exactly as
+   * long as there is a board to move. Gated on `draftAhead` rather than removed,
+   * so a league heading into its next draft gets the control back on its own,
+   * and the stored levels are never touched either way.
+   */
+  const cardCorner = (player: PlayerListItem) =>
+    draftAhead ? (
+      <MyGuyControl
+        myGuy={player.myGuy ?? EMPTY_MY_GUY}
+        busy={flagging === player.id}
+        onChange={(level) => void setMyGuy(player.id, level)}
+      />
+    ) : (
+      <OwnerPill label={ownerPillLabel(player.ownerRosterId, teams)} />
+    );
+
   /*
    * The player's page, on top of the list rather than instead of it.
    *
@@ -462,9 +496,7 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         player={toSummary(open)}
         backLabel="Players"
         onBack={() => setFull(false)}
-        trailing={
-          <OwnerPill label={ownerPillLabel(open.ownerRosterId, teams)} />
-        }
+        trailing={cardCorner(open)}
       />
     );
   }
@@ -622,7 +654,7 @@ export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 restoreScroll.current = pageScrollTop();
                 setFull(true);
               }}
-              trailing={<OwnerPill label={ownerPillLabel(open.ownerRosterId, teams)} />}
+              trailing={cardCorner(open)}
             />
           ) : null}
 

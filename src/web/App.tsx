@@ -402,7 +402,7 @@ export function App() {
         {tab === 'matchup' ? <MatchupScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'waivers' ? <WaiversScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'trades' ? <TradesScreen resetNonce={resetNonce} /> : null}
-        {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} /> : null}
+        {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} draftAhead={draftVisible} /> : null}
         {tab === 'setup' ? (
           <SetupScreen
             leagues={leagues}
