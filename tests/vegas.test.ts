@@ -7,6 +7,7 @@ import {
   type SnapshotStore,
 } from '../src/core/vegas/cache.ts';
 import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
+import { buildFetchPlan, manualRefreshThresholdMinutes } from '../src/core/vegas/plan.ts';
 import { parseQuotes } from '../src/core/vegas/oddsApiProvider.ts';
 import {
   americanToProbability,
@@ -252,8 +253,10 @@ describe('shouldRefresh', () => {
     expect(decision.reason).toContain('cooldown');
   });
 
-  it('allows a manual refresh once the cooldown expires', () => {
-    expect(shouldRefresh(snapshot('2026-09-10T11:00:00Z'), { now, manual: true }).refresh).toBe(true);
+  it('allows a manual refresh once the wait for that game expires', () => {
+    // Kickoff is three days out, so the wait is six hours: 1h old is kept, 7h is re-bought.
+    expect(shouldRefresh(snapshot('2026-09-10T11:00:00Z'), { now, manual: true }).refresh).toBe(false);
+    expect(shouldRefresh(snapshot('2026-09-10T05:00:00Z'), { now, manual: true }).refresh).toBe(true);
   });
 });
 
@@ -330,5 +333,75 @@ describe('getPropsWithCache', () => {
       },
     };
     await expect(getPropsWithCache('g1', exploding, new MemoryStore())).resolves.toBeTruthy();
+  });
+});
+
+describe('manual refresh: per-game wait by time to kickoff', () => {
+  const kickoff = Date.parse('2026-09-13T17:00:00Z');
+  const hoursBefore = (h: number) => kickoff - h * 3_600_000;
+  const ago = (now: number, min: number) => new Date(now - min * 60_000).toISOString();
+  const ask = (hoursOut: number, ageMin: number) => {
+    const now = hoursBefore(hoursOut);
+    return shouldRefresh(snapshot(ago(now, ageMin)), { now, manual: true }).refresh;
+  };
+
+  it('thresholds: 6h beyond a day, 1h inside it, 15 min inside two hours', () => {
+    expect(manualRefreshThresholdMinutes(48)).toBe(360);
+    expect(manualRefreshThresholdMinutes(24.5)).toBe(360);
+    expect(manualRefreshThresholdMinutes(24)).toBe(60);
+    expect(manualRefreshThresholdMinutes(2)).toBe(60);
+    expect(manualRefreshThresholdMinutes(1.9)).toBe(15);
+    expect(manualRefreshThresholdMinutes(0)).toBeNull();
+    expect(manualRefreshThresholdMinutes(-3)).toBeNull();
+  });
+
+  it('far out: a 5h-old line is kept, a 6h-old one is re-bought', () => {
+    expect(ask(48, 300)).toBe(false);
+    expect(ask(48, 361)).toBe(true);
+  });
+
+  it('a day out: a 50 min line is kept, a 61 min one is re-bought', () => {
+    expect(ask(10, 50)).toBe(false);
+    expect(ask(10, 61)).toBe(true);
+  });
+
+  it('under two hours: 14 min kept, 16 min re-bought', () => {
+    expect(ask(1, 14)).toBe(false);
+    expect(ask(1, 16)).toBe(true);
+  });
+
+  it('after kickoff: never re-bought, however old', () => {
+    expect(ask(-1, 5000)).toBe(false);
+  });
+
+  it('never fetched: always fetched', () => {
+    expect(shouldRefresh(null, { now: hoursBefore(-2), manual: true }).refresh).toBe(true);
+  });
+});
+
+describe('manual plan: each game judged on its own kickoff', () => {
+  const now = Date.parse('2026-09-10T12:00:00Z');
+  const player = (id: string, hoursOut: number, ageMinutes: number | null) => ({
+    playerId: id,
+    position: 'WR',
+    eventId: `e-${id}`,
+    kickoff: new Date(now + hoursOut * 3_600_000).toISOString(),
+    starter: true,
+    status: null,
+    contested: false,
+    ageMinutes,
+  });
+
+  it('same 90 min age: the game inside a day is re-bought, the far one and the started one are not', () => {
+    const plan = buildFetchPlan(
+      [player('thu', 10, 90), player('sun', 70, 90), player('done', -1, 90)],
+      { now, thresholdMinutes: manualRefreshThresholdMinutes },
+    );
+    expect(plan.events.map((e) => e.eventId)).toEqual(['e-thu']);
+  });
+
+  it('a game with no lines on file is planned whatever the table says', () => {
+    const plan = buildFetchPlan([player('new', 70, null)], { now, thresholdMinutes: manualRefreshThresholdMinutes });
+    expect(plan.events).toHaveLength(1);
   });
 });

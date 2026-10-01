@@ -69,6 +69,37 @@ export interface PlanOptions {
   nearKickoffHours?: number;
   /** Never plan more events than this in one pass, whatever the roster spans. */
   maxEvents?: number;
+  /**
+   * Per-game staleness, for a person's tap. Given the hours to a game's
+   * kickoff, the age in minutes at which its lines are worth re-buying, or
+   * null for "never". When set it replaces `staleAfterMinutes` and the
+   * near-kickoff override entirely, so the table alone decides. The clock's
+   * pass leaves it unset and is unchanged.
+   */
+  thresholdMinutes?: (hoursToKickoff: number | null) => number | null;
+}
+
+/**
+ * How old a game's lines must be before a manual refresh re-buys them.
+ *
+ * Lines barely move early in the week and move fastest close to kickoff, so the
+ * wait shrinks as the game nears. Judged per game, never as one app-wide timer:
+ * Thursday night, Sunday and Monday night sit in different rows at once.
+ *
+ *   more than 24h out   6 hours
+ *   2 to 24h out        1 hour
+ *   under 2h out        15 minutes
+ *   kicked off          never (books have closed the line)
+ *
+ * An unknown kickoff is treated as far out. A game never fetched is not decided
+ * here: the callers fetch it whatever this says.
+ */
+export function manualRefreshThresholdMinutes(hoursToKickoff: number | null): number | null {
+  if (hoursToKickoff == null || !Number.isFinite(hoursToKickoff)) return 360;
+  if (hoursToKickoff <= 0) return null;
+  if (hoursToKickoff < 2) return 15;
+  if (hoursToKickoff <= 24) return 60;
+  return 360;
 }
 
 export const PLAN_DEFAULTS = {
@@ -132,7 +163,20 @@ export function buildFetchPlan(players: PlannedPlayer[], opts: PlanOptions): Fet
       skipped.push({ playerId: player.playerId, reason: 'game has started; nothing left to decide' });
       continue;
     }
-    if (player.ageMinutes != null && player.ageMinutes < staleAfter && !isUrgent(player, hoursToKickoff, nearKickoff)) {
+    const tableLimit = opts.thresholdMinutes ? opts.thresholdMinutes(hoursToKickoff) : undefined;
+    if (player.ageMinutes != null && tableLimit !== undefined && (tableLimit === null || player.ageMinutes < tableLimit)) {
+      skipped.push({
+        playerId: player.playerId,
+        reason: `lines are ${Math.round(player.ageMinutes)} min old, under this game's ${tableLimit ?? 0} min wait`,
+      });
+      continue;
+    }
+    if (
+      tableLimit === undefined &&
+      player.ageMinutes != null &&
+      player.ageMinutes < staleAfter &&
+      !isUrgent(player, hoursToKickoff, nearKickoff)
+    ) {
       skipped.push({
         playerId: player.playerId,
         reason: `lines are ${Math.round(player.ageMinutes)} min old, still fresh`,
