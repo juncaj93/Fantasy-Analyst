@@ -68,4 +68,8 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * owner's bar (QB 14, RB/WR/TE 8, DEF 6), not only when a slot is empty. That
  * count prices bids, so bids move.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@8', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@9`: a rival whose flex starter projects under 8 points needs every
+ * position that flex takes. More rivals count as needy, so bids move.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@9', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

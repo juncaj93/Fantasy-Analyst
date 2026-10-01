@@ -180,6 +180,24 @@ describe('the roster is refreshed by a clock, not only by a gesture', () => {
     ).toBe(true);
   });
 
+  /*
+   * 1 October 2026: every three hours, so a rival's fresh drop reaches the
+   * Waivers screen without a Refresh. See `core/league/waiverReadCadence.ts`.
+   */
+  it('re-reads the league and its transactions on the five-minute tick at a quarter past every third hour', async () => {
+    const run = stubWorld();
+    await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.UTC(2026, 9, 1, 15, 15) }, { DB: db } as never);
+    expect(run.urls.some((u) => /\/league\/L2026\/rosters$/.test(u)), 'rosters').toBe(true);
+    expect(run.urls.some((u) => /\/league\/L2026\/transactions\/1$/.test(u)), 'transactions').toBe(true);
+    expect((await new LeagueRepo(db).listRosters('L2026'))[0]!.playerIds).toEqual(IN_SLEEPER);
+  });
+
+  it('leaves the league alone on every other five-minute tick', async () => {
+    const run = stubWorld();
+    await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.UTC(2026, 9, 1, 16, 15) }, { DB: db } as never);
+    expect(run.urls.some((u) => /\/league\/L2026/.test(u))).toBe(false);
+  });
+
   it('adopts a waiver claim made in Sleeper, defence and all', async () => {
     stubWorld();
     const before = await new LeagueRepo(db).listRosters('L2026');

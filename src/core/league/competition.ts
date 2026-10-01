@@ -130,6 +130,10 @@ export const WEAK_STARTER_POINTS: Readonly<Record<string, number>> = {
  * Without projections, or for a position with no dedicated slot or no bar,
  * the older body count: fewer healthy players than slots is `urgent`, exactly
  * as many with a flex that takes the position is `thin`.
+ *
+ * Then the flex: a team whose named slots are covered still needs the
+ * position when one of the flex spots it could fill starts somebody under 8
+ * points (`thin`). See {@link weakFlex}.
  */
 export function teamNeedsFor(
   position: string,
@@ -164,10 +168,57 @@ export function teamNeedsFor(
       } else {
         level = flexEligible && healthy <= required ? 'thin' : 'covered';
       }
+      /* Then the flex spots this position can fill: a weak flex starter is a need too. */
+      if (level === 'covered' && projections != null && projections.size > 0 && weakFlex(position, r, meta, shape, projections)) {
+        level = 'thin';
+      }
 
       return { rosterId: r.rosterId, displayName: r.displayName, level, healthy, required, flexEligible };
     });
 }
+
+/**
+ * Whether a team's flex starters, the spots this position could fill, include
+ * one under {@link WEAK_STARTER_POINTS}' 8-point skill bar.
+ *
+ * Asked for on 1 October 2026, when the dedicated-slot rule alone left almost
+ * every rival covered: this league starts two FLEX (RB/WR/TE) beside its named
+ * slots, and a team starting a 6-point receiver there needs an RB, a WR or a
+ * TE as much as one with a weak RB2. The flex starters are each team's best
+ * leftover RB/WR/TE after its named slots are filled, by projection; no
+ * projection counts as zero. Only flex slots made entirely of skill positions
+ * are judged, so a superflex slot (QB or skill) is left alone.
+ */
+export function weakFlex(
+  position: string,
+  roster: Pick<TeamRoster, 'playerIds'>,
+  meta: Map<string, RosterPlayerMeta>,
+  shape: RosterShape,
+  projections: ReadonlyMap<string, number>,
+): boolean {
+  const slots = shape.flex.filter(
+    (f) => f.positions.includes(position) && f.positions.every((p) => FLEX_SKILL.has(p.toUpperCase())),
+  );
+  if (slots.length === 0) return false;
+  const eligible = new Set(slots.flatMap((f) => f.positions));
+  const pool: number[] = [];
+  for (const pos of eligible) {
+    const points = roster.playerIds
+      .filter((id) => {
+        const m = meta.get(id);
+        return m?.position === pos && !m.unavailable;
+      })
+      .map((id) => projections.get(id) ?? 0)
+      .sort((a, b) => b - a);
+    pool.push(...points.slice(shape.starters[pos] ?? 0));
+  }
+  const flex = pool.sort((a, b) => b - a).slice(0, slots.length);
+  return flex.length < slots.length || Math.min(...flex) < FLEX_BAR;
+}
+
+const FLEX_SKILL = new Set(['RB', 'WR', 'TE']);
+/** The skill bar, the same 8 points a named RB, WR or TE slot is held to. */
+const FLEX_BAR = 8;
 
 /**
  * Turn needs and wallets into a count, a level and a sentence.
