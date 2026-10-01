@@ -565,7 +565,14 @@ export function planDst(input: DstPlanInput): DstPlan {
       ...base(playoffWeeks),
       decision: stash ? 'stash' : 'hold',
       activation: window.activation,
-      surface: true,
+      /*
+       * Drawn only when it says something: a stash to make, or a bye ahead
+       * that will need a fill. A plain `No clear upgrade` (or a hold argued
+       * from the schedule) is nothing to do, and on 1 October 2026 the owner
+       * asked for the line to go when there is nothing to suggest. The plan
+       * itself, and its sheet, are unchanged.
+       */
+      surface: stash != null || byeAhead != null,
       headline: stash ? `Hold ${current.team} · stash ${stash.option.team} for ${weekRange(playoffWeeks)}` : headline,
       why: [
         holdsForFuture

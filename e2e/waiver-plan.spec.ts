@@ -186,17 +186,12 @@ test.describe('the plan as a card', () => {
   });
 
   /**
-   * The repeated lines read as contingencies rather than as a mistake.
-   *
-   * One target twice and one drop twice is exactly right and looks exactly
-   * wrong, and the qualifier is the whole of what tells them apart. It is on the
-   * card because a reader who cannot see it deletes one of the two lines.
+   * No `Only if 1 loses` pills: the numbering is the order, and the owner cut
+   * the qualifiers on 1 October 2026.
    */
-  test('marks the repeated claims as contingencies', async ({ page }) => {
-    const qualifiers = page.getByTestId('waiver-plan-qualifier');
-    await expect(qualifiers).toHaveCount(2);
-    await expect(qualifiers.nth(0)).toHaveText('Only if 1 loses');
-    await expect(qualifiers.nth(1)).toHaveText('Only if 2 does not land him');
+  test('draws no contingency pills', async ({ page }) => {
+    await expect(page.getByTestId('waiver-plan-qualifier')).toHaveCount(0);
+    await expect(page.getByTestId('waiver-plan')).not.toContainText('Only if');
   });
 
   /** The numbers are the order; the card no longer says so in words. */
@@ -325,7 +320,7 @@ test.describe('the trimmed card', () => {
     await inSeason(page);
   });
 
-  test('names the handcuff on the drop line and nobody else', async ({ page }) => {
+  test('says only "Drop X" on the drop line', async ({ page }) => {
     await withPlan(
       page,
       planFixture({
@@ -333,7 +328,7 @@ test.describe('the trimmed card', () => {
           {
             index: 1,
             drop: { playerId: 'c', name: 'Depth Back' },
-            headline: 'Drop Depth Back for the first one you win',
+            headline: 'Drop Depth Back',
             keep: [
               'Keeping Backup Back: he backs up Feature Back, your starting RB.',
               'Keeping Rated Receiver: the market still rates him (#3 add in Sleeper this week).',
@@ -348,9 +343,10 @@ test.describe('the trimmed card', () => {
     );
     await openWaivers(page);
     const drop = page.getByTestId('waiver-plan-drop');
-    await expect(drop).toHaveText('Drop Depth Back for the first one you win (Backup Back stays: he backs up Feature Back)');
+    await expect(drop).toHaveText('Drop Depth Back');
     const card = page.getByTestId('waiver-plan');
     await expect(card).not.toContainText('Keeping');
+    await expect(card).not.toContainText('stays');
     await expect(card).not.toContainText('Rated Receiver');
   });
 
@@ -363,14 +359,14 @@ test.describe('the trimmed card', () => {
           {
             ...planFixture().claims[0],
             bid: null,
-            headline: 'Add Breakout Back · free agent, no bid needed',
+            headline: 'Add Breakout Back · free agent',
             pickup: { state: 'free', reason: null, until: null },
           },
         ],
       }),
     );
     await openWaivers(page);
-    await expect(page.getByTestId('waiver-plan-claim').first()).toContainText('free agent, no bid needed');
+    await expect(page.getByTestId('waiver-plan-claim').first()).toContainText('Add Breakout Back · free agent');
     const width = testInfo.project.use.viewport!.width;
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   });
@@ -402,12 +398,13 @@ test.describe('free agent or waiver claim, on the board', () => {
     await openWaivers(page);
     const summaries = page.getByTestId('waiver-summary');
     await expect(summaries.first()).toBeVisible();
-    await expect(page.locator('[data-testid="waiver-summary"][data-pickup="free"]').first()).toContainText(
-      'Free agent: pick up anytime, no FAAB needed',
-    );
+    const free = page.locator('[data-testid="waiver-summary"][data-pickup="free"]').first();
+    // The app's own status tag, reading just `Free agent`.
+    await expect(free.locator('.tag')).toHaveText('Free agent');
+    await expect(free).not.toContainText('FAAB');
     const claim = page.locator('[data-testid="waiver-summary"][data-pickup="waivers"]');
     if ((await claim.count()) > 0) {
-      await expect(claim.first()).toContainText('On waivers until');
+      await expect(claim.first().locator('.tag')).toContainText('On waivers until');
       await expect(claim.first()).toContainText('Est. cost');
     }
   });
@@ -554,7 +551,7 @@ test.describe('the defence keeps its own lane', () => {
 /**
  * The plan grouped by drop, as the waiver yardstick produces it.
  *
- * `Drop Jaylen Wright for the first one you win`, said once, then the claims
+ * `Drop Jaylen Wright`, said once, then the claims
  * that would spend it, each with the case for it on one line under the
  * instruction. The 30 September 2026 shape: one drop, three tries, and the
  * handcuff the plan chose not to cut, named with the reason.
@@ -583,7 +580,7 @@ function groupedPlan() {
       {
         index: 1,
         drop: { playerId: 'jw', name: 'Jaylen Wright' },
-        headline: 'Drop Jaylen Wright for the first one you win',
+        headline: 'Drop Jaylen Wright',
         keep: ['Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.'],
         keepNote: 'Emmett Johnson stays: he backs up Kenneth Walker',
         firstRank: 1,
@@ -591,9 +588,9 @@ function groupedPlan() {
       },
     ],
     claims: [
-      claim(1, 'ka', 'Keenan Allen', '$3–7', null, 'Proj. 7.0 vs 3.5 (Sleeper projection for both) · #11 most-added on Sleeper today · practised fully'),
-      claim(2, 'kc', 'KC Concepcion', '$2–5', 'Only if 1 loses', 'Proj. 7.6 vs 3.5 (Sleeper projection for both) · #22 most-dropped on Sleeper today · Dropped by you 7 days ago'),
-      claim(3, 'ta', 'Tyler Allgeier', '$1–3', 'Only if 1 and 2 lose', 'Proj. 6.6 vs 3.5 (Sleeper projection for both)'),
+      claim(1, 'ka', 'Keenan Allen', '$3–7', null, 'Proj. 7.0 vs 3.5 · #11 most-added on Sleeper today'),
+      claim(2, 'kc', 'KC Concepcion', '$2–5', 'Only if 1 loses', 'Proj. 7.6 vs 3.5 · Dropped by you 7 days ago'),
+      claim(3, 'ta', 'Tyler Allgeier', '$1–3', 'Only if 1 and 2 lose', 'Proj. 6.6 vs 3.5'),
     ],
   });
 }
@@ -608,22 +605,25 @@ test.describe('the plan grouped by drop', () => {
 
   test('says the drop once, then the claims that would spend it', async ({ page }) => {
     await expect(page.getByTestId('waiver-plan-drop')).toHaveText(
-      'Drop Jaylen Wright for the first one you win (Emmett Johnson stays: he backs up Kenneth Walker)',
+      'Drop Jaylen Wright',
     );
     const claims = page.getByTestId('waiver-plan-claim');
     await expect(claims).toHaveCount(3);
     await expect(claims.nth(0)).toContainText('Add Keenan Allen · bid $3–7');
     await expect(claims.nth(0)).not.toContainText('Drop');
     await expect(claims.nth(2)).toHaveAttribute('data-rank', '3');
-    await expect(page.getByTestId('waiver-plan-qualifier').nth(1)).toHaveText('Only if 1 and 2 lose');
+    await expect(page.getByTestId('waiver-plan-qualifier')).toHaveCount(0);
   });
 
-  test('puts the case for each claim under it, and names the handcuff on the drop line', async ({ page }) => {
-    await expect(page.getByTestId('waiver-plan-claim-detail').first()).toContainText(
-      'Proj. 7.0 vs 3.5 (Sleeper projection for both)',
+  test('puts the two numbers under each claim, and no explanation on the drop line', async ({ page }) => {
+    await expect(page.getByTestId('waiver-plan-claim-detail').first()).toHaveText(
+      'Proj. 7.0 vs 3.5 · #11 most-added on Sleeper today',
     );
-    await expect(page.getByTestId('waiver-plan-keep')).toHaveText('(Emmett Johnson stays: he backs up Kenneth Walker)');
-    await expect(page.getByTestId('waiver-plan')).not.toContainText('Keeping');
+    const card = page.getByTestId('waiver-plan');
+    await expect(card).not.toContainText('Sleeper projection');
+    await expect(page.getByTestId('waiver-plan-keep')).toHaveCount(0);
+    await expect(card).not.toContainText('Keeping');
+    await expect(card).not.toContainText('stays');
   });
 
   test('fits the phone', async ({ page }, testInfo) => {
@@ -643,8 +643,8 @@ test.describe('the plan grouped by drop', () => {
  * props behind the Vegas yardstick keep their own schedule and budget, and
  * nothing on this screen spends it.
  */
-test.describe('the refresh line', () => {
-  test('says when the board was updated and refreshes from Sleeper only', async ({ page }) => {
+test.describe('the refresh button', () => {
+  test('is Team\'s round icon button, says when the board was updated, and refreshes from Sleeper only', async ({ page }) => {
     await inSeason(page);
     const sleeperOnly: string[] = [];
     const vegas: string[] = [];
@@ -664,10 +664,16 @@ test.describe('the refresh line', () => {
     const line = page.getByTestId('waivers-updated');
     await expect(line).toBeVisible();
     await expect(line).toContainText(/Updated|Not updated yet/);
-    const button = page.getByTestId('waivers-refresh');
-    await expect(button).toHaveText('Refresh');
+    // In the nav bar, as the subtitle under the title, like Team's header.
+    await expect(page.getByTestId('waivers-nav').getByTestId('waivers-updated')).toHaveCount(1);
+    const button = page.getByTestId('waivers-nav').getByTestId('waivers-refresh');
+    // The same control Team uses: `btn btn-icon`, an icon, and no text.
+    await expect(button).toHaveClass(/btn-icon/);
+    await expect(button).toHaveText('');
+    await expect(button).toHaveAttribute('aria-label', /Refresh/);
     const box = (await button.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(40);
+    expect(box.width).toBeGreaterThanOrEqual(40);
 
     await button.click();
     await expect.poll(() => sleeperOnly.length).toBeGreaterThan(0);

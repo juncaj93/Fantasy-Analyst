@@ -148,7 +148,7 @@ test.describe('the waivers page', () => {
 
     // One status line: the pickup state or the cost, then the projection.
     const summary = await row.getByTestId('waiver-summary').innerText();
-    expect(summary).toMatch(/Est\. cost|Free agent: pick up anytime/);
+    expect(summary).toMatch(/Est\. cost|Free agent/);
     expect(summary).toMatch(/Proj\. \+?\d+\.\d pts|Proj\. \d+\.\d vs \d+\.\d/);
     // One decimal, always.
     expect(summary).not.toMatch(/\d\.\d\d/);
@@ -330,8 +330,10 @@ test.describe('the waivers page', () => {
    * control on this screen does now.
    */
   test('offers one refresh control, and both it and the pull read Sleeper only', async ({ page }) => {
+    // One refresh control: Team's round icon button, so it is counted by its label.
+    await expect(page.locator('button:visible[aria-label*="Refresh"]')).toHaveCount(1);
     const labels = (await page.locator('button:visible').allInnerTexts()).map((t) => t.trim().toLowerCase());
-    expect(labels.filter((l) => l === 'refresh')).toHaveLength(1);
+    expect(labels.filter((l) => l === 'refresh')).toHaveLength(0);
 
     let sleeper = 0;
     let odds = 0;

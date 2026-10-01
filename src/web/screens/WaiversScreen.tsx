@@ -28,6 +28,7 @@ import { BudgetFooter, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../c
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { unwindOne } from '../tabReset.ts';
+import { RefreshIcon } from '../components/icons.tsx';
 
 const ALL_FILTER = 'ALL';
 
@@ -147,32 +148,41 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 
   return (
     <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull" live={advice?.gameWindow?.live ?? false}>
-      <NavBar title="Waivers" testId="waivers-nav" />
+      {/*
+        Team's header, exactly: the shared NavBar with a round `btn btn-icon`
+        refresh in the corner, and how old the board is as the bar's subtitle.
+        Replaced the `Updated 9:53 AM · Refresh` text line on 1 October 2026.
+        The pull gesture and this button run the same Sleeper-only refresh.
+      */}
+      <NavBar
+        title="Waivers"
+        testId="waivers-nav"
+        subtitle={
+          advice?.found ? (
+            <span data-testid="waivers-updated">
+              {advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}
+            </span>
+          ) : undefined
+        }
+        trailing={
+          selected ? (
+            <span className="nav-actions-group">
+              <button
+                className="btn btn-icon"
+                data-testid="waivers-refresh"
+                aria-label="Refresh waivers from Sleeper"
+                title="Refresh"
+                disabled={refreshing}
+                onClick={() => void refresh()}
+              >
+                <RefreshIcon className={refreshing ? 'spin' : undefined} />
+              </button>
+            </span>
+          ) : null
+        }
+      />
 
       {error ? <Notice tone="error">{error}</Notice> : null}
-
-      {/*
-        How old the board is, and the one way to make it newer.
-
-        The pull gesture was the only refresh on this screen and nothing said
-        how old the answer was. This says both in one line. A text button, not
-        an icon: `Refresh` is the word, and it is the only control on the line.
-      */}
-      {advice?.found ? (
-        <div className="waivers-updated" data-testid="waivers-updated">
-          <span>{advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}</span>
-          <span aria-hidden="true">·</span>
-          <button
-            type="button"
-            className="waivers-updated-refresh"
-            data-testid="waivers-refresh"
-            onClick={() => void refresh()}
-            disabled={refreshing}
-          >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-      ) : null}
 
       {!selected ? (
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>

@@ -356,10 +356,18 @@ The Waivers screen opens on the result:
 
 ```
 Recommended move                         (the section title, not the card)
-Drop Jaylen Wright for the first one you win (Emmett Johnson stays: he backs up Kenneth Walker)
+Drop Jaylen Wright
 1. Add Adonai Mitchell · bid $8–16
-2. Add Keenan Allen · free agent, no bid needed     Only if 1 loses
+   Proj. 9.0 vs 3.5
+2. Add Keenan Allen · free agent
+   Proj. 7.0 vs 3.5 · #14 most-added on Sleeper today
 ```
+
+Later the same day the owner cut further: no `for the first one you win`, no
+handcuff clause, no `Only if 1 loses` pills (the numbering is the order), no
+`(Sleeper projection for both)`, a plain `Free agent` tag on the board, no
+`Check the news before claiming` after a drop rank, no DEF `No clear upgrade`
+line, and Team's round refresh button in the header.
 
 Four decisions in that card are worth stating, because each is the answer to a
 way the feature could have gone wrong.

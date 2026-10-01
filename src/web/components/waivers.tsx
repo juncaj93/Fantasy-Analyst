@@ -130,11 +130,6 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
   return (
     <li className="claim-plan-claim" data-testid="waiver-plan-claim" data-rank={claim.rank} data-relation={claim.relation}>
       <span className="claim-plan-headline">{claim.headline}</span>
-      {claim.qualifier ? (
-        <span className="tag tag-mini claim-plan-qualifier" data-testid="waiver-plan-qualifier">
-          {claim.qualifier}
-        </span>
-      ) : null}
       {/*
         The case for him in one line: both projections on the one yardstick,
         then Sleeper's attention and anything worth a warning. Block-level so
@@ -152,7 +147,7 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
 /**
  * One drop and the claims that would spend it.
  *
- * `Drop Jaylen Wright for the first one you win`, said once above the list
+ * `Drop Jaylen Wright`, said once above the list
  * rather than on every line: the claims under it share the cut, and Sleeper
  * runs the first one that wins and skips the rest because the cut is gone.
  * When the plan passed over a backup to one of your starters, the drop line
@@ -163,12 +158,6 @@ function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: Waiver
     <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
       <div className="claim-plan-drop" data-testid="waiver-plan-drop">
         {group.headline}
-        {group.keepNote ? (
-          <span className="faint claim-plan-keep" data-testid="waiver-plan-keep">
-            {' '}
-            ({group.keepNote})
-          </span>
-        ) : null}
       </div>
       <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
         {claims.map((claim) => (
@@ -286,19 +275,24 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
         now. See `core/waivers/clearWindow.ts`.
       */}
       <div className="waiver-summary" data-testid="waiver-summary" data-pickup={row.pickup?.state ?? 'unknown'}>
+        {/*
+          The pickup state as the app's own status tag (`tag tag-mini`, the
+          one the DEF line and the plan already wear): `Free agent`, or `On
+          waivers until Fri` beside the price. Owner's call, 1 October 2026:
+          "no FAAB needed" is what `Free agent` means.
+        */}
         {row.pickup?.state === 'free' ? (
-          <span data-testid="waiver-cost">
-            {/*
-              Not "add anytime, no bid": this row is a button (it opens the
-              detail), and no control on this screen may read as a transaction.
-              See `e2e/waivers.spec.ts`.
-            */}
-            <strong>Free agent</strong>: pick up anytime, no FAAB needed
+          <span className="tag tag-mini waiver-pickup" data-testid="waiver-cost">
+            Free agent
           </span>
         ) : (
           <>
             {row.pickup?.state === 'waivers' ? (
-              <span data-testid="waiver-window">On waivers until {clearDay(row.pickup.until)} · </span>
+              <>
+                <span className="tag tag-mini waiver-pickup" data-testid="waiver-window">
+                  On waivers until {clearDay(row.pickup.until)}
+                </span>{' '}
+              </>
             ) : null}
             <span data-testid="waiver-cost">
               Est. cost{' '}
@@ -312,8 +306,9 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
           look accidental.
         */}
         <span data-testid="waiver-short-term" style={{ whiteSpace: 'nowrap' }}>
-          {' '}
-          · Proj. <strong>{row.shortTerm.label}</strong>
+          {/* No dot straight after the `Free agent` tag: the tag is its own separator. */}
+          {row.pickup?.state === 'free' ? ' ' : ' · '}
+          Proj. <strong>{row.shortTerm.label}</strong>
         </span>
       </div>
 
@@ -478,7 +473,7 @@ export function WaiverDetailSheet({
               {row.pickup?.state === 'free' ? (
                 <>
                   None
-                  <span className="faint"> · free agent, add anytime in Sleeper, no bid needed</span>
+                  <span className="faint"> · free agent</span>
                 </>
               ) : row.faab ? (
                 <>
