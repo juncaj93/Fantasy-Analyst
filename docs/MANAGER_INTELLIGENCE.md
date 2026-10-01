@@ -335,6 +335,27 @@ season price every claim in the league.
 Late-season budget conservation is only read in the back half. Everybody has
 money in week 2.
 
+### Transaction → each named rival's Competition row
+
+`core/managers/biddingProfile.ts`, attached to each stored transaction profile
+as `bidding` at derive time and read by `core/league/bidders.ts`.
+
+- **Participation is per waiver run, losing claims included.** The denominator
+  is the weeks the league actually processed claims in, across the seasons the
+  manager was in the league. A failed claim is still a bid. A current manager
+  with no claims at all gets a "0 of N" record instead of nothing.
+- **Thin records blend toward the room in the open.** The rate adds four
+  imaginary runs at the league's rate; bid size adds four imaginary bids at the
+  middle manager's typical bid (each manager counts once, so one manager's
+  hundreds of $0 claims cannot set the room at $0). Size stays bounded ±40%.
+- **The row says it in words with the counts.** "rarely bids (1 of 35 waiver
+  runs since 2024, none this season) · likely $1–8 if bidding", "bids most weeks
+  (31 of 35 …)". A typical bidder gets no phrase. A rare bidder's estimate drops
+  to low confidence.
+- **It never reaches the price.** The rival count that feeds `expected`,
+  `recommended` and `doNotExceed` still comes from `core/waivers/bidLikelihood.ts`,
+  unchanged. This only rewrites how each rival is described.
+
 ---
 
 ## Diagnostics

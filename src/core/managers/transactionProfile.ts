@@ -35,6 +35,7 @@
  * evidence and reaches nothing.
  */
 
+import type { ManagerBidding } from './biddingProfile.ts';
 import { isFinalised, type LedgerTransaction } from './ledger.ts';
 
 export const TRANSACTION_PROFILE_VERSION = 1;
@@ -151,6 +152,13 @@ export interface ManagerTransactionProfile {
    * mistake the shrinkage exists to prevent.
    */
   spendConfidence: number;
+  /**
+   * Bidding per waiver run, losing claims included. See `biddingProfile.ts`.
+   *
+   * Optional because profiles derived before it existed are still stored, and
+   * a reader treats its absence as "not measured" rather than as zero.
+   */
+  bidding?: ManagerBidding;
   /** Developer-facing sentences. Never user copy. */
   notes: string[];
 }

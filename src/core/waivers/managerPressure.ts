@@ -336,6 +336,38 @@ export function waiverManagerPressure(input: WaiverPressureInput): WaiverManager
  * range rather than shifting it.
  */
 export function bidderTendencyFrom(rosterId: number, profile: ManagerTransactionProfile): BidderTendency {
+  /*
+   * The per-run bidding record, when the ledger has derived one.
+   *
+   * Losing claims count as bids here, and the size reading is a blend toward
+   * the room by sample size rather than a switch at three bids, so a manager
+   * with two claims moves their estimate a little instead of not at all. See
+   * `core/managers/biddingProfile.ts`.
+   */
+  const b = profile.bidding;
+  if (b) {
+    const relative = b.sizeRelative;
+    const confident = b.bids >= MIN_BIDS_FOR_TENDENCY && relative != null;
+    return {
+      rosterId,
+      sample: b.bids,
+      medianShare: b.medianBidShare,
+      relative,
+      confident,
+      note: confident ? sizeNote(relative!) : null,
+      activity: {
+        opportunities: b.opportunities,
+        bidRuns: b.bidRuns,
+        seasonOpportunities: b.seasonOpportunities,
+        seasonBidRuns: b.seasonBidRuns,
+        since: b.since,
+        rate: b.rate,
+        roomRate: b.roomRate,
+      },
+      weight: b.sizeWeight,
+    };
+  }
+
   const confident = profile.usable && profile.bidSample >= MIN_BIDS_FOR_TENDENCY && profile.spendRelative != null;
   return {
     rosterId,
@@ -348,7 +380,10 @@ export function bidderTendencyFrom(rosterId: number, profile: ManagerTransaction
 }
 
 function spendNote(profile: ManagerTransactionProfile): string {
-  const relative = profile.spendRelative ?? 1;
+  return sizeNote(profile.spendRelative ?? 1);
+}
+
+function sizeNote(relative: number): string {
   if (relative >= 1.2) return 'bids above the room';
   if (relative <= 0.85) return 'bids below the room';
   return 'bids around the room';

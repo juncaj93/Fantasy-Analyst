@@ -79,7 +79,37 @@ export interface BidderTendency {
   confident: boolean;
   /** One phrase, only when the sample supports it. */
   note: string | null;
+  /**
+   * How often this manager bids per real waiver run, when the ledger measured
+   * it. Absent on tendencies built from this season's bids alone.
+   */
+  activity?: BidderActivity | null;
+  /**
+   * How much of {@link BidderTendency.relative} is this manager's own record,
+   * `n / (n + k)`. Present only when `relative` is a blend toward the room
+   * rather than a reading that switches on at {@link MIN_BIDS_FOR_TENDENCY}.
+   */
+  weight?: number;
 }
+
+/** Bidding per waiver run, in the shape the Competition rows need. See `core/managers/biddingProfile.ts`. */
+export interface BidderActivity {
+  /** Waiver runs the manager was in the league for. */
+  opportunities: number;
+  /** Runs with at least one claim submitted, won or lost. */
+  bidRuns: number;
+  seasonOpportunities: number;
+  seasonBidRuns: number;
+  /** Earliest season the counts reach back to. */
+  since: string | null;
+  /** Their rate blended toward the room's. */
+  rate: number;
+  /** The room's rate. */
+  roomRate: number;
+}
+
+/** Waiver runs below which nothing is said about how often somebody bids. */
+export const MIN_RUNS_FOR_ACTIVITY = 4;
 
 export interface NamedBidder {
   rosterId: number;
@@ -300,11 +330,24 @@ function toNamed(
   const { estimate, basis, caveat } = estimateFor(bidder, ctx);
 
   const confidence: NamedBidder['confidence'] =
-    basis === 'manager_history' && bidder.remaining != null
+    activityPhrase(ctx.tendency.activity ?? null)?.rare
+      ? 'low'
+      : basis === 'manager_history' && bidder.remaining != null
       ? 'high'
       : basis === 'none'
         ? 'low'
         : 'medium';
+
+  /*
+   * How often they bid, per real waiver run, when the ledger measured it.
+   *
+   * Replaces the participation band below rather than sitting beside it: both
+   * describe the same habit, and "rarely bids (1 of 35 waiver runs)" says it
+   * with the counts a person can check. A rare bidder's amount is framed as
+   * conditional, because "likely $1–6" on its own reads as a forecast that
+   * they will bid at all.
+   */
+  const activity = activityPhrase(ctx.tendency.activity ?? null);
 
   /*
    * A rival his own record says rarely claims is qualified on the card.
@@ -315,13 +358,18 @@ function toNamed(
    * be true while the row as a whole was misleading. The phrase is the shortest
    * one that fixes it, and it is the same fact the price is now using.
    */
-  const quiet = quietPhrase(bidder.participation);
+  // Measured per waiver run, the old participation band would only restate it less precisely.
+  const measured = activity != null || (ctx.tendency.activity?.opportunities ?? 0) >= MIN_RUNS_FOR_ACTIVITY;
+  const quiet = measured ? null : quietPhrase(bidder.participation);
+  const rare = activity?.rare === true;
 
   const parts = [bidder.displayName];
-  if (estimate) parts.push(`likely $${estimate.low}–${estimate.high}`);
+  if (rare) parts.push(activity!.phrase);
+  if (estimate) parts.push(`likely $${estimate.low}–${estimate.high}${rare ? ' if bidding' : ''}`);
   else if (ctx.bidding) parts.push('amount unknown');
   if (bidder.remaining != null) parts.push(`$${bidder.remaining} left`);
   parts.push(needReason);
+  if (activity && !rare) parts.push(activity.phrase);
   if (quiet) parts.push(quiet);
   if (ctx.tendency.note && ctx.tendency.confident) parts.push(ctx.tendency.note);
 
@@ -352,6 +400,44 @@ function quietPhrase(participation: number): string | null {
   if (participation <= 0.4) return 'rarely claims';
   if (participation <= 0.7) return 'claims less than the room';
   return null;
+}
+
+/**
+ * How often somebody bids, in words with the counts beside them.
+ *
+ * Read off the blended rate against the room's, so a manager with four runs on
+ * record cannot be called rare on one quiet month, and the raw counts are
+ * always printed so the reader can see what the words rest on. Below
+ * {@link MIN_RUNS_FOR_ACTIVITY} only the count is stated, and a typical
+ * bidder gets no phrase at all.
+ */
+export function activityPhrase(activity: BidderActivity | null): { phrase: string; rare: boolean } | null {
+  if (!activity || activity.opportunities === 0) return null;
+  if (activity.opportunities < MIN_RUNS_FOR_ACTIVITY) {
+    return { phrase: `only ${activity.opportunities} waiver run(s) on record`, rare: false };
+  }
+  const counts = activityCounts(activity);
+  if (activity.roomRate <= 0) return null;
+
+  const ratio = activity.rate / activity.roomRate;
+  if (ratio <= 0.45) return { phrase: `rarely bids (${counts})`, rare: true };
+  if (ratio <= 0.8) return { phrase: `bids less often than most (${counts})`, rare: false };
+  if (ratio >= 1.25) {
+    return activity.bidRuns / activity.opportunities >= 0.7
+      ? { phrase: `bids most weeks (${counts})`, rare: false }
+      : { phrase: `bids more often than most (${counts})`, rare: false };
+  }
+  // A typical bidder: the row already has enough words, and this one says nothing new.
+  return null;
+}
+
+/** `1 of 35 waiver runs since 2024, none this season`. */
+function activityCounts(a: BidderActivity): string {
+  const onlyThisSeason = a.seasonOpportunities === a.opportunities;
+  const window = onlyThisSeason ? ' this season' : a.since ? ` since ${a.since}` : '';
+  const quietNow =
+    !onlyThisSeason && a.seasonOpportunities >= 2 && a.seasonBidRuns === 0 && a.bidRuns > 0 ? ', none this season' : '';
+  return `${a.bidRuns} of ${a.opportunities} waiver runs${window}${quietNow}`;
 }
 
 /**
@@ -389,7 +475,15 @@ function estimateFor(
   }
 
   const relative = ctx.tendency.relative;
-  const basis: EstimateBasis = relative != null ? 'manager_history' : 'league_price';
+  /*
+   * A blended reading (the ledger's, with `weight`) always carries a relative,
+   * pulled most of the way to 1 when the sample is thin. It counts as the
+   * manager's own history only once the sample would have supported a habit
+   * on its own; below that it is the league's range, nudged and widened.
+   */
+  const blended = ctx.tendency.weight != null;
+  const ownHistory = relative != null && (!blended || ctx.tendency.confident);
+  const basis: EstimateBasis = ownHistory ? 'manager_history' : 'league_price';
 
   let lo = low * (relative ?? 1);
   let hi = high * (relative ?? 1);
@@ -401,17 +495,22 @@ function estimateFor(
    * more, and a confident-looking narrow band is the specific way this feature
    * would mislead.
    */
-  if (relative == null) {
+  if (!ownHistory) {
     const width = (hi - lo) || hi * 0.2;
-    lo -= width * THIN_SAMPLE_WIDENING;
-    hi += width * THIN_SAMPLE_WIDENING;
+    const widen = THIN_SAMPLE_WIDENING * (blended ? 1 - (ctx.tendency.weight ?? 0) : 1);
+    lo -= width * widen;
+    hi += width * widen;
   }
 
   let loDollars = Math.max(1, Math.round(lo));
   let hiDollars = Math.max(loDollars, Math.round(hi));
 
   let caveat: string | null =
-    relative == null
+    blended && !ownHistory
+      ? ctx.tendency.sample === 0
+        ? 'no bids on record, so this is the league’s range'
+        : `only ${ctx.tendency.sample} bid(s) on record, so this leans on the league’s range`
+      : relative == null
       ? ctx.tendency.sample === 0
         ? 'no bids of his own on record — this is the league’s range'
         : `only ${ctx.tendency.sample} bid(s) of his own on record — this is the league’s range`
