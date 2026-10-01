@@ -163,12 +163,17 @@ import { mostAddedLine } from './wording.ts';
 export { mostAddedLine };
 
 export function mostDroppedLine(rank: number): string {
-  return `#${rank} most-dropped on Sleeper today`;
+  return `#${rank} most-dropped today`;
 }
 
-/** The card's warning for a free agent near the top of the drops list. */
+/**
+ * The card's warning for a free agent near the top of the drops list.
+ *
+ * The fact, and no advice after it: "Check the news before claiming" was cut
+ * on 1 October 2026. The warning tone on the card is what says it matters.
+ */
 export function mostDroppedWarning(rank: number): string {
-  return `${mostDroppedLine(rank)}. Check the news before claiming.`;
+  return mostDroppedLine(rank);
 }
 
 /**

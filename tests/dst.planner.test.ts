@@ -217,6 +217,9 @@ describe('streaming: better is not the same as worth it', () => {
     expect(plan.decision).toBe('hold');
     expect(plan.headline).toBe('No clear upgrade');
     expect(plan.gain! < plan.bar!).toBe(true);
+    /* 1 October 2026: nothing to suggest, so no line on Team or Waivers. The sheet's reasons stay. */
+    expect(plan.surface).toBe(false);
+    expect(plan.why.length).toBeGreaterThan(0);
   });
 
   it('asks for a wider gap when either side is thinly known', () => {

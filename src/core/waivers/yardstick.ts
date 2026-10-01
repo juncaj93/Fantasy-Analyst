@@ -446,7 +446,7 @@ export interface WaiverMovePlan {
  * 1. Each candidate is measured against the cheapest cut for his slots.
  * 2. The claims that clear are taken best first: upgrades before bench value,
  *    then by gap plus nudges. Each joins the group for his cut, up to three
- *    claims a group ("drop Jaylen Wright for the first one you win").
+ *    claims a group (the numbered list under "Drop Jaylen Wright").
  * 3. A claim whose group is full, or who would open a group beyond the second,
  *    is measured against the next cut instead. If he clears against that cut on
  *    his own, a second drop is spent on him; his card names that cut. If not,

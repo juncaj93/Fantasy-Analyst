@@ -286,9 +286,9 @@ describe('Sleeper trending and your own cuts', () => {
 
   it('keeps a top-ten drop out of the plan and warns about him', () => {
     const top = dropSignal({ rank: 1, heat: 1 });
-    expect(top.planExcluded).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
+    expect(top.planExcluded).toBe('#1 most-dropped today');
     const lower = dropSignal({ rank: 22, heat: 0.58 });
-    expect(lower).toMatchObject({ planExcluded: null, note: '#22 most-dropped on Sleeper today' });
+    expect(lower).toMatchObject({ planExcluded: null, note: '#22 most-dropped today' });
     expect(lower.nudge).toBeLessThan(0);
     expect(lower.nudge).toBeGreaterThanOrEqual(-0.5);
   });
@@ -446,7 +446,7 @@ describe('the 30 September board, rebuilt', () => {
       const p = buildWaiverClaimPlan({
         advice: { ...advice, faab: { bids }, pickup: { keenan: free, kc: free, lloyd: free } },
       });
-      expect(p.claims.map((c) => c.headline)).toEqual(['Add Keenan Allen · free agent, no bid needed']);
+      expect(p.claims.map((c) => c.headline)).toEqual(['Add Keenan Allen · free agent']);
       expect(p.claims[0]!.bid).toBeNull();
       expect(p.groups[0]!.headline).toBe('Drop Jaylen Wright');
       expect(p.instruction).toBeNull();
@@ -458,7 +458,7 @@ describe('the 30 September board, rebuilt', () => {
       });
       expect(p.claims.map((c) => c.headline)).toEqual([
         'Add Keenan Allen · bid $8–16',
-        'Add KC Concepcion · free agent, no bid needed',
+        'Add KC Concepcion · free agent',
       ]);
       expect(p.claims[1]!.qualifier).toBe('Only if 1 loses');
       expect(p.claims[0]!.pickup?.state).toBe('waivers');
@@ -485,7 +485,8 @@ describe('the 30 September board, rebuilt', () => {
     const keenan = board.rows.find((r) => r.playerId === 'keenan')!;
     expect(keenan.shortTerm.label).toBe('7.0 vs 3.5');
     expect(keenan.yardstick?.label).toBe('Sleeper projection for both');
-    expect(plan.claims[0]!.detail).toContain('Proj. 7.0 vs 3.5 (Sleeper projection for both)');
+    expect(plan.claims[0]!.detail).toContain('Proj. 7.0 vs 3.5');
+    expect(plan.claims[0]!.detail).not.toContain('Sleeper projection');
     expect(plan.claims[0]!.detail).toContain('#11 most-added on Sleeper today');
     expect(plan.claims[1]!.qualifier).toBe('Only if 1 loses');
   });
@@ -493,7 +494,7 @@ describe('the 30 September board, rebuilt', () => {
   it('says you cut KC Concepcion recently, and still ranks him', () => {
     const kc = board.rows.find((r) => r.playerId === 'kc')!;
     expect(kc.notes).toContain('Dropped by you 7 days ago');
-    expect(kc.notes).toContain('#22 most-dropped on Sleeper today');
+    expect(kc.notes).toContain('#22 most-dropped today');
   });
 
   /*
@@ -505,13 +506,13 @@ describe('the 30 September board, rebuilt', () => {
     expect(kc.notes[0]).toBe('Dropped by you 7 days ago');
     expect(cardReason(kc)).toBe('Dropped by you 7 days ago');
     const line = plan.claims.find((c) => c.addPlayerId === 'kc')!;
-    expect(line.detail).toBe('Proj. 7.6 vs 3.5 (Sleeper projection for both) · Dropped by you 7 days ago');
+    expect(line.detail).toBe('Proj. 7.6 vs 3.5 · Dropped by you 7 days ago');
   });
 
   it('shows the top-ten drop warning above everything else', () => {
     const lloyd = board.rows.find((r) => r.playerId === 'lloyd')!;
-    expect(lloyd.notes[0]).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
-    expect(cardReason(lloyd)).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
+    expect(lloyd.notes[0]).toBe('#1 most-dropped today');
+    expect(cardReason(lloyd)).toBe('#1 most-dropped today');
   });
 
   it('puts how many teams need the position first on a player who costs money, never on a free agent', () => {
@@ -537,8 +538,8 @@ describe('the 30 September board, rebuilt', () => {
   it('keeps the #1 most-dropped player out of the plan, with the warning on his card', () => {
     expect(plan.claims.map((c) => c.addPlayerId)).not.toContain('lloyd');
     const lloyd = board.rows.find((r) => r.playerId === 'lloyd');
-    expect(lloyd?.planExcluded).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
-    expect(lloyd?.notes).toContain('#1 most-dropped on Sleeper today. Check the news before claiming.');
+    expect(lloyd?.planExcluded).toBe('#1 most-dropped today');
+    expect(lloyd?.notes).toContain('#1 most-dropped today');
   });
 
   it('prices nothing it cannot, and never compares Jaylen Wright on his 2+ TD line', () => {

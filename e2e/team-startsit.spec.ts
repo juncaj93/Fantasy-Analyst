@@ -475,7 +475,7 @@ test.describe('waiver upgrades', () => {
      * `e2e/waivers.spec.ts` holds them.
      */
     // The cost, or, for a free agent outside the waiver window, that there is none.
-    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost|Free agent: pick up anytime/);
+    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost|Free agent/);
     await expect(row.getByTestId('waiver-summary')).toContainText(/Proj\./);
   });
 
@@ -509,7 +509,7 @@ test.describe('waiver upgrades', () => {
     if (waivers.pickup?.[playerId]?.state === 'free') {
       // Outside the waiver window he is an instant add: no price, because
       // nobody bids. See `core/waivers/clearWindow.ts`.
-      expect(cost).toBe('Free agent: pick up anytime, no FAAB needed');
+      expect(cost).toBe('Free agent');
     } else if (bid?.expected) {
       // The number on the row is the number the pricing pass produced, to the
       // dollar. A row that rounded, averaged or re-derived it would be a second
@@ -588,7 +588,7 @@ test.describe('waiver upgrades', () => {
     const bid = page.getByTestId('faab-bid').first();
     // A free agent outside the waiver window has no bid to quote at all.
     if (free) {
-      await expect(page.getByTestId('waiver-detail-cost')).toContainText('no bid needed');
+      await expect(page.getByTestId('waiver-detail-cost')).toContainText('free agent');
       await expect(page.getByTestId('faab-bid')).toHaveCount(0);
       return;
     }

@@ -19,7 +19,7 @@
  *
  * ```
  * Your waiver plan
- * Drop Jaylen Wright for the first one you win
+ * Drop Jaylen Wright
  *   1  Add Keenan Allen · bid $3–7
  *   2  Add KC Concepcion · bid $2–5          Only if 1 loses
  *   3  Add Tyler Allgeier · bid $1–3         Only if 1 and 2 lose
@@ -40,7 +40,6 @@
 
 import { myBudget, type LeagueBudgetState } from '../faab/budget.ts';
 import { buildWaiverBoard, type WaiverAdviceLike, type WaiverBoardRow } from './board.ts';
-import { basisLabel } from './yardstick.ts';
 import { mostAddedLine } from './signals.ts';
 import type { PickupState } from './clearWindow.ts';
 
@@ -66,7 +65,7 @@ export interface WaiverClaimLine {
   bidRange: string | null;
   /** `Add Keenan Allen · bid $3–7` */
   headline: string;
-  /** `Proj. 7.0 vs 3.5 (Sleeper projection for both) · #11 most-added on Sleeper today · practised fully` */
+  /** `Proj. 7.0 vs 3.5 · #11 most-added on Sleeper today`: the two numbers and at most one reason. */
   detail: string | null;
   /** `Only if 1 loses`, on every claim that is a fallback. */
   qualifier: string | null;
@@ -81,7 +80,7 @@ export interface WaiverClaimLine {
 export interface WaiverClaimGroup {
   index: number;
   drop: { playerId: string; name: string } | null;
-  /** `Drop Jaylen Wright for the first one you win` */
+  /** `Drop Jaylen Wright` */
   headline: string;
   /**
    * Every protected player the drop was chosen over, with why. Data only: the
@@ -146,7 +145,7 @@ export interface WaiverClaimPlanInput {
 
 const ORDER_INSTRUCTION = 'Enter in this order';
 /** On a claim for a player outside the waiver window. */
-export const FREE_AGENT_PHRASE = 'free agent, no bid needed';
+export const FREE_AGENT_PHRASE = 'free agent';
 const ORDER_NOTE =
   'Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run. So the first claim you win under a drop spends it, and the claims below it under the same drop do not run.';
 const NO_SAFE_DROP_NOTE =
@@ -278,10 +277,12 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
     outGroups.push({
       index: gi + 1,
       drop: group.drop ? { playerId: group.drop.playerId, name: group.drop.name } : null,
+      /*
+       * `Drop Jaylen Wright`, and nothing more: the numbered list already says
+       * the first claim that wins spends it (owner's call, 1 October 2026).
+       */
       headline: group.drop
-        ? group.addIds.length > 1
-          ? `Drop ${group.drop.name} for the first one you win`
-          : `Drop ${group.drop.name}`
+        ? `Drop ${group.drop.name}`
         : group.addIds.length > 1
           ? `${group.addIds.length} open roster spots: these need no drop`
           : 'Open roster spot: this one needs no drop',
@@ -325,7 +326,8 @@ export function detailFor(row: WaiverBoardRow): string | null {
   const parts: string[] = [];
   const basis = row.basis;
   if (basis?.yardstick && basis.projection != null && basis.overProjection != null) {
-    parts.push(`Proj. ${basis.projection.toFixed(1)} vs ${basis.overProjection.toFixed(1)} (${basisLabel(basis.yardstick)})`);
+    /* The two numbers only: which yardstick they came from is on his detail sheet. */
+    parts.push(`Proj. ${basis.projection.toFixed(1)} vs ${basis.overProjection.toFixed(1)}`);
   }
   /*
    * Then one reason, never a stack: the card's most important note (they
