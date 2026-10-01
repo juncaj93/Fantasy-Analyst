@@ -432,6 +432,42 @@ the last thing standing between a bad release and production.
 
 ---
 
+## 1 October: the props reads, and a subquery on the wrong index
+
+Cloudflare's 81% alert on 1 October came from the app's own reads, not from a
+sweep. `D1 read insights` over 30 September and 1 October listed 7.45M rows:
+
+| What | Rows (2 days) |
+| --- | --- |
+| The props reads behind every lineup (latest, previous, kickoff, priced count) | ~4.46M (60%) |
+| Player dictionary and its counts, already memoised for an hour per isolate | ~1.35M |
+| Everything else, no query above 3% | the rest |
+| The Worker's crons (288 ticks a day + the 09:00 sync) | ~40,000 a day (under 1%) |
+
+Every heavy hour sat inside a development window: Worker requests ran 60-130
+an hour across eight deploys and about twenty probe runs on 1 October, against
+12 an hour (the five-minute cron alone) on the quiet hours either side.
+
+The props reads' newest-snapshot subquery took the `(scope, fetched_at)` index,
+on which almost every snapshot is the same value, instead of `(event_id,
+fetched_at)`. D1 has no table statistics, so SQLite could not tell them apart.
+`+s2.scope` rules the scope index out and changes no value. Measured on
+production with D1's own `rows_read`, same rows returned:
+
+| Read | Before | After |
+| --- | --- | --- |
+| Unwindowed latest (Vegas refresh planner, `/api/vegas/budget`) | 26,595 | 4,176 |
+| Priced-player count (Data Health) | 26,595 | 4,176 |
+| Previous lines (every lineup) | 2,311 | 1,061 |
+| Latest lines (every lineup) | 1,498 | 1,156 |
+| Kickoff fallback (every lineup) | 2,849 | not asked when the schedule has the game |
+
+Over the same two days that is about 3M fewer rows, roughly 40% of the total.
+`scripts/probe-props-reads.mjs`, run from `D1 query plans`, repeats the
+measurement; `tests/propsNewestSnapshotPlan.test.ts` holds the plan.
+
+---
+
 ## What this is not
 
 No recalibration of any fantasy model. No change to waiver, DST or trade logic.
