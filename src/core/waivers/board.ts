@@ -72,6 +72,10 @@ export interface WaiverLeagueIntel {
     level: 'high' | 'medium' | 'low' | 'unknown';
     label: string;
     detail?: string | null;
+    /** Rivals who need the position (a weak or empty starting slot), before money. Absent on an older payload. */
+    needyTeams?: number;
+    /** `5 of 9 teams need RB`: that count as a sentence, never the named summary. */
+    needs?: string | null;
   } | null;
   /**
    * Which of them, by name, when the evidence supports saying so.

@@ -201,16 +201,24 @@ const STRENGTH_TAG: Record<WaiverBoardRow['strength']['level'], string> = {
  * The one reason line a card may carry, or none.
  *
  * In order: the plan leaving him out (a top-ten Sleeper drop, "check the news
- * before claiming"); an empty starting slot he would fill, or a defence row's
- * call; then the engine's
+ * before claiming"); on a player who costs money, how many rivals need the
+ * position (`5 of 9 teams need RB`); an empty starting slot he would fill, or
+ * a defence row's call; then the engine's
  * own notes, which arrive most important first: a Vegas edge over your bench,
  * your own recent cut, a lower place on the drops list. An empty slot outranks
  * the notes because it is the reason he is on the board at all.
  */
 export function cardReason(
-  row: Pick<WaiverBoardRow, 'planExcluded' | 'fit' | 'notes' | 'dst' | 'strength' | 'why'>,
+  row: Pick<WaiverBoardRow, 'planExcluded' | 'fit' | 'notes' | 'dst' | 'strength' | 'why' | 'pickup' | 'faab' | 'competition'>,
 ): string | null {
   if (row.planExcluded) return row.planExcluded;
+  /*
+   * On a player who costs money, how many rivals need the position is what
+   * justifies the price, so it comes first (owner's call, 1 October 2026).
+   * Not on a free agent: nobody bids for an instant pickup.
+   */
+  const costs = row.pickup?.state !== 'free' && row.faab != null;
+  if (costs && (row.competition?.needyTeams ?? 0) > 0 && row.competition?.needs) return row.competition.needs;
   /* A defence row's fit is the planner's call (`Streams over BUF`), the whole point of the row. */
   if (row.dst != null || row.fit.need === 'unfilled') return row.fit.label;
   const note = row.notes?.[0];

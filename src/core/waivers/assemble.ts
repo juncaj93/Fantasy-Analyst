@@ -471,6 +471,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     rosters: request.rosters,
     players: request.players,
     shape,
+    /* Sleeper's published week, read for every rostered player: who has a weak starter. */
+    projections: request.published ?? null,
     budgets: request.budgets,
     prices: request.prices,
     observations: request.observations,

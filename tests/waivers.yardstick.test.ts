@@ -514,6 +514,20 @@ describe('the 30 September board, rebuilt', () => {
     expect(cardReason(lloyd)).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
   });
 
+  it('puts how many teams need the position first on a player who costs money, never on a free agent', () => {
+    const kc = board.rows.find((r) => r.playerId === 'kc')!;
+    const competition = { level: 'medium' as const, label: 'Likely 2–3 bidders', detail: null, needyTeams: 5, needs: '5 of 9 teams need WR' };
+    const faab = { low: 1, high: 2, unit: 'dollar' as const, detail: null };
+    const onWaivers = { state: 'waivers' as const, reason: 'dropped' as const, until: '2026-10-02T07:10:58Z' };
+    expect(cardReason({ ...kc, competition, faab, pickup: onWaivers })).toBe('5 of 9 teams need WR');
+    expect(cardReason({ ...kc, competition, faab, pickup: { state: 'free', reason: null, until: null } })).toBe(
+      'Dropped by you 7 days ago',
+    );
+    expect(cardReason({ ...kc, competition: { ...competition, needyTeams: 0, needs: '0 of 9 teams need WR' }, faab, pickup: onWaivers })).toBe(
+      'Dropped by you 7 days ago',
+    );
+  });
+
   it('carries no reason line for a card with nothing to flag', () => {
     const keenan = board.rows.find((r) => r.playerId === 'keenan')!;
     expect(keenan.notes).toEqual([]);

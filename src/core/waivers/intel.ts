@@ -66,6 +66,12 @@ export function waiverLeagueIntel(opts: {
   rosters: WaiverIntelRoster[];
   players: CanonicalPlayer[];
   shape: RosterShape;
+  /**
+   * This week's projection for rostered players, by id. What decides whether a
+   * rival's starter at a position is weak enough that he needs one. Absent
+   * falls back to counting bodies. See `teamNeedsFor`.
+   */
+  projections?: ReadonlyMap<string, number> | null;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   /**
@@ -180,7 +186,10 @@ export function waiverLeagueIntel(opts: {
   for (const candidate of everyone) {
     {
       if (!needsByPosition.has(candidate.position)) {
-        needsByPosition.set(candidate.position, teamNeedsFor(candidate.position, teams, meta, opts.shape));
+        needsByPosition.set(
+          candidate.position,
+          teamNeedsFor(candidate.position, teams, meta, opts.shape, opts.projections ?? null),
+        );
       }
       const needs = needsByPosition.get(candidate.position)!;
 
@@ -286,6 +295,9 @@ export function withCompetition<T extends { candidates: { playerId: string }[] }
                * When names are withheld the original detail stands.
                */
               detail: named?.namesShown ? (named.summary ?? assessed.detail) : assessed.detail,
+              /* The count itself, for the card's reason line on a player who costs money. */
+              needyTeams: assessed.needyTeams,
+              needs: assessed.detail,
             }
           : null,
         /** The expanded view. Null when the evidence does not support naming anybody. */
