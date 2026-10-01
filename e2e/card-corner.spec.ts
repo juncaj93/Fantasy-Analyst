@@ -1,0 +1,91 @@
+/**
+ * The corner of a player's card, beside Done: the heart before the draft, the
+ * owner after it.
+ *
+ * The heart only ever moved the draft board, so once Sleeper calls the draft
+ * finished the corner answers *who holds him* instead. The switch is the same
+ * `season.draftVisible` that puts Draft in the bar, so a league heading into
+ * its next draft gets the heart back without a code change. Both sides are
+ * pinned here by overriding only that one field.
+ *
+ * The seeded league is two rosters: `You` holds Marcus Vance (`1001`), `Rival`
+ * holds Devin Okafor (`1002`).
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+const MINE = '1001';
+const RIVAL = '1002';
+
+async function draftAhead(page: Page, ahead: boolean): Promise<void> {
+  await page.route('**/api/overview', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const season = ahead
+      ? { phase: 'preseason', draftVisible: true, reason: 'your draft has not finished yet', assumed: false }
+      : { phase: 'regular', draftVisible: false, reason: 'the regular season is under way (week 4)', assumed: false };
+    await route.fulfill({ response, body: JSON.stringify({ ...body, season }) });
+  });
+}
+
+async function openPlayers(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.getByTestId('tab-players').click();
+  await expect(page.getByTestId('players-list')).toBeVisible();
+}
+
+async function openCard(page: Page, playerId: string): Promise<void> {
+  const row = page.locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`);
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+  await expect(page.getByTestId('player-sheet')).toBeVisible();
+}
+
+test.describe('the card corner once the draft is over', () => {
+  test.beforeEach(async ({ page }) => {
+    await draftAhead(page, false);
+    await openPlayers(page);
+  });
+
+  test('names a rival manager and draws no heart', async ({ page }) => {
+    await openCard(page, RIVAL);
+    const sheet = page.getByTestId('player-sheet');
+    await expect(sheet.getByTestId('owner-pill')).toHaveText('Rival');
+    await expect(sheet.getByTestId('my-guy-control')).toHaveCount(0);
+  });
+
+  test('says You on your own player', async ({ page }) => {
+    await openCard(page, MINE);
+    await expect(page.getByTestId('player-sheet').getByTestId('owner-pill')).toHaveText('You');
+  });
+
+  test('says Available on a free agent', async ({ page }) => {
+    await page.getByTestId('players-owner-open').click();
+    await page.getByTestId('players-owner-option').filter({ hasText: /^Available/ }).click();
+    await expect(page.getByTestId('players-owner-sheet')).toBeHidden();
+    // The filter lands after a debounce; wait until the rostered players leave.
+    await expect
+      .poll(() =>
+        page.getByTestId('player-search-row').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id'))),
+      )
+      .not.toContain(MINE);
+    const first = page.getByTestId('player-search-row').first();
+    await expect(first).toBeVisible();
+    await first.click();
+    const sheet = page.getByTestId('player-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('owner-pill')).toHaveText('Available');
+    await expect(sheet.getByTestId('my-guy-control')).toHaveCount(0);
+  });
+});
+
+test.describe('the card corner while a draft is ahead', () => {
+  test('keeps the heart and draws no owner', async ({ page }) => {
+    await draftAhead(page, true);
+    await openPlayers(page);
+    await openCard(page, RIVAL);
+    const sheet = page.getByTestId('player-sheet');
+    await expect(sheet.getByTestId('my-guy-control')).toBeVisible();
+    await expect(sheet.getByTestId('owner-pill')).toHaveCount(0);
+  });
+});
