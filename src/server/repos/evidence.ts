@@ -688,6 +688,8 @@ export class EvidenceRepo {
            * that were actually wrong.
            */
           last7: { ...recent.last7, items: 0 },
+          /* The real count, for the one reader (waivers) that is not the draft board. */
+          last7Count: recent.last7.items,
           last30: recent.last30,
           seasonToDate: { positive: 0, negative: 0, net: Number(r['season_net'] ?? 0), items: 0 },
           categoryBreakdown: parseJson(r['category_breakdown_json'], {}),

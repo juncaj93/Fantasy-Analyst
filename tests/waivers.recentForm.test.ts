@@ -63,6 +63,14 @@ describe('what a week of news is allowed to say', () => {
     expect(RECENT_FORM.maxPoints * 2).toBeLessThan(1);
   });
 
+  it('reads the real item count when the stored-summary read reports last7.items as zero', () => {
+    // The cache-fed signal has always said items: 0 for the draft board's sake; last7Count is the truth.
+    const cached = { ...tally(-4, 0), last7Count: 4 };
+    expect(recentFormOf(cached)).toMatchObject({ direction: 'down', items7: 4 });
+    // And without it, a zero count is a silent week, as before.
+    expect(recentFormOf(tally(-4, 0))).toMatchObject({ direction: null });
+  });
+
   it('is signed so a good week is positive and a bad one negative', () => {
     expect(recentFormOf(tally(4, 4))).toMatchObject({ direction: 'up' });
     expect(recentFormOf(tally(-4, 4))).toMatchObject({ direction: 'down' });

@@ -79,10 +79,12 @@ const SILENT: RecentForm = { points: 0, direction: null, net7: 0, items7: 0, wei
 
 /** One player's week, read off the tally the Players screen already shows. */
 export function recentFormOf(
-  signal: Pick<PlayerSignal, 'last7' | 'last30'> | null | undefined,
+  signal: Pick<PlayerSignal, 'last7' | 'last30' | 'last7Count'> | null | undefined,
 ): RecentForm {
   if (!signal) return SILENT;
-  const { net, items } = signal.last7;
+  const { net } = signal.last7;
+  /* The stored-summary read reports `last7.items` as zero on purpose; `last7Count` is the real figure. */
+  const items = signal.last7Count ?? signal.last7.items;
   if (!Number.isFinite(net) || items < RECENT_FORM.minItems) return { ...SILENT, net7: net ?? 0, items7: items ?? 0 };
 
   const weight = items / (items + RECENT_FORM.priorItems);
