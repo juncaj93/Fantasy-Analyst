@@ -21,7 +21,7 @@
 
 import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
-import { buildFetchPlan, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
+import { buildFetchPlan, manualRefreshThresholdMinutes, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
@@ -176,7 +176,10 @@ export class VegasRefreshService {
     let fetched = discovery.events;
 
     const mapped = discovery.entities > 0 ? await this.rosterPlayers(now) : players;
-    const plan = buildFetchPlan(mapped, { now });
+    const plan = buildFetchPlan(mapped, {
+      now,
+      ...(opts.manual ? { thresholdMinutes: manualRefreshThresholdMinutes } : {}),
+    });
 
     const decision = canSpend(budget, {
       entities: plan.estimatedEntities,

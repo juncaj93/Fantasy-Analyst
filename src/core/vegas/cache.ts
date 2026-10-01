@@ -10,6 +10,7 @@
  * returned and explicitly marked stale — never fabricated, never empty.
  */
 
+import { manualRefreshThresholdMinutes } from './plan.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from './types.ts';
 
 export interface CachedSnapshot {
@@ -81,10 +82,13 @@ export function shouldRefresh(
 
   const age = minutesBetween(cached.fetchedAt, opts.now);
   if (opts.manual) {
-    if (age < policy.manualCooldownMinutes) {
+    // Per game, by time to kickoff; see `manualRefreshThresholdMinutes`.
+    const wait = manualRefreshThresholdMinutes((Date.parse(cached.gameStart) - opts.now) / 3_600_000);
+    if (wait === null) return { refresh: false, reason: 'game has started; the line is closed' };
+    if (age < wait) {
       return {
         refresh: false,
-        reason: `manual refresh on cooldown (${Math.ceil(policy.manualCooldownMinutes - age)} min left)`,
+        reason: `manual refresh on cooldown (${Math.ceil(wait - age)} min left)`,
       };
     }
     return { refresh: true, reason: 'manual refresh' };
