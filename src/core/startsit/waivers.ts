@@ -35,6 +35,7 @@ import {
   type YardstickReading,
 } from '../waivers/yardstick.ts';
 import { dropSignal, mostAddedLine, propsEdge, recentDropNote, type PropsEdge } from '../waivers/signals.ts';
+import { recentFormLine, recentFormOf, recentFormPhrase, type RecentForm } from '../waivers/recentForm.ts';
 
 /**
  * How much better an available player has to be before he is worth mentioning.
@@ -125,6 +126,11 @@ export interface WaiverCandidate {
   notes?: string[];
   /** Set when he is kept out of the plan, with the reason his card shows. */
   planExcluded?: string | null;
+  /**
+   * The order the board draws starter upgrades in: gain, plus the 7-day nudge.
+   * Never a points claim, which is `gain`.
+   */
+  priority?: number;
 }
 
 export interface WaiverUpgrade {
@@ -213,6 +219,11 @@ export interface WaiverAddBasis {
   props?: { verdict: PropsEdge['verdict']; line: string; nudge: number } | null;
   /** Sleeper's trending drops, when he is on the list. */
   dropped?: { rank: number; nudge: number } | null;
+  /**
+   * The last seven days of news, when it moved him: ordering points, the
+   * tally behind them, and whether it changed his place in the claims.
+   */
+  recentForm?: { points: number; line: string; changed: boolean } | null;
 }
 
 /** What the rest of Sleeper is adding. Heat is 0–1, rank is 1-based. */
@@ -385,6 +396,17 @@ export function recommendWaiverUpgrades(opts: {
    */
   const unscored = evaluated.filter((e) => !readable(e)).length;
 
+  /*
+   * The last seven days of news, per player, as a secondary nudge on the order.
+   * Read off the tally the Players screen shows; see `waivers/recentForm.ts`
+   * for the three guards that keep a thin or lone week from deciding anything.
+   */
+  const forms = new Map<string, RecentForm>(
+    [...opts.roster, ...unrostered].map((i) => [i.player.id, recentFormOf(i.signal)] as const),
+  );
+  const formPoints = (id: string) => forms.get(id)?.points ?? 0;
+  const anyForm = [...forms.values()].some((f) => f.direction != null);
+
   const reserved = new Set(opts.reserveIds ?? []);
   const heldNotes: ReadonlyMap<string, string> =
     opts.heldIds instanceof Map
@@ -399,15 +421,18 @@ export function recommendWaiverUpgrades(opts: {
    * upgrades, the bench adds and the plan's grouping — so the card and the
    * plan cannot name two different cuts.
    */
-  const pool = buildCutPool({
-    roster: opts.roster.map((i) => readingOf(rosterEvaluations.get(i.player.id)!)),
-    starterIds,
-    reserveIds: reserved,
-    ruledOutIds: new Set([...rosterEvaluations.values()].filter((e) => e.ruledOut).map((e) => e.playerId)),
-    held: heldNotes,
-    handcuffs: opts.handcuffs ?? new Map(),
-    excludedPositions: new Set([DEFENCE_POSITION]),
-  });
+  const buildPool = (withForm: boolean) =>
+    buildCutPool({
+      roster: opts.roster.map((i) => readingOf(rosterEvaluations.get(i.player.id)!)),
+      starterIds,
+      reserveIds: reserved,
+      ruledOutIds: new Set([...rosterEvaluations.values()].filter((e) => e.ruledOut).map((e) => e.playerId)),
+      held: heldNotes,
+      handcuffs: opts.handcuffs ?? new Map(),
+      excludedPositions: new Set([DEFENCE_POSITION]),
+      ...(withForm ? { form: new Map(opts.roster.map((i) => [i.player.id, formPoints(i.player.id)] as const)) } : {}),
+    });
+  const pool = buildPool(true);
 
   interface Considered {
     slot: (typeof lineup.slots)[number];
@@ -415,6 +440,8 @@ export function recommendWaiverUpgrades(opts: {
     bar: number;
     current: StartSitEvaluation | null;
     ranked: { evaluation: StartSitEvaluation; gain: number; bar: number; basis: YardstickBasis | null }[];
+    /** The same candidates in gain-only order, to tell whether the 7-day nudge moved anybody. */
+    plainOrder: string[];
   }
 
   const considered: Considered[] = [];
@@ -453,11 +480,25 @@ export function recommendWaiverUpgrades(opts: {
         const bar = round2(base + (comparison.basis === 'sleeper' ? 0.5 : 0));
         return { evaluation: e, gain: comparison.gap, bar, basis: comparison.basis };
       })
-      .filter((c): c is NonNullable<typeof c> => c != null && c.gain >= c.bar && c.gain > 0)
-      .sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name));
+      .filter((c): c is NonNullable<typeof c> => c != null && c.gain >= c.bar && c.gain > 0);
 
-    if (ranked.length > 0) {
-      considered.push({ slot, need, bar: Math.max(...ranked.map((c) => c.bar)), current, ranked });
+    /* Gain first; the week's news only orders near-ties. Without it, gain alone. */
+    const byGain = [...ranked].sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name));
+    const byForm = [...ranked].sort(
+      (a, b) =>
+        b.gain + formPoints(b.evaluation.playerId) - (a.gain + formPoints(a.evaluation.playerId)) ||
+        a.evaluation.name.localeCompare(b.evaluation.name),
+    );
+
+    if (byForm.length > 0) {
+      considered.push({
+        slot,
+        need,
+        bar: Math.max(...byForm.map((c) => c.bar)),
+        current,
+        ranked: byForm,
+        plainOrder: byGain.map((c) => c.evaluation.playerId),
+      });
     }
   }
 
@@ -506,6 +547,9 @@ export function recommendWaiverUpgrades(opts: {
     dropped: ReturnType<typeof dropSignal>;
     dropRank: number | null;
     recent: string | null;
+    form: RecentForm;
+    /** The week's news changed his place in the claims. Set after the plan is made. */
+    formChanged: boolean;
   }
   const extras = new Map<string, Extra>();
   const moveCandidates: MoveCandidate[] = [];
@@ -533,6 +577,8 @@ export function recommendWaiverUpgrades(opts: {
       dropped: dropSignal(dropEntry),
       dropRank: dropEntry?.rank ?? null,
       recent: recentDropNote(opts.recentlyDropped?.get(e.playerId), now),
+      form: forms.get(e.playerId) ?? recentFormOf(null),
+      formChanged: false,
     };
     extras.set(e.playerId, extra);
     return extra;
@@ -547,7 +593,7 @@ export function recommendWaiverUpgrades(opts: {
         tier: 'upgrade',
         competes: competesWith(c.evaluation.position),
         overCap: false,
-        nudges: { lift: 0, order: 0 },
+        nudges: { lift: 0, order: extra.form.points },
         planExcluded: extra.dropped.planExcluded,
         cleared: true,
         slot: entry.slot.slot,
@@ -585,8 +631,8 @@ export function recommendWaiverUpgrades(opts: {
          * yardstick already says is positive.
          */
         lift: extra.lift,
-        /* Order only, never admission: the lean, Vegas props, and trending drops. */
-        order: round2(extra.lean + (extra.props?.nudge ?? 0) + extra.dropped.nudge),
+        /* Order only, never admission: the lean, Vegas props, trending drops, and the week's news. */
+        order: round2(extra.lean + (extra.props?.nudge ?? 0) + extra.dropped.nudge + extra.form.points),
       },
       planExcluded: extra.dropped.planExcluded,
     });
@@ -599,6 +645,45 @@ export function recommendWaiverUpgrades(opts: {
   });
 
   /*
+   * The same plan with the week's news taken out, so the app can say when it
+   * mattered and stay silent when it did not. Skipped when nobody has a week
+   * worth reading, which is most of the time.
+   */
+  const plainPlan = anyForm
+    ? planMoves({
+        candidates: moveCandidates.map((c) => ({
+          ...c,
+          nudges: { ...c.nudges, order: round2(c.nudges.order - formPoints(c.reading.playerId)) },
+        })),
+        pool: buildPool(false),
+        ...(opts.openSpots === undefined ? {} : { openSpots: opts.openSpots }),
+      })
+    : plan;
+  const placementOf = (p: typeof plan, id: string): string => {
+    const gi = p.groups.findIndex((g) => g.addIds.includes(id));
+    const move = p.moves.get(id);
+    return gi < 0 ? `off:${move?.cut?.reading.playerId ?? ''}` : `${gi}:${p.groups[gi]!.addIds.indexOf(id)}:${p.groups[gi]!.drop?.playerId ?? 'open'}`;
+  };
+  const valueOrderOf = (p: typeof plan) =>
+    [...p.moves.values()]
+      .filter((m) => m.tier === 'value' && m.clears && m.cut && m.comparison)
+      .sort((a, b) => b.priority - a.priority || a.playerId.localeCompare(b.playerId))
+      .map((m) => m.playerId);
+  const valueOrder = valueOrderOf(plan);
+  const plainValueOrder = anyForm ? valueOrderOf(plainPlan) : valueOrder;
+  if (anyForm) {
+    for (const [id, extra] of extras) {
+      if (extra.form.direction == null) continue;
+      const inSlot = considered.find((c) => c.ranked.some((r) => r.evaluation.playerId === id));
+      const slotMoved = inSlot ? inSlot.ranked.findIndex((r) => r.evaluation.playerId === id) !== inSlot.plainOrder.indexOf(id) : false;
+      extra.formChanged =
+        slotMoved ||
+        placementOf(plan, id) !== placementOf(plainPlan, id) ||
+        valueOrder.indexOf(id) !== plainValueOrder.indexOf(id);
+    }
+  }
+
+  /*
    * Most important first, because a card prints only the first one (see
    * `WaiverRow`). A top-ten drop is a warning that keeps him out of the plan;
    * a Vegas edge says something about this week's game; your own recent cut
@@ -609,6 +694,8 @@ export function recommendWaiverUpgrades(opts: {
     if (!extra) return [];
     const lines: string[] = [];
     if (extra.dropped.note && extra.dropped.planExcluded) lines.push(extra.dropped.note);
+    /* Only when the week's news changed where he sits, so the phrase is always a fact about this plan. */
+    if (extra.formChanged && extra.form.direction) lines.push(capitalise(recentFormPhrase(extra.form.direction)));
     if (extra.props) lines.push(extra.props.line);
     if (extra.recent) lines.push(extra.recent);
     if (extra.dropped.note && !extra.dropped.planExcluded) lines.push(extra.dropped.note);
@@ -639,6 +726,7 @@ export function recommendWaiverUpgrades(opts: {
         cut: move?.cut ? { playerId: move.cut.reading.playerId, name: move.cut.reading.name } : null,
         notes: noteLines(extra),
         planExcluded: move?.planExcluded ?? null,
+        priority: round2(c.gain + (extra?.form.points ?? 0)),
       };
     }),
   }));
@@ -675,6 +763,10 @@ export function recommendWaiverUpgrades(opts: {
       yardstick: comparison.basis,
       props: extra.props ? { verdict: extra.props.verdict, line: extra.props.line, nudge: extra.props.nudge } : null,
       dropped: extra.dropRank != null ? { rank: extra.dropRank, nudge: extra.dropped.nudge } : null,
+      recentForm:
+        extra.form.direction != null
+          ? { points: extra.form.points, line: recentFormLine(extra.form) ?? '', changed: extra.formChanged }
+          : null,
     };
     valueAdds.push({
       playerId: evaluation.playerId,
@@ -697,12 +789,33 @@ export function recommendWaiverUpgrades(opts: {
   }
 
   /*
+   * Whether the week's news changed who a group drops, and in whose words.
+   * `trending down this week` when it is the dropped player's own week, or
+   * `Kalif Raymond trending up this week` when it kept the other one.
+   *
+   * Said only against the cut the group's first claim would have made without
+   * it. If the drop is the same, nothing is said, even when the player's week
+   * was bad: a phrase on a card is a fact about the plan, not a mood.
+   */
+  const dropFormLine = (g: (typeof plan.groups)[number]): string | null => {
+    if (!anyForm || !g.drop || !g.addIds[0]) return null;
+    const without = plainPlan.moves.get(g.addIds[0])?.cut ?? null;
+    if (!without || without.reading.playerId === g.drop.playerId) return null;
+    const chosen = pool.candidates.find((c) => c.reading.playerId === g.drop!.playerId);
+    const form = chosen ? (forms.get(chosen.reading.playerId) ?? null) : null;
+    if (form?.direction === 'down') return recentFormPhrase('down');
+    const spared = forms.get(without.reading.playerId) ?? null;
+    if (spared?.direction === 'up') return `${without.reading.name} ${recentFormPhrase('up')}`;
+    return null;
+  };
+
+  /*
    * The plan's groups, trimmed to the players who survived onto the board —
    * the over-cap rule above can drop a claim the grouping had taken.
    */
   const onBoard = new Set([...upgrades.flatMap((u) => u.candidates.map((c) => c.playerId)), ...valueAdds.map((a) => a.playerId)]);
   const moveGroups = plan.groups
-    .map((g) => ({ ...g, addIds: g.addIds.filter((id) => onBoard.has(id)) }))
+    .map((g) => ({ ...g, addIds: g.addIds.filter((id) => onBoard.has(id)), recentForm: dropFormLine(g) }))
     .filter((g) => g.addIds.length > 0);
 
   /*

@@ -94,6 +94,11 @@ export interface WaiverClaimGroup {
    * plan skipped, and this is why. Null when no handcuff was passed over.
    */
   keepNote: string | null;
+  /**
+   * `Jaylen Wright trending down this week`, set only when the last seven days
+   * of news changed who the plan drops. Null otherwise, and on an older payload.
+   */
+  formNote?: string | null;
   firstRank: number;
   lastRank: number;
 }
@@ -270,7 +275,7 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
         detail: detailFor(row),
         qualifier,
         relation: gi === 0 && i === 0 ? 'primary' : i === 0 || drop == null ? 'compatible' : 'fallback',
-        why: whyFor(row, drop, drop == null ? [] : groupRanks, usesFaab),
+        why: whyFor(row, drop, drop == null ? [] : groupRanks, usesFaab, group.recentForm ?? null),
       });
       groupRanks.push(rank);
     });
@@ -288,6 +293,7 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
           : 'Open roster spot: this one needs no drop',
       keep: group.kept.map((k) => `Keeping ${k.name}: ${k.why}.`),
       keepNote: keepNoteFor(group.kept),
+      formNote: group.recentForm ?? null,
       firstRank,
       lastRank: claims.length,
     });
@@ -392,6 +398,11 @@ export function caseLines(name: string, row: WaiverBoardRow | null): string[] {
         : `${basis.props.line}.`,
     );
   }
+  if (basis.recentForm?.line) {
+    lines.push(
+      basis.recentForm.changed ? basis.recentForm.line : `${basis.recentForm.line} It did not change his place in the plan.`,
+    );
+  }
   if (basis.lean > 0) lines.push(`Running backs get a ${basis.lean.toFixed(2)}-pt lean when adds are close. It breaks ties and never overrides a real gap.`);
   return lines;
 }
@@ -401,9 +412,11 @@ function whyFor(
   drop: { playerId: string; name: string } | null,
   earlier: readonly number[],
   usesFaab: boolean,
+  formNote: string | null,
 ): string[] {
   const lines: string[] = [...(row.basis ? caseLines(row.name, row) : row.reasons.slice(0, 3))];
   if (drop) lines.push(`${drop.name} is the player this claim would cut: the weakest you hold who plays the same slots and is not protected.`);
+  if (drop && formNote) lines.push(`${formNote.startsWith('trending') ? `${drop.name} is ${formNote}` : formNote}, and that changed who gets cut. The week's news only breaks near-ties: it moves a player at most 0.4 pts, and the projection still leads.`);
   else lines.push('A spare roster spot means this claim costs you nobody.');
   for (const note of row.notes) if (!lines.some((l) => l.startsWith(note))) lines.push(`${note}.`);
   if (usesFaab && row.bid?.headline) lines.push(row.bid.headline);

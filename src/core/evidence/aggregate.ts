@@ -167,6 +167,7 @@ export function aggregatePlayerSignal(
     playerId,
     raw,
     last7,
+    last7Count: last7.items,
     last30,
     seasonToDate,
     categoryBreakdown,

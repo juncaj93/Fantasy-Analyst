@@ -78,6 +78,15 @@ export interface PlayerSignal {
   playerId: string;
   raw: SignalWindow;
   last7: SignalWindow;
+  /**
+   * How many counted items the 7-day window really holds, when the caller knows.
+   *
+   * Separate from `last7.items` because the stored-summary read has always
+   * reported that as zero (the draft board's 7-day term depends on it staying
+   * inert, see `server/repos/evidence.ts`). Waivers read this one to tell a
+   * week with real news from a lone note. Absent means read `last7.items`.
+   */
+  last7Count?: number;
   last30: SignalWindow;
   seasonToDate: SignalWindow;
   categoryBreakdown: Record<string, { positive: number; negative: number; items: number }>;
