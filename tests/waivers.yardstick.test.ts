@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { recommendWaiverUpgrades } from '../src/core/startsit/waivers.ts';
 import { buildWaiverClaimPlan } from '../src/core/waivers/claimPlan.ts';
+import { cardReason } from '../src/web/components/waivers.tsx';
 import { buildWaiverBoard } from '../src/core/waivers/board.ts';
 import {
   buildCutPool,
@@ -493,6 +494,44 @@ describe('the 30 September board, rebuilt', () => {
     const kc = board.rows.find((r) => r.playerId === 'kc')!;
     expect(kc.notes).toContain('Dropped by you 7 days ago');
     expect(kc.notes).toContain('#22 most-dropped on Sleeper today');
+  });
+
+  /*
+   * 1 October 2026: one reason per card, never a stack. The notes arrive most
+   * important first, and both the card and the plan line show only the first.
+   */
+  it('puts your own recent cut ahead of a low place on the drops list, and shows only it', () => {
+    const kc = board.rows.find((r) => r.playerId === 'kc')!;
+    expect(kc.notes[0]).toBe('Dropped by you 7 days ago');
+    expect(cardReason(kc)).toBe('Dropped by you 7 days ago');
+    const line = plan.claims.find((c) => c.addPlayerId === 'kc')!;
+    expect(line.detail).toBe('Proj. 7.6 vs 3.5 (Sleeper projection for both) · Dropped by you 7 days ago');
+  });
+
+  it('shows the top-ten drop warning above everything else', () => {
+    const lloyd = board.rows.find((r) => r.playerId === 'lloyd')!;
+    expect(lloyd.notes[0]).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
+    expect(cardReason(lloyd)).toBe('#1 most-dropped on Sleeper today. Check the news before claiming.');
+  });
+
+  it('puts how many teams need the position first on a player who costs money, never on a free agent', () => {
+    const kc = board.rows.find((r) => r.playerId === 'kc')!;
+    const competition = { level: 'medium' as const, label: 'Likely 2–3 bidders', detail: null, needyTeams: 5, needs: '5 of 9 teams need WR' };
+    const faab = { low: 1, high: 2, unit: 'dollar' as const, detail: null };
+    const onWaivers = { state: 'waivers' as const, reason: 'dropped' as const, until: '2026-10-02T07:10:58Z' };
+    expect(cardReason({ ...kc, competition, faab, pickup: onWaivers })).toBe('5 of 9 teams need WR');
+    expect(cardReason({ ...kc, competition, faab, pickup: { state: 'free', reason: null, until: null } })).toBe(
+      'Dropped by you 7 days ago',
+    );
+    expect(cardReason({ ...kc, competition: { ...competition, needyTeams: 0, needs: '0 of 9 teams need WR' }, faab, pickup: onWaivers })).toBe(
+      'Dropped by you 7 days ago',
+    );
+  });
+
+  it('carries no reason line for a card with nothing to flag', () => {
+    const keenan = board.rows.find((r) => r.playerId === 'keenan')!;
+    expect(keenan.notes).toEqual([]);
+    expect(cardReason(keenan)).toBeNull();
   });
 
   it('keeps the #1 most-dropped player out of the plan, with the warning on his card', () => {

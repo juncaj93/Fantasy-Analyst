@@ -63,4 +63,9 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * bid, and a claim under the same drop below him is not planned; a fresh drop
  * the room rated is priced as contested. See `core/waivers/clearWindow.ts`.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@7', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@8`: a rival needs a position when a starter there projects under the
+ * owner's bar (QB 14, RB/WR/TE 8, DEF 6), not only when a slot is empty. That
+ * count prices bids, so bids move.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@8', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

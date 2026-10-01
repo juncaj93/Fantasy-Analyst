@@ -618,7 +618,12 @@ export async function gatherWaiverInputs(
     .publishedFor({
       season: league.season,
       week,
-      playerIds: [...mine.playerIds, ...candidateIds],
+      /*
+       * Every rostered player too: the competition read asks whether each
+       * rival's starters are weak enough that he needs the position. One
+       * stored week is read either way, so the wider list costs nothing.
+       */
+      playerIds: [...new Set([...mine.playerIds, ...candidateIds, ...rosteredIds])],
       profile,
       positionOf: (id) => positionOfId.get(id) ?? null,
     })

@@ -182,3 +182,72 @@ describe('the level and the label always agree', () => {
     expect(COMPETITION_UNKNOWN.bidders).toEqual([]);
   });
 });
+
+/*
+ * 1 October 2026, the owner: "If a team has 2 RB slots and 1 of the RB slots
+ * has a player projected to score less than 8 pts then they need an RB. Same
+ * with WR and TE. QB ... 14, and defense ... 6." The live board had said
+ * `0 of 9 teams need RB` because every rival had two healthy backs.
+ */
+describe('a weak starter is a need', () => {
+  const rosters = [
+    roster(1, [], true),
+    roster(2, ['RB', 'RB', 'RB']),
+    roster(3, ['RB', 'RB']),
+    roster(4, ['RB', 'RB', 'RB']),
+  ];
+  const meta = metaFor(rosters, { 1: [], 2: ['RB', 'RB', 'RB'], 3: ['RB', 'RB'], 4: ['RB', 'RB', 'RB'] });
+  const projections = new Map([
+    // Team 2: two strong backs and a weak third. Covered: the third does not start.
+    ['2-RB-0', 15],
+    ['2-RB-1', 11],
+    ['2-RB-2', 4],
+    // Team 3: one back under 8. Needs one.
+    ['3-RB-0', 14],
+    ['3-RB-1', 6.5],
+    // Team 4: second-best back has no projection this week (a bye). Needs one.
+    ['4-RB-0', 12],
+  ]);
+
+  it('reads each team’s best starters by projection against the 8-point bar', () => {
+    const needs = teamNeedsFor('RB', rosters, meta, SHAPE, projections);
+    expect(needs.map((n) => [n.rosterId, n.level])).toEqual([
+      [2, 'covered'],
+      [3, 'thin'],
+      [4, 'thin'],
+    ]);
+  });
+
+  it('still calls an empty slot urgent', () => {
+    const short = [roster(1, [], true), roster(5, ['RB'])];
+    const needs = teamNeedsFor('RB', short, metaFor(short, { 1: [], 5: ['RB'] }), SHAPE, new Map([['5-RB-0', 20]]));
+    expect(needs[0]!.level).toBe('urgent');
+  });
+
+  it('holds a quarterback to 14 points', () => {
+    const qbs = [roster(1, [], true), roster(6, ['QB']), roster(7, ['QB'])];
+    const needs = teamNeedsFor(
+      'QB',
+      qbs,
+      metaFor(qbs, { 1: [], 6: ['QB'], 7: ['QB'] }),
+      SHAPE,
+      new Map([
+        ['6-QB-0', 13.5],
+        ['7-QB-0', 19],
+      ]),
+    );
+    expect(needs.map((n) => n.level)).toEqual(['thin', 'covered']);
+  });
+
+  it('counts bodies, as before, when no projections are stored', () => {
+    const needs = teamNeedsFor('RB', rosters, meta, SHAPE, new Map());
+    expect(needs.map((n) => n.level)).toEqual(['covered', 'thin', 'covered']);
+  });
+
+  it('puts the count in the sentence the card prints', () => {
+    const needs = teamNeedsFor('RB', rosters, meta, SHAPE, projections);
+    const assessed = assessCompetition({ needs, budgets: wallets({}), expectedLow: null, bidding: true, position: 'RB' });
+    expect(assessed.needyTeams).toBe(2);
+    expect(assessed.detail).toBe('2 of 3 teams need RB');
+  });
+});

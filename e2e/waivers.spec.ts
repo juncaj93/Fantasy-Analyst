@@ -117,43 +117,49 @@ test.describe('the waivers page', () => {
   test('lists who is available as one decision per player', async ({ page }) => {
     const rows = page.getByTestId('waiver-row');
     await expect(rows.first()).toBeVisible();
-    await expect(rows.first().getByTestId('waiver-fit')).toContainText(/Upgrades|Fills/);
+    await expect(rows.first().getByTestId('waiver-summary')).toBeVisible();
     await expect(rows.first().getByTestId('waiver-short-term')).toContainText('pts');
   });
 
   /**
-   * A card is a header, a row of tags and one line — not four lines of prose.
+   * A card is who he is, one status line, and at most one reason.
    *
-   * What it replaced said the same things in scattered sentences: `High
-   * pressure · 7 of 11 rivals need the position` on one line, `stronger market
-   * expectation (13.5 vs 9.2 pts)` on another, a cost and a fit between them.
-   * The claims here are the shape rather than the wording, so a card that grows
-   * a fourth explanatory line fails them whatever that line says.
+   * On 1 October 2026 every card carried three pills (`Better than Jaylen
+   * Wright`, `Sleeper projection`, `Nobody else needs him`) over two or three
+   * lines of text, with `0 of 9 teams need RB` repeating the third pill. The
+   * owner's verdict: "why's there so much text everywhere". The pills are gone
+   * from every card, and the reasons line holds one reason.
    */
-  test('says it in tags and one line', async ({ page }) => {
-    const row = page.getByTestId('waiver-row').first();
-    await expect(row).toBeVisible();
+  test('says it in one status line and at most one reason', async ({ page }) => {
+    const rows = page.getByTestId('waiver-row');
+    await expect(rows.first()).toBeVisible();
 
+    const row = rows.first();
     // The identity, in the order this app now uses everywhere.
     await expect(row.locator('.pos-pill')).toHaveCount(1);
     await expect(row.getByTestId('team-logo')).toHaveCount(1);
     await expect(row.getByTestId('waiver-strength')).toBeVisible();
 
-    // Recurring tags, not sentences.
-    const tags = await row.getByTestId('waiver-tags').locator('.tag').allInnerTexts();
-    expect(tags.length, 'the card carries compact tags').toBeGreaterThan(1);
-    for (const tag of tags) {
-      expect(tag.length, `"${tag}" is a tag, not a sentence`).toBeLessThan(24);
+    // No pill row on any card, and none of the phrases the pills carried.
+    await expect(page.getByTestId('waiver-tags')).toHaveCount(0);
+    for (const text of await rows.allInnerTexts()) {
+      expect(text).not.toMatch(/Better than|Sleeper projection|Vegas lines|Nobody else needs him|teams need/);
     }
 
-    // And one summary line carrying cost, competition and the projection.
+    // One status line: the pickup state or the cost, then the projection.
     const summary = await row.getByTestId('waiver-summary').innerText();
-    // The cost, or, for a free agent outside the waiver window, that there is none.
     expect(summary).toMatch(/Est\. cost|Free agent: pick up anytime/);
-    expect(summary).toMatch(/Proj\. \+?\d+\.\d pts/);
-    // One decimal, always — `+6.46 pts` beside `+5.7 pts` was two different
-    // claims about how precisely the same calculation is known.
+    expect(summary).toMatch(/Proj\. \+?\d+\.\d pts|Proj\. \d+\.\d vs \d+\.\d/);
+    // One decimal, always.
     expect(summary).not.toMatch(/\d\.\d\d/);
+
+    // At most one reason, never several joined together.
+    const count = await rows.count();
+    for (let i = 0; i < count; i++) {
+      const notes = rows.nth(i).getByTestId('waiver-notes');
+      expect(await notes.count()).toBeLessThanOrEqual(1);
+      if ((await notes.count()) === 1) expect(await notes.innerText()).not.toContain(' · ');
+    }
   });
 
   /**
@@ -435,9 +441,9 @@ test.describe('the league wallet, under the board', () => {
  *
  * The board answered one question — is he better than the man he would replace,
  * this Sunday — and Alex's complaint is that a claim is rarely only about this
- * Sunday. The chip is the market's own season-long line divided by the games
- * left, which is a different horizon *and* a different source from every other
- * chip on the row.
+ * Sunday. The reading is the market's own season-long line divided by the
+ * games left, which is a different horizon *and* a different source from
+ * everything else on the card, so it lives on the detail sheet.
  *
  * The demo deployment may or may not carry a season snapshot, so these assert
  * the two states rather than requiring one: where the chip is drawn it must be
@@ -447,47 +453,13 @@ test.describe('the league wallet, under the board', () => {
 test.describe('the rest-of-season signal', () => {
   test.beforeEach(async ({ page }) => openWaivers(page));
 
-  test('is a chip of its own, distinct from the weekly ones beside it', async ({ page }) => {
-    const chip = page.getByTestId('waiver-season').first();
-    if ((await chip.count()) === 0) {
-      // No season market stored. The board must be honest about the gap.
-      const pending = page.getByTestId('waivers-pending');
-      if ((await pending.count()) > 0) await expect(pending).not.toBeEmpty();
-      return;
-    }
-
-    await expect(chip).toBeVisible();
-    await expect(chip).toHaveAttribute('data-level', /season_asset|in_line|this_week_only/);
-
-    /*
-     * Drawn differently from the fit chip beside it, which is the whole point:
-     * a reader who took a season rate for a weekly number would be out by a
-     * factor of twenty.
-     */
-    const fit = page.getByTestId('waiver-fit').first();
-    const [seasonStyle, fitStyle] = await Promise.all([
-      chip.evaluate((el) => {
-        const s = getComputedStyle(el);
-        return { background: s.backgroundColor, border: s.borderTopWidth };
-      }),
-      fit.evaluate((el) => {
-        const s = getComputedStyle(el);
-        return { background: s.backgroundColor, border: s.borderTopWidth };
-      }),
-    ]);
-    expect(
-      seasonStyle.background !== fitStyle.background || seasonStyle.border !== fitStyle.border,
-      'the season chip must not look like a weekly one',
-    ).toBe(true);
-  });
-
-  test('names both numbers wherever it explains itself', async ({ page }) => {
-    const chip = page.getByTestId('waiver-season').first();
-    if ((await chip.count()) === 0) test.skip(true, 'no season market stored on this deployment');
-
-    // The title carries the sentence, so the chip's two words are never the
-    // whole claim.
-    await expect(chip).toHaveAttribute('title', /a week for the season, against .* this week/);
+  /*
+   * Off the card since 1 October 2026: the card carries no pills at all. The
+   * season reading lives on the detail sheet, beside the week it is not.
+   */
+  test('is on the detail sheet, not the card', async ({ page }) => {
+    await expect(page.getByTestId('waiver-row').first()).toBeVisible();
+    await expect(page.getByTestId('waiver-season')).toHaveCount(0);
   });
 
   test('says the column is unknown rather than blank, in the sheet', async ({ page }) => {

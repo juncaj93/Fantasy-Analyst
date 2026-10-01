@@ -316,7 +316,7 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
 }
 
 /**
- * The line under a claim: the comparison, then the signals.
+ * The line under a claim: the comparison, then at most one signal.
  *
  * The yardstick is always named, so a reader can see that both numbers are
  * the same kind of number.
@@ -327,8 +327,13 @@ export function detailFor(row: WaiverBoardRow): string | null {
   if (basis?.yardstick && basis.projection != null && basis.overProjection != null) {
     parts.push(`Proj. ${basis.projection.toFixed(1)} vs ${basis.overProjection.toFixed(1)} (${basisLabel(basis.yardstick)})`);
   }
-  if (basis?.attention?.rank != null) parts.push(mostAddedLine(basis.attention.rank));
-  parts.push(...row.notes);
+  /*
+   * Then one reason, never a stack: the card's most important note (they
+   * arrive most important first), or else where he sits on Sleeper's adds.
+   * The rest stays on his detail sheet.
+   */
+  const reason = row.notes[0] ?? (basis?.attention?.rank != null ? mostAddedLine(basis.attention.rank) : null);
+  if (reason) parts.push(reason);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 

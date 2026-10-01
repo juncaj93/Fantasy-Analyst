@@ -8886,44 +8886,6 @@ div.matchup-result {
   color: var(--text-faint);
 }
 
-/*
- * A projection this app borrowed rather than computed.
- *
- * Mostly the opponent's column, and for a structural reason: market lines are
- * bought for the reader's own roster and nobody else's, so his opponent's
- * starters are unpriced except by coincidence. The alternative to this was a
- * run of dashes down the one screen whose subject is the opponent.
- *
- * Three signals, because one of them is not enough at 0.68rem: the dotted
- * underline this app already uses for a borrowed figure — see
- * `.proj[data-projection-source='sleeper']`, and it is deliberately the same
- * mark rather than a second vocabulary — plus italics and a further step down
- * in weight. Anything less and a lighter grey at this size is indistinguishable
- * from the ordinary faint the figure beside it is already drawn in.
- */
-/*
- * A chip about the season, among chips about this Sunday.
- *
- * The row's other tags come from this app's own weekly engine; this one is the
- * market's season-long line divided by the games that are left. Different
- * horizon, different source — and a reader who took the figure behind it for a
- * weekly number would be out by a factor of twenty, so it does not get to look
- * like its neighbours. Outlined rather than filled, which reads as "a different
- * kind of claim" without competing with the fit chip for attention.
- */
-.tag-season {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-faint);
-  font-style: italic;
-}
-
-.tag-season[data-level='season_asset'] {
-  border-color: var(--pos);
-  color: var(--pos);
-  font-style: normal;
-}
-
 .matchup-player-proj-borrowed {
   color: var(--text-faint);
   opacity: 0.72;
@@ -8938,8 +8900,9 @@ div.matchup-result {
  * over sixteen games.
  *
  * It keeps the borrowed treatment and changes the rule from dotted to dashed,
- * matching `.tag-season`'s outline — the vocabulary this app already uses for
- * a claim about the season sitting among claims about this Sunday. The dash is
+ * matching the outline the waiver cards' season chip used to wear — the
+ * vocabulary this app uses for a claim about the season sitting among claims
+ * about this Sunday. The dash is
  * not what a reader will notice at 0.68rem and is not meant to be; the `EST`
  * tag the component prints in front of the figure is. This is the corroborating
  * signal for somebody who has learned the difference, not the announcement of
@@ -10004,12 +9967,6 @@ div.matchup-result {
 .waiver-notes-warn {
   color: var(--warn);
   font-weight: 600;
-}
-
-/* Which yardstick a card's numbers came from: present, never loud. */
-.tag-yardstick {
-  background: var(--surface-inset);
-  color: var(--text-dim);
 }
 
 /*

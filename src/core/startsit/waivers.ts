@@ -598,12 +598,20 @@ export function recommendWaiverUpgrades(opts: {
     ...(opts.openSpots === undefined ? {} : { openSpots: opts.openSpots }),
   });
 
+  /*
+   * Most important first, because a card prints only the first one (see
+   * `WaiverRow`). A top-ten drop is a warning that keeps him out of the plan;
+   * a Vegas edge says something about this week's game; your own recent cut
+   * is a reminder; a place lower down the drops list is the weakest signal.
+   * The order changes nothing but which line a card shows.
+   */
   const noteLines = (extra: Extra | undefined): string[] => {
     if (!extra) return [];
     const lines: string[] = [];
-    if (extra.dropped.note) lines.push(extra.dropped.note);
-    if (extra.recent) lines.push(extra.recent);
+    if (extra.dropped.note && extra.dropped.planExcluded) lines.push(extra.dropped.note);
     if (extra.props) lines.push(extra.props.line);
+    if (extra.recent) lines.push(extra.recent);
+    if (extra.dropped.note && !extra.dropped.planExcluded) lines.push(extra.dropped.note);
     return lines;
   };
 

@@ -101,32 +101,69 @@ export interface CompetitionAssessment {
 }
 
 /**
- * How many of a position this team can actually start, and how many it needs.
+ * The projection a starter has to reach before his team is covered there.
  *
- * Flex is counted as eligibility rather than as a required slot. A team with
- * two backs, two receivers and one flex does not *need* a third back; it can
- * *use* one, which is the difference between urgent and thin, and collapsing
- * the two makes every team in the league look desperate for everything.
+ * Set by the owner on 1 October 2026: "If a team has 2 RB slots and 1 of the
+ * RB slots has a player projected to score less than 8 pts then they need an
+ * RB. Same with WR and TE. QB should probably be like 14, and defense should
+ * be like 6." Before this, a team "needed" a position only when it had fewer
+ * healthy bodies than slots, so every rival with two weak backs read as
+ * covered and the board said `0 of 9 teams need RB`.
+ */
+export const WEAK_STARTER_POINTS: Readonly<Record<string, number>> = {
+  QB: 14,
+  RB: 8,
+  WR: 8,
+  TE: 8,
+  DEF: 6,
+};
+
+/**
+ * Whether each rival needs this position.
+ *
+ * With projections: a team needs it when a dedicated slot is empty (`urgent`)
+ * or the weakest of its likely starters there, its best players by this week's
+ * projection, is under {@link WEAK_STARTER_POINTS} (`thin`). A player with no
+ * projection this week (a bye, no feed row) counts as zero: he scores nothing
+ * for them this Sunday.
+ *
+ * Without projections, or for a position with no dedicated slot or no bar,
+ * the older body count: fewer healthy players than slots is `urgent`, exactly
+ * as many with a flex that takes the position is `thin`.
  */
 export function teamNeedsFor(
   position: string,
   rosters: TeamRoster[],
   meta: Map<string, RosterPlayerMeta>,
   shape: RosterShape,
+  projections?: ReadonlyMap<string, number> | null,
 ): TeamNeed[] {
   const required = shape.starters[position] ?? 0;
   const flexEligible = shape.flex.some((f) => f.positions.includes(position));
+  const bar = WEAK_STARTER_POINTS[position.toUpperCase()];
+  const byProjection = projections != null && projections.size > 0 && bar != null && required > 0;
 
   return rosters
     .filter((r) => !r.isMine)
     .map((r) => {
-      const healthy = r.playerIds.filter((id) => {
+      const available = r.playerIds.filter((id) => {
         const m = meta.get(id);
         return m?.position === position && !m.unavailable;
-      }).length;
+      });
+      const healthy = available.length;
 
-      const level: NeedLevel =
-        healthy < required ? 'urgent' : flexEligible && healthy <= required ? 'thin' : 'covered';
+      let level: NeedLevel;
+      if (healthy < required) {
+        level = 'urgent';
+      } else if (byProjection) {
+        const starters = available
+          .map((id) => projections!.get(id) ?? 0)
+          .sort((a, b) => b - a)
+          .slice(0, required);
+        level = Math.min(...starters) < bar! ? 'thin' : 'covered';
+      } else {
+        level = flexEligible && healthy <= required ? 'thin' : 'covered';
+      }
 
       return { rosterId: r.rosterId, displayName: r.displayName, level, healthy, required, flexEligible };
     });
