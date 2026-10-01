@@ -156,6 +156,44 @@ it moved him, and the lean.
 
 ---
 
+## The week's news, as a tie-breaker (`core/waivers/recentForm.ts`)
+
+Neither side of the plan read the 7-day research tally (`signal.last7`, good
+news minus bad news from the newsletters) until 1 October 2026. It is now a
+**secondary adjustment on the order**, and nothing else:
+
+| side | what the week does |
+| --- | --- |
+| drop | a rostered player with a bad week moves earlier in the cut order, one with a good week later |
+| pickup | a free agent with a good week moves earlier in the claims, one with a bad week later |
+
+The projection stays the primary basis. The week is added to the ordering number
+only: never to a projection, a gap or a bar, so the two numbers a card prints
+are unchanged and a hot week cannot create a claim the projection does not
+support. A handcuff or a market hold stays protected whatever his week says.
+
+Three guards, in the open:
+
+1. **Thin weeks say nothing.** Fewer than 2 counted items in the window is no
+   signal.
+2. **Small samples shrink toward zero.** Two imaginary neutral items are added to
+   the real ones (the bidding profile's rule): 2 items carry half the weight, 10
+   carry five sixths. Full weight needs a net of 3, the draft board's saturation.
+3. **The month outranks the week.** When the 30-day tally has 3 or more items and
+   points the other way, the week is halved.
+
+Then a ceiling of **0.4 pts a side**. The widest possible swing between two
+players is 0.8, under the 1.0 a claim has to clear on Sleeper's projection, so
+the week can reorder near-ties and cannot turn over a clear gap.
+
+The app says it only when it mattered. The plan is built twice, with and without
+the week; a pickup's card gets `Trending up this week` and a drop line gets
+`trending down this week` only where the two plans differ. **See why** carries
+the arithmetic whenever the week moved a number, including when it did not
+change the order.
+
+---
+
 ## Claim structure
 
 Sleeper processes claims in the order they were entered, and a claim whose drop

@@ -135,6 +135,8 @@ export interface WaiverCandidateLike extends WaiverLeagueIntel {
   notes?: string[];
   /** Set when the plan leaves him out, with the reason. */
   planExcluded?: string | null;
+  /** The engine's order: gain plus the supplementary nudges. Absent on an older payload, which sorts on gain. */
+  priority?: number;
 }
 
 export interface WaiverUpgradeLike {
@@ -749,6 +751,7 @@ function rowFor(candidate: WaiverCandidateLike, upgrade: WaiverUpgradeLike): Wai
     cut: candidate.cut ?? null,
     notes: candidate.notes ?? [],
     planExcluded: candidate.planExcluded ?? null,
+    ...(candidate.priority === undefined ? {} : { priority: candidate.priority }),
     yardstick: null,
   };
 }
@@ -930,11 +933,18 @@ function compareRows(a: WaiverBoardRow, b: WaiverBoardRow): number {
   /*
    * Value adds in the engine's order when it gave one.
    *
-   * The priority is gain plus the two supplementary nudges — Sleeper's trending
-   * adds and the positional lean — and re-sorting those rows on gain alone
-   * would quietly undo both. See `core/startsit/waivers.ts`.
+   * The priority is gain plus the supplementary nudges — Sleeper's trending
+   * adds, the positional lean and the last seven days of news — and re-sorting
+   * those rows on gain alone would quietly undo them. See `core/startsit/waivers.ts`.
    */
-  if (a.priority != null && b.priority != null && a.priority !== b.priority) return b.priority - a.priority;
+  /*
+   * A row with no priority sorts on its gain, so a defence row or an older
+   * payload sits in the same order as before and the comparison stays one
+   * consistent key.
+   */
+  const keyA = a.priority ?? a.shortTerm.gain;
+  const keyB = b.priority ?? b.shortTerm.gain;
+  if (keyA !== keyB) return keyB - keyA;
   if (b.shortTerm.gain !== a.shortTerm.gain) return b.shortTerm.gain - a.shortTerm.gain;
   return a.name.localeCompare(b.name);
 }

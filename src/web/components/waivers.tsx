@@ -158,6 +158,17 @@ function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: Waiver
     <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
       <div className="claim-plan-drop" data-testid="waiver-plan-drop">
         {group.headline}
+        {/*
+          Only when the last seven days of news changed who is dropped:
+          `Jaylen Wright trending down this week`. Short, and absent when the
+          drop would have been the same without it.
+        */}
+        {group.formNote ? (
+          <span className="faint claim-plan-form" data-testid="waiver-plan-drop-form">
+            {' \u00b7 '}
+            {group.formNote}
+          </span>
+        ) : null}
       </div>
       <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
         {claims.map((claim) => (

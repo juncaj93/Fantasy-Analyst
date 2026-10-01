@@ -244,7 +244,14 @@ export type CutProtection = 'handcuff' | 'market_hold';
 
 export interface CutCandidate {
   reading: YardstickReading;
+  /** The number the cut order sorts on: the projection, plus `form`. */
   standing: number;
+  /**
+   * The last seven days of news, as ordering points (see `recentForm.ts`).
+   * Already inside `standing`; kept apart so a card can say it and a test can
+   * take it out. Zero when the week is thin or flat.
+   */
+  form: number;
   starting: boolean;
   protection: CutProtection | null;
   /** For a handcuff: the starter he backs up. */
@@ -272,6 +279,13 @@ export function buildCutPool(opts: {
   handcuffs: ReadonlyMap<string, { playerId: string; name: string }>;
   /** Positions another planner owns (defence). */
   excludedPositions: ReadonlySet<string>;
+  /**
+   * Each rostered player's 7-day nudge in points, from `recentFormOf`. Negative
+   * moves him earlier in the cut order. A secondary adjustment only: it never
+   * touches `reading`, so the two projections a card prints are unchanged, and
+   * a handcuff or a market hold stays protected whatever it says.
+   */
+  form?: ReadonlyMap<string, number>;
 }): CutPool {
   const candidates: CutCandidate[] = [];
   const unreadable: YardstickReading[] = [];
@@ -285,9 +299,11 @@ export function buildCutPool(opts: {
     }
     const backs = opts.handcuffs.get(reading.playerId) ?? null;
     const hold = opts.held.get(reading.playerId) ?? null;
+    const form = opts.form?.get(reading.playerId) ?? 0;
     candidates.push({
       reading,
-      standing,
+      standing: round2(standing + form),
+      form,
       starting: opts.starterIds.has(reading.playerId),
       protection: backs ? 'handcuff' : hold ? 'market_hold' : null,
       backs,
@@ -420,6 +436,12 @@ export interface WaiverMove {
 export interface WaiverMoveGroup {
   /** Null when the roster has an open spot and nothing needs to go. */
   drop: { playerId: string; name: string; position: string } | null;
+  /**
+   * Set only when the last seven days of news changed who this group drops:
+   * `Jaylen Wright trending down this week`. Null whenever the drop would have
+   * been the same without it.
+   */
+  recentForm?: string | null;
   /** Adds to try, in the order to enter them. */
   addIds: string[];
   /** Protected players this group's drop was chosen over, with why. */
