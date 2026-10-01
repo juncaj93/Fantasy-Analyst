@@ -53,6 +53,7 @@ import {
 import {
   buildLeagueTransactionBaseline,
   buildTransactionProfiles,
+  neutralTransactionProfile,
   TRANSACTION_PROFILE_VERSION,
   type LeagueTransactionBaseline,
   type ManagerTransactionProfile,
@@ -71,6 +72,7 @@ import {
 } from '../../core/managers/managerTendencies.ts';
 import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../core/managers/draftProfile.ts';
 import { buildTradeProfile, type TradeEvent } from '../../core/managers/tradeProfile.ts';
+import { buildBiddingProfiles } from '../../core/managers/biddingProfile.ts';
 import { buildBudgetState } from '../../core/faab/budget.ts';
 import { isTransactionWeekSettled } from '../../core/league/transactionSettling.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
@@ -752,6 +754,28 @@ export class ManagerIntelService {
     };
     const transactionBaseline = buildLeagueTransactionBaseline(transactionInput);
     const transactionProfiles = buildTransactionProfiles(transactionInput, transactionBaseline);
+
+    /*
+     * Bidding per waiver run, losing claims included, attached to each profile.
+     *
+     * A current manager with no completed transaction at all still gets a
+     * profile here, unusable as before, so the Competition rows can say "0 of
+     * 35" about them instead of saying nothing. `usable: false` keeps every
+     * other reader of the profile treating them exactly as it did.
+     */
+    const bidding = buildBiddingProfiles({
+      transactions: ledgerTransactions,
+      seasonsByUser,
+      budgetTotal: budgetState.rule.total,
+    });
+    const currentOwners = new Set(rosters.map((r) => r.ownerId).filter((id): id is string => !!id));
+    for (const [userId, record] of bidding) {
+      const existing = transactionProfiles.get(userId);
+      if (existing) existing.bidding = record;
+      else if (currentOwners.has(userId)) {
+        transactionProfiles.set(userId, { ...neutralTransactionProfile(userId, displayNames.get(userId) ?? null), bidding: record });
+      }
+    }
 
     const tradeInput = {
       transactions: ledgerTransactions,
