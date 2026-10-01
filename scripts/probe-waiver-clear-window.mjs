@@ -77,6 +77,10 @@ if (sleeperLeagueId) {
 }
 
 const W = (await get(`${APP}/api/leagues/${league.id}/waivers`)).json ?? {};
+/* When the board's Sleeper inputs were last read: the screen's "Updated" line. */
+console.log(`\nupdatedAt: ${W.updatedAt ?? '-'}`);
+console.log(`dst line: decision=${W.dst?.decision ?? '-'} surface=${W.dst?.surface ?? '-'} headline=${JSON.stringify(W.dst?.headline ?? null)}`);
+
 console.log('\n== plan');
 for (const c of W.claimPlan?.claims ?? []) {
   console.log(`  ${c.rank}. ${c.headline}${c.qualifier ? `  [${c.qualifier}]` : ''}  pickup=${JSON.stringify(c.pickup ?? null)}`);
