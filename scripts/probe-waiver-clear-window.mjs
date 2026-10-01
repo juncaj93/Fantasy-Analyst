@@ -93,6 +93,15 @@ for (const r of rows) {
   console.log(
     `  ${r.name.padEnd(22)} ${String(r.position).padEnd(3)} gain=${r.gain?.toFixed?.(2) ?? '-'} ` +
       `bid=${bid?.recommended ?? '-'} expected=${bid?.expected ? `${bid.expected.low}-${bid.expected.high}` : '-'} ` +
-      `pickup=${JSON.stringify(r.pickup ?? null)}`,
+      `pickup=${JSON.stringify(W.pickup?.[r.playerId] ?? null)}`,
   );
 }
+
+/* Every scanned free agent still inside the window, whether or not he made the board. */
+console.log('\n== scanned free agents on waivers right now');
+for (const [id, p] of Object.entries(W.pickup ?? {})) {
+  if (p.state !== 'waivers') continue;
+  console.log(`  ${nameOf(id)}  reason=${p.reason} until=${p.until}`);
+}
+const free = Object.values(W.pickup ?? {}).filter((p) => p.state === 'free').length;
+console.log(`  (${free} scanned free agents are free to add)`);
