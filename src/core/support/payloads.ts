@@ -57,6 +57,7 @@ import type { LeagueBudgetState } from '../faab/budget.ts';
 import type { BidObservation, PriceSummary } from '../faab/bids.ts';
 import type { WaiverPricingContext } from '../waivers/pricing.ts';
 import type { TrendingVelocity } from '../market/trending.ts';
+import type { WaiverRules } from '../waivers/clearWindow.ts';
 import type {
   SnapshotLeague,
   SnapshotLeagueRules,
@@ -248,6 +249,8 @@ export interface WaiverPlanInputs {
   trendingDrops?: [string, TrendingVelocity][];
   /** This roster's recent cuts, with when. Absent on older files. */
   recentlyDropped?: Record<string, string>;
+  /** The league's waiver window: its rules and every recent drop. Absent on older files. */
+  waiverWindow?: { rules: WaiverRules; drops: Record<string, string> } | null;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.

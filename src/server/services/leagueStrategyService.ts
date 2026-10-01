@@ -23,6 +23,7 @@ import { collectBids, losingBidNote, summarisePrices, type BidHistory, type Pric
 import { toSnapshot, velocity, trendingHeadline, type TrendingVelocity } from '../../core/market/trending.ts';
 import { readFinalWeek } from '../../core/league/planning.ts';
 import { isTransactionWeekSettled } from '../../core/league/transactionSettling.ts';
+import { waiverRulesOf, type WaiverRules } from '../../core/waivers/clearWindow.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import { TrendingRepo } from '../repos/trending.ts';
@@ -83,6 +84,13 @@ export interface StrategyContext {
    * Read off stored transactions; the waiver board says so on the card.
    */
   recentlyDropped: Map<string, string>;
+  /**
+   * The latest completed drop of each player by anyone in this league, in the
+   * last week. With {@link waiverRules}, what says who is still on waivers.
+   */
+  leagueDrops: Map<string, string>;
+  /** The league's waiver window, or null when its settings say nothing usable. */
+  waiverRules: WaiverRules | null;
   notes: string[];
 }
 
@@ -246,6 +254,26 @@ export class LeagueStrategyService {
       }
     }
 
+    /*
+     * Every completed drop in the league, by anyone, in the last week: the
+     * waiver window's input. A player dropped and re-added is rostered again,
+     * which the rostered-id exclusion already handles; only the latest drop
+     * of each player matters. `status_updated` because a drop made by a
+     * waiver claim happens when the claim runs, not when it was entered.
+     */
+    const leagueDrops = new Map<string, string>();
+    const windowSince = Date.now() - 7 * 86_400_000;
+    for (const txn of stored) {
+      if (txn.status !== 'complete' || !txn.drops) continue;
+      const atMs = typeof txn.status_updated === 'number' ? txn.status_updated : txn.created;
+      if (typeof atMs !== 'number' || atMs < windowSince) continue;
+      const at = new Date(atMs).toISOString();
+      for (const playerId of Object.keys(txn.drops)) {
+        const known = leagueDrops.get(playerId);
+        if (!known || known < at) leagueDrops.set(playerId, at);
+      }
+    }
+
     const notes = [...budget.notes];
     if (weeksRead.length === 0) {
       notes.push('No transaction history has been read for this league yet, so bid prices are estimates.');
@@ -270,6 +298,8 @@ export class LeagueStrategyService {
       transactionsReadAt,
       trendingDrops: dropCapture ? velocity(dropCapture, null) : new Map(),
       recentlyDropped,
+      leagueDrops,
+      waiverRules: waiverRulesOf(league.leagueSettings),
       notes,
     };
   }

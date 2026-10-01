@@ -2,8 +2,8 @@
  * The waiver plan, on a phone.
  *
  * The screen's whole promise in one card: *add this player, bid this much, drop
- * this player, enter these claims in this order.* Everything else is behind one
- * **See Why**.
+ * this player, enter these claims in this order.* There is no button on it:
+ * `See why` and its sheet were removed on 1 October 2026 at the owner's request.
  *
  * Two things are defended here and they are separable on purpose.
  *
@@ -132,7 +132,9 @@ test.describe('the plan the deployment actually computes', () => {
   test('hands the reader a numbered instruction per claim', async ({ page }) => {
     const card = page.getByTestId('waiver-plan');
     await expect(card).toBeVisible();
-    await expect(page.getByTestId('waiver-plan-headline')).toHaveText('Your waiver plan');
+    // The section title says "Recommended move"; the card repeats nothing.
+    await expect(page.getByTestId('waiver-plan-headline')).toHaveCount(0);
+    await expect(card).not.toContainText('Your waiver plan');
 
     const claims = page.getByTestId('waiver-plan-claim');
     const count = await claims.count();
@@ -188,8 +190,7 @@ test.describe('the plan as a card', () => {
    *
    * One target twice and one drop twice is exactly right and looks exactly
    * wrong, and the qualifier is the whole of what tells them apart. It is on the
-   * card and not behind **See Why** because a reader who cannot see it deletes
-   * one of the two lines.
+   * card because a reader who cannot see it deletes one of the two lines.
    */
   test('marks the repeated claims as contingencies', async ({ page }) => {
     const qualifiers = page.getByTestId('waiver-plan-qualifier');
@@ -198,34 +199,13 @@ test.describe('the plan as a card', () => {
     await expect(qualifiers.nth(1)).toHaveText('Only if 2 does not land him');
   });
 
-  /**
-   * Four words of instruction, and the mechanic behind **See Why**.
-   *
-   * The card used to close with the whole sentence — `Enter them in this order
-   * — Sleeper runs claims top to bottom, and a claim whose drop is already gone
-   * does not run.` — which wraps to two lines under the claims on a phone, on
-   * the one card in this app a reader is copying into another app. What they
-   * have to do is the four words, and they are above the list they are about;
-   * why Sleeper's waiver run makes the order matter is the same fact every week
-   * and is one tap in.
-   *
-   * Both halves are asserted, because a shortening that dropped the mechanic
-   * would be the reader inferring a contingency from a list — which §8 of the
-   * brief forbids in the same breath as it asks for the shorter copy.
-   */
-  test('says the order in four words, and keeps the mechanic behind See why', async ({ page }) => {
-    const instruction = page.getByTestId('waiver-plan-instruction');
-    await expect(instruction).toHaveText('Enter in this order');
-
+  /** The numbers are the order; the card no longer says so in words. */
+  test('carries no title or instruction above the claims', async ({ page }) => {
     const card = page.getByTestId('waiver-plan');
+    await expect(page.getByTestId('waiver-plan-instruction')).toHaveCount(0);
+    await expect(card).not.toContainText('Enter in this order');
+    await expect(card).not.toContainText('Your waiver plan');
     await expect(card).not.toContainText('Sleeper runs claims top to bottom');
-    // Above the claims it introduces, not under them.
-    const claims = (await page.getByTestId('waiver-plan-claims').boundingBox())!;
-    expect((await instruction.boundingBox())!.y).toBeLessThan(claims.y);
-
-    await page.getByTestId('waiver-plan-why').click();
-    await expect(page.getByTestId('waiver-plan-detail')).toBeVisible();
-    await expect(page.getByTestId('waiver-plan-mechanics')).toContainText('Sleeper runs claims top to bottom');
   });
 
   /**
@@ -245,28 +225,16 @@ test.describe('the plan as a card', () => {
   });
 
   /**
-   * One See Why, and nothing on the card that offers to make a claim.
+   * Nothing on the card that offers to make a claim, and no button at all.
    *
    * The rule the whole app is held to, at the surface closest to breaking it:
    * this card is a list of transactions and there is no control on it that
-   * performs one. The claims are not buttons, so there is nothing to nest a
-   * control inside.
+   * performs one.
    */
-  test('offers exactly one control, and it does not transact', async ({ page }) => {
+  test('offers no control', async ({ page }) => {
     const card = page.getByTestId('waiver-plan');
-    await expect(card.locator('button')).toHaveCount(1);
-    await expect(page.getByTestId('waiver-plan-why')).toHaveText('See why');
-    await expect(card.locator('button button')).toHaveCount(0);
-    for (const claim of await page.getByTestId('waiver-plan-claim').all()) {
-      await expect(claim.locator('button')).toHaveCount(0);
-    }
-  });
-
-  /** 44px is a thumb, and a control a thumb cannot land on is not a control. */
-  test('gives the See Why control a full tap target', async ({ page }) => {
-    const box = (await page.getByTestId('waiver-plan-why').boundingBox())!;
-    expect(box.height, `the control is only ${box.height}px tall`).toBeGreaterThanOrEqual(44);
-    expect(box.width).toBeGreaterThanOrEqual(44);
+    await expect(card.locator('button')).toHaveCount(0);
+    await expect(page.getByTestId('waiver-plan-why')).toHaveCount(0);
   });
 
   /**
@@ -347,51 +315,101 @@ test.describe('the plan as a card', () => {
   });
 });
 
-test.describe('See Why', () => {
+/*
+ * 1 October 2026: "way too much text". A `Keeping X: reason` line for every
+ * bench player the plan did not cut is gone; only a handcuff to one of your
+ * starters gets a clause, on the drop line.
+ */
+test.describe('the trimmed card', () => {
   test.beforeEach(async ({ page }) => {
     await inSeason(page);
-    await withPlan(page, planFixture());
+  });
+
+  test('names the handcuff on the drop line and nobody else', async ({ page }) => {
+    await withPlan(
+      page,
+      planFixture({
+        groups: [
+          {
+            index: 1,
+            drop: { playerId: 'c', name: 'Depth Back' },
+            headline: 'Drop Depth Back for the first one you win',
+            keep: [
+              'Keeping Backup Back: he backs up Feature Back, your starting RB.',
+              'Keeping Rated Receiver: the market still rates him (#3 add in Sleeper this week).',
+            ],
+            keepNote: 'Backup Back stays: he backs up Feature Back',
+            firstRank: 1,
+            lastRank: 3,
+          },
+        ],
+        claims: planFixture().claims.map((c) => ({ ...c, group: 1 })),
+      }),
+    );
     await openWaivers(page);
-    await page.getByTestId('waiver-plan-why').click();
-    await expect(page.getByTestId('waiver-plan-detail')).toBeVisible();
+    const drop = page.getByTestId('waiver-plan-drop');
+    await expect(drop).toHaveText('Drop Depth Back for the first one you win (Backup Back stays: he backs up Feature Back)');
+    const card = page.getByTestId('waiver-plan');
+    await expect(card).not.toContainText('Keeping');
+    await expect(card).not.toContainText('Rated Receiver');
   });
 
-  /** One sheet, no tabs, and every question the brief asks answered in it. */
-  test('explains every claim, the branches, the pairings and the protected list', async ({ page }) => {
-    const sheet = page.getByTestId('waiver-plan-detail');
-    await expect(sheet.getByTestId('waiver-plan-why-claim')).toHaveCount(3);
-    await expect(sheet.getByTestId('waiver-plan-outcomes')).toContainText('Best case');
-    await expect(sheet.getByTestId('waiver-plan-relationships')).toBeVisible();
-    await expect(sheet.getByTestId('waiver-plan-protected')).toContainText('Starting for you');
-    await expect(sheet.getByTestId('waiver-plan-budget')).toContainText('$42');
-    await expect(sheet).toContainText('Advisory only');
-  });
-
-  /**
-   * A fallback says what happens if the claim above it lands, in English.
-   *
-   * The single most useful sentence on the sheet and the one a reader cannot
-   * derive from the card: the second claim is unreachable in the world where the
-   * first succeeds, which is exactly what makes it safe to enter.
-   */
-  test('says what a fallback does when the claim above it lands', async ({ page }) => {
-    const second = page.getByTestId('waiver-plan-why-claim').nth(1);
-    await expect(second).toContainText('Claim 1 spends Depth Back');
-    await expect(second).toContainText('cannot run at all');
-  });
-
-  /** No tabs, and no second sheet stacked on the first. */
-  test('is one sheet with no nested modal in it', async ({ page }) => {
-    await expect(page.locator('.sheet')).toHaveCount(1);
-    await expect(page.getByTestId('waiver-plan-detail').locator('[role="dialog"]')).toHaveCount(0);
-  });
-
-  test('fits the phone', async ({ page }, testInfo) => {
+  test('says a free agent needs no bid', async ({ page }, testInfo) => {
+    await withPlan(
+      page,
+      planFixture({
+        instruction: null,
+        claims: [
+          {
+            ...planFixture().claims[0],
+            bid: null,
+            headline: 'Add Breakout Back · free agent, no bid needed',
+            pickup: { state: 'free', reason: null, until: null },
+          },
+        ],
+      }),
+    );
+    await openWaivers(page);
+    await expect(page.getByTestId('waiver-plan-claim').first()).toContainText('free agent, no bid needed');
     const width = testInfo.project.use.viewport!.width;
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    const box = (await page.getByTestId('waiver-plan-detail').boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5);
+  });
+});
+
+/*
+ * The board card for each case: an instant add carries no price, a player on
+ * waivers carries his price and the day he clears.
+ */
+test.describe('free agent or waiver claim, on the board', () => {
+  test('prints no price for a free agent and a clear day for a claim', async ({ page }) => {
+    await inSeason(page);
+    await page.route('**/api/leagues/*/waivers', async (route) => {
+      const response = await route.fetch();
+      const original = await response.json();
+      const ids: string[] = [
+        ...(original.upgrades ?? []).flatMap((u: { candidates: { playerId: string }[] }) => u.candidates.map((c) => c.playerId)),
+        ...(original.valueAdds ?? []).map((a: { playerId: string }) => a.playerId),
+      ];
+      const pickup: Record<string, unknown> = {};
+      ids.forEach((id, i) => {
+        pickup[id] =
+          i === 0
+            ? { state: 'waivers', reason: 'dropped', until: '2026-10-02T17:22:00.000Z' }
+            : { state: 'free', reason: null, until: null };
+      });
+      await route.fulfill({ response, body: JSON.stringify({ ...original, pickup }) });
+    });
+    await openWaivers(page);
+    const summaries = page.getByTestId('waiver-summary');
+    await expect(summaries.first()).toBeVisible();
+    await expect(page.locator('[data-testid="waiver-summary"][data-pickup="free"]').first()).toContainText(
+      'Free agent: pick up anytime, no FAAB needed',
+    );
+    const claim = page.locator('[data-testid="waiver-summary"][data-pickup="waivers"]');
+    if ((await claim.count()) > 0) {
+      await expect(claim.first()).toContainText('On waivers until');
+      await expect(claim.first()).toContainText('Est. cost');
+    }
   });
 });
 
@@ -418,18 +436,15 @@ test.describe('the honest endings', () => {
     await expect(card).toHaveAttribute('data-state', 'no_safe_drop');
     await expect(page.getByTestId('waiver-plan-headline')).toHaveText('No safe drop for this upgrade');
     await expect(page.getByTestId('waiver-plan-claim')).toHaveCount(0);
-    /* Still worth a sheet: the protected list is the argument somebody wants. */
-    await expect(page.getByTestId('waiver-plan-why')).toBeVisible();
+    await expect(card.getByRole('button')).toHaveCount(0);
   });
 
   /*
    * The same ending with nobody to name, which is what production drew on
    * 29 September 2026: every player starting or on injured reserve, so the
-   * protected list is empty and the note on the card is the whole argument. A
-   * sheet would repeat the headline, so there is no See why, and no button of
-   * any kind.
+   * note on the card is the whole argument, and there is no button of any kind.
    */
-  test('draws a full roster with nobody to name as its note alone, with no See why', async ({ page }) => {
+  test('draws a full roster with nobody to name as its note alone', async ({ page }) => {
     await inSeason(page);
     await withPlan(
       page,
@@ -570,6 +585,7 @@ function groupedPlan() {
         drop: { playerId: 'jw', name: 'Jaylen Wright' },
         headline: 'Drop Jaylen Wright for the first one you win',
         keep: ['Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.'],
+        keepNote: 'Emmett Johnson stays: he backs up Kenneth Walker',
         firstRank: 1,
         lastRank: 3,
       },
@@ -591,7 +607,9 @@ test.describe('the plan grouped by drop', () => {
   });
 
   test('says the drop once, then the claims that would spend it', async ({ page }) => {
-    await expect(page.getByTestId('waiver-plan-drop')).toHaveText('Drop Jaylen Wright for the first one you win');
+    await expect(page.getByTestId('waiver-plan-drop')).toHaveText(
+      'Drop Jaylen Wright for the first one you win (Emmett Johnson stays: he backs up Kenneth Walker)',
+    );
     const claims = page.getByTestId('waiver-plan-claim');
     await expect(claims).toHaveCount(3);
     await expect(claims.nth(0)).toContainText('Add Keenan Allen · bid $3–7');
@@ -600,13 +618,12 @@ test.describe('the plan grouped by drop', () => {
     await expect(page.getByTestId('waiver-plan-qualifier').nth(1)).toHaveText('Only if 1 and 2 lose');
   });
 
-  test('puts the case for each claim under it, and names who it keeps', async ({ page }) => {
+  test('puts the case for each claim under it, and names the handcuff on the drop line', async ({ page }) => {
     await expect(page.getByTestId('waiver-plan-claim-detail').first()).toContainText(
       'Proj. 7.0 vs 3.5 (Sleeper projection for both)',
     );
-    await expect(page.getByTestId('waiver-plan-keep')).toHaveText(
-      'Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.',
-    );
+    await expect(page.getByTestId('waiver-plan-keep')).toHaveText('(Emmett Johnson stays: he backs up Kenneth Walker)');
+    await expect(page.getByTestId('waiver-plan')).not.toContainText('Keeping');
   });
 
   test('fits the phone', async ({ page }, testInfo) => {

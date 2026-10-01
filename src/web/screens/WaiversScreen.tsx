@@ -216,11 +216,16 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               <div className="section-title" data-testid="waivers-others-title">
                 Other options to consider
               </div>
-              <div className="faint waivers-others-note" data-testid="waivers-others-note">
-                {planMoves
-                  ? 'Not part of the plan above. Worth a look if a claim does not land.'
-                  : 'Each beats someone on your bench on paper, but none is worth a roster move this week.'}
-              </div>
+              {/*
+                Under a plan, the heading says it all; the note that said
+                "not part of the plan above" was removed on 1 October 2026.
+                With no plan, the note is the reason nothing is recommended.
+              */}
+              {planMoves ? null : (
+                <div className="faint waivers-others-note" data-testid="waivers-others-note">
+                  Each beats someone on your bench on paper, but none is worth a roster move this week.
+                </div>
+              )}
               {segments.length > 1 ? (
                 <SegmentedControl
                   label="Filter by position"

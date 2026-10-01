@@ -1957,14 +1957,15 @@ test.describe('the season features', () => {
   });
 
   /**
-   * The plan on screen: one See Why, and no control that could transact.
+   * The plan on screen: no control at all, so nothing that could transact.
    *
    * Skipped out of season, and only this half is — the contract assertions above
    * run in every season. This card is a list of transactions and there is no
    * control on it that performs one, which is the guarantee the whole app is
-   * held to and this is the surface closest to breaking it.
+   * held to and this is the surface closest to breaking it. Its one button,
+   * `See why`, was removed on 1 October 2026 at the owner's request.
    */
-  test('the waiver plan offers one See Why, and nothing that would transact', async ({ page }) => {
+  test('the waiver plan offers no control, and nothing that would transact', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
@@ -1973,53 +1974,8 @@ test.describe('the season features', () => {
     const card = page.getByTestId('waiver-plan');
     test.skip((await card.count()) === 0, 'this deployment surfaced no plan to draw');
 
-    /*
-     * See why is offered only when the plan has more than its headline and note.
-     * A `no_safe_drop` plan with nobody to name (every player starting or on
-     * injured reserve) is drawn as its note alone, which is what this deployment
-     * showed on 29 September 2026. So the server's own plan says how many
-     * buttons to expect: one when there is something behind it, none when there
-     * is not, and never anything else.
-     */
-    const id = await selectedLeagueId(page);
-    const plan = id
-      ? (
-          await apiJson<{
-            claimPlan?: {
-              claims?: unknown[];
-              protectedPlayers?: unknown[];
-              outcomes?: unknown[];
-              relationships?: unknown[];
-              mechanics?: unknown;
-              budget?: unknown;
-            } | null;
-          }>(page, `/api/leagues/${id}/waivers`)
-        )?.claimPlan
-      : null;
-    const hasWhy =
-      plan == null ||
-      (plan.claims?.length ?? 0) > 0 ||
-      (plan.protectedPlayers?.length ?? 0) > 0 ||
-      (plan.outcomes?.length ?? 0) > 0 ||
-      (plan.relationships?.length ?? 0) > 0 ||
-      plan.mechanics != null ||
-      plan.budget != null;
-
-    await expect(card.getByRole('button')).toHaveCount(hasWhy ? 1 : 0);
-    if (hasWhy) {
-      const label = (await card.getByRole('button').innerText()).toLowerCase();
-      for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-        expect(label, `a control reading "${forbidden}" would imply a transaction`).not.toMatch(
-          new RegExp(`\\b${forbidden}\\b`),
-        );
-      }
-    }
-
-    /* And the claims are not controls, so there is nothing to nest one inside. */
-    await expect(card.locator('button button')).toHaveCount(0);
-    for (const claim of await card.getByTestId('waiver-plan-claim').all()) {
-      await expect(claim.locator('button')).toHaveCount(0);
-    }
+    await expect(card.getByRole('button')).toHaveCount(0);
+    await expect(card).not.toContainText('Keeping ');
   });
 });
 

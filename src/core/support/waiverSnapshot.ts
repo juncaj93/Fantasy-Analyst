@@ -273,6 +273,14 @@ export async function captureWaiverSnapshot(
         ...(input.request.recentlyDropped === undefined
           ? {}
           : { recentlyDropped: Object.fromEntries(input.request.recentlyDropped) }),
+        ...(input.request.waiverWindow == null
+          ? {}
+          : {
+              waiverWindow: {
+                rules: input.request.waiverWindow.rules,
+                drops: Object.fromEntries(input.request.waiverWindow.drops),
+              },
+            }),
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -324,11 +332,19 @@ export async function captureWaiverSnapshot(
   }, aliases);
 }
 
-/** The strategy context minus the two Maps the request carries on its own. */
+/** The strategy context minus the waiver fields the request carries on its own. */
 function withoutWaiverMaps<T extends object>(strategy: T): T {
-  const { trendingDrops: _drops, recentlyDropped: _recent, ...rest } = strategy as T & {
+  const {
+    trendingDrops: _drops,
+    recentlyDropped: _recent,
+    leagueDrops: _league,
+    waiverRules: _rules,
+    ...rest
+  } = strategy as T & {
     trendingDrops?: unknown;
     recentlyDropped?: unknown;
+    leagueDrops?: unknown;
+    waiverRules?: unknown;
   };
   return rest as T;
 }
@@ -392,6 +408,9 @@ export async function replayWaiverSnapshot(
     ...(inputs.recentlyDropped === undefined
       ? {}
       : { recentlyDropped: new Map(Object.entries(inputs.recentlyDropped)) }),
+    ...(inputs.waiverWindow == null
+      ? {}
+      : { waiverWindow: { rules: inputs.waiverWindow.rules, drops: new Map(Object.entries(inputs.waiverWindow.drops)) } }),
     rosters: inputs.rosters,
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,

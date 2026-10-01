@@ -16,7 +16,6 @@
  * that does anything but open the detail.
  */
 
-import { useState } from 'react';
 import type { FaabAdvice } from '../api.ts';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
 import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
@@ -59,97 +58,62 @@ function UnknownField({ what }: { what: string }) {
  *
  * ## Not a control
  *
- * The card is a `div` and every claim is an `li`. The only button on it is
- * `See why`, and there is exactly one: this app makes no transaction, and a
- * claim line that looked tappable would be offering to make one. The claims are
- * typed into Sleeper by hand, which is also why the order matters.
+ * The card is a `div` and every claim is an `li`, and there is no button on it
+ * at all: this app makes no transaction, and a claim line that looked tappable
+ * would be offering to make one. The claims are typed into Sleeper by hand,
+ * which is also why the order matters.
+ *
+ * ## Short on purpose
+ *
+ * On 1 October 2026 the owner's verdict on this card was "way too much text".
+ * It closed with a `Keeping X: reason` line for every bench player the plan did
+ * not cut, and a `See why` button onto a sheet of the full argument. Both are
+ * gone. A bench player who was not cut needs no defence. The one exception is
+ * a backup to your own starter, who looks like the obvious cut the plan
+ * skipped; he gets a clause on the drop line (see `ClaimGroup`).
  */
 export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefined }) {
-  const [open, setOpen] = useState(false);
   if (!plan?.surface) return null;
 
-  /*
-   * The sheet is offered only when it has something the card does not.
-   *
-   * An empty plan whose whole story is its own headline — a quiet week — would
-   * open onto a sheet repeating that headline, which is a control that exists to
-   * disappoint. A plan with claims always has more; a `no safe drop` plan
-   * usually has the protected list, which is precisely the argument somebody
-   * wants with it. When nobody is protected (everyone starting or on injured
-   * reserve) its note is the whole argument, and it gets no See why.
-   */
-  const hasWhy =
-    plan.claims.length > 0 ||
-    plan.protectedPlayers.length > 0 ||
-    plan.outcomes.length > 0 ||
-    plan.relationships.length > 0 ||
-    plan.mechanics != null ||
-    plan.budget != null;
-
   return (
-    <>
-      <div className="card claim-plan" data-testid="waiver-plan" data-state={plan.state}>
+    <div className="card claim-plan" data-testid="waiver-plan" data-state={plan.state}>
+      {/*
+        No title and no "Enter in this order" on a plan with claims: the
+        section above already says "Recommended move", and the numbers are the
+        order. Removed 1 October 2026 at the owner's request. An empty ending
+        (`No safe drop for this upgrade`) has no claims, so its headline is the
+        whole message and stays.
+      */}
+      {plan.claims.length === 0 ? (
         <div className="detail-label" data-testid="waiver-plan-headline">
           {plan.headline}
         </div>
+      ) : null}
 
-        {/*
-          Four words, above the list they are about.
+      {/*
+        One block per drop: the drop, said once, then the claims that would
+        spend it in the order to enter them, numbered across the whole plan
+        because the numbers are the Sleeper order. An older cached payload
+        with no groups draws the flat list it always drew.
+      */}
+      {plan.claims.length > 0 && (plan.groups ?? []).length > 0 ? (
+        (plan.groups ?? []).map((group) => (
+          <ClaimGroup key={group.index} group={group} claims={plan.claims.filter((c) => c.group === group.index)} />
+        ))
+      ) : plan.claims.length > 0 ? (
+        <ol className="claim-plan-list" data-testid="waiver-plan-claims">
+          {plan.claims.map((claim) => (
+            <ClaimLine key={claim.claimId} claim={claim} />
+          ))}
+        </ol>
+      ) : null}
 
-          The card used to close with the whole mechanic — `Enter them in this
-          order — Sleeper runs claims top to bottom, and a claim whose drop is
-          already gone does not run.` — which is two wrapped lines under the
-          claims on a 375pt phone, and it is an explanation rather than an
-          instruction. Everything a reader does with this card is above it: add
-          whom, bid what, drop whom, in what order. So the four words that are
-          the instruction come up here where the list starts, and the sentence
-          that explains why the order matters goes behind `See why` with the
-          rest of the argument.
-
-          What is *not* shortened is the per-claim qualifier — `Only if 1 loses`
-          — which stays inline on the line it saves from looking like a
-          duplicate. See `ClaimLine`.
-        */}
-        {plan.instruction ? (
-          <div className="claim-plan-instruction" data-testid="waiver-plan-instruction">
-            {plan.instruction}
-          </div>
-        ) : null}
-
-        {/*
-          One block per drop: the drop, said once, then the claims that would
-          spend it in the order to enter them, numbered across the whole plan
-          because the numbers are the Sleeper order. An older cached payload
-          with no groups draws the flat list it always drew.
-        */}
-        {plan.claims.length > 0 && (plan.groups ?? []).length > 0 ? (
-          (plan.groups ?? []).map((group) => (
-            <ClaimGroup key={group.index} group={group} claims={plan.claims.filter((c) => c.group === group.index)} />
-          ))
-        ) : plan.claims.length > 0 ? (
-          <ol className="claim-plan-list" data-testid="waiver-plan-claims">
-            {plan.claims.map((claim) => (
-              <ClaimLine key={claim.claimId} claim={claim} />
-            ))}
-          </ol>
-        ) : null}
-
-        {plan.note ? (
-          <div className="faint claim-plan-note" data-testid="waiver-plan-note">
-            {plan.note}
-          </div>
-        ) : null}
-
-        {hasWhy ? (
-          <div className="btn-row" style={{ marginTop: 'var(--sp-2)' }}>
-            <button className="btn btn-compact" data-testid="waiver-plan-why" onClick={() => setOpen(true)}>
-              See why
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {open ? <WaiverPlanSheet plan={plan} onClose={() => setOpen(false)} /> : null}
-    </>
+      {plan.note ? (
+        <div className="faint claim-plan-note" data-testid="waiver-plan-note">
+          {plan.note}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -191,114 +155,27 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
  * `Drop Jaylen Wright for the first one you win`, said once above the list
  * rather than on every line: the claims under it share the cut, and Sleeper
  * runs the first one that wins and skips the rest because the cut is gone.
- * The `Keeping…` line says who the plan chose not to cut, and why, which is
- * the question a reader asks the moment the drop is not who they expected.
+ * When the plan passed over a backup to one of your starters, the drop line
+ * says so in one clause, because that is the cut a reader expected.
  */
 function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: WaiverClaimLine[] }) {
   return (
     <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
       <div className="claim-plan-drop" data-testid="waiver-plan-drop">
         {group.headline}
+        {group.keepNote ? (
+          <span className="faint claim-plan-keep" data-testid="waiver-plan-keep">
+            {' '}
+            ({group.keepNote})
+          </span>
+        ) : null}
       </div>
       <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
         {claims.map((claim) => (
           <ClaimLine key={claim.claimId} claim={claim} />
         ))}
       </ol>
-      {group.keep.map((line) => (
-        <div key={line} className="faint claim-plan-keep" data-testid="waiver-plan-keep">
-          {line}
-        </div>
-      ))}
     </div>
-  );
-}
-
-/**
- * The whole argument, in one sheet with no tabs in it.
- *
- * Per claim: why him, why that cut, what the roster gains, what the lineup
- * gains, what the pricing pass said, who else wants him, and how the claim
- * stands to the ones above it. Then the three things that are about the plan
- * rather than about any one claim — how the week can go, whether two adds are
- * worth two cuts, and who the plan refuses to touch.
- *
- * No reason codes reach this file. Every sentence below was written in
- * `core/waivers/claimPlan.ts`, next to the arithmetic that justifies it.
- */
-export function WaiverPlanSheet({ plan, onClose }: { plan: WaiverClaimPlan; onClose: () => void }) {
-  return (
-    <Sheet title={plan.headline} onClose={onClose} testId="waiver-plan-detail">
-      <div className="weekly" data-testid="waiver-plan-detail-body" data-state={plan.state}>
-        {plan.claims.map((claim) => (
-          <div key={claim.claimId} className="claim-why" data-testid="waiver-plan-why-claim" data-rank={claim.rank}>
-            <div className="claim-why-head">
-              {/*
-                Read out, not hidden.
-
-                The number is half the instruction on this sheet — every
-                relation sentence under it says `Claim 2` — so a reader using a
-                screen reader needs to hear which claim they are inside.
-              */}
-              <span className="claim-plan-rank">{claim.rank}</span>
-              <span className="claim-plan-headline">{claim.headline}</span>
-            </div>
-            {claim.qualifier ? (
-              <div className="faint claim-why-qualifier">{claim.qualifier}</div>
-            ) : null}
-            <ul className="reason-list">
-              {claim.why.map((line, index) => (
-                <li key={index}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-
-        {/*
-          Why the order is the order — the sentence the card no longer spends
-          two lines on. First, because it is the mechanic the claims above are
-          arranged by, and a reader who tapped `See why` on a numbered list is
-          most likely asking about the numbering.
-        */}
-        <PlanSection
-          label="Why the order matters"
-          lines={plan.mechanics ? [plan.mechanics] : []}
-          testId="waiver-plan-mechanics"
-        />
-        <PlanSection label="How the week can go" lines={plan.outcomes} testId="waiver-plan-outcomes" />
-        <PlanSection label="Two adds, or one" lines={plan.relationships} testId="waiver-plan-relationships" />
-        <PlanSection label="Not on offer as a cut" lines={plan.protectedPlayers} testId="waiver-plan-protected" />
-        <PlanSection label="What your budget allows" lines={plan.budget ? [plan.budget] : []} testId="waiver-plan-budget" />
-
-        {/*
-          The promise, beside the instructions it qualifies.
-
-          The same sentence the player sheet carries, in the one other place
-          somebody is about to act — and enforced by something stronger than a
-          sentence: there is no control on this screen that could transact, which
-          `e2e/waivers.spec.ts` asserts by reading every button on it.
-        */}
-        <div className="faint" style={{ marginTop: 'var(--sp-2)' }}>
-          Advisory only — enter these in Sleeper yourself. This app never makes a transaction.
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
-function PlanSection({ label, lines, testId }: { label: string; lines: string[]; testId: string }) {
-  if (lines.length === 0) return null;
-  return (
-    <>
-      <div className="detail-label" style={{ marginTop: 12 }}>
-        {label}
-      </div>
-      <ul className="reason-list" data-testid={testId}>
-        {lines.map((line, index) => (
-          <li key={index}>{line}</li>
-        ))}
-      </ul>
-    </>
   );
 }
 
@@ -396,7 +273,8 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
             {row.seasonOutlook.label}
           </span>
         ) : null}
-        {row.competition ? (
+        {/* Nobody competes for an instant pickup, so a free agent carries no competition chip. */}
+        {row.competition && row.pickup?.state !== 'free' ? (
           <span className="tag" data-testid="waiver-competition">
             {row.competition.label}
           </span>
@@ -413,12 +291,34 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
         ) : null}
       </div>
 
-      <div className="waiver-summary" data-testid="waiver-summary">
-        <span data-testid="waiver-cost">
-          Est. cost{' '}
-          {row.faab ? <strong>{formatFaab(row.faab)}</strong> : <UnknownField what="Expected cost" />}
-        </span>
-        {row.competition?.detail ? <span> · {row.competition.detail}</span> : null}
+      {/*
+        A free agent outside the waiver window is an instant add: nobody bids,
+        so no price is printed and nobody's need for him is a competition. A
+        player still on waivers says until when, beside the price that matters
+        now. See `core/waivers/clearWindow.ts`.
+      */}
+      <div className="waiver-summary" data-testid="waiver-summary" data-pickup={row.pickup?.state ?? 'unknown'}>
+        {row.pickup?.state === 'free' ? (
+          <span data-testid="waiver-cost">
+            {/*
+              Not "add anytime, no bid": this row is a button (it opens the
+              detail), and no control on this screen may read as a transaction.
+              See `e2e/waivers.spec.ts`.
+            */}
+            <strong>Free agent</strong>: pick up anytime, no FAAB needed
+          </span>
+        ) : (
+          <>
+            {row.pickup?.state === 'waivers' ? (
+              <span data-testid="waiver-window">On waivers until {clearDay(row.pickup.until)} · </span>
+            ) : null}
+            <span data-testid="waiver-cost">
+              Est. cost{' '}
+              {row.faab ? <strong>{formatFaab(row.faab)}</strong> : <UnknownField what="Expected cost" />}
+            </span>
+            {row.competition?.detail ? <span> · {row.competition.detail}</span> : null}
+          </>
+        )}
         {/*
           One unbreakable phrase. `Proj. +6.5 pts` wrapping to leave `pts`
           alone on a second line is the sort of thing that makes a compact card
@@ -442,6 +342,13 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
       ) : null}
     </button>
   );
+}
+
+/** `Fri`: the day a player on waivers clears, in the reader's own time zone. */
+export function clearDay(iso: string | null): string {
+  if (!iso) return 'the next run';
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? 'the next run' : at.toLocaleDateString(undefined, { weekday: 'short' });
 }
 
 /** `12–18%` / `$4–7` / `unknown`. Never a single number pretending to be a bid. */
@@ -582,8 +489,13 @@ export function WaiverDetailSheet({
           </div>
           <div className="weekly-line">
             <dt>Expected cost</dt>
-            <dd>
-              {row.faab ? (
+            <dd data-testid="waiver-detail-cost">
+              {row.pickup?.state === 'free' ? (
+                <>
+                  None
+                  <span className="faint"> · free agent, add anytime in Sleeper, no bid needed</span>
+                </>
+              ) : row.faab ? (
                 <>
                   {formatFaab(row.faab)}
                   {row.faab.detail ? <span className="faint"> · {row.faab.detail}</span> : null}
@@ -646,7 +558,14 @@ export function WaiverDetailSheet({
           thing this sheet can say: *he will go for more than he is worth to
           you.* Nothing here is recomputed — see `WaiverBidLike`.
         */}
-        {row.bid && !row.bid.withheld ? (
+        {row.pickup?.state === 'waivers' ? (
+          <div className="faint" data-testid="waiver-detail-window">
+            On waivers until {clearDay(row.pickup.until)}:{' '}
+            {row.pickup.reason === 'dropped' ? 'just dropped, so a claim is contested.' : 'his game has started, so he clears at the weekly run.'}
+          </div>
+        ) : null}
+
+        {row.bid && !row.bid.withheld && row.pickup?.state !== 'free' ? (
           <div className="bid" data-testid="faab-bid" data-player={row.bid.playerId}>
             <div>
               <strong>{row.bid.headline}</strong>

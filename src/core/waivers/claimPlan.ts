@@ -42,6 +42,7 @@ import { myBudget, type LeagueBudgetState } from '../faab/budget.ts';
 import { buildWaiverBoard, type WaiverAdviceLike, type WaiverBoardRow } from './board.ts';
 import { basisLabel } from './yardstick.ts';
 import { mostAddedLine } from './signals.ts';
+import type { PickupState } from './clearWindow.ts';
 
 /** How a claim stands to the claims above it. */
 export type ClaimRelation = 'primary' | 'fallback' | 'compatible';
@@ -72,6 +73,8 @@ export interface WaiverClaimLine {
   relation: ClaimRelation;
   /** The **See why** paragraph for this claim, one sentence per line. */
   why: string[];
+  /** Still on waivers, or free to add now. Null when the window could not be read. */
+  pickup: PickupState | null;
 }
 
 /** One drop, and the claims that would spend it. */
@@ -80,8 +83,18 @@ export interface WaiverClaimGroup {
   drop: { playerId: string; name: string } | null;
   /** `Drop Jaylen Wright for the first one you win` */
   headline: string;
-  /** `Keeping Emmett Johnson: he backs up Kenneth Walker, your starting RB.` */
+  /**
+   * Every protected player the drop was chosen over, with why. Data only: the
+   * card no longer prints it (see {@link keepNote}).
+   */
   keep: string[];
+  /**
+   * `Emmett Johnson stays: he backs up Kenneth Walker`, printed on the drop
+   * line. Only the handcuff case: a bench player who was not cut needs no
+   * defending, but a backup to your own starter looks like an obvious cut the
+   * plan skipped, and this is why. Null when no handcuff was passed over.
+   */
+  keepNote: string | null;
   firstRank: number;
   lastRank: number;
 }
@@ -132,6 +145,8 @@ export interface WaiverClaimPlanInput {
 }
 
 const ORDER_INSTRUCTION = 'Enter in this order';
+/** On a claim for a player outside the waiver window. */
+export const FREE_AGENT_PHRASE = 'free agent, no bid needed';
 const ORDER_NOTE =
   'Sleeper runs claims top to bottom, and a claim whose drop is already gone does not run. So the first claim you win under a drop spends it, and the claims below it under the same drop do not run.';
 const NO_SAFE_DROP_NOTE =
@@ -155,8 +170,19 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
     .filter((row) => row.cut != null)
     .map((row) => ({ addPlayerId: row.playerId, dropName: row.cut!.name, label: `Drop ${row.cut!.name}` }));
 
+  /*
+   * A free agent outside the waiver window is an instant add, so a claim under
+   * the same drop below him can never run: adding him spends the drop. The
+   * list stops at the first one. Claims into open spots each run on their own
+   * and are left alone. See `waivers/clearWindow.ts`.
+   */
+  const isFree = (id: string) => rows.get(id)?.pickup?.state === 'free';
   let groups = (opts.advice.moveGroups ?? [])
-    .map((g) => ({ ...g, addIds: g.addIds.filter((id) => rows.has(id)) }))
+    .map((g) => {
+      const present = g.addIds.filter((id) => rows.has(id));
+      const firstFree = g.drop == null ? -1 : present.findIndex(isFree);
+      return { ...g, addIds: firstFree < 0 ? present : present.slice(0, firstFree + 1) };
+    })
     .filter((g) => g.addIds.length > 0);
 
   /*
@@ -172,7 +198,7 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
   } else if (remaining != null) {
     /* Claims under one drop never land together; claims into open spots all can. */
     const worst = (g: (typeof groups)[number]) => {
-      const bids = g.addIds.map((id) => rows.get(id)?.bid?.recommended ?? 0);
+      const bids = g.addIds.map((id) => (isFree(id) ? 0 : (rows.get(id)?.bid?.recommended ?? 0)));
       return g.drop == null ? bids.reduce((a, b) => a + b, 0) : Math.max(0, ...bids);
     };
     while (groups.length > 1 && groups.reduce((t, g) => t + worst(g), 0) > remaining) {
@@ -183,6 +209,8 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
       const most = groups.reduce((t, g) => t + worst(g), 0);
       if (most > 0) {
         budgetLine = `The most this plan can spend is $${most} of the $${remaining} you have left: one claim per drop. Claims under the same drop never both land.`;
+      } else if (groups.some((g) => g.addIds.some(isFree))) {
+        budgetLine = `Every add in this plan is a free agent, so it spends none of the $${remaining} you have left.`;
       }
     }
   }
@@ -219,7 +247,9 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
     group.addIds.forEach((addId, i) => {
       const row = rows.get(addId)!;
       const rank = claims.length + 1;
-      const bidRange = usesFaab && row.faab && row.faab.low != null && row.faab.high != null ? rangeOf(row.faab.low, row.faab.high) : null;
+      const free = row.pickup?.state === 'free';
+      const bidRange =
+        !free && usesFaab && row.faab && row.faab.low != null && row.faab.high != null ? rangeOf(row.faab.low, row.faab.high) : null;
       const drop = group.drop;
       /* Claims into open spots each run on their own; claims under a drop are fallbacks. */
       const qualifier =
@@ -234,9 +264,10 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
         addTeam: row.team,
         dropPlayerId: drop?.playerId ?? null,
         dropName: drop?.name ?? null,
-        bid: usesFaab ? (row.bid?.recommended ?? null) : null,
+        bid: usesFaab && !free ? (row.bid?.recommended ?? null) : null,
         bidRange,
-        headline: [`Add ${row.name}`, bidRange ? `bid ${bidRange}` : null].filter(Boolean).join(' · '),
+        headline: [`Add ${row.name}`, free ? FREE_AGENT_PHRASE : bidRange ? `bid ${bidRange}` : null].filter(Boolean).join(' · '),
+        pickup: row.pickup ?? null,
         detail: detailFor(row),
         qualifier,
         relation: gi === 0 && i === 0 ? 'primary' : i === 0 || drop == null ? 'compatible' : 'fallback',
@@ -255,6 +286,7 @@ export function buildWaiverClaimPlan(opts: WaiverClaimPlanInput): WaiverClaimPla
           ? `${group.addIds.length} open roster spots: these need no drop`
           : 'Open roster spot: this one needs no drop',
       keep: group.kept.map((k) => `Keeping ${k.name}: ${k.why}.`),
+      keepNote: keepNoteFor(group.kept),
       firstRank,
       lastRank: claims.length,
     });
@@ -386,6 +418,14 @@ function outcomeLines(groups: readonly WaiverClaimGroup[], claims: readonly Waiv
   if (claims.length > firsts.length) lines.push('If a first choice goes to somebody else, the next claim under the same drop runs instead.');
   lines.push('If the room outbids you on all of them, nothing on your roster changes and you spend nothing.');
   return lines;
+}
+
+/** The handcuffs a drop was chosen over, as one clause for the drop line. */
+export function keepNoteFor(kept: readonly { name: string; backs?: string }[]): string | null {
+  const cuffs = kept.filter((k) => k.backs != null);
+  if (cuffs.length === 0) return null;
+  if (cuffs.length === 1) return `${cuffs[0]!.name} stays: he backs up ${cuffs[0]!.backs}`;
+  return `${joinNames(cuffs.map((k) => k.name))} stay: they back up your starters`;
 }
 
 function rangeOf(low: number, high: number): string {

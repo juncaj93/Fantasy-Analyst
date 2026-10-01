@@ -29,6 +29,21 @@ import { trendingHeadline } from '../market/trending.ts';
 import { detectDisagreement, type Disagreement } from '../market/disagreement.ts';
 import type { WaiverAdvice, WaiverCandidate, WaiverUpgrade, WaiverValueAdd } from '../startsit/waivers.ts';
 import type { CompetitionAssessment } from '../league/competition.ts';
+import type { PickupState } from './clearWindow.ts';
+
+/**
+ * The floor under a fresh drop the room rated: rivals assumed to want him, and
+ * attention assumed on him.
+ *
+ * A player drafted inside the league's starter pool, or near the top of
+ * Sleeper's adds, who was just cut and is still on waivers is the one claim
+ * every funded manager looks at, whatever their roster needs. On 30 September
+ * 2026 Braelon Allen drew four bids in this league ($16, $11, $8, $3) from
+ * managers the position-need count would not all have named. Without this
+ * floor a measured "nobody needs a WR" priced such a player at a dollar.
+ */
+export const FRESH_DROP_RIVALS = 3;
+export const FRESH_DROP_HEAT = 0.6;
 
 /**
  * What pricing needs to know about the league, and nothing more.
@@ -71,6 +86,10 @@ export function priceWaiverUpgrades(opts: {
    * at the position is not a league where nine people are bidding.
    */
   competition?: Map<string, CompetitionAssessment>;
+  /** Each free agent's waiver state, from `waivers/clearWindow.ts`. Absent prices everyone as before. */
+  pickup?: Readonly<Record<string, PickupState>>;
+  /** Players the room rates: drafted early, or near the top of Sleeper's adds. */
+  heldIds?: ReadonlyMap<string, string>;
 }): PricedBid[] {
   const { advice, strategy } = opts;
   const season = { week: strategy.week, finalWeek: strategy.finalWeek };
@@ -124,6 +143,32 @@ export function priceWaiverUpgrades(opts: {
     return fundedRivals > 0 ? Math.min(fundedRivals, 4) : null;
   };
 
+  /*
+   * A fresh drop the room rated, still on waivers: priced as the contested
+   * asset he is. See {@link FRESH_DROP_RIVALS}.
+   */
+  const freshAsset = (playerId: string): boolean => {
+    const p = opts.pickup?.[playerId];
+    return p?.state === 'waivers' && p.reason === 'dropped' && (opts.heldIds?.has(playerId) ?? false);
+  };
+  const demandFor = (playerId: string, heat: number | null) =>
+    freshAsset(playerId)
+      ? {
+          rivalsWithNeed: Math.max(rivalsFor(playerId) ?? 0, FRESH_DROP_RIVALS),
+          marketHeat: Math.max(heat ?? 0, FRESH_DROP_HEAT),
+        }
+      : { rivalsWithNeed: rivalsFor(playerId), marketHeat: heat };
+  const freshNote = (playerId: string, rec: BidRecommendation): BidRecommendation =>
+    freshAsset(playerId)
+      ? {
+          ...rec,
+          reasons: [
+            ...rec.reasons,
+            `Just dropped and still on waivers, and the room rates him (${opts.heldIds?.get(playerId)}), so he is priced as contested.`,
+          ],
+        }
+      : rec;
+
   const out: PricedBid[] = [];
 
   /*
@@ -162,7 +207,7 @@ export function priceWaiverUpgrades(opts: {
       const role = roleStabilityOf(candidate);
       const modelObserved = candidate.score != null && candidate.role.games > 0;
 
-      const rec = recommendBid({
+      const rec = freshNote(candidate.playerId, recommendBid({
         inputs: {
           playerId: candidate.playerId,
           name: candidate.name,
@@ -178,14 +223,13 @@ export function priceWaiverUpgrades(opts: {
           roleStability: role,
           shelfLife: shelfLifeOf(candidate, upgrade.need),
           futureOpportunity: 'normal',
-          marketHeat,
-          rivalsWithNeed: rivalsFor(candidate.playerId),
+          ...demandFor(candidate.playerId, marketHeat),
         },
         budgetState: strategy.budget,
         prices: strategy.prices,
         season,
         reserveFor: otherNeed(upgrade.slot),
-      });
+      }));
 
       out.push({
         ...rec,
@@ -217,7 +261,7 @@ export function priceWaiverUpgrades(opts: {
     const others = values.filter((o) => o.playerId !== add.playerId && o.position === add.position);
     const gainOverReplacement =
       others.length === 0 ? null : Math.round((add.gain - Math.max(...others.map((o) => o.gain))) * 100) / 100;
-    const rec = recommendBid({
+    const rec = freshNote(add.playerId, recommendBid({
       inputs: {
         playerId: add.playerId,
         name: add.name,
@@ -227,14 +271,13 @@ export function priceWaiverUpgrades(opts: {
         roleStability: roleStabilityOf(add),
         shelfLife: shelfLifeOf(add),
         futureOpportunity: 'normal',
-        marketHeat,
-        rivalsWithNeed: rivalsFor(add.playerId),
+        ...demandFor(add.playerId, marketHeat),
       },
       budgetState: strategy.budget,
       prices: strategy.prices,
       season,
       reserveFor: null,
-    });
+    }));
     out.push({
       ...rec,
       opportunity: rec.recommended != null ? simulateOpportunityCost(strategy.budget, rec.recommended) : null,

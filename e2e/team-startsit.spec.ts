@@ -473,7 +473,8 @@ test.describe('waiver upgrades', () => {
      * worth. The reasons themselves moved into the sheet, where
      * `e2e/waivers.spec.ts` holds them.
      */
-    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost/);
+    // The cost, or, for a free agent outside the waiver window, that there is none.
+    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost|Free agent: pick up anytime/);
     await expect(row.getByTestId('waiver-summary')).toContainText(/Proj\./);
   });
 
@@ -504,7 +505,11 @@ test.describe('waiver upgrades', () => {
     const bid = (waivers.faab?.bids ?? []).find((b: { playerId: string }) => b.playerId === playerId) ?? null;
     const cost = await row.getByTestId('waiver-cost').innerText();
 
-    if (bid?.expected) {
+    if (waivers.pickup?.[playerId]?.state === 'free') {
+      // Outside the waiver window he is an instant add: no price, because
+      // nobody bids. See `core/waivers/clearWindow.ts`.
+      expect(cost).toBe('Free agent: pick up anytime, no FAAB needed');
+    } else if (bid?.expected) {
       // The number on the row is the number the pricing pass produced, to the
       // dollar. A row that rounded, averaged or re-derived it would be a second
       // opinion about somebody else's arithmetic.
@@ -575,9 +580,17 @@ test.describe('waiver upgrades', () => {
   test('quotes a bid without offering to place it', async ({ page }) => {
     // The three figures live in the detail sheet now: the row has room for the
     // expected range and nothing else, and the rest opens on tap.
-    await page.locator('[data-testid="waiver-row"]').first().click();
+    const row = page.locator('[data-testid="waiver-row"]').first();
+    const free = (await row.getByTestId('waiver-summary').getAttribute('data-pickup')) === 'free';
+    await row.click();
     await expect(page.getByTestId('waiver-detail')).toBeVisible();
     const bid = page.getByTestId('faab-bid').first();
+    // A free agent outside the waiver window has no bid to quote at all.
+    if (free) {
+      await expect(page.getByTestId('waiver-detail-cost')).toContainText('no bid needed');
+      await expect(page.getByTestId('faab-bid')).toHaveCount(0);
+      return;
+    }
     const withheld = page.getByTestId('faab-withheld').first();
     // A league with no FAAB says so instead; either is a valid state.
     if (await withheld.isVisible().catch(() => false)) {
