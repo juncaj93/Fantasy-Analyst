@@ -416,6 +416,19 @@ Sleeper add) is priced as contested, never as an uncontested dollar. A league
 whose settings cannot be read, or that runs daily waivers, gets no state and
 keeps every price.
 
+The league's rosters and transactions are re-read every three hours (at :15
+past 00, 03, … 21 UTC, on the five-minute tick), so a rival's drop shows up as
+`On waivers until …` without a Refresh. See `core/league/waiverReadCadence.ts`.
+
+## Who else needs him
+
+A rival needs a position when a named slot there is empty, when his weakest
+named starter there projects under the owner's bar (QB 14, RB/WR/TE 8, DEF 6),
+or when one of the FLEX spots that position fills starts somebody under 8.
+The count prices the bid and, on a player who costs money, is the card's
+reason line (`4 of 9 teams need RB`). See `teamNeedsFor` and `weakFlex` in
+`core/league/competition.ts`.
+
 Nothing says `optimal`, and no branch carries a percentage.
 
 ---

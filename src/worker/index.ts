@@ -38,6 +38,7 @@ import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts
 import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
 import { nflverseFeedDue } from '../core/nflverse/cadence.ts';
+import { waiverReadDue } from '../core/league/waiverReadCadence.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { CronRunRecorder } from '../server/repos/cronRuns.ts';
@@ -202,7 +203,8 @@ export default {
    * Cron cadence (see wrangler.toml):
    *   Every 5 minutes  -> injury check (conditional; usually a 304 and no work)
    *                       plus, until it finishes, one step of last season's
-   *                       history backfill
+   *                       history backfill; and every three hours at :15 the
+   *                       league's rosters and transactions
    *   Sat 23:00 UTC    -> Vegas refresh, and a late pregame calibration capture
    *   Sun 15:00 UTC    -> Vegas refresh, and a late pregame calibration capture
    *   Daily 09:00 UTC  -> Sleeper player dictionary, last season's statistics,
@@ -355,6 +357,38 @@ export default {
           if (run.outcome === 'failed') console.error(`nflverse ${feed} refresh failed`, run.note);
         } catch (err) {
           console.error(`nflverse ${feed} refresh failed`, err);
+        }
+      }
+
+      /*
+       * And the league itself, every three hours: rosters, then this week's and
+       * last week's transactions. What puts a rival's fresh drop on the Waivers
+       * screen as "On waivers until …" without anybody tapping Refresh. See
+       * `core/league/waiverReadCadence.ts` for the clock.
+       *
+       * Its own budget, like the feed above, and last and separately caught, so
+       * a Sleeper outage can never cost the injury check. The 09:00 tick still
+       * reads the roster too; this adds reads, it moves none.
+       */
+      if (!feed && waiverReadDue(event.scheduledTime)) {
+        try {
+          const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);
+          const metered = toAppEnv(env, budgetedFetch(budget));
+          const selected = await new LeagueRepo(env.DB).getSelectedLeague();
+          if (selected) {
+            await new SleeperSyncService(env.DB, metered.sleeper).syncLeague(selected.id);
+            const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
+            await new LeagueStrategyService(env.DB, { sleeper: metered.sleeper }).syncTransactions({
+              leagueId: selected.id,
+              sleeperLeagueId: selected.sleeperLeagueId,
+              season: selected.season,
+              week: state?.week ?? 1,
+              maxWeeks: 2,
+              now: new Date(event.scheduledTime ?? Date.now()),
+            });
+          }
+        } catch (err) {
+          console.error('league read failed', err);
         }
       }
       return;

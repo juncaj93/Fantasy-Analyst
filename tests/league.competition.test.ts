@@ -13,6 +13,7 @@ import {
   assessCompetition,
   levelFor,
   teamNeedsFor,
+  weakFlex,
   type RosterPlayerMeta,
   type TeamRoster,
 } from '../src/core/league/competition.ts';
@@ -198,10 +199,10 @@ describe('a weak starter is a need', () => {
   ];
   const meta = metaFor(rosters, { 1: [], 2: ['RB', 'RB', 'RB'], 3: ['RB', 'RB'], 4: ['RB', 'RB', 'RB'] });
   const projections = new Map([
-    // Team 2: two strong backs and a weak third. Covered: the third does not start.
+    // Team 2: two strong backs and a third who fills the flex at 9. Covered.
     ['2-RB-0', 15],
     ['2-RB-1', 11],
-    ['2-RB-2', 4],
+    ['2-RB-2', 9],
     // Team 3: one back under 8. Needs one.
     ['3-RB-0', 14],
     ['3-RB-1', 6.5],
@@ -249,5 +250,50 @@ describe('a weak starter is a need', () => {
     const assessed = assessCompetition({ needs, budgets: wallets({}), expectedLow: null, bidding: true, position: 'RB' });
     expect(assessed.needyTeams).toBe(2);
     expect(assessed.detail).toBe('2 of 3 teams need RB');
+  });
+});
+
+/*
+ * 1 October 2026, the owner: judge each rival's two FLEX starters against the
+ * same 8-point bar, not just the named slots. On the live rosters the named
+ * slots alone left 1 of 9 teams needy at RB and at WR.
+ */
+describe('a weak flex starter is a need', () => {
+  const FLEX_SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN']);
+  const team = (rosterId: number, positions: string[]) => roster(rosterId, positions);
+  const pos = ['RB', 'RB', 'RB', 'WR', 'WR', 'WR', 'WR', 'TE'];
+  const rosters = [roster(1, [], true), team(2, pos), team(3, pos)];
+  const meta = metaFor(rosters, { 1: [], 2: pos, 3: pos });
+  // Named slots all strong on both teams. Team 2's flex: RB3 12, WR4 9. Team 3's: RB3 12, WR4 6.5.
+  const strong = (id: number) => [
+    [`${id}-RB-0`, 15],
+    [`${id}-RB-1`, 12],
+    [`${id}-RB-2`, 12],
+    [`${id}-WR-3`, 14],
+    [`${id}-WR-4`, 12],
+    [`${id}-WR-5`, 10],
+    [`${id}-TE-7`, 9],
+  ] as [string, number][];
+  const projections = new Map<string, number>([...strong(2), ['2-WR-6', 9], ...strong(3), ['3-WR-6', 6.5]]);
+
+  it('makes a team with a 6.5-point flex needy at every flex position', () => {
+    for (const position of ['RB', 'WR', 'TE']) {
+      const needs = teamNeedsFor(position, rosters, meta, FLEX_SHAPE, projections);
+      expect(needs.map((n) => [n.rosterId, n.level]), position).toEqual([
+        [2, 'covered'],
+        [3, 'thin'],
+      ]);
+    }
+  });
+
+  it('never applies the skill bar to a quarterback', () => {
+    expect(weakFlex('QB', rosters[2]!, meta, FLEX_SHAPE, projections)).toBe(false);
+  });
+
+  it('counts a flex spot nobody can fill as weak', () => {
+    const thin = [roster(1, [], true), team(4, ['RB', 'RB', 'WR', 'WR', 'WR', 'TE'])];
+    const m = metaFor(thin, { 1: [], 4: ['RB', 'RB', 'WR', 'WR', 'WR', 'TE'] });
+    const p = new Map(thin[1]!.playerIds.map((id) => [id, 15] as [string, number]));
+    expect(teamNeedsFor('WR', thin, m, FLEX_SHAPE, p)[0]!.level).toBe('thin');
   });
 });
