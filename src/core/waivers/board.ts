@@ -50,6 +50,7 @@ import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
 import type { WaiverAddBasis } from '../startsit/waivers.ts';
 import type { WaiverMoveGroup, YardstickBasis } from './yardstick.ts';
 import { basisLabel, mostAddedLine } from './wording.ts';
+import type { PickupState } from './clearWindow.ts';
 
 export interface WaiverLeagueIntel {
   /**
@@ -238,6 +239,8 @@ export interface WaiverAdviceLike {
   dst?: DstPlan | null;
   /** The claims grouped by drop, from `core/waivers/yardstick.ts`. Absent on an older payload. */
   moveGroups?: WaiverMoveGroup[];
+  /** Each free agent's waiver state, from `core/waivers/clearWindow.ts`. Absent on an older payload. */
+  pickup?: Readonly<Record<string, PickupState>> | null;
 }
 
 /**
@@ -324,6 +327,11 @@ export interface WaiverBoardRow {
   planExcluded: string | null;
   /** Which yardstick the numbers on the card came from, in words. Null when not a comparison. */
   yardstick: { basis: YardstickBasis; label: string } | null;
+  /**
+   * Still on waivers (a claim, priced) or free to add now (no bid). Absent
+   * when the league's window could not be read, which keeps the price showing.
+   */
+  pickup?: PickupState | null;
 }
 
 export interface WaiverBoard {
@@ -496,6 +504,8 @@ export function buildWaiverBoard(advice: WaiverAdviceLike): WaiverBoard {
    */
   const bids = new Map((advice.faab?.bids ?? []).map((b) => [b.playerId, b]));
   for (const row of byPlayer.values()) {
+    const pickup = advice.pickup?.[row.playerId];
+    if (pickup) row.pickup = pickup;
     const bid = bids.get(row.playerId);
     if (!bid) continue;
     row.bid = bid;

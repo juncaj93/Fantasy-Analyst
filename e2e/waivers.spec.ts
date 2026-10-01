@@ -148,7 +148,8 @@ test.describe('the waivers page', () => {
 
     // And one summary line carrying cost, competition and the projection.
     const summary = await row.getByTestId('waiver-summary').innerText();
-    expect(summary).toMatch(/Est\. cost/);
+    // The cost, or, for a free agent outside the waiver window, that there is none.
+    expect(summary).toMatch(/Est\. cost|Free agent: pick up anytime/);
     expect(summary).toMatch(/Proj\. \+?\d+\.\d pts/);
     // One decimal, always — `+6.46 pts` beside `+5.7 pts` was two different
     // claims about how precisely the same calculation is known.

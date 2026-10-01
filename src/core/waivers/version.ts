@@ -58,4 +58,9 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * top ten of Sleeper's drops kept out of the plan; bench adds priced; claims
  * grouped by drop, up to two drops a week. See `core/waivers/yardstick.ts`.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@6', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@7`: a free agent outside the waiver window is an instant add with no
+ * bid, and a claim under the same drop below him is not planned; a fresh drop
+ * the room rated is priced as contested. See `core/waivers/clearWindow.ts`.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@7', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

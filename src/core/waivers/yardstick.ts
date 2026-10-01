@@ -423,7 +423,13 @@ export interface WaiverMoveGroup {
   /** Adds to try, in the order to enter them. */
   addIds: string[];
   /** Protected players this group's drop was chosen over, with why. */
-  kept: { playerId: string; name: string; why: string }[];
+  kept: {
+    playerId: string;
+    name: string;
+    why: string;
+    /** Set for a handcuff: the starter he backs up. */
+    backs?: string;
+  }[];
 }
 
 export interface WaiverMovePlan {
@@ -572,7 +578,12 @@ export function planMoves(opts: {
         c.protection === 'handcuff' && c.backs
           ? `he backs up ${c.backs.name}, your starting ${c.reading.position}`
           : `the market still rates him (${c.holdNote ?? 'held'})`;
-      group.kept.push({ playerId: c.reading.playerId, name: c.reading.name, why });
+      group.kept.push({
+        playerId: c.reading.playerId,
+        name: c.reading.name,
+        why,
+        ...(c.protection === 'handcuff' && c.backs ? { backs: c.backs.name } : {}),
+      });
     }
   }
 

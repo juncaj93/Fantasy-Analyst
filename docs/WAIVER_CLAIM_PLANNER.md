@@ -356,38 +356,63 @@ The Waivers screen opens on the result:
 
 ```
 Your waiver plan
-1. Add Breakout Back · $24 · Drop Depth Back
-2. Add Emerging Receiver · $14 · Drop Depth Back   Only if 1 loses
-3. Add Emerging Receiver · $14 · Drop Roster Filler  Only if 2 does not land him
-4. Add Streaming Tight End · $4 · Drop Backup Tight End
-Enter them in this order — Sleeper runs claims top to bottom …
-                                                              [ See why ]
+Enter in this order
+Drop Jaylen Wright for the first one you win (Emmett Johnson stays: he backs up Kenneth Walker)
+1. Add Adonai Mitchell · bid $8–16
+2. Add Keenan Allen · free agent, no bid needed     Only if 1 loses
 ```
 
-Three decisions in that card are worth stating, because each is the answer to a
+Four decisions in that card are worth stating, because each is the answer to a
 way the feature could have gone wrong.
 
-**The qualifier is on the card, not behind `See Why`.** A plan naming one target
-twice and one drop twice is exactly right and looks exactly like a mistake, and a
-reader who cannot see why will delete one of the two lines — which decides
-whether they land the player.
+**The qualifier is on the card.** A plan naming one target twice and one drop
+twice is exactly right and looks exactly like a mistake, and a reader who cannot
+see why will delete one of the two lines — which decides whether they land the
+player.
 
 **It is an ordered list, and nothing on it is a button.** The numbering is the
-instruction, so it is a real `<ol>` marker rather than a printed digit. The only
-control is one `See why`, because this card is a list of transactions and there
-is no control on it that performs one.
+instruction, so it is a real `<ol>` marker rather than a printed digit. There is
+no control on the card at all: it is a list of transactions and nothing on it
+performs one. The `See why` button and its sheet were removed on 1 October 2026
+at the owner's request ("way too much text"), along with a `Keeping X: reason`
+line for every bench player the plan did not cut. Only a handcuff to one of your
+own starters gets a clause on the drop line, because he looks like the obvious
+cut the plan skipped. The plan still carries its `why`, `outcomes` and `keep`
+data; nothing draws them.
 
 **An empty plan surfaces only when it says something the board does not.** A
 quiet week is already `Nothing available beats what you already have` on the
 board underneath; `No safe drop for this upgrade` is a different fact and earns
 its line.
 
-`See Why` is one sheet with no tabs in it: per claim, why him, why that cut, what
-the roster gains, what the lineup gains, the pricing pass's own headline, who
-else wants him, and how the claim stands to the ones above it — then the
-branches, the substitute and complement readings, who the plan refuses to cut,
-and what the wallet allowed. A player's own detail sheet carries one extra line,
-`If you claim him → Drop X`, which reaches the targets the plan had no room for.
+**A free agent carries no bid.** See below. A player's own detail sheet carries
+one extra line, `If you claim him → Drop X`, which reaches the targets the plan
+had no room for.
+
+## Waiver claim, or free pickup
+
+`core/waivers/clearWindow.ts`, added 1 October 2026. Sleeper's public API has no
+per-player "on waivers" flag, so the app computes it from the league settings
+(`waiver_type`, `waiver_clear_days`, `waiver_day_of_week`, `daily_waivers`), the
+league's completed drops, and each player's kickoff:
+
+- dropped by anyone in the league less than `waiver_clear_days` ago: on waivers;
+- his game this week has kicked off: on waivers until the weekly run (midnight
+  Pacific at the start of the run day, Monday = 0);
+- otherwise: a free agent, an instant add with no bid.
+
+Read off this league's own log: Adonai Mitchell dropped 30 Sep, claimable from
+about 2 Oct; Braelon Allen never dropped, yet bid on by four managers on Monday
+and Tuesday and awarded at the Wednesday 07:10 UTC run.
+
+A free agent's card says `Free agent: pick up anytime, no FAAB needed` and no
+price; in the plan he reads `free agent, no bid needed`, and any claim under the
+same drop below him is dropped from the list, because adding him spends the
+drop. A player on waivers keeps his price and says the day he clears. A just
+dropped player the room rated (drafted inside the starter pool, or a top-ten
+Sleeper add) is priced as contested, never as an uncontested dollar. A league
+whose settings cannot be read, or that runs daily waivers, gets no state and
+keeps every price.
 
 Nothing says `optimal`, and no branch carries a percentage.
 

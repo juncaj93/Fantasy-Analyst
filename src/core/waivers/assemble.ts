@@ -64,6 +64,7 @@ import { priceWaiverUpgrades, type PricedBid, type WaiverPricingContext } from '
 import { buildWaiverClaimPlan, type WaiverClaimPlan } from './claimPlan.ts';
 import { marketHoldFor } from './marketHold.ts';
 import { findHandcuffs } from './yardstick.ts';
+import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindow.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
@@ -167,6 +168,13 @@ export interface WaiverAssemblyRequest {
   trendingDrops?: ReadonlyMap<string, TrendingVelocity> | undefined;
   /** Players this roster dropped recently, with when. Said on the card, never hidden. */
   recentlyDropped?: ReadonlyMap<string, string> | undefined;
+  /**
+   * The league's waiver window: its rules, and the latest drop of each player
+   * by anyone in the league. What separates a contested claim from an instant
+   * add — see `waivers/clearWindow.ts`. Absent leaves every add priced, as
+   * before.
+   */
+  waiverWindow?: { rules: WaiverRules; drops: ReadonlyMap<string, string> } | null | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -209,6 +217,12 @@ export interface WaiverAssembly extends WaiverAdvice {
   bids: PricedBid[];
   /** The claims to enter, in order. Advisory — nothing here transacts. */
   claimPlan: WaiverClaimPlan | null;
+  /**
+   * Each scanned free agent's state: still on waivers, or free to add now.
+   * A record rather than a map so it survives the trip to the phone. Empty
+   * when the league's window could not be read.
+   */
+  pickup: Record<string, PickupState>;
   /**
    * The lineup the whole board was measured against.
    *
@@ -432,6 +446,25 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     }),
   }));
 
+  /*
+   * Who is still on waivers and who is an instant add, for every scanned free
+   * agent. Read by pricing (a strong player inside the window is priced as
+   * contested) and by the board and the plan (a free agent carries no bid).
+   */
+  const pickup: Record<string, PickupState> = {};
+  if (request.waiverWindow) {
+    const { rules, drops } = request.waiverWindow;
+    for (const input of candidateInputs) {
+      pickup[input.player.id] = pickupStateFor({
+        droppedAt: drops.get(input.player.id) ?? null,
+        kickoff: input.kickoff ?? null,
+        hasTeam: input.player.team != null && input.player.team !== '',
+        now: request.now,
+        rules,
+      });
+    }
+  }
+
   const intel = waiverLeagueIntel({
     /* Bench adds need a rival count too: they are priced now. */
     advice: { upgrades: advice.upgrades, valueAdds: advice.valueAdds },
@@ -450,6 +483,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         strategy: request.strategy,
         rosteredIds,
         competition: intel.competition,
+        pickup,
+        heldIds,
       })
     : [];
 
@@ -580,7 +615,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   const claimPlan = (() => {
     try {
       return buildWaiverClaimPlan({
-        advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids } },
+        advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids }, pickup },
         budget: request.budgets,
         ...(request.generatedAt === undefined ? {} : { generatedAt: request.generatedAt }),
       });
@@ -589,5 +624,5 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     }
   })();
 
-  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, lineup };
+  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, lineup, pickup };
 }

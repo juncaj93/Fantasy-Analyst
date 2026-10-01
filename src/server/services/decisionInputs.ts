@@ -522,11 +522,35 @@ export async function gatherWaiverInputs(
    * drafted early enough that a September claim may not cut him.
    */
   const ranks = await draftRanks(db);
-  const candidateIds = boundedFreeAgentIds(players, {
-    rosteredIds,
-    startable: startablePositions(shape),
-    ranks,
+  const startable = startablePositions(shape);
+  const week = base.nflState?.week ?? 1;
+
+  /*
+   * What the ledger and the league's own transactions know.
+   *
+   * Both are reads of stored rows and never a fetch: the manager-history
+   * backfill fills them on the daily clock, and a waiver board that triggered
+   * ingestion would turn a page load into a walk of the previous-league chain.
+   * Read before the scan, because the scan reaches the league's fresh drops.
+   */
+  const strategy = await new LeagueStrategyService(db, { sleeper })
+    .context(league.id, { week, season: league.season })
+    .catch(() => null);
+
+  /*
+   * The wire scan, plus anybody this league dropped inside the waiver window.
+   *
+   * The bounded scan orders by draft rank and takes the top of each position,
+   * which can miss a player a rival cut yesterday. He is the one claim that is
+   * actually contested this week, so he is always scanned.
+   */
+  const scanned = boundedFreeAgentIds(players, { rosteredIds, startable, ranks });
+  const inWindow = [...(strategy?.leagueDrops.keys() ?? [])].filter((id) => {
+    if (rosteredIds.has(id) || scanned.includes(id)) return false;
+    const p = players.find((x) => x.id === id);
+    return p != null && p.active && (startable.size === 0 || startable.has(p.position));
   });
+  const candidateIds = [...scanned, ...inWindow];
 
   /*
    * The slate, the defences and the fixture list, built once for both scans.
@@ -536,7 +560,6 @@ export async function gatherWaiverInputs(
    * model's smallest residual has been waiting for.
    */
   const context = await buildStartSitContext(db);
-  const week = base.nflState?.week ?? 1;
 
   const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints] = await Promise.all([
     startSitInputsFor(db, mine.playerIds, { context, reserveIds: mine.reserveIds }),
@@ -574,16 +597,6 @@ export async function gatherWaiverInputs(
     preseasonPointsFor(db, base.league.season, profile, mine.playerIds),
   ]);
 
-  /*
-   * What the ledger and the league's own transactions know.
-   *
-   * Both are reads of stored rows and never a fetch: the manager-history
-   * backfill fills them on the daily clock, and a waiver board that triggered
-   * ingestion would turn a page load into a walk of the previous-league chain.
-   */
-  const strategy = await new LeagueStrategyService(db, { sleeper })
-    .context(league.id, { week, season: league.season })
-    .catch(() => null);
   const history = await new ManagerIntelService(db)
     .waiverHistory({
       leagueId: league.id,
@@ -650,6 +663,11 @@ export async function gatherWaiverInputs(
       trending: strategy?.trending,
       trendingDrops: strategy?.trendingDrops,
       recentlyDropped: strategy?.recentlyDropped,
+      /*
+       * Who is still on waivers and who is an instant add. Null when the
+       * league's settings say nothing usable, which keeps every price.
+       */
+      waiverWindow: strategy?.waiverRules ? { rules: strategy.waiverRules, drops: strategy.leagueDrops } : null,
       published,
       depth,
       /*

@@ -9967,37 +9967,6 @@ div.matchup-result {
 }
 
 /*
- * One claim's argument on the See Why sheet, and the number that ties it back
- * to the line on the card.
- *
- * The marker cannot be a list marker here because each claim is a block with a
- * heading and a list of its own, so the rank is drawn — quietly, and hidden
- * from assistive technology, which reads the instruction beside it instead of
- * a bare digit.
- */
-.claim-why + .claim-why {
-  margin-top: var(--sp-3);
-}
-
-.claim-why-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-}
-
-.claim-plan-rank {
-  flex: none;
-  min-width: 1.1em;
-  color: var(--text-dim);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.claim-why-qualifier {
-  margin: 2px 0 0 calc(1.1em + var(--sp-2));
-}
-
-/*
  * One drop and the claims under it.
  *
  * The drop is the heading of its block, in the weight of an instruction,
@@ -10029,10 +9998,10 @@ div.matchup-result {
   overflow-wrap: anywhere;
 }
 
+/* The one handcuff the drop was chosen over, as a clause on the drop line. */
 .claim-plan-keep {
-  margin-top: var(--sp-2);
-  font-size: 0.76rem;
-  line-height: 1.35;
+  font-size: 0.78rem;
+  font-weight: 450;
 }
 
 /* Warnings and colour on a waiver card, under its numbers. */

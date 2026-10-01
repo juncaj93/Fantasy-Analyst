@@ -424,6 +424,52 @@ describe('the 30 September board, rebuilt', () => {
     for (const claim of plan.claims) expect(claim.dropName).toBe('Jaylen Wright');
   });
 
+  /*
+   * 1 October 2026: the owner's verdict on the card was "way too much text".
+   * The market-hold players need no defence; only the handcuff gets a clause.
+   */
+  it('says only the handcuff on the drop line, in one clause', () => {
+    expect(plan.groups[0]!.keepNote).toBe('Emmett Johnson stays: he backs up Kenneth Walker');
+    expect(plan.groups[0]!.keepNote).not.toMatch(/Kalif|Harvey/);
+  });
+
+  describe('with the waiver window read', () => {
+    const free = { state: 'free' as const, reason: null, until: null };
+    const locked = { state: 'waivers' as const, reason: 'dropped' as const, until: '2026-10-02T17:22:00Z' };
+    const bids = [
+      { playerId: 'keenan', recommended: 9, doNotExceed: 12, headline: 'Bid $9', expected: { low: 8, high: 16 } },
+      { playerId: 'kc', recommended: 2, doNotExceed: 3, headline: 'Bid $2', expected: { low: 1, high: 3 } },
+    ];
+
+    it('prints no bid for a free agent, and stops the list at him', () => {
+      const p = buildWaiverClaimPlan({
+        advice: { ...advice, faab: { bids }, pickup: { keenan: free, kc: free, lloyd: free } },
+      });
+      expect(p.claims.map((c) => c.headline)).toEqual(['Add Keenan Allen · free agent, no bid needed']);
+      expect(p.claims[0]!.bid).toBeNull();
+      expect(p.groups[0]!.headline).toBe('Drop Jaylen Wright');
+      expect(p.instruction).toBeNull();
+    });
+
+    it('keeps the price on a player still on waivers, with a free agent as his fallback', () => {
+      const p = buildWaiverClaimPlan({
+        advice: { ...advice, faab: { bids }, pickup: { keenan: locked, kc: free } },
+      });
+      expect(p.claims.map((c) => c.headline)).toEqual([
+        'Add Keenan Allen · bid $8–16',
+        'Add KC Concepcion · free agent, no bid needed',
+      ]);
+      expect(p.claims[1]!.qualifier).toBe('Only if 1 loses');
+      expect(p.claims[0]!.pickup?.state).toBe('waivers');
+    });
+
+    it('carries the state onto the board card', () => {
+      const b = buildWaiverBoard({ ...advice, faab: { bids }, pickup: { keenan: locked, kc: free } });
+      expect(b.rows.find((r) => r.playerId === 'keenan')!.pickup?.state).toBe('waivers');
+      expect(b.rows.find((r) => r.playerId === 'kc')!.pickup?.state).toBe('free');
+    });
+  });
+
   it('names the same cut on every card as the plan does', () => {
     const planned = new Map(plan.claims.map((c) => [c.addPlayerId, c.dropName]));
     for (const row of board.rows) {
