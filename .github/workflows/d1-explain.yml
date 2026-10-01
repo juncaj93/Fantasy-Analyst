@@ -104,3 +104,20 @@ jobs:
             cat plans.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # What the Start/Sit props reads cost as written and as rewritten, in D1's
+      # own rows_read, with a fingerprint of the rows each returns so a cheaper
+      # form that answers differently cannot pass for a fix. SELECTs only.
+      # See scripts/probe-props-reads.mjs.
+      - name: What the props reads cost
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          node scripts/probe-props-reads.mjs | tee props.txt
+          {
+            echo '### Props reads, as written and rewritten'
+            echo ''
+            echo '```'
+            cat props.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
