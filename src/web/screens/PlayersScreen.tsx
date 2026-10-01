@@ -814,7 +814,13 @@ function PlayerRow({
             translation the reader was doing for no reason, and one of the two
             names was simply false. No value, weighting or ordering changes —
             see `core/evidence/aggregate.ts`.
+
+            `7d` comes first, so the row reads this week before the month it
+            sits inside. Same field the player page calls `7d`, same source as
+            `30d` beside it. Trades keeps its row to `30d` and `Life` on purpose;
+            this screen is the one scanned for who is moving right now.
           */
+          { label: '7d', value: <SignedValue net={player.signal?.last7.net ?? 0} /> },
           { label: '30d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
           {
             label: 'ADP',
