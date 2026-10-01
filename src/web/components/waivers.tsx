@@ -197,7 +197,30 @@ const STRENGTH_TAG: Record<WaiverBoardRow['strength']['level'], string> = {
   unknown: '',
 };
 
+/**
+ * The one reason line a card may carry, or none.
+ *
+ * In order: the plan leaving him out (a top-ten Sleeper drop, "check the news
+ * before claiming"); an empty starting slot he would fill, or a defence row's
+ * call; then the engine's
+ * own notes, which arrive most important first: a Vegas edge over your bench,
+ * your own recent cut, a lower place on the drops list. An empty slot outranks
+ * the notes because it is the reason he is on the board at all.
+ */
+export function cardReason(
+  row: Pick<WaiverBoardRow, 'planExcluded' | 'fit' | 'notes' | 'dst' | 'strength' | 'why'>,
+): string | null {
+  if (row.planExcluded) return row.planExcluded;
+  /* A defence row's fit is the planner's call (`Streams over BUF`), the whole point of the row. */
+  if (row.dst != null || row.fit.need === 'unfilled') return row.fit.label;
+  const note = row.notes?.[0];
+  if (note) return note;
+  /* A player nothing can score is on the board only because Sleeper is adding him. */
+  return row.strength.level === 'unknown' ? row.why : null;
+}
+
 export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => void }) {
+  const reason = cardReason(row);
   return (
     <button
       className="player-row waiver-row"
@@ -238,59 +261,16 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
       </div>
 
       {/*
-        Tags, then one line.
-
-        This card used to be three lines of prose under the header — `High
-        pressure · 7 of 11 rivals need the position`, `stronger market
-        expectation (13.5 vs 9.2 pts)`, a cost and a fit scattered between
-        them — and a reader had to assemble the claim from four places. The
-        tags are the recurring shapes: what he is, how wanted he is, which way
-        he is moving. The line under them is the arithmetic: what he costs, who
-        else wants him, what he is worth.
+        No pills. On 1 October 2026 every card carried three of them (`Better
+        than Jaylen Wright`, `Sleeper projection`, `Nobody else needs him`) on
+        top of two or three lines of text, and the owner's verdict was "why's
+        there so much text everywhere". The plan's drop line already names the
+        cut, the plan card says which projection it used, and who else needs
+        him is not a question for a free pickup. Fit, multi-week value, season
+        outlook, competition and the yardstick all remain on the detail sheet
+        one tap away. A card is now: who he is, one status line, and at most
+        one reason.
       */}
-      <div className="tag-row" data-testid="waiver-tags">
-        <span className="tag" data-testid="waiver-fit">
-          {row.fit.label}
-        </span>
-        {row.multiWeek ? <span className="tag">{row.multiWeek.label}</span> : null}
-        {/*
-          The season, marked as a different kind of claim from the ones beside it.
-
-          Every other chip on this row is about this week and comes from this
-          app's own engine. This one is the market's season-long line divided by
-          the games left, so it is a different horizon *and* a different source,
-          and a reader who took it for a weekly figure would be reading it as
-          twenty times what it says. Hence its own tone rather than the shared
-          `.tag` — see `.tag-season` — and a title carrying both numbers.
-        */}
-        {row.seasonOutlook ? (
-          <span
-            className="tag tag-season"
-            data-testid="waiver-season"
-            data-level={row.seasonOutlook.level}
-            title={row.seasonOutlook.detail ?? undefined}
-          >
-            {row.seasonOutlook.label}
-          </span>
-        ) : null}
-        {/* Nobody competes for an instant pickup, so a free agent carries no competition chip. */}
-        {row.competition && row.pickup?.state !== 'free' ? (
-          <span className="tag" data-testid="waiver-competition">
-            {row.competition.label}
-          </span>
-        ) : null}
-        {/*
-          Which yardstick the two numbers below came from. Never absent on a
-          comparison: a reader should not have to guess whether a betting line
-          was set against a published projection, because it never is.
-        */}
-        {row.yardstick ? (
-          <span className="tag tag-yardstick" data-testid="waiver-yardstick" data-basis={row.yardstick.basis}>
-            {row.yardstick.basis === 'sleeper' ? 'Sleeper projection' : 'Vegas lines'}
-          </span>
-        ) : null}
-      </div>
-
       {/*
         A free agent outside the waiver window is an instant add: nobody bids,
         so no price is printed and nobody's need for him is a competition. A
@@ -316,7 +296,6 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
               Est. cost{' '}
               {row.faab ? <strong>{formatFaab(row.faab)}</strong> : <UnknownField what="Expected cost" />}
             </span>
-            {row.competition?.detail ? <span> · {row.competition.detail}</span> : null}
           </>
         )}
         {/*
@@ -331,13 +310,11 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
       </div>
 
       {/*
-        Warnings and colour, under the numbers: most-dropped first, then your
-        own recent cut, then what Vegas says against your bench. A row the plan
-        leaves out on purpose says why in the warning tone.
+        One reason, never a stack of them. See `cardReason` for which one.
       */}
-      {(row.notes ?? []).length > 0 ? (
+      {reason ? (
         <div className={`waiver-notes${row.planExcluded ? ' waiver-notes-warn' : ''}`} data-testid="waiver-notes">
-          {(row.notes ?? []).join(' · ')}
+          {reason}
         </div>
       ) : null}
     </button>

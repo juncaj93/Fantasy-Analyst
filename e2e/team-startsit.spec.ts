@@ -463,7 +463,8 @@ test.describe('waiver upgrades', () => {
     const row = page.locator('[data-testid="waiver-row"]').first();
     await expect(row).toHaveAttribute('data-player-id', top!.playerId);
     await expect(row).toContainText(top!.name);
-    await expect(row.getByTestId('waiver-fit')).toContainText(/Upgrades|Fills/);
+    // No pills: fit lives on the detail sheet since 1 October 2026.
+    await expect(row.getByTestId('waiver-tags')).toHaveCount(0);
     await expect(row.getByTestId('waiver-short-term')).toContainText('pts');
     /*
      * The third line was `waiver-why` — one reason, in the engine's own words,
