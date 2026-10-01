@@ -81,3 +81,33 @@ for (const p of players) {
   }
   console.log(`  ${String(p.name).padEnd(24)} ${String(p.position ?? '').padEnd(4)} pill: ${label(p.ownerRosterId)}`);
 }
+
+// The list row: owner pill and pick, for early picks, late picks, and anybody
+// on a roster the draft never reached (a waiver pickup).
+const all = [];
+for (let offset = 0; offset < 1200; offset += 200) {
+  const page = await get(`/api/players?q=&leagueId=${encodeURIComponent(league.id)}&limit=200&offset=${offset}`);
+  all.push(...(page.json?.players ?? []));
+  if (!page.json?.hasMore) break;
+}
+const sendsPick = all.some((p) => 'draftPick' in p);
+console.log(`\nrow: draftPick on the wire: ${sendsPick ? 'yes' : 'NO (older deployment)'}`);
+if (sendsPick) {
+  const pickNo = (s) => {
+    const [r, n] = s.split('.').map(Number);
+    return r * 100 + n;
+  };
+  const drafted = all.filter((p) => p.draftPick).sort((a, b) => pickNo(a.draftPick) - pickNo(b.draftPick));
+  const undraftedOwned = all.filter((p) => !p.draftPick && p.ownerRosterId != null);
+  const show = (p) =>
+    console.log(
+      `  ${String(p.name).padEnd(24)} ${String(p.position ?? '').padEnd(4)} Pick ${p.draftPick ?? '—'}  pill: ${label(p.ownerRosterId)}`,
+    );
+  console.log(`drafted: ${drafted.length}  on a roster but undrafted: ${undraftedOwned.length}`);
+  console.log('Early picks:');
+  drafted.slice(0, 4).forEach(show);
+  console.log('Late picks:');
+  drafted.slice(-4).forEach(show);
+  console.log('On a roster, never drafted:');
+  undraftedOwned.slice(0, 4).forEach(show);
+}

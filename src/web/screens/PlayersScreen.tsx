@@ -79,6 +79,11 @@ interface PlayerListItem {
    * a claim nobody can make.
    */
   ownerRosterId?: number | null;
+  /**
+   * Where this league's draft took him, as `1.04`; null when it never did.
+   * Absent when no league was named or on an older deployment.
+   */
+  draftPick?: string | null;
 }
 
 /** One page of the response, plus what it says about the rest of the list. */
@@ -624,6 +629,8 @@ export function PlayersScreen({
                 key={p.id}
                 player={p}
                 busy={flagging === p.id}
+                draftAhead={draftAhead}
+                teams={teams}
                 onOpen={() => setOpenId(p.id)}
                 onMyGuy={(level) => void setMyGuy(p.id, level)}
               />
@@ -775,11 +782,16 @@ function LoadMore({
 function PlayerRow({
   player,
   busy,
+  draftAhead,
+  teams,
   onOpen,
   onMyGuy,
 }: {
   player: PlayerListItem;
   busy: boolean;
+  /** Whether a draft is still to be held. See `PlayersScreen`'s `draftAhead`. */
+  draftAhead: boolean;
+  teams: readonly OwnerTeam[];
   onOpen: () => void;
   onMyGuy: (level: 0 | 1 | 2 | 3) => void;
 }) {
@@ -804,9 +816,18 @@ function PlayerRow({
           actions, two buttons, two tab stops, and a target the size of a thumb
           on each. See `CompactPlayerRow`'s `action` and `.row-action`.
         */
-        action={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
+        /*
+          Only while a draft is ahead. Once it is over the heart has nothing
+          left to move, and the row says who holds him instead, in the same
+          words and from the same lookup as the card's corner (`OwnerPill`,
+          `ownerPillLabel`). The stored levels are untouched either way.
+        */
+        {...(draftAhead
+          ? { action: <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} /> }
+          : { trailing: <OwnerPill label={ownerPillLabel(player.ownerRosterId, teams)} /> })}
         onOpen={onOpen}
         testId="player-search-row"
+        cluster
         /*
           Two numbers clustered at the leading edge, which is how the draft
           board's own second line reads.
@@ -854,18 +875,36 @@ function PlayerRow({
           */
           { label: '7d', value: <SignedValue net={player.signal?.last7.net ?? 0} /> },
           { label: '30d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
-          {
-            label: 'ADP',
-            testId: 'players-adp',
-            value:
-              player.draftRank != null ? (
-                player.draftRank
-              ) : (
-                <span className="faint" title="Sleeper does not rank him">
-                  —
-                </span>
-              ),
-          },
+          /*
+            Where the market has him while a draft is ahead, and where this
+            league's draft actually took him once it is over: `Pick 1.04`.
+            A player the draft never reached (a waiver pickup, a rookie added
+            later) shows a quiet dash, the same mark an unranked ADP uses.
+          */
+          draftAhead
+            ? {
+                label: 'ADP',
+                testId: 'players-adp',
+                value:
+                  player.draftRank != null ? (
+                    player.draftRank
+                  ) : (
+                    <span className="faint" title="Sleeper does not rank him">
+                      —
+                    </span>
+                  ),
+              }
+            : {
+                label: 'Pick',
+                testId: 'players-pick',
+                value: player.draftPick ? (
+                  player.draftPick
+                ) : (
+                  <span className="faint" title="Not drafted in this league">
+                    —
+                  </span>
+                ),
+              },
         ]}
       />
     </div>

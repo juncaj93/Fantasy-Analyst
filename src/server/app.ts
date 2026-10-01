@@ -2151,9 +2151,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     // it: they depend on nothing this handler has read, and on D1 a statement
     // that waits for a previous one is a network round trip. Issued together,
     // ownership costs the list no wave at all.
-    const [snapshot, rosters] = await Promise.all([
+    const [snapshot, rosters, draftPicks] = await Promise.all([
       new AdpRepo(ctx.env.db).latestPlatformSnapshot(),
       leagueId ? new LeagueRepo(ctx.env.db).listRosters(leagueId) : Promise.resolve([]),
+      leagueId ? leagueDraftPicks(new LeagueRepo(ctx.env.db), leagueId) : Promise.resolve(new Map<string, string>()),
     ]);
     const ranks = snapshot ? await new AdpRepo(ctx.env.db).valuesByPlayer(snapshot.id) : new Map();
 
@@ -2294,6 +2295,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
          * for a nameless seat, exactly as `OwnerTeam` says.
          */
         ...(leagueId ? { ownerRosterId: owned.get(row.player.id) ?? null } : {}),
+        /*
+         * Where this league's draft took him, as the room says it: `1.04`.
+         * Null for a player the draft never reached (a waiver pickup, a
+         * rookie added later), absent when no league was named. The row
+         * prints it in place of ADP once the draft is over.
+         */
+        ...(leagueId ? { draftPick: draftPicks.get(row.player.id) ?? null } : {}),
       })),
     });
   });
@@ -3525,4 +3533,21 @@ export async function refreshVegas(env: AppEnv, opts: { manual?: boolean } = {})
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+/**
+ * Every pick of a league's draft, keyed by player, already in `1.04` form.
+ *
+ * Read from the picks this app stored as the draft ran, in one statement so
+ * the list pays no extra round trip, and labelled by the same
+ * `draftPickLabel` the Team screen prints, so the two cannot disagree about
+ * which round a pick fell in. A league with no draft yields an empty map.
+ */
+async function leagueDraftPicks(repo: LeagueRepo, leagueId: string): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  for (const pick of await repo.listLeagueDraftPicks(leagueId)) {
+    const label = draftPickLabel(pick.pickNo, pick.teams);
+    if (label) labels.set(pick.playerId, label);
+  }
+  return labels;
 }

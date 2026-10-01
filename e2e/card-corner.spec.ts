@@ -89,3 +89,64 @@ test.describe('the card corner while a draft is ahead', () => {
     await expect(sheet.getByTestId('owner-pill')).toHaveCount(0);
   });
 });
+
+/**
+ * The list row follows the same gate as the card.
+ *
+ * After the draft: the owner pill where the heart was, and the row's third
+ * number is this league's pick (`Pick 1.02`) rather than ADP. Before it: the
+ * heart and ADP, exactly as they were. Either way the numbers stay one group at
+ * the leading edge: three of them once spread to the far ends of the row.
+ */
+function row(page: Page, playerId: string) {
+  return page.locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`);
+}
+
+async function numbersStayTogether(page: Page, playerId: string): Promise<void> {
+  const r = row(page, playerId);
+  const rowBox = (await r.boundingBox())!;
+  const cells = r.locator('.dense-metric');
+  await expect(cells).toHaveCount(3);
+  const last = (await cells.nth(2).boundingBox())!;
+  expect(last.x + last.width - rowBox.x, 'the third number has drifted to the far edge').toBeLessThan(
+    rowBox.width * 0.6,
+  );
+}
+
+test.describe('the list row once the draft is over', () => {
+  test.beforeEach(async ({ page }) => {
+    await draftAhead(page, false);
+    await openPlayers(page);
+  });
+
+  test('names the owner, prints the pick and draws no heart', async ({ page }) => {
+    const rival = row(page, RIVAL);
+    await expect(rival.getByTestId('owner-pill')).toHaveText('Rival');
+    await expect(rival.getByTestId('players-pick')).toHaveText(/Pick\s*1\.02/);
+    await expect(rival.getByTestId('players-adp')).toHaveCount(0);
+    await expect(rival.getByTestId('my-guy-control')).toHaveCount(0);
+    await expect(row(page, MINE).getByTestId('owner-pill')).toHaveText('You');
+    await numbersStayTogether(page, RIVAL);
+  });
+
+  test('gives an undrafted free agent a dash for a pick', async ({ page }) => {
+    const free = page
+      .getByTestId('player-search-row')
+      .filter({ has: page.locator('[data-testid="owner-pill"][data-owner="Available"]') })
+      .first();
+    await expect(free).toBeVisible();
+    await expect(free.getByTestId('players-pick')).toHaveText(/Pick\s*—/);
+  });
+});
+
+test.describe('the list row while a draft is ahead', () => {
+  test('keeps the heart and ADP', async ({ page }) => {
+    await draftAhead(page, true);
+    await openPlayers(page);
+    const rival = row(page, RIVAL);
+    await expect(rival.getByTestId('my-guy-control')).toBeVisible();
+    await expect(rival.getByTestId('players-adp')).toBeVisible();
+    await expect(rival.getByTestId('owner-pill')).toHaveCount(0);
+    await numbersStayTogether(page, RIVAL);
+  });
+});
