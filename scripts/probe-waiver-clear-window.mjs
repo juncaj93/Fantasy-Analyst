@@ -95,6 +95,10 @@ for (const r of rows) {
       `bid=${bid?.recommended ?? '-'} expected=${bid?.expected ? `${bid.expected.low}-${bid.expected.high}` : '-'} ` +
       `pickup=${JSON.stringify(W.pickup?.[r.playerId] ?? null)}`,
   );
+  /* The rival-need count and the price the card reads. */
+  if (r.competition) {
+    console.log(`      need: ${r.competition.needs ?? r.competition.detail ?? '-'} (needyTeams=${r.competition.needyTeams ?? '?'})  cost: ${r.faab ? `$${r.faab.low}-${r.faab.high}` : '-'}`);
+  }
   /* Every note the engine wrote, in its order. The card prints the first only. */
   if ((r.notes ?? []).length > 0) console.log(`      notes: ${r.notes.join('  |  ')}`);
 }
