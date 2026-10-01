@@ -90,7 +90,27 @@ function variants(inList) {
   };
 }
 
-for (const size of [15, 40]) {
+// The two heaviest per call in insights: the unwindowed read the Vegas refresh
+// planner makes over a roster (`snapshotAges`), and the health screen's count.
+{
+  const inList = [...priced.slice(0, 28), ...unpriced.slice(0, 2)].map(lit).join(',');
+  const forms = {
+    'unwindowed current': `SELECT pp.* FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (${inList}) AND ps.scope = 'week' AND ps.id = ${newest('', '')}`,
+    'unwindowed fixed': `SELECT pp.* FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (${inList}) AND ps.scope = 'week' AND ps.id = ${newest('+', '')}`,
+    'priced current': `SELECT COUNT(DISTINCT pp.player_id) AS priced FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IS NOT NULL AND ps.scope = 'week' AND ps.id = ${newest('', '')}`,
+    'priced fixed': `SELECT COUNT(DISTINCT pp.player_id) AS priced FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IS NOT NULL AND ps.scope = 'week' AND ps.id = ${newest('+', '')}`,
+  };
+  console.log('');
+  console.log('== 30 players, no window; and the priced-player count');
+  for (const [form, sql] of Object.entries(forms)) {
+    const plan = run(`EXPLAIN QUERY PLAN ${sql}`).rows.map((r) => r.detail).join(' | ');
+    const r = run(sql);
+    console.log(`${form.padEnd(22)} rows_read ${String(r.read).padStart(7)}   returned ${String(r.rows.length).padStart(4)}   ${fingerprint(r.rows)}`);
+    console.log(`          plan: ${plan}`);
+  }
+}
+
+for (const size of process.env.SIZES ? process.env.SIZES.split(",").map(Number) : [15, 40]) {
   const ids = [...priced.slice(0, size - 2), ...unpriced.slice(0, 2)];
   const inList = ids.map(lit).join(',');
   console.log('');
