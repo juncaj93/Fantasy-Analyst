@@ -85,11 +85,10 @@ export async function startSitInputsFor(
    * it belonged to.
    */
   const slate = slateWindow(opts.now ?? new Date());
-  const [players, propsByPlayer, previousProps, pricedKickoffs, signals] = await Promise.all([
+  const [players, propsByPlayer, previousProps, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
     propsRepo.latestForPlayers(playerIds, slate),
     propsRepo.previousForPlayers(playerIds, slate),
-    propsRepo.kickoffsForPlayers(playerIds, slate),
     new EvidenceRepo(db).getSignals(playerIds),
   ]);
 
@@ -139,6 +138,25 @@ export async function startSitInputsFor(
    * have already built it for a different endpoint on the same request.
    */
   const context = opts.context ?? (await buildStartSitContext(db, usageService));
+
+  /*
+   * The priced kickoff, asked only for the players the fixture list misses.
+   *
+   * It is the fallback behind `context.schedule` (see `kickoff` below), and on
+   * any week the schedule has been read that is nobody: the read was answering
+   * a question whose answer was then thrown away. It was also the dearest of
+   * the three props reads, 2,849 rows a call on production on 1 October 2026
+   * whatever the size of the list, on every assembly of every lineup screen.
+   * Asked after the context rather than beside the other reads, so a week with
+   * the schedule in hand issues no statement at all; a week without it pays one
+   * extra round trip, which is the only time the answer is used.
+   */
+  const unscheduled = playerIds.filter((id) => {
+    const player = players.get(id);
+    return player != null && context.schedule.get((player.team ?? '').toUpperCase())?.kickoff == null;
+  });
+  const pricedKickoffs =
+    unscheduled.length > 0 ? await propsRepo.kickoffsForPlayers(unscheduled, slate) : new Map<string, string>();
 
   const inputs: StartSitInput[] = [];
   for (const id of playerIds) {

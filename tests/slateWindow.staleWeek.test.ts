@@ -223,7 +223,7 @@ describe('a kickoff is a fact about the fixture list', () => {
 });
 
 describe('what it costs', () => {
-  it('bounds the kickoff read rather than dropping it, at the same query count', async () => {
+  it('bounds the kickoff read rather than dropping it, and asks it only when the schedule is silent', async () => {
     /*
      * An earlier draft of this change deleted `kickoffsForPlayers` outright,
      * on the reasoning that the schedule is stored so inferring one from
@@ -232,15 +232,20 @@ describe('what it costs', () => {
      * has no `nfl_schedule` rows, every kickoff went null, and the lineup's
      * scores moved while the comparison's did not.
      *
-     * So the read stays and takes the window. Same number of queries as
-     * before, each of them now answering about this week.
+     * So the read stays, takes the window, and is asked for exactly the
+     * players the fixture list cannot place. With the schedule in hand that is
+     * nobody, and the statement is not issued: on production on 1 October
+     * 2026 it was 2,849 rows a call, every call, for an answer then discarded.
      */
-    const inner = await seed();
-    const counting = countingDb(inner);
-    await startSitInputsFor(counting.db, [QB]);
+    const scheduled = countingDb(await seed());
+    await startSitInputsFor(scheduled.db, [QB], { now: TUESDAY });
+    expect(scheduled.callsMatching('ps.game_start AS game_start'), 'the schedule answered').toBe(0);
+    expect(scheduled.callsMatching('FROM player_props')).toBeLessThanOrEqual(2);
 
-    expect(counting.callsMatching('ps.game_start AS game_start')).toBe(1);
-    expect(counting.callsMatching('FROM player_props')).toBeLessThanOrEqual(3);
+    const unscheduled = countingDb(await seed({ fixtures: false, weekTwoPriced: true }));
+    const [input] = await startSitInputsFor(unscheduled.db, [QB], { now: TUESDAY });
+    expect(unscheduled.callsMatching('ps.game_start AS game_start'), 'the fallback is still asked').toBe(1);
+    expect(input?.kickoff, 'and still answers').toBe(THIS_SUNDAY_KICKOFF);
   });
 
   it('never asks the kickoff question without a window', () => {

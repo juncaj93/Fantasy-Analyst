@@ -139,6 +139,22 @@ export class PropsRepo implements SnapshotStore {
    * still need buying, across a fetch horizon that can span two NFL weeks, and
    * "what do we already hold" is genuinely not week-scoped. Every caller
    * serving a screen passes {@link slateWindow}.
+   *
+   * ## `+s2.scope`, and why the plus is load-bearing
+   *
+   * The newest-snapshot subquery has two indexes it could use: one on
+   * `(event_id, fetched_at)` and one on `(scope, fetched_at)`. D1 keeps no
+   * table statistics, so SQLite cannot tell that nearly every snapshot is
+   * `scope = 'week'` and picked the scope index — walking every game's
+   * snapshots, newest first, until it reached one for this game, once per
+   * snapshot in the outer scan. The unary plus changes no value; it only rules
+   * that term out as an index key, which leaves the event index.
+   *
+   * Measured on production on 1 October 2026 with D1's own `rows_read`, same
+   * rows returned before and after: this read 1,498 → 1,156 a call, the
+   * previous-lines read 2,311 → 1,061. `d1 insights` had these reads, with the
+   * unwindowed form below, at about 60% of the two days that set off the 81%
+   * allowance alert. See `scripts/probe-props-reads.mjs`.
    */
   async latestForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
     const out = new Map<string, PlayerProp[]>();
@@ -154,7 +170,7 @@ export class PropsRepo implements SnapshotStore {
               ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
+                 WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1
               )`,
         )
@@ -234,7 +250,7 @@ export class PropsRepo implements SnapshotStore {
               ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
               AND ps.id = (
                 SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
+                 WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
                  ORDER BY s2.fetched_at DESC LIMIT 1 OFFSET 1
               )`,
         )
@@ -343,7 +359,7 @@ export class PropsRepo implements SnapshotStore {
             AND ps.scope = 'week'
             AND ps.id = (
               SELECT id FROM prop_snapshots s2
-               WHERE s2.event_id = ps.event_id AND s2.scope = 'week'
+               WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
                ORDER BY s2.fetched_at DESC LIMIT 1
             )`,
       )
