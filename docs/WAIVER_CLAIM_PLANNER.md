@@ -355,8 +355,7 @@ runtime each add.
 The Waivers screen opens on the result:
 
 ```
-Your waiver plan
-Enter in this order
+Recommended move                         (the section title, not the card)
 Drop Jaylen Wright for the first one you win (Emmett Johnson stays: he backs up Kenneth Walker)
 1. Add Adonai Mitchell · bid $8–16
 2. Add Keenan Allen · free agent, no bid needed     Only if 1 loses
@@ -377,8 +376,11 @@ performs one. The `See why` button and its sheet were removed on 1 October 2026
 at the owner's request ("way too much text"), along with a `Keeping X: reason`
 line for every bench player the plan did not cut. Only a handcuff to one of your
 own starters gets a clause on the drop line, because he looks like the obvious
-cut the plan skipped. The plan still carries its `why`, `outcomes` and `keep`
-data; nothing draws them.
+cut the plan skipped. The same day the card lost its own title (`Your waiver
+plan`) and `Enter in this order`: the section above already says `Recommended
+move`, and the numbers are the order. The list below it lost its `Not part of
+the plan above` note. The plan still carries its `headline`, `instruction`,
+`why`, `outcomes` and `keep` data; nothing draws them on a plan with claims.
 
 **An empty plan surfaces only when it says something the board does not.** A
 quiet week is already `Nothing available beats what you already have` on the

@@ -273,7 +273,10 @@ test.describe('the waivers page', () => {
 
     const others = page.getByTestId('waivers-others');
     await expect(page.getByTestId('waivers-others-title')).toHaveText('Other options to consider');
-    await expect(page.getByTestId('waivers-others-note')).toBeVisible();
+    // Under a plan, no note: the heading is enough.
+    if ((await recommended.getByTestId('waiver-plan-claim').count()) > 0) {
+      await expect(page.getByTestId('waivers-others-note')).toHaveCount(0);
+    }
     await expect(others.getByTestId('waiver-row').first()).toBeVisible();
 
     const top = (await recommended.boundingBox())!.y;

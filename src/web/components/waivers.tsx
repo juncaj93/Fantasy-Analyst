@@ -77,18 +77,16 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
 
   return (
     <div className="card claim-plan" data-testid="waiver-plan" data-state={plan.state}>
-      <div className="detail-label" data-testid="waiver-plan-headline">
-        {plan.headline}
-      </div>
-
       {/*
-        Four words, above the list they are about. What is *not* shortened is
-        the per-claim qualifier — `Only if 1 loses` — which stays inline on the
-        line it saves from looking like a duplicate. See `ClaimLine`.
+        No title and no "Enter in this order" on a plan with claims: the
+        section above already says "Recommended move", and the numbers are the
+        order. Removed 1 October 2026 at the owner's request. An empty ending
+        (`No safe drop for this upgrade`) has no claims, so its headline is the
+        whole message and stays.
       */}
-      {plan.instruction ? (
-        <div className="claim-plan-instruction" data-testid="waiver-plan-instruction">
-          {plan.instruction}
+      {plan.claims.length === 0 ? (
+        <div className="detail-label" data-testid="waiver-plan-headline">
+          {plan.headline}
         </div>
       ) : null}
 

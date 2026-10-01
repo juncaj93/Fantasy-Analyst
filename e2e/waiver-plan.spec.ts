@@ -132,7 +132,9 @@ test.describe('the plan the deployment actually computes', () => {
   test('hands the reader a numbered instruction per claim', async ({ page }) => {
     const card = page.getByTestId('waiver-plan');
     await expect(card).toBeVisible();
-    await expect(page.getByTestId('waiver-plan-headline')).toHaveText('Your waiver plan');
+    // The section title says "Recommended move"; the card repeats nothing.
+    await expect(page.getByTestId('waiver-plan-headline')).toHaveCount(0);
+    await expect(card).not.toContainText('Your waiver plan');
 
     const claims = page.getByTestId('waiver-plan-claim');
     const count = await claims.count();
@@ -197,15 +199,13 @@ test.describe('the plan as a card', () => {
     await expect(qualifiers.nth(1)).toHaveText('Only if 2 does not land him');
   });
 
-  /** Four words of instruction, above the list they are about. */
-  test('says the order in four words, above the claims', async ({ page }) => {
-    const instruction = page.getByTestId('waiver-plan-instruction');
-    await expect(instruction).toHaveText('Enter in this order');
-
+  /** The numbers are the order; the card no longer says so in words. */
+  test('carries no title or instruction above the claims', async ({ page }) => {
     const card = page.getByTestId('waiver-plan');
+    await expect(page.getByTestId('waiver-plan-instruction')).toHaveCount(0);
+    await expect(card).not.toContainText('Enter in this order');
+    await expect(card).not.toContainText('Your waiver plan');
     await expect(card).not.toContainText('Sleeper runs claims top to bottom');
-    const claims = (await page.getByTestId('waiver-plan-claims').boundingBox())!;
-    expect((await instruction.boundingBox())!.y).toBeLessThan(claims.y);
   });
 
   /**

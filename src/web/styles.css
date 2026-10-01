@@ -9893,22 +9893,6 @@ div.matchup-result {
   padding: var(--sp-3);
 }
 
-/*
- * `Enter in this order`, between the card's heading and the claims.
- *
- * Quieter than the heading above it and quieter than the claims below it,
- * because it is neither the name of the card nor a thing to type into Sleeper —
- * it is the one word of instruction that makes the numbering mean something.
- * It gets no margin of its own above: the heading already has the gap, and this
- * belongs to the list it introduces.
- */
-.claim-plan-instruction {
-  margin-top: 2px;
-  font-size: 0.78rem;
-  font-weight: 560;
-  color: var(--text-dim);
-}
-
 .claim-plan-list {
   list-style: decimal;
   margin: var(--sp-2) 0 0;
@@ -9973,6 +9957,11 @@ div.matchup-result {
  * because it is one: the first claim below it that wins spends it. A second
  * drop's block sits under a hairline so the two read as two decisions.
  */
+/* The drop line opens the card now that it has no title above it. */
+.claim-plan-group:first-child .claim-plan-drop {
+  margin-top: 0;
+}
+
 .claim-plan-group + .claim-plan-group {
   margin-top: var(--sp-3);
   padding-top: var(--sp-3);
