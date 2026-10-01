@@ -30,7 +30,8 @@ console.log(`asking ${APP}  gitSha=${health.json?.gitSha ?? health.json?.release
 
 const overview = await get('/api/overview');
 const season = overview.json?.season ?? {};
-console.log(`draft status (Sleeper): ${overview.json?.draft?.status ?? '(none)'}`);
+const lifecycle = overview.json?.lifecycle;
+console.log(`lifecycle: ${typeof lifecycle === 'string' ? lifecycle : JSON.stringify(lifecycle ?? null)}`);
 console.log(`season: phase=${season.phase} draftVisible=${season.draftVisible} reason="${season.reason ?? ''}"`);
 console.log(`card corner: ${season.draftVisible === false ? 'OWNER PILL' : 'HEART'}\n`);
 
@@ -41,7 +42,18 @@ if (!league) {
   console.log(`no league: ${leagues.status}`);
   process.exit(0);
 }
-console.log(`league: ${league.name} (${league.id})\n`);
+console.log(`league: ${league.name} (${league.id})  draftId=${league.draftId ?? '(none)'}`);
+// Sleeper's own word on the draft, read from Sleeper rather than from this app.
+if (league.draftId) {
+  try {
+    const res = await fetch(`https://api.sleeper.app/v1/draft/${league.draftId}`);
+    const draft = await res.json();
+    console.log(`Sleeper draft status: ${draft?.status ?? '(none)'}  rounds=${draft?.settings?.rounds ?? '?'}`);
+  } catch (err) {
+    console.log(`Sleeper draft read failed: ${String(err)}`);
+  }
+}
+console.log('');
 
 const res = await get(`/api/players?q=&leagueId=${encodeURIComponent(league.id)}&limit=200&offset=0`);
 const players = res.json?.players ?? [];
