@@ -10,6 +10,11 @@
  * once against the code after, on the same file, and the two outputs are the
  * before and the after on the league's real data.
  *
+ * The 7-day item count printed is `last7Count`, the real one. `last7.items` is
+ * zero on every stored-summary read by design (the draft board depends on it),
+ * so it says nothing about how many items the week holds. A snapshot captured
+ * before `last7Count` existed says "count not carried".
+ *
  * Reads only the fields both versions of the engine have, so it works on
  * either checkout.
  */
@@ -20,6 +25,9 @@ import { buildWaiverBoard } from '../src/core/waivers/board.ts';
 import { snapshotDstSources } from '../src/core/support/dstSnapshot.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 import { rehydratePlayer } from '../src/core/support/players.ts';
+
+/** The 7-day item count below which the week says nothing. Mirrors `RECENT_FORM.minItems`. */
+const MIN_ITEMS = 2;
 
 const file = process.argv[2];
 if (!file) {
@@ -78,9 +86,17 @@ const decision = await assembleWaiverPlan({
   generatedAt: inputs.generatedAt,
 });
 
+type Tally = {
+  last7: { net: number; items: number };
+  last7Count?: number;
+  last30: { net: number; items: number };
+};
+
 const sign = (n: number) => (n > 0 ? `+${n}` : String(n));
-const tally = (s: { last7: { net: number; items: number }; last30: { net: number; items: number } } | null | undefined) =>
-  s ? `7d ${sign(s.last7.net)} (${s.last7.items} items) | 30d ${sign(s.last30.net)} (${s.last30.items} items)` : 'no tally';
+const tally = (s: Tally | null | undefined) =>
+  s
+    ? `7d ${sign(s.last7.net)} (${s.last7Count ?? s.last7.items} items${s.last7Count === undefined ? ', count not carried' : ''}) | 30d ${sign(s.last30.net)} (${s.last30.items} items)`
+    : 'no tally';
 const published: Record<string, number> = inputs.published ?? {};
 const starters = new Set<string>(inputs.currentStarterIds);
 
@@ -109,3 +125,27 @@ for (const row of board.rows.filter((r) => r.dst == null && r.strength.level !==
     `  ${row.strength.label.padEnd(12)} ${row.name.padEnd(22)} proj ${String(published[row.playerId] ?? '-').padStart(5)}  ${tally(byId.get(row.playerId)?.signal)}  cut ${row.cut?.name ?? '-'}${row.notes[0] ? `  "${row.notes[0]}"` : ''}`,
   );
 }
+
+/*
+ * The census the round is judged on: how many players have a week the engine is
+ * allowed to read at all. A count at or above the minimum with an identical plan
+ * would mean something other than thin data is holding the signal back.
+ */
+const everyone = [
+  ...roster.map((i) => ({ who: i.player.fullName, side: 'roster', signal: i.signal as Tally | null })),
+  ...candidates.map((i) => ({ who: i.player.fullName, side: 'wire', signal: i.signal as Tally | null })),
+];
+const carried = everyone.filter((p) => p.signal && p.signal.last7Count !== undefined);
+const readable = carried.filter((p) => (p.signal!.last7Count ?? 0) >= MIN_ITEMS);
+console.log(`\nCENSUS OF 7-DAY ITEM COUNTS (minimum to be read: ${MIN_ITEMS})`);
+console.log(`  players in the snapshot: ${everyone.length}  with a tally: ${everyone.filter((p) => p.signal).length}`);
+console.log(`  carrying the real count (last7Count): ${carried.length}`);
+console.log(`  at or above the minimum: ${readable.length}`);
+for (const p of readable) {
+  console.log(`    ${p.side.padEnd(6)} ${p.who.padEnd(22)} ${tally(p.signal)}`);
+}
+const histogram = new Map<number, number>();
+for (const p of carried) histogram.set(p.signal!.last7Count!, (histogram.get(p.signal!.last7Count!) ?? 0) + 1);
+console.log(
+  `  histogram (count: players): ${[...histogram.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => `${k}: ${v}`).join(', ') || '(none carried)'}`,
+);
