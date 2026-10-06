@@ -157,6 +157,12 @@ export interface PlayerLine {
   rosValue: number | null;
   /** Weeks he would be in the starting lineup, on the roster that holds him. */
   startsWeeks: number;
+  /** Which weeks those are. */
+  startsOn?: number[];
+  /** Expected availability for each week of the horizon: 1 plays, 0 bye or out. */
+  weekly?: number[];
+  /** What his rate is made of: the base number, and the capped nudges added to it. */
+  rateParts?: { base: number; nudges: number } | null;
 }
 
 export interface Adjustment {
@@ -171,6 +177,8 @@ export interface SideResult {
   isMine: boolean;
   /** Change in the best projected lineup over the remaining weeks. */
   lineupChange: number;
+  /** The same, week by week, so a total can be checked against the weeks it came from. */
+  weekly?: { week: number; lineupBefore: number; lineupAfter: number; depthBefore: number; depthAfter: number }[];
   /** Change in the small depth credit. */
   depthChange: number;
   /** Alex's preferences. Empty for every other team. */
@@ -182,6 +190,8 @@ export interface SideResult {
   outgoing: PlayerLine[];
   /** Someone cut to make room, when the trade leaves the roster over its limit. */
   mustDrop: PlayerLine | null;
+  /** How many players the trade forces out in all, `mustDrop` being the first. Zero when none. */
+  cutCount?: number;
   /** Starters Sleeper has set who have no projection, so are missing from the lineup math. */
   unvaluedStarters: string[];
 }
@@ -222,7 +232,9 @@ interface RosterValue {
   lineup: number;
   /** Depth credit, by what is excluded. */
   depth: { neutral: number; noQbTe: number; noQbTeDef: number };
-  starts: Map<string, number>;
+  /** For each player, the weeks he is in the lineup. */
+  starts: Map<string, number[]>;
+  byWeek: { week: number; lineup: number; depth: number }[];
 }
 
 function valueRoster(opts: {
@@ -233,7 +245,8 @@ function valueRoster(opts: {
 }): RosterValue {
   const { players, slots, replacement, horizon } = opts;
   const priced = players.filter((p) => p.rate != null);
-  const starts = new Map<string, number>();
+  const starts = new Map<string, number[]>();
+  const byWeek: { week: number; lineup: number; depth: number }[] = [];
   let lineup = 0;
   const depth = { neutral: 0, noQbTe: 0, noQbTeDef: 0 };
   const defPrepWeek = horizon.regularSeasonEnd;
@@ -258,7 +271,7 @@ function valueRoster(opts: {
     for (const pick of result.picks) {
       if (!pick) continue;
       started.add(pick.id);
-      if (!pick.id.startsWith('replacement:')) starts.set(pick.id, (starts.get(pick.id) ?? 0) + 1);
+      if (!pick.id.startsWith('replacement:')) starts.set(pick.id, [...(starts.get(pick.id) ?? []), week]);
     }
 
     const bench = candidates
@@ -276,15 +289,16 @@ function valueRoster(opts: {
     depth.neutral += credited(() => true);
     depth.noQbTe += credited((position) => !isSpare(position));
     depth.noQbTeDef += credited((position) => !isSpare(position) && (position !== 'DEF' || week >= defPrepWeek));
+    byWeek.push({ week, lineup: result.total, depth: credited(() => true) });
   });
 
-  return { lineup, depth, starts };
+  return { lineup, depth, starts, byWeek };
 }
 
 function lineFor(
   player: PlayerRate,
   replacement: ReplacementLevels,
-  starts: Map<string, number>,
+  starts: Map<string, number[]>,
 ): PlayerLine {
   const level = replacement.get(player.position);
   const rosValue =
@@ -303,7 +317,10 @@ function lineFor(
     byeWeek: player.byeWeek,
     byeInside: player.byeInside,
     rosValue,
-    startsWeeks: starts.get(player.playerId) ?? 0,
+    startsWeeks: starts.get(player.playerId)?.length ?? 0,
+    startsOn: starts.get(player.playerId) ?? [],
+    weekly: player.weekly,
+    rateParts: player.rateParts ?? null,
   };
 }
 
@@ -331,6 +348,16 @@ export function evaluateTrade(input: {
   replacement: ReplacementLevels;
   a: TradeSide;
   b: TradeSide;
+  /**
+   * How many players a roster may hold, reserve slots included.
+   *
+   * Taken from the league's settings by the caller, because Sleeper's slot list
+   * does not always name the injured-reserve slots a league has: this league
+   * publishes two in `reserve_slots` and none in `roster_positions`, which made
+   * a 17-player roster look over its limit on a one-for-one swap. Absent falls
+   * back to what the slot list says.
+   */
+  rosterLimit?: number;
   /** Players side A sends to B. */
   aSends: readonly string[];
   /** Players side B sends to A. */
@@ -372,8 +399,12 @@ export function evaluateTrade(input: {
   const unpriced = moved.filter((p) => p.rate == null);
   if (unpriced.length > 0) {
     return empty(
-      `No number can be put on ${listNames(unpriced.map((p) => p.name))}: ${unpriced[0]!.rateNote ?? 'nothing prices'} ` +
-        `${unpriced.length === 1 ? 'him' : 'them'}. A verdict needs a real projection for every player moved.`,
+      `No number can be put on ${listNames(unpriced.map((p) => p.name))}: ${unpriced[0]!.rateNote ?? 'nothing prices him'}. ` +
+        `A verdict needs a real projection for every player moved.` +
+        // Lines go up through the week, so a gap that is about the market is a gap that closes.
+        (unpriced.some((p) => !/ruled out/.test(p.rateNote ?? ''))
+          ? ' Betting lines fill in through the week, so check again Thursday or later.'
+          : ''),
     );
   }
   const lacking = [...new Set(moved.filter((p) => startable.has(p.position) && !replacement.has(p.position)).map((p) => p.position))];
@@ -389,9 +420,21 @@ export function evaluateTrade(input: {
     let after = [...side.roster.filter((p) => afterIds.has(p.playerId)), ...inn];
 
     let mustDrop: PlayerRate | null = null;
-    if (after.length > rosterCapacity(shape)) {
-      mustDrop = pickDrop(after, replacement);
-      if (mustDrop) after = after.filter((p) => p.playerId !== mustDrop!.playerId);
+    let cutCount = 0;
+    /*
+     * Only a trade that makes a roster bigger can force a cut, and only down to
+     * where the roster already was or the limit, whichever is higher. A roster
+     * already over its limit (a stale sync, a league that allows it) is not this
+     * trade's doing, and a one-for-one swap never changes the count. As many are
+     * cut as it takes, least valuable first.
+     */
+    const target = Math.max(input.rosterLimit ?? rosterCapacity(shape), side.roster.length);
+    while (after.length > target) {
+      const cut = pickDrop(after, replacement);
+      if (!cut) break;
+      mustDrop ??= cut;
+      cutCount += 1;
+      after = after.filter((p) => p.playerId !== cut.playerId);
     }
 
     const before = valueRoster({ players: side.roster, slots, replacement, horizon });
@@ -454,9 +497,19 @@ export function evaluateTrade(input: {
     }
     const adjustmentTotal = round1(adjustments.reduce((s, x) => s + x.points, 0));
 
+    /*
+     * A starter with no projection only matters to a trade that could put
+     * somebody into his slot. A missing quarterback says nothing about a swap of
+     * receivers, and printing it there is a caution about nothing.
+     */
+    const relevant = new Set<string>();
+    for (const p of [...out, ...inn]) {
+      relevant.add(p.position);
+      for (const slot of slots) if (slot.eligible.has(p.position)) for (const q of slot.eligible) relevant.add(q);
+    }
     const unvaluedStarters = (side.starterIds ?? [])
       .map((id) => side.roster.find((p) => p.playerId === id))
-      .filter((p): p is PlayerRate => p != null && p.rate == null)
+      .filter((p): p is PlayerRate => p != null && p.rate == null && relevant.has(p.position))
       .map((p) => p.name);
 
     return {
@@ -464,6 +517,13 @@ export function evaluateTrade(input: {
       rosterId: side.rosterId,
       isMine: side.isMine,
       lineupChange: round1(lineupChange),
+      weekly: before.byWeek.map((w, i) => ({
+        week: w.week,
+        lineupBefore: round1(w.lineup),
+        lineupAfter: round1(post.byWeek[i]?.lineup ?? w.lineup),
+        depthBefore: round1(w.depth),
+        depthAfter: round1(post.byWeek[i]?.depth ?? w.depth),
+      })),
       depthChange: round1(depthChange),
       adjustments,
       adjustmentTotal,
@@ -471,6 +531,7 @@ export function evaluateTrade(input: {
       incoming: inn.map((p) => lineFor(p, replacement, post.starts)),
       outgoing: out.map((p) => lineFor(p, replacement, before.starts)),
       mustDrop: mustDrop ? lineFor(mustDrop, replacement, before.starts) : null,
+      cutCount,
       unvaluedStarters,
     };
   };
@@ -516,13 +577,20 @@ function verdictFor(a: SideResult, b: SideResult, gap: number, band: number): Ve
   }
   const strong = size > band * TRADE_VALUE.edgeBands;
   const name = who(winner);
+  /*
+   * The gap is one side's change minus the other's, so a swap where one team
+   * gains 59 and the other loses 59 reads 118. That is the honest head-to-head
+   * difference and it is also double what either team experiences, so the two
+   * changes ride beside it and the larger number never appears alone.
+   */
+  const both = `${who(a)} ${signedPts(a.net)}, ${who(b)} ${signedPts(b.net)}`;
   return {
     kind: `${strong ? 'favors' : 'leans'}_${kindSuffix}` as VerdictKind,
     gap,
     band,
     headline: strong
-      ? `Favors ${name} by about ${pts} pts over the rest of the season.`
-      : `Leans toward ${name}, about ${pts} pts over the rest of the season.`,
+      ? `Favors ${name} by about ${pts} pts over the rest of the season (${both}).`
+      : `Leans toward ${name}, about ${pts} pts over the rest of the season (${both}).`,
   };
 }
 
@@ -627,7 +695,11 @@ function caveatsFor(
   for (const p of lines) if (p.injuryNote) out.push(`${p.name}: ${p.injuryNote}.`);
   for (const side of [a, b]) {
     if (side.mustDrop) {
-      out.push(`${side.isMine ? 'You' : side.label} would be over the roster limit and cut ${side.mustDrop.name}.`);
+      const more = (side.cutCount ?? 1) - 1;
+      out.push(
+        `${side.isMine ? 'You' : side.label} would be over the roster limit and cut ${side.mustDrop.name}` +
+          `${more > 0 ? ` and ${more} more` : ''}.`,
+      );
     }
   }
   if (horizon.deadlinePassed) {
@@ -642,6 +714,11 @@ function caveatsFor(
     .join(', ');
   if (level) out.push(`Replacement level (a free agent): ${level} pts a game.`);
   return out;
+}
+
+function signedPts(value: number): string {
+  const n = Math.round(Math.abs(value));
+  return value > 0 ? `+${n}` : value < 0 ? `\u2212${n}` : '0';
 }
 
 function listNames(names: readonly string[]): string {

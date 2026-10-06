@@ -66,6 +66,14 @@ export function reviewCheck(label, body) {
       say(`${side.label} net does not add up from its parts`);
     }
     if (!side.isMine && side.adjustments.length > 0) say(`${side.label} carries preferences and is not Alex`);
+    if (Array.isArray(side.weekly) && side.weekly.length > 0) {
+      const summed = side.weekly.reduce((a, w) => a + (w.lineupAfter - w.lineupBefore), 0);
+      // Each week is rounded to a tenth, so the sum may drift by a little per week.
+      if (Math.abs(summed - side.lineupChange) > 0.1 * side.weekly.length + 0.2) {
+        say(`${side.label} weeks add to ${summed.toFixed(1)} but the lineup change is ${side.lineupChange}`);
+      }
+      if (side.weekly.length !== ev.weeks.count) say(`${side.label} has ${side.weekly.length} weekly rows for ${ev.weeks.count} weeks`);
+    }
     for (const p of [...side.incoming, ...side.outgoing]) {
       if (p.rosValue != null && (p.rosValue < 0 || p.rosValue > ABSURD_PLAYER)) {
         say(`${p.name} is worth ${p.rosValue} over replacement, which is not credible`);

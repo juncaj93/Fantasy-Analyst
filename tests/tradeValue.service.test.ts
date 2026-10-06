@@ -26,6 +26,8 @@ import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
 import { countingDb } from './helpers/countingDb.ts';
 import { forgetPlayerReads } from '../src/server/repos/players.ts';
+import { rosterLimitOf } from '../src/server/services/tradeValueService.ts';
+import { buildRosterShape } from '../src/core/sleeper/rosterShape.ts';
 
 async function get<T>(db: AppEnv['db'], path: string, client: SleeperClient): Promise<{ status: number; body: T }> {
   const res = await createApp()(new Request(`http://x${path}`), envFor(db, client));
@@ -205,6 +207,34 @@ describe('what a trade check costs the database', () => {
   });
 });
 
+describe('the cost meter', () => {
+  it('shares the real database\u2019s memo, so it reports what a warm request pays', async () => {
+    const real = await createTestDb();
+    forgetPlayerReads(real);
+    await seed(real);
+    const { client } = forbiddenSleeper();
+    const ask = async () => {
+      const res = await createApp()(new Request(`http://x${q(1, 2, ['m_wr5'], ['t_rb2'])}&cost=1`), envFor(real, client));
+      return (await res.json()) as { cost: { statements: number; rowsReturned: number; top: { sql: string; rows: number }[] } };
+    };
+    const cold = await ask();
+    const warm = await ask();
+    expect(cold.cost.top.length).toBeGreaterThan(0);
+    // The second request finds the player dictionary already held, as a real one
+    // does: the difference is at least the roster's and the shortlist's players.
+    expect(cold.cost.rowsReturned - warm.cost.rowsReturned).toBeGreaterThanOrEqual(30);
+  });
+
+  it('is absent unless asked for', async () => {
+    const real = await createTestDb();
+    forgetPlayerReads(real);
+    await seed(real);
+    const { client } = forbiddenSleeper();
+    const { body } = await get<TradeCheckResponse>(real, q(1, 2, ['m_wr5'], ['t_rb2']), client);
+    expect(body.cost).toBeUndefined();
+  });
+});
+
 describe('replaying past trades', () => {
   it('rebuilds both rosters from their current state and reverses the deal', async () => {
     const db = await createTestDb();
@@ -304,5 +334,25 @@ describe('replaying past trades', () => {
     const { body } = await get<TradeReplayResponse>(db, '/api/diagnostics/trade-values', client);
     expect(body.considered).toBe(0);
     expect(body.notes[0]).toMatch(/No completed trades/);
+  });
+});
+
+describe('the roster limit', () => {
+  const league = (settings: Record<string, unknown>) =>
+    ({ leagueSettings: settings }) as unknown as Parameters<typeof rosterLimitOf>[0];
+  const shape = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN']);
+
+  it('counts the reserve slots the league settings report and the slot list does not', () => {
+    // Tony's league: ten starters, six bench, `reserve_slots` 2, none named in roster_positions.
+    expect(rosterLimitOf(league({ reserve_slots: 2, taxi_slots: 0 }), shape)).toBe(18);
+  });
+
+  it('falls back to the slot list when the league says nothing', () => {
+    expect(rosterLimitOf(league({}), shape)).toBe(16);
+  });
+
+  it('uses the slot list\u2019s own reserve slots when they are named', () => {
+    const named = buildRosterShape(['QB', 'RB', 'BN', 'BN', 'IR', 'IR']);
+    expect(rosterLimitOf(league({}), named)).toBe(named.totalStarters + 2 + 2);
   });
 });

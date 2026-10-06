@@ -66,6 +66,8 @@ export interface PlayerRate {
   basis: RateBasis;
   /** One clause on a basis that is not the plain market, or on why there is none. */
   rateNote: string | null;
+  /** The base number the rate started from, and the capped nudges added to it. Null on a season line. */
+  rateParts?: { base: number; nudges: number } | null;
   designation: Designation;
   /** Games expected, bye and injury taken out. */
   games: number;
@@ -87,6 +89,8 @@ function statusPoints(evaluation: StartSitEvaluation): number {
 
 interface WeekRead {
   weekRate: number | null;
+  /** The base the week's number started from and what the engine's nudges added, availability excluded. */
+  parts: { base: number; nudges: number } | null;
   weekBasis: RateBasis;
   out: boolean;
   /** This week's number is not a read of him: a bye, or a ruled-out player's zero. */
@@ -103,6 +107,7 @@ function readWeek(args: {
   const decision = decisionPoints(evaluation, args.published);
   const out = isOutNow(evaluation.injury.designation) || evaluation.ruledOut;
   const weekOk = decision != null && (decision.basis === 'market' || decision.basis === 'published');
+  const status = statusPoints(evaluation);
   const weekRate = weekOk ? Math.max(0, decision.points - statusPoints(evaluation)) : null;
   /*
    * A bye has no game to price, and a ruled-out player's week is a zero
@@ -110,6 +115,10 @@ function readWeek(args: {
    */
   return {
     weekRate,
+    parts:
+      weekOk && decision
+        ? { base: Math.round(decision.base * 100) / 100, nudges: Math.round((decision.adjustments - status) * 100) / 100 }
+        : null,
     weekBasis: decision?.basis === 'published' ? 'published' : 'market',
     out,
     unrepresentative: args.byeThisWeek || (out && (weekRate == null || weekRate < OUT_PLAYER_FLOOR)),
@@ -139,7 +148,7 @@ export function resolveRate(args: {
   seasonLine: number | null;
   /** True when this week's number is not a read of him (bye week). */
   byeThisWeek: boolean;
-}): { rate: number | null; basis: RateBasis; note: string | null } {
+}): { rate: number | null; basis: RateBasis; note: string | null; parts?: { base: number; nudges: number } | null } {
   const { seasonLine } = args;
   const week = readWeek(args);
   const season = seasonLine != null && Number.isFinite(seasonLine) && seasonLine > 0 ? seasonLine : null;
@@ -147,6 +156,7 @@ export function resolveRate(args: {
   if (week.weekRate != null && !week.unrepresentative) {
     return {
       rate: round2(week.weekRate),
+      parts: week.parts,
       basis: week.weekBasis,
       note:
         week.weekBasis === 'published'
@@ -210,6 +220,7 @@ export function buildPlayerRate(args: {
     rate: resolved.rate,
     basis: resolved.basis,
     rateNote: resolved.note,
+    rateParts: resolved.parts ?? null,
     designation,
     games: round2(availability.games),
     weekly: availability.weekly,

@@ -82,6 +82,23 @@ interface Entry<T> {
 export const SLOW_READ_TTL_MS = 5 * 60 * 1_000;
 
 /**
+ * A wrapper around a database names the database it wraps under this key, and
+ * the memo is kept on that one.
+ *
+ * The memo is keyed on the database *object*, which is right for a Worker (one
+ * binding, many requests) and wrong for anything that wraps it per request: a
+ * wrapper is a new object every time, so a read behind one is always a miss.
+ * The request-cost meter is such a wrapper, and before this it reported the
+ * cost of a cold isolate on every request, which is not what a real request
+ * pays and is the wrong number to hold the free plan against.
+ */
+export const MEMO_KEY: unique symbol = Symbol('memoKey');
+
+function memoKeyOf(db: Database): Database {
+  return (db as unknown as { [MEMO_KEY]?: Database })[MEMO_KEY] ?? db;
+}
+
+/**
  * One memoised read, per database, per key.
  *
  * `key` exists for the reads that take an argument — a season, in practice —
@@ -97,10 +114,10 @@ export class SlowRead<T> {
   ) {}
 
   get(db: Database, key: string, load: () => Promise<T>): Promise<T> {
-    let byKey = this.store.get(db);
+    let byKey = this.store.get(memoKeyOf(db));
     if (!byKey) {
       byKey = new Map();
-      this.store.set(db, byKey);
+      this.store.set(memoKeyOf(db), byKey);
     }
 
     const at = this.now();
@@ -126,6 +143,6 @@ export class SlowRead<T> {
 
   /** Forget everything known about this database. Called by writes. */
   forget(db: Database): void {
-    this.store.delete(db);
+    this.store.delete(memoKeyOf(db));
   }
 }

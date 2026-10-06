@@ -58,7 +58,7 @@ export interface TradeCheckResponse {
   notes?: string[];
   advisory?: string;
   /** What the request asked of the database. Only present when `?cost=1` was sent. */
-  cost?: { statements: number; rowsReturned: number };
+  cost?: { statements: number; rowsReturned: number; top?: { sql: string; calls: number; rows: number }[] };
 }
 
 /** One past trade, replayed through the model. Diagnostics only. */
@@ -85,7 +85,7 @@ export interface TradeReplayResponse {
   considered: number;
   replays: TradeReplay[];
   notes: string[];
-  cost?: { statements: number; rowsReturned: number };
+  cost?: { statements: number; rowsReturned: number; top?: { sql: string; calls: number; rows: number }[] };
 }
 
 export const TRADE_CHECK_ADVISORY =

@@ -475,7 +475,8 @@ describe('thin data', () => {
   it('flags a Sleeper starter with no projection as a reason the gain may be overstated', () => {
     const a = side('A', roster('a', { te: null }));
     const b = side('B', roster('b'));
-    const r = run(a, b, ['a-def'], ['b-def']);
+    // A receiver swap reaches the tight end through the flex slots.
+    const r = run(a, b, ['a-wr3'], ['b-wr3']);
     expect(r.a!.unvaluedStarters).toEqual(['a-te']);
     expect(r.confidence).not.toBe('high');
   });
@@ -599,3 +600,126 @@ describe('where the numbers may come from', () => {
     }
   });
 });
+
+describe('roster limits, from the league\u2019s own settings', () => {
+  /** Seventeen players: ten starters, six bench and one in an IR slot. */
+  const seventeen = () =>
+    roster('a', {}, [...Array.from({ length: 6 }, (_, i) => rate(`a-bn${i}`, 'WR', 4 + i * 0.1)), rate('a-ir1', 'RB', 5)]);
+
+  it('never cuts anybody on a one-for-one swap, even when the slot list undercounts the limit', () => {
+    // The slot list says 10 + 6 = 16, and this roster holds 17 already.
+    const a = side('A', seventeen());
+    const b = side('B', roster('b'));
+    const r = run(a, b, ['a-wr3'], ['b-wr3']);
+    expect(r.a!.mustDrop).toBeNull();
+    expect(r.a!.cutCount).toBe(0);
+  });
+
+  it('cuts only what the trade itself forces, as many as it takes, least valuable first', () => {
+    const a = side('A', seventeen());
+    const b = side('B', roster('b', {}, [rate('b-x1', 'WR', 15), rate('b-x2', 'RB', 15), rate('b-x3', 'WR', 14)]));
+    const r = evaluateTrade({
+      horizon: HORIZON,
+      shape: SHAPE,
+      replacement: REPLACEMENT,
+      a,
+      b,
+      rosterLimit: 18,
+      aSends: [],
+      bSends: ['b-x1', 'b-x2', 'b-x3'],
+    });
+    // 17 + 3 = 20 against a limit of 18: two go.
+    expect(r.a!.cutCount).toBe(2);
+    expect(r.a!.mustDrop!.playerId).toBe('a-bn0');
+    expect(r.caveats.join(' ')).toMatch(/cut a-bn0 and 1 more/);
+  });
+
+  it('does not blame a trade for a roster that was already over the limit', () => {
+    const a = side('A', seventeen());
+    const b = side('B', roster('b', {}, [rate('b-x1', 'WR', 15)]));
+    const r = evaluateTrade({
+      horizon: HORIZON, shape: SHAPE, replacement: REPLACEMENT, a, b,
+      rosterLimit: 16, aSends: [], bSends: ['b-x1'],
+    });
+    // 18 after against a limit of 16, but it was 17 before: only one over what it was.
+    expect(r.a!.cutCount).toBe(1);
+  });
+});
+
+describe('cautions about missing projections', () => {
+  it('say nothing about a position the trade cannot touch', () => {
+    const a = side('A', roster('a', { qb: null }));
+    const b = side('B', roster('b'));
+    const r = run(a, b, ['a-wr3'], ['b-wr3']);
+    expect(r.a!.unvaluedStarters).toEqual([]);
+    expect(r.confidence).toBe('high');
+  });
+
+  it('name a starter at a position the trade does reach, including through a flex slot', () => {
+    const a = side('A', roster('a', { te: null }));
+    const b = side('B', roster('b'));
+    const r = run(a, b, ['a-wr3'], ['b-wr3']);
+    // WR can fill FLEX and so can TE, so a missing tight end can change who a receiver displaces.
+    expect(r.a!.unvaluedStarters).toEqual(['a-te']);
+  });
+});
+
+describe('the refusal sentence', () => {
+  it('reads cleanly, with no doubled pronoun', () => {
+    const a = side('A', roster('a', { wr1: null }).map((p) => (p.playerId === 'a-wr1' ? { ...p, rateNote: 'ruled out and no season line is stored for him' } : p)));
+    const r = run(a, side('B', roster('b')), ['a-wr1'], ['b-wr1']);
+    expect(r.insufficientReason).not.toMatch(/\b(him|them) (him|them)\b/);
+    expect(r.insufficientReason).toMatch(/for him\. A verdict needs/);
+  });
+});
+
+describe('what the card says, and what it shows its working with', () => {
+  it('puts both sides\u2019 changes beside the gap, so a swap never reads as double', () => {
+    // Alex gives a 17 ppg receiver for a 9 ppg one: he loses what Dermot gains.
+    const r = run(side('Alex', roster('a'), true), side('Dermot', roster('b', { wr1: 9 })), ['a-wr1'], ['b-wr1']);
+    const net = Math.round(Math.abs(r.a!.net));
+    expect(r.verdict!.headline).toMatch(/^Favors Dermot by about \d+ pts over the rest of the season \(you \u2212\d+, Dermot \+\d+\)\.$/);
+    expect(r.verdict!.headline).toContain(`you \u2212${net}`);
+    // The gap counts both sides, which is why the two changes sit next to it.
+    expect(Math.abs(r.verdict!.gap)).toBeCloseTo(Math.abs(r.a!.net) + Math.abs(r.b!.net), 0);
+  });
+
+  it('adds nothing to a close call', () => {
+    const r = run(side('A', roster('a', { wr2: 14 })), side('B', roster('b', { wr2: 14.1 })), ['a-wr2'], ['b-wr2']);
+    expect(r.verdict!.headline).not.toMatch(/\(/);
+  });
+
+  it('tells a reader to check again later when the gap is about the market, and not when it is about an injury', () => {
+    const market = run(side('A', roster('a', { wr1: null })), side('B', roster('b')), ['a-wr1'], ['b-wr1']);
+    expect(market.insufficientReason).toMatch(/check again Thursday or later/);
+    const hurt = roster('a', { wr1: null }).map((p) => (p.playerId === 'a-wr1' ? { ...p, rateNote: 'ruled out and no season line is stored for him' } : p));
+    const out = run(side('A', hurt), side('B', roster('b')), ['a-wr1'], ['b-wr1']);
+    expect(out.insufficientReason).not.toMatch(/Thursday/);
+  });
+
+  it('reports each side\u2019s lineup week by week, and the weeks add to the total', () => {
+    const r = run(side('Alex', roster('a'), true), side('Dermot', roster('b', { wr1: 9 })), ['a-wr1'], ['b-wr1']);
+    for (const s of [r.a!, r.b!]) {
+      expect(s.weekly).toHaveLength(13);
+      const summed = s.weekly!.reduce((acc, w) => acc + (w.lineupAfter - w.lineupBefore), 0);
+      expect(Math.abs(summed - s.lineupChange)).toBeLessThan(0.1 * 13 + 0.2);
+    }
+  });
+
+  it('says which weeks a player starts, when he plays, and what his rate is made of', () => {
+    const star = { ...rate('b-wr9', 'WR', 17), rateParts: { base: 16.2, nudges: 0.8 } };
+    const withBye = withBye_(star, 9);
+    const r = run(side('Alex', roster('a', { wr1: 9 }), true), side('Dermot', roster('b', {}, [withBye])), [], ['b-wr9']);
+    const line = r.a!.incoming[0]!;
+    expect(line.rateParts).toEqual({ base: 16.2, nudges: 0.8 });
+    expect(line.weekly).toHaveLength(13);
+    expect(line.weekly![HORIZON.weeks.indexOf(9)]).toBe(0);
+    expect(line.startsOn).not.toContain(9);
+    expect(line.startsOn!.length).toBe(line.startsWeeks);
+  });
+});
+
+function withBye_(p: PlayerRate, week: number): PlayerRate {
+  const weekly = p.weekly.map((v, i) => (HORIZON.weeks[i] === week ? 0 : v));
+  return { ...p, weekly, games: weekly.reduce((a, b) => a + b, 0), byeWeek: week, byeInside: true };
+}

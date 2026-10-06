@@ -165,7 +165,17 @@ lineup math with no opinion about how a manager likes to build a roster.
 
 The verdict compares the two sides: **side A's change minus side B's change**.
 Both numbers are always shown, so a deal where Dermot gains 41 and Alex loses 41
-reads "82 pts apart" with both figures beside it.
+reads "82 pts apart" with both figures beside it. The headline says so itself:
+"Favors Dermot by about 82 pts over the rest of the season (you −41, Dermot +41)".
+That gap is the honest head-to-head difference and also twice what either team
+experiences in a swap, so the larger number never appears without the two that
+make it.
+
+Each result carries its working: every player's base number, the capped nudges
+added to it, his bye and injury weeks, which weeks he starts, and each side's
+lineup week by week, so a total can be checked against the weeks it came from.
+The probe prints all of it, and a check fails if the weeks do not add up to the
+total.
 
 The close-call band is the wider of 4 points or 12% of the larger package, in
 points over the rest of the season. Projections have a noise floor and that
@@ -180,7 +190,9 @@ line (low), on Sleeper's projection (medium), his bye is unknown (medium),
 replacement level rests on fewer than three free agents (medium), or one of a
 team's Sleeper starters has no projection so its gain may be overstated (medium).
 No verdict at all when a moved player has no basis, or a position has no priced
-free agent to measure against.
+free agent to measure against. When the gap is about the market (a partial week,
+a bye, no season line) the sentence ends "Betting lines fill in through the week,
+so check again Thursday or later." It does not say that about an injury.
 
 ### Draft picks and FAAB
 
@@ -244,6 +256,42 @@ test whether the model predicts the future.
 from the real rosters, each asked from both teams' chairs (the answer must not
 depend on which team is written first), and runs the checks in
 `scripts/lib/tradeValueReview.mjs`.
+
+## What the first live run found (6 October 2026)
+
+The probe was run against production the hour it deployed, on a Tuesday. It
+passed its own checks (nothing absurd, every answer identical from both teams'
+chairs) and still found four things, all fixed in the follow-up:
+
+- **A wrong roster limit.** Sleeper lists this league's two injured-reserve
+  slots in `settings.reserve_slots` and not in `roster_positions`, so the limit
+  came out two short and a 17-man roster looked over its limit on a one-for-one
+  swap, producing a false "would cut" line and a small false charge. The limit
+  now comes from the league's settings, and only a trade that makes a roster
+  bigger can force a cut.
+- **A caution about nothing.** "Your lineup includes a quarterback with no
+  projection" was printed on swaps of receivers. It now appears only when the
+  trade can reach that starter's slot, directly or through a flex slot.
+- **The cost reading was inflated.** The cost meter wrapped the database, and
+  the player list is remembered on the database object, so every metered
+  request skipped the memory and reported the cost of a cold start. The meter now
+  shares the real database's memory and names the statements that returned the
+  most rows.
+- **A doubled word** in the refusal sentence.
+
+It also showed how often the model says "no number" on a Tuesday: three of six
+example trades had no verdict. The reasons are real and none was guessed past:
+
+- Tuesday is when the books have posted the least. A quarterback with only some
+  of his lines up is a partial market, and Sleeper's published week is not quoted
+  for quarterbacks in a league that pays six points for a passing touchdown, so
+  there is nothing to fall back to.
+- A player on a bye this week has no game to price, and the market's season line
+  is stored for few players.
+
+So the card is sharpest from Thursday on, when the week's lines are complete.
+That is a property of the inputs, not of the model, and it is why a trade with an
+unpriced player gets a sentence and not a number.
 
 ## Known limitations
 

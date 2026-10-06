@@ -75,6 +75,19 @@ describe('the checks', () => {
     expect(reviewCheck('t', bad).join(' ')).toMatch(/not Alex/);
   });
 
+  it('catch weekly figures that do not add up to the lineup change', () => {
+    const weekly = [
+      { week: 5, lineupBefore: 100, lineupAfter: 110, depthBefore: 0, depthAfter: 0 },
+      { week: 6, lineupBefore: 100, lineupAfter: 110, depthBefore: 0, depthAfter: 0 },
+    ];
+    const bad = answer({}, side({ label: 'Alex', isMine: true, lineupChange: 50, net: 51, weekly }));
+    const ok = answer({}, side({ label: 'Alex', isMine: true, lineupChange: 20, net: 21, weekly }));
+    (bad as { evaluation: { weeks: unknown } }).evaluation.weeks = { first: 5, last: 6, count: 2 };
+    (ok as { evaluation: { weeks: unknown } }).evaluation.weeks = { first: 5, last: 6, count: 2 };
+    expect(reviewCheck('t', bad).join(' ')).toMatch(/weeks add to 20.0/);
+    expect(reviewCheck('t', ok).join(' ')).not.toMatch(/weeks add to/);
+  });
+
   it('catch a player who is not credible', () => {
     const bad = answer({}, side({ label: 'Alex', isMine: true, incoming: [line({ rosValue: 700 })] }));
     expect(reviewCheck('t', bad).join(' ')).toMatch(/not credible/);
