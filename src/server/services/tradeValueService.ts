@@ -124,6 +124,21 @@ export function currentWeekOf(state: NflState | null): number {
   return state.week != null && state.week > 0 ? state.week : 1;
 }
 
+/**
+ * How many players a roster may hold in this league, from its own settings.
+ *
+ * Starters, bench, and the injured-reserve and taxi slots Sleeper reports in
+ * `settings`. Sleeper's `roster_positions` names the starters and the bench but
+ * not always the reserve slots (this league has two and lists none), so reading
+ * the slot list alone undercounts and flags a full roster as over the limit.
+ */
+export function rosterLimitOf(league: LeagueRecord, shape: ReturnType<typeof buildRosterShape>): number {
+  const reserve = Number(league.leagueSettings['reserve_slots']);
+  const taxi = Number(league.leagueSettings['taxi_slots']);
+  const extra = Math.max(shape.irSlots, (Number.isFinite(reserve) ? reserve : 0) + (Number.isFinite(taxi) ? taxi : 0));
+  return shape.totalStarters + shape.benchSlots + extra;
+}
+
 const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 
 export class TradeValueService {
@@ -235,6 +250,7 @@ export class TradeValueService {
       replacement: prepared.replacement,
       a: sideOf(a),
       b: sideOf(b),
+      rosterLimit: rosterLimitOf(league, prepared.shape),
       aSends: request.aSends,
       bSends: request.bSends,
     });
@@ -359,6 +375,7 @@ export class TradeValueService {
           replacement: prepared.replacement,
           a: side(rx, gotX, gotY),
           b: side(ry, gotY, gotX),
+          rosterLimit: rosterLimitOf(league, prepared.shape),
           aSends: gotY,
           bSends: gotX,
         });

@@ -245,6 +245,42 @@ from the real rosters, each asked from both teams' chairs (the answer must not
 depend on which team is written first), and runs the checks in
 `scripts/lib/tradeValueReview.mjs`.
 
+## What the first live run found (6 October 2026)
+
+The probe was run against production the hour it deployed, on a Tuesday. It
+passed its own checks (nothing absurd, every answer identical from both teams'
+chairs) and still found four things, all fixed in the follow-up:
+
+- **A wrong roster limit.** Sleeper lists this league's two injured-reserve
+  slots in `settings.reserve_slots` and not in `roster_positions`, so the limit
+  came out two short and a 17-man roster looked over its limit on a one-for-one
+  swap, producing a false "would cut" line and a small false charge. The limit
+  now comes from the league's settings, and only a trade that makes a roster
+  bigger can force a cut.
+- **A caution about nothing.** "Your lineup includes a quarterback with no
+  projection" was printed on swaps of receivers. It now appears only when the
+  trade can reach that starter's slot, directly or through a flex slot.
+- **The cost reading was inflated.** The cost meter wrapped the database, and
+  the player list is remembered on the database object, so every metered
+  request skipped the memory and reported the cost of a cold start. The meter now
+  shares the real database's memory and names the statements that returned the
+  most rows.
+- **A doubled word** in the refusal sentence.
+
+It also showed how often the model says "no number" on a Tuesday: three of six
+example trades had no verdict. The reasons are real and none was guessed past:
+
+- Tuesday is when the books have posted the least. A quarterback with only some
+  of his lines up is a partial market, and Sleeper's published week is not quoted
+  for quarterbacks in a league that pays six points for a passing touchdown, so
+  there is nothing to fall back to.
+- A player on a bye this week has no game to price, and the market's season line
+  is stored for few players.
+
+So the card is sharpest from Thursday on, when the week's lines are complete.
+That is a property of the inputs, not of the model, and it is why a trade with an
+unpriced player gets a sentence and not a number.
+
 ## Known limitations
 
 - **A rate is one week's number carried forward.** It is not regressed toward a

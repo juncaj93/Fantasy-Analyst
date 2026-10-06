@@ -18,37 +18,62 @@
  */
 
 import type { Database, DbResult, PreparedStatement } from './db.ts';
+import { MEMO_KEY } from './repos/slowRead.ts';
 
 export interface DbCost {
   statements: number;
   rowsReturned: number;
+  /** The statements that returned the most rows, so a big number has a name. */
+  top?: { sql: string; calls: number; rows: number }[];
 }
 
 export function meterDatabase(inner: Database): { db: Database; cost: () => DbCost } {
   let statements = 0;
   let rowsReturned = 0;
+  const byStatement = new Map<string, { calls: number; rows: number }>();
 
-  const wrap = (stmt: PreparedStatement): PreparedStatement => ({
-    bind: (...values: unknown[]) => wrap(stmt.bind(...values)),
+  const note = (sql: string, rows: number): void => {
+    statements += 1;
+    rowsReturned += rows;
+    const key = sql.replace(/\s+/g, ' ').trim().slice(0, 110);
+    const hit = byStatement.get(key) ?? { calls: 0, rows: 0 };
+    hit.calls += 1;
+    hit.rows += rows;
+    byStatement.set(key, hit);
+  };
+
+  const wrap = (sql: string, stmt: PreparedStatement): PreparedStatement => ({
+    bind: (...values: unknown[]) => wrap(sql, stmt.bind(...values)),
     first: async <T,>(colName?: string) => {
       const row = await stmt.first<T>(colName);
-      statements += 1;
-      rowsReturned += row == null ? 0 : 1;
+      note(sql, row == null ? 0 : 1);
       return row;
     },
     all: async <T,>() => {
       const result = await stmt.all<T>();
-      statements += 1;
-      rowsReturned += result.results.length;
+      note(sql, result.results.length);
       return result as DbResult<T>;
     },
     run: async () => stmt.run(),
   });
 
   const db: Database = {
-    prepare: (sql: string) => wrap(inner.prepare(sql)),
+    prepare: (sql: string) => wrap(sql, inner.prepare(sql)),
     batch: (list) => inner.batch(list),
     exec: (query) => inner.exec(query),
   };
-  return { db, cost: () => ({ statements, rowsReturned }) };
+  // The memo lives on the real database, so a read behind this wrapper hits it.
+  (db as unknown as { [MEMO_KEY]: Database })[MEMO_KEY] = inner;
+
+  return {
+    db,
+    cost: () => ({
+      statements,
+      rowsReturned,
+      top: [...byStatement.entries()]
+        .map(([sql, v]) => ({ sql, ...v }))
+        .sort((a, b) => b.rows - a.rows)
+        .slice(0, 6),
+    }),
+  };
 }

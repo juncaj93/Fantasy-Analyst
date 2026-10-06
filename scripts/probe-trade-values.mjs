@@ -74,7 +74,7 @@ function printEvaluation(ev) {
       `    ${side.isMine ? 'YOU' : side.label}: net ${pts(side.net)}  (lineup ${pts(side.lineupChange)}, depth ${pts(side.depthChange)}${adj ? `, prefs ${adj}` : ''})`,
     );
     for (const p of side.incoming) console.log(`        gets ${describePlayer(p)}`);
-    if (side.mustDrop) console.log(`        would cut ${side.mustDrop.name}`);
+    if (side.mustDrop) console.log(`        would cut ${side.mustDrop.name}${(side.cutCount ?? 1) > 1 ? ` and ${side.cutCount - 1} more` : ''}`);
   }
   for (const r of ev.reasons) console.log(`    why: ${r}`);
   for (const r of ev.confidenceReasons) console.log(`    caution: ${r}`);
@@ -176,11 +176,9 @@ async function main() {
   const q = (ta, tb, give, get, cost) =>
     `${base}?a=${ta.rosterId}&b=${tb.rosterId}&give=${give.map((p) => p.playerId).join(',')}&get=${get.map((p) => p.playerId).join(',')}${cost ? '&cost=1' : ''}`;
 
-  let first_ = true;
   for (const [label, ta, tb, give, get] of examples) {
-    const forward = await fetchJson(q(ta, tb, give, get, first_));
+    const forward = await fetchJson(q(ta, tb, give, get, true));
     const reverse = await fetchJson(q(tb, ta, get, give, false));
-    first_ = false;
     console.log(`\n  ${label}`);
     console.log(`    ${ta.label}${ta.isMine ? ' (you)' : ''} gives ${give.map((p) => p.name).join(' + ')}; ${tb.label} gives ${get.map((p) => p.name).join(' + ')}  [${forward.ms} ms]`);
     if (forward.status !== 200) {
@@ -196,7 +194,10 @@ async function main() {
 
   // ----------------------------------------------------------------- cost
   console.log('\nWhat it costs the database (measured in the Worker, rows returned)');
-  for (const [label, c] of costs) console.log(`  ${String(c.rowsReturned).padStart(6)} rows, ${String(c.statements).padStart(3)} statements  ${label}`);
+  for (const [label, c] of costs) {
+    console.log(`  ${String(c.rowsReturned).padStart(6)} rows, ${String(c.statements).padStart(3)} statements  ${label}`);
+    for (const t of (c.top ?? []).slice(0, 4)) console.log(`      ${String(t.rows).padStart(5)} rows  ${t.calls}x  ${t.sql}`);
+  }
   console.log('  Rows returned is a lower bound on rows read, and the player list is served from a memo when warm.');
 
   // -------------------------------------------------------------- verdict

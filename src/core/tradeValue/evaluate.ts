@@ -182,6 +182,8 @@ export interface SideResult {
   outgoing: PlayerLine[];
   /** Someone cut to make room, when the trade leaves the roster over its limit. */
   mustDrop: PlayerLine | null;
+  /** How many players the trade forces out in all, `mustDrop` being the first. Zero when none. */
+  cutCount?: number;
   /** Starters Sleeper has set who have no projection, so are missing from the lineup math. */
   unvaluedStarters: string[];
 }
@@ -331,6 +333,16 @@ export function evaluateTrade(input: {
   replacement: ReplacementLevels;
   a: TradeSide;
   b: TradeSide;
+  /**
+   * How many players a roster may hold, reserve slots included.
+   *
+   * Taken from the league's settings by the caller, because Sleeper's slot list
+   * does not always name the injured-reserve slots a league has: this league
+   * publishes two in `reserve_slots` and none in `roster_positions`, which made
+   * a 17-player roster look over its limit on a one-for-one swap. Absent falls
+   * back to what the slot list says.
+   */
+  rosterLimit?: number;
   /** Players side A sends to B. */
   aSends: readonly string[];
   /** Players side B sends to A. */
@@ -372,8 +384,8 @@ export function evaluateTrade(input: {
   const unpriced = moved.filter((p) => p.rate == null);
   if (unpriced.length > 0) {
     return empty(
-      `No number can be put on ${listNames(unpriced.map((p) => p.name))}: ${unpriced[0]!.rateNote ?? 'nothing prices'} ` +
-        `${unpriced.length === 1 ? 'him' : 'them'}. A verdict needs a real projection for every player moved.`,
+      `No number can be put on ${listNames(unpriced.map((p) => p.name))}: ${unpriced[0]!.rateNote ?? 'nothing prices him'}. ` +
+        `A verdict needs a real projection for every player moved.`,
     );
   }
   const lacking = [...new Set(moved.filter((p) => startable.has(p.position) && !replacement.has(p.position)).map((p) => p.position))];
@@ -389,9 +401,21 @@ export function evaluateTrade(input: {
     let after = [...side.roster.filter((p) => afterIds.has(p.playerId)), ...inn];
 
     let mustDrop: PlayerRate | null = null;
-    if (after.length > rosterCapacity(shape)) {
-      mustDrop = pickDrop(after, replacement);
-      if (mustDrop) after = after.filter((p) => p.playerId !== mustDrop!.playerId);
+    let cutCount = 0;
+    /*
+     * Only a trade that makes a roster bigger can force a cut, and only down to
+     * where the roster already was or the limit, whichever is higher. A roster
+     * already over its limit (a stale sync, a league that allows it) is not this
+     * trade's doing, and a one-for-one swap never changes the count. As many are
+     * cut as it takes, least valuable first.
+     */
+    const target = Math.max(input.rosterLimit ?? rosterCapacity(shape), side.roster.length);
+    while (after.length > target) {
+      const cut = pickDrop(after, replacement);
+      if (!cut) break;
+      mustDrop ??= cut;
+      cutCount += 1;
+      after = after.filter((p) => p.playerId !== cut.playerId);
     }
 
     const before = valueRoster({ players: side.roster, slots, replacement, horizon });
@@ -454,9 +478,19 @@ export function evaluateTrade(input: {
     }
     const adjustmentTotal = round1(adjustments.reduce((s, x) => s + x.points, 0));
 
+    /*
+     * A starter with no projection only matters to a trade that could put
+     * somebody into his slot. A missing quarterback says nothing about a swap of
+     * receivers, and printing it there is a caution about nothing.
+     */
+    const relevant = new Set<string>();
+    for (const p of [...out, ...inn]) {
+      relevant.add(p.position);
+      for (const slot of slots) if (slot.eligible.has(p.position)) for (const q of slot.eligible) relevant.add(q);
+    }
     const unvaluedStarters = (side.starterIds ?? [])
       .map((id) => side.roster.find((p) => p.playerId === id))
-      .filter((p): p is PlayerRate => p != null && p.rate == null)
+      .filter((p): p is PlayerRate => p != null && p.rate == null && relevant.has(p.position))
       .map((p) => p.name);
 
     return {
@@ -471,6 +505,7 @@ export function evaluateTrade(input: {
       incoming: inn.map((p) => lineFor(p, replacement, post.starts)),
       outgoing: out.map((p) => lineFor(p, replacement, before.starts)),
       mustDrop: mustDrop ? lineFor(mustDrop, replacement, before.starts) : null,
+      cutCount,
       unvaluedStarters,
     };
   };
@@ -627,7 +662,11 @@ function caveatsFor(
   for (const p of lines) if (p.injuryNote) out.push(`${p.name}: ${p.injuryNote}.`);
   for (const side of [a, b]) {
     if (side.mustDrop) {
-      out.push(`${side.isMine ? 'You' : side.label} would be over the roster limit and cut ${side.mustDrop.name}.`);
+      const more = (side.cutCount ?? 1) - 1;
+      out.push(
+        `${side.isMine ? 'You' : side.label} would be over the roster limit and cut ${side.mustDrop.name}` +
+          `${more > 0 ? ` and ${more} more` : ''}.`,
+      );
     }
   }
   if (horizon.deadlinePassed) {
