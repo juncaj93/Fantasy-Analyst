@@ -123,6 +123,8 @@ import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
+import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
+import { meterDatabase } from './meter.ts';
 import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService, seasonFor } from './services/seasonMarketService.ts';
 import { PreseasonProjectionService } from './services/preseasonProjectionService.ts';
@@ -2912,6 +2914,74 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
        */
       consolidation: ladder.consolidation,
     });
+  });
+
+  /**
+   * The rosters, for choosing who is in a trade to check.
+   *
+   * Names and slots only. The check itself is the next route and is the one that
+   * reads the market, so opening the picker costs two small reads.
+   */
+  router.get('/api/leagues/:id/trades/check/teams', async (ctx) => {
+    try {
+      return jsonResponse(await new TradeValueService(ctx.env.db, ctx.env.sleeper).teams(ctx.params['id']!));
+    } catch (err) {
+      if (err instanceof TradeCheckError) return errorResponse(err.message, err.status);
+      throw err;
+    }
+  });
+
+  /**
+   * What a trade between any two teams does to each lineup over the rest of the
+   * fantasy season.
+   *
+   * `a` and `b` are Sleeper roster ids; `give` and `get` are comma-separated
+   * player ids, `give` being what `a` gives up and `get` what `b` gives up. A
+   * recommendation only: nothing here proposes, makes or answers a trade, and
+   * the response says so. Reads stored rows and never calls Sleeper.
+   */
+  router.get('/api/leagues/:id/trades/check', async (ctx) => {
+    const ids = (name: string): string[] =>
+      (ctx.url.searchParams.get(name) ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0);
+    const a = Number(ctx.url.searchParams.get('a'));
+    const b = Number(ctx.url.searchParams.get('b'));
+    if (!Number.isInteger(a) || !Number.isInteger(b)) return errorResponse('a and b must be roster ids', 400);
+    try {
+      const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+      const result = await new TradeValueService(metered?.db ?? ctx.env.db, ctx.env.sleeper).check(ctx.params['id']!, {
+        a,
+        b,
+        aSends: ids('give'),
+        bSends: ids('get'),
+      });
+      return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
+    } catch (err) {
+      if (err instanceof TradeCheckError) return errorResponse(err.message, err.status);
+      throw err;
+    }
+  });
+
+  /**
+   * Past league trades, replayed through the model, for a person checking the
+   * model for absurd answers. Read-only; the same assembly as the check above.
+   */
+  router.get('/api/diagnostics/trade-values', async (ctx) => {
+    const leagueRepo = new LeagueRepo(ctx.env.db);
+    const wanted = ctx.url.searchParams.get('leagueId');
+    const league = wanted ? await leagueRepo.getLeague(wanted) : await leagueRepo.getSelectedLeague();
+    if (!league) return errorResponse('league not found', 404);
+    const limit = Number(ctx.url.searchParams.get('limit') ?? 12) || 12;
+    try {
+      const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+      const result = await new TradeValueService(metered?.db ?? ctx.env.db, ctx.env.sleeper).replay(league.id, { limit });
+      return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
+    } catch (err) {
+      if (err instanceof TradeCheckError) return errorResponse(err.message, err.status);
+      throw err;
+    }
   });
 
   // ------------------------------------------------------- help my scores ---

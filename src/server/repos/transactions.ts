@@ -164,6 +164,29 @@ export class TransactionRepo {
   }
 
   /**
+   * Completed trades only, newest first, with the season each belongs to.
+   *
+   * The narrow read the trade replay needs. `listBySeason` returns every
+   * transaction the league has ever had, waiver claims included, which is
+   * hundreds of payloads to find a few dozen trades. Filtered in SQL on
+   * `txn_type` and `status`, so only the trades are read.
+   */
+  async completedTrades(leagueId: string, limit = 60): Promise<{ season: string; transaction: SleeperTransaction }[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT season, payload_json FROM league_transactions
+          WHERE league_id = ? AND txn_type = 'trade' AND status = 'complete'
+          ORDER BY created_at_ms DESC LIMIT ?`,
+      )
+      .bind(leagueId, limit)
+      .all<{ season: string; payload_json: string }>();
+    return rows.results.map((r) => ({
+      season: String(r.season),
+      transaction: parseJson<SleeperTransaction>(r.payload_json, {} as SleeperTransaction),
+    }));
+  }
+
+  /**
    * How many transactions are stored, without loading any of them.
    *
    * A count for a diagnostics line. Reading every payload to call `.length` on

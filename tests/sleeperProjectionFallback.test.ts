@@ -896,6 +896,19 @@ describe('no recommendation engine can reach the fallback', () => {
          * number about a player.
          */
         'server/services/dataHealthService.ts',
+        /*
+         * Trade values, sanctioned by the brief for that round (6 October 2026):
+         * Sleeper's published projection is an allowed input when Vegas has not
+         * fully priced a player, and it is labelled `Sleeper projection` wherever
+         * it is the base.
+         *
+         * The shape of the exception is the waiver yardstick's: the figure
+         * reaches `core/tradeValue/` as a plain map and never as an import (the
+         * model modules are checked for that in `tradeValue.model.test.ts`), a
+         * complete Vegas week always outranks it, and a partial market is never
+         * topped up from it.
+         */
+        'server/services/tradeValueService.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );

@@ -162,11 +162,19 @@ export class SleeperProjectionService {
     playerIds: readonly string[];
     profile: ScoringProfile;
     positionOf?: (playerId: string) => string | null | undefined;
+    /**
+     * Read only these players' rows, through the table's key, instead of the
+     * whole stored week. For a caller that asks about a few dozen players and
+     * would otherwise pay for every player the feed publishes.
+     */
+    narrow?: boolean;
   }): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (opts.playerIds.length === 0) return out;
 
-    const stored = await this.repo.forWeek(opts.season, opts.week);
+    const stored = opts.narrow
+      ? await this.repo.forPlayers(opts.season, opts.week, opts.playerIds)
+      : await this.repo.forWeek(opts.season, opts.week);
     if (stored.size === 0) return out;
 
     for (const playerId of opts.playerIds) {
