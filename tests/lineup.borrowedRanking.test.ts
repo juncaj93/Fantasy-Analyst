@@ -158,7 +158,7 @@ describe('the discount on somebody else’s model', () => {
      * incumbent's score carries (see `decisionPoints.ts`), so the line he has to
      * clear is the incumbent's score plus the discount, less his own reads.
      */
-    const concepcion = [...contest(0).bench, ...contest(0).undecidable].find((e) => e.playerId === 'concepcion');
+    const concepcion = [...contest(7).bench, ...contest(7).undecidable].find((e) => e.playerId === 'concepcion');
     const adjustments = concepcion?.decision?.adjustments ?? 0;
     expect(adjustments).not.toBe(0);
 

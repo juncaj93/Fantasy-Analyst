@@ -43,6 +43,7 @@
  * kept out of the number a *suggestion* is printed with, so a suggestion and
  * the sheet it opens are always the same arithmetic.
  */
+import { budgetAdjustments, BUDGETED_KEYS } from './adjustmentBudget.ts';
 import { marketIsComplete } from './projection.ts';
 
 /** Where the base of a decision number came from. */
@@ -62,7 +63,7 @@ export interface DecisionEvaluation {
   playerId: string;
   score: number | null;
   expectation?: { points: number | null; missingMarkets?: readonly string[] } | null;
-  components?: readonly { key: string; value: number; unknown: boolean }[];
+  components?: readonly { key: string; value: number; unknown: boolean; preBudgetValue?: number }[];
 }
 
 /** Components that describe the market rather than the player. */
@@ -76,6 +77,28 @@ function sum(evaluation: DecisionEvaluation, keep: (key: string) => boolean): nu
   return (evaluation.components ?? [])
     .filter((c) => !c.unknown && keep(c.key))
     .reduce((total, c) => total + c.value, 0);
+}
+
+/**
+ * The adjustments a published week carries, held to the same budget the market
+ * number's are, measured against the published figure instead.
+ *
+ * The engine budgeted each secondary value against the market expectation,
+ * which for a partly priced player is a few points at best, so it is read from
+ * `preBudgetValue` here (the value before that) and budgeted again against the
+ * week actually being used. Availability and the lineup-only cover charge are
+ * not nudges and pass through as they are.
+ */
+function publishedAdjustments(evaluation: DecisionEvaluation, base: number, rosterRisk: boolean): number {
+  const live = (evaluation.components ?? []).filter(
+    (c) => !c.unknown && !MARKET_KEYS.has(c.key) && (rosterRisk || !ROSTER_KEYS.has(c.key)),
+  );
+  const nudges = budgetAdjustments(
+    live.filter((c) => BUDGETED_KEYS.includes(c.key)).map((c) => ({ key: c.key, value: c.preBudgetValue ?? c.value })),
+    base,
+  );
+  const rest = live.filter((c) => !BUDGETED_KEYS.includes(c.key)).reduce((a, c) => a + c.value, 0);
+  return [...nudges.values()].reduce((a, v) => a + v, 0) + rest;
 }
 
 /**
@@ -99,7 +122,7 @@ export function decisionPoints(
     const figure = published?.get(evaluation.playerId);
     if (figure != null && Number.isFinite(figure)) {
       const base = Math.max(0, figure);
-      const adjustments = sum(evaluation, (k) => !MARKET_KEYS.has(k) && (rosterRisk || !ROSTER_KEYS.has(k)));
+      const adjustments = publishedAdjustments(evaluation, base, rosterRisk);
       return { points: round2(base + adjustments), basis: 'published', base: round2(base), adjustments: round2(adjustments) };
     }
   }

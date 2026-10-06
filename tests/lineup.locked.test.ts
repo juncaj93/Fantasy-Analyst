@@ -192,7 +192,7 @@ describe('late swap in a head-to-head comparison', () => {
     // The projection still prefers the better player — the risk is named, not
     // silently applied.
     expect(comparison.recommendedPlayerId).toBe('night');
-    expect(comparison.margin).toBeCloseTo(0.7, 1);
+    expect(comparison.margin).toBeCloseTo(0.64, 2);
     expect(comparison.lateSwap.verdict).toBe('consider_early_option');
     expect(comparison.warnings.join(' ')).toContain('Consider starting Early WR');
   });

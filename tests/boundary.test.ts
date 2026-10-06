@@ -162,7 +162,9 @@ describe('wind boundary', () => {
       temperatureC: 8,
       snow: false,
     });
-    const challenger = inWeather(candidate('b', 'Indoor Guy', 'WR', 11.7), { indoor: true });
+    // A near-tie on purpose: weather is held to 3% of the market number, so
+    // it can only flip a gap that small.
+    const challenger = inWeather(candidate('b', 'Indoor Guy', 'WR', 12.0), { indoor: true });
     const report = findBoundaries([leader, challenger], HALF_PPR);
     const wind = report.conditions.find((c) => c.kind === 'wind');
     expect(wind).toBeDefined();
