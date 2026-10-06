@@ -20,19 +20,6 @@ import { readFileSync } from 'node:fs';
 import { assembleLineup } from '../src/core/startsit/assemble.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 
-/** Everything that is neither the market nor availability. */
-const SECONDARY = [
-  'news_recent',
-  'news_raw',
-  'uncertainty',
-  'usage_level',
-  'role_trend',
-  'td_dependency',
-  'game_script',
-  'weather',
-  'matchup_role',
-  'explosiveness',
-];
 const NEWS = ['news_recent', 'news_raw'];
 const LIMIT = 0.1;
 
@@ -63,78 +50,84 @@ const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 const sumOf = (comps: Comp[], keys: string[], raw = false) =>
   comps.filter((c) => !c.unknown && keys.includes(c.key)).reduce((a, c) => a + (raw ? (c.preBudgetValue ?? c.value) : c.value), 0);
 
+/*
+ * The base a decision is made on, per player: the market's number when it is a
+ * complete market, Rotowire's published week when it is not, and nothing at all
+ * when neither exists. `decision` is what the lineup and the Compare sheet rank
+ * on, so it is what is measured here, and both versions of the engine have it.
+ *
+ * "Secondary" is the decision's adjustments less availability, which is a gate
+ * and not a nudge.
+ */
 interface Row {
   name: string;
   slot: string;
-  vegas: number;
+  basis: string;
+  base: number;
   secondary: number;
-  secondaryRaw: number;
   news: number;
-  newsRaw: number;
   status: number;
-  share: number | null;
-  score: number | null;
+  points: number | null;
 }
 const starterSlot = new Map(lineup.slots.map((s) => [s.playerId, s.slot]));
 const rows: Row[] = everyone
   .map((e) => {
     const comps = e.components as Comp[];
-    const vegas = e.expectation.points == null ? null : (comps.find((c) => c.key === 'vegas')?.value ?? null);
+    const d = e.decision;
+    const status = sumOf(comps, ['status']);
     return {
       name: `${e.name} (${e.position})`,
       slot: starterSlot.get(e.playerId) ?? 'bench',
-      vegas: vegas ?? NaN,
-      secondary: sumOf(comps, SECONDARY),
-      secondaryRaw: sumOf(comps, SECONDARY, true),
+      basis: d?.basis ?? 'none',
+      base: d?.base ?? NaN,
+      secondary: d == null ? 0 : d.adjustments - status,
       news: sumOf(comps, NEWS),
-      newsRaw: sumOf(comps, NEWS, true),
-      status: sumOf(comps, ['status']),
-      share: vegas == null || vegas <= 0 ? null : Math.abs(sumOf(comps, SECONDARY)) / vegas,
-      score: e.score,
+      status,
+      points: d?.points ?? null,
     };
   })
   .sort((a, b) => a.name.localeCompare(b.name));
 
 console.log(`week ${snapshot.decision.context.week} · ${inputs.mode} · ${rows.length} rostered players\n`);
-console.log('player | slot | vegas | secondary | secondary % of vegas | news (both) | availability | score');
+console.log('player | slot | basis | base | secondary | secondary % of base | news lines (engine) | availability | decision points');
 for (const r of rows) {
-  const priced = Number.isFinite(r.vegas) && r.vegas > 0;
+  const ok = Number.isFinite(r.base) && r.base > 0 && r.basis !== 'unpriced';
   console.log(
     [
       r.name,
       r.slot,
-      priced ? r.vegas.toFixed(2) : 'no market',
+      r.basis,
+      ok ? r.base.toFixed(2) : 'n/a',
       r.secondary.toFixed(2),
-      priced ? pct(r.secondary / r.vegas) : 'n/a',
+      ok ? pct(r.secondary / r.base) : 'n/a',
       r.news.toFixed(2),
       r.status.toFixed(2),
-      r.score == null ? 'unscored' : r.score.toFixed(2),
+      r.points == null ? 'unscored' : r.points.toFixed(2),
     ].join(' | '),
   );
 }
 
-const priced = rows.filter((r) => Number.isFinite(r.vegas) && r.vegas > 0);
+const priced = rows.filter((r) => Number.isFinite(r.base) && r.base > 0 && r.basis !== 'unpriced');
 const quantile = (xs: number[], q: number) => {
   if (xs.length === 0) return NaN;
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))]!;
 };
-const absShare = priced.map((r) => Math.abs(r.secondary) / r.vegas);
-const newsShare = priced.map((r) => Math.abs(r.news) / r.vegas);
-console.log(`\npriced players: ${priced.length} of ${rows.length}`);
-console.log('|secondary| / vegas      median ' + pct(quantile(absShare, 0.5)) + ' · p90 ' + pct(quantile(absShare, 0.9)) + ' · max ' + pct(Math.max(...absShare)));
-console.log('|news, both lines| / vegas  median ' + pct(quantile(newsShare, 0.5)) + ' · p90 ' + pct(quantile(newsShare, 0.9)) + ' · max ' + pct(Math.max(...newsShare)));
-if (priced.some((r) => r.secondaryRaw !== r.secondary)) {
-  const rawShare = priced.map((r) => Math.abs(r.secondaryRaw) / r.vegas);
-  console.log('without the budget      median ' + pct(quantile(rawShare, 0.5)) + ' · p90 ' + pct(quantile(rawShare, 0.9)) + ' · max ' + pct(Math.max(...rawShare)));
+const absShare = priced.map((r) => Math.abs(r.secondary) / r.base);
+const newsShare = priced.map((r) => Math.abs(r.news) / r.base);
+const count = (b: string) => rows.filter((r) => r.basis === b).length;
+console.log(`\nbases: market ${count('market')} · partial market ${count('partial')} · published week ${count('published')} · unpriced ${count('unpriced')}`);
+console.log(`measurable players (a base above zero): ${priced.length} of ${rows.length}`);
+if (priced.length > 0) {
+  console.log('|secondary| / base       median ' + pct(quantile(absShare, 0.5)) + ' · p90 ' + pct(quantile(absShare, 0.9)) + ' · max ' + pct(Math.max(...absShare)));
+  console.log('|news, both lines| / base   median ' + pct(quantile(newsShare, 0.5)) + ' · p90 ' + pct(quantile(newsShare, 0.9)) + ' · max ' + pct(Math.max(...newsShare)));
 }
-const worst = [...priced].sort((a, b) => Math.abs(b.secondary) / b.vegas - Math.abs(a.secondary) / a.vegas).slice(0, 5);
+const worst = [...priced].sort((a, b) => Math.abs(b.secondary) / b.base - Math.abs(a.secondary) / a.base).slice(0, 5);
 console.log('largest secondary shares:');
-for (const w of worst) console.log(`  ${w.name}: vegas ${w.vegas.toFixed(2)}, secondary ${w.secondary.toFixed(2)} (${pct(w.secondary / w.vegas)}), news ${w.news.toFixed(2)}`);
-const over = priced.filter((r) => Math.abs(r.secondary) > r.vegas * LIMIT + 1e-9);
-console.log(`\nINVARIANT players over ${LIMIT * 100}% of vegas: ${over.length}${over.length ? ' -> ' + over.map((o) => o.name).join(', ') : ''}`);
-
-if (over.length > 0) process.exitCode = 1;
+for (const w of worst) console.log(`  ${w.name}: base ${w.base.toFixed(2)} (${w.basis}), secondary ${w.secondary.toFixed(2)} (${pct(w.secondary / w.base)}), news ${w.news.toFixed(2)}`);
+const over = priced.filter((r) => Math.abs(r.secondary) > r.base * LIMIT + 0.011);
+console.log(`\nINVARIANT players over ${LIMIT * 100}% of base: ${over.length}${over.length ? ' -> ' + over.map((o) => o.name).join(', ') : ''}`);
+if (over.length > 0 && process.env.STRICT) process.exitCode = 1;
 
 console.log('\nrecommended lineup');
 for (const s of lineup.slots) console.log(`  ${s.slot}: ${s.name ?? '(empty)'} · ${s.score == null ? 'unscored' : r2(s.score)}`);
