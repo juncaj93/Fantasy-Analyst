@@ -165,7 +165,17 @@ lineup math with no opinion about how a manager likes to build a roster.
 
 The verdict compares the two sides: **side A's change minus side B's change**.
 Both numbers are always shown, so a deal where Dermot gains 41 and Alex loses 41
-reads "82 pts apart" with both figures beside it.
+reads "82 pts apart" with both figures beside it. The headline says so itself:
+"Favors Dermot by about 82 pts over the rest of the season (you −41, Dermot +41)".
+That gap is the honest head-to-head difference and also twice what either team
+experiences in a swap, so the larger number never appears without the two that
+make it.
+
+Each result carries its working: every player's base number, the capped nudges
+added to it, his bye and injury weeks, which weeks he starts, and each side's
+lineup week by week, so a total can be checked against the weeks it came from.
+The probe prints all of it, and a check fails if the weeks do not add up to the
+total.
 
 The close-call band is the wider of 4 points or 12% of the larger package, in
 points over the rest of the season. Projections have a noise floor and that
@@ -180,7 +190,9 @@ line (low), on Sleeper's projection (medium), his bye is unknown (medium),
 replacement level rests on fewer than three free agents (medium), or one of a
 team's Sleeper starters has no projection so its gain may be overstated (medium).
 No verdict at all when a moved player has no basis, or a position has no priced
-free agent to measure against.
+free agent to measure against. When the gap is about the market (a partial week,
+a bye, no season line) the sentence ends "Betting lines fill in through the week,
+so check again Thursday or later." It does not say that about an injury.
 
 ### Draft picks and FAAB
 

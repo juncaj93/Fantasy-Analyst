@@ -61,6 +61,36 @@ function describePlayer(p) {
   return `${p.name} (${p.position}) ${rate}, ${p.games.toFixed(1)} g, starts ${p.startsWeeks}${val}${bye}`;
 }
 
+/**
+ * The working, per week: what each player is made of, when he plays, and how each
+ * side's lineup moves. So a big total can be checked against the weeks it came
+ * from instead of being taken on trust.
+ */
+function printBreakdown(ev) {
+  if (!ev || ev.status !== 'ok') return;
+  const weeks = ev.a.weekly?.map((w) => w.week) ?? [];
+  const head = weeks.map((w) => String(w).padStart(5)).join('');
+  for (const side of [ev.a, ev.b]) {
+    console.log(`    ${side.isMine ? 'YOU' : side.label}, week by week`);
+    console.log(`        week            ${head}`);
+    for (const p of [...side.outgoing.map((x) => ['gives', x]), ...side.incoming.map((x) => ['gets', x])]) {
+      const [verb, line] = p;
+      const parts = line.rateParts ? `base ${line.rateParts.base.toFixed(1)} + nudges ${pts(line.rateParts.nudges)}` : 'no base (season line)';
+      console.log(`        ${verb} ${line.name}: ${line.rate?.toFixed(1) ?? '?'}/g = ${parts}; ${line.designation}${line.injuryNote ? ` (${line.injuryNote})` : ''}`);
+      const avail = (line.weekly ?? []).map((a) => String(a === 0 ? 'bye/out' : a === 1 ? '1' : a.toFixed(2)).padStart(5)).join('');
+      console.log(`            available   ${avail}`);
+      const on = new Set(line.startsOn ?? []);
+      console.log(`            starts      ${weeks.map((w) => (on.has(w) ? '  yes' : '   no')).join('')}`);
+    }
+    const row = (label, f) => console.log(`        ${label.padEnd(15)} ${side.weekly.map((w) => String(f(w).toFixed(1)).padStart(5)).join('')}`);
+    row('lineup before', (w) => w.lineupBefore);
+    row('lineup after', (w) => w.lineupAfter);
+    row('change', (w) => w.lineupAfter - w.lineupBefore + (w.depthAfter - w.depthBefore));
+    const total = side.weekly.reduce((a, w) => a + (w.lineupAfter - w.lineupBefore), 0);
+    console.log(`        lineup change summed over ${weeks.length} weeks: ${pts(total)}  (reported ${pts(side.lineupChange)})`);
+  }
+}
+
 function printEvaluation(ev) {
   if (!ev) return;
   if (ev.status !== 'ok') {
@@ -187,6 +217,7 @@ async function main() {
       continue;
     }
     printEvaluation(forward.body.evaluation);
+    printBreakdown(forward.body.evaluation);
     findings.push(...reviewCheck(label, forward.body));
     findings.push(...reviewAntisymmetry(label, forward.body, reverse.body));
     if (forward.body.cost) costs.push([label, forward.body.cost]);

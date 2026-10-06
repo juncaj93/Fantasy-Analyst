@@ -672,3 +672,54 @@ describe('the refusal sentence', () => {
     expect(r.insufficientReason).toMatch(/for him\. A verdict needs/);
   });
 });
+
+describe('what the card says, and what it shows its working with', () => {
+  it('puts both sides\u2019 changes beside the gap, so a swap never reads as double', () => {
+    // Alex gives a 17 ppg receiver for a 9 ppg one: he loses what Dermot gains.
+    const r = run(side('Alex', roster('a'), true), side('Dermot', roster('b', { wr1: 9 })), ['a-wr1'], ['b-wr1']);
+    const net = Math.round(Math.abs(r.a!.net));
+    expect(r.verdict!.headline).toMatch(/^Favors Dermot by about \d+ pts over the rest of the season \(you \u2212\d+, Dermot \+\d+\)\.$/);
+    expect(r.verdict!.headline).toContain(`you \u2212${net}`);
+    // The gap counts both sides, which is why the two changes sit next to it.
+    expect(Math.abs(r.verdict!.gap)).toBeCloseTo(Math.abs(r.a!.net) + Math.abs(r.b!.net), 0);
+  });
+
+  it('adds nothing to a close call', () => {
+    const r = run(side('A', roster('a', { wr2: 14 })), side('B', roster('b', { wr2: 14.1 })), ['a-wr2'], ['b-wr2']);
+    expect(r.verdict!.headline).not.toMatch(/\(/);
+  });
+
+  it('tells a reader to check again later when the gap is about the market, and not when it is about an injury', () => {
+    const market = run(side('A', roster('a', { wr1: null })), side('B', roster('b')), ['a-wr1'], ['b-wr1']);
+    expect(market.insufficientReason).toMatch(/check again Thursday or later/);
+    const hurt = roster('a', { wr1: null }).map((p) => (p.playerId === 'a-wr1' ? { ...p, rateNote: 'ruled out and no season line is stored for him' } : p));
+    const out = run(side('A', hurt), side('B', roster('b')), ['a-wr1'], ['b-wr1']);
+    expect(out.insufficientReason).not.toMatch(/Thursday/);
+  });
+
+  it('reports each side\u2019s lineup week by week, and the weeks add to the total', () => {
+    const r = run(side('Alex', roster('a'), true), side('Dermot', roster('b', { wr1: 9 })), ['a-wr1'], ['b-wr1']);
+    for (const s of [r.a!, r.b!]) {
+      expect(s.weekly).toHaveLength(13);
+      const summed = s.weekly!.reduce((acc, w) => acc + (w.lineupAfter - w.lineupBefore), 0);
+      expect(Math.abs(summed - s.lineupChange)).toBeLessThan(0.1 * 13 + 0.2);
+    }
+  });
+
+  it('says which weeks a player starts, when he plays, and what his rate is made of', () => {
+    const star = { ...rate('b-wr9', 'WR', 17), rateParts: { base: 16.2, nudges: 0.8 } };
+    const withBye = withBye_(star, 9);
+    const r = run(side('Alex', roster('a', { wr1: 9 }), true), side('Dermot', roster('b', {}, [withBye])), [], ['b-wr9']);
+    const line = r.a!.incoming[0]!;
+    expect(line.rateParts).toEqual({ base: 16.2, nudges: 0.8 });
+    expect(line.weekly).toHaveLength(13);
+    expect(line.weekly![HORIZON.weeks.indexOf(9)]).toBe(0);
+    expect(line.startsOn).not.toContain(9);
+    expect(line.startsOn!.length).toBe(line.startsWeeks);
+  });
+});
+
+function withBye_(p: PlayerRate, week: number): PlayerRate {
+  const weekly = p.weekly.map((v, i) => (HORIZON.weeks[i] === week ? 0 : v));
+  return { ...p, weekly, games: weekly.reduce((a, b) => a + b, 0), byeWeek: week, byeInside: true };
+}

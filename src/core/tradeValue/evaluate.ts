@@ -157,6 +157,12 @@ export interface PlayerLine {
   rosValue: number | null;
   /** Weeks he would be in the starting lineup, on the roster that holds him. */
   startsWeeks: number;
+  /** Which weeks those are. */
+  startsOn?: number[];
+  /** Expected availability for each week of the horizon: 1 plays, 0 bye or out. */
+  weekly?: number[];
+  /** What his rate is made of: the base number, and the capped nudges added to it. */
+  rateParts?: { base: number; nudges: number } | null;
 }
 
 export interface Adjustment {
@@ -171,6 +177,8 @@ export interface SideResult {
   isMine: boolean;
   /** Change in the best projected lineup over the remaining weeks. */
   lineupChange: number;
+  /** The same, week by week, so a total can be checked against the weeks it came from. */
+  weekly?: { week: number; lineupBefore: number; lineupAfter: number; depthBefore: number; depthAfter: number }[];
   /** Change in the small depth credit. */
   depthChange: number;
   /** Alex's preferences. Empty for every other team. */
@@ -224,7 +232,9 @@ interface RosterValue {
   lineup: number;
   /** Depth credit, by what is excluded. */
   depth: { neutral: number; noQbTe: number; noQbTeDef: number };
-  starts: Map<string, number>;
+  /** For each player, the weeks he is in the lineup. */
+  starts: Map<string, number[]>;
+  byWeek: { week: number; lineup: number; depth: number }[];
 }
 
 function valueRoster(opts: {
@@ -235,7 +245,8 @@ function valueRoster(opts: {
 }): RosterValue {
   const { players, slots, replacement, horizon } = opts;
   const priced = players.filter((p) => p.rate != null);
-  const starts = new Map<string, number>();
+  const starts = new Map<string, number[]>();
+  const byWeek: { week: number; lineup: number; depth: number }[] = [];
   let lineup = 0;
   const depth = { neutral: 0, noQbTe: 0, noQbTeDef: 0 };
   const defPrepWeek = horizon.regularSeasonEnd;
@@ -260,7 +271,7 @@ function valueRoster(opts: {
     for (const pick of result.picks) {
       if (!pick) continue;
       started.add(pick.id);
-      if (!pick.id.startsWith('replacement:')) starts.set(pick.id, (starts.get(pick.id) ?? 0) + 1);
+      if (!pick.id.startsWith('replacement:')) starts.set(pick.id, [...(starts.get(pick.id) ?? []), week]);
     }
 
     const bench = candidates
@@ -278,15 +289,16 @@ function valueRoster(opts: {
     depth.neutral += credited(() => true);
     depth.noQbTe += credited((position) => !isSpare(position));
     depth.noQbTeDef += credited((position) => !isSpare(position) && (position !== 'DEF' || week >= defPrepWeek));
+    byWeek.push({ week, lineup: result.total, depth: credited(() => true) });
   });
 
-  return { lineup, depth, starts };
+  return { lineup, depth, starts, byWeek };
 }
 
 function lineFor(
   player: PlayerRate,
   replacement: ReplacementLevels,
-  starts: Map<string, number>,
+  starts: Map<string, number[]>,
 ): PlayerLine {
   const level = replacement.get(player.position);
   const rosValue =
@@ -305,7 +317,10 @@ function lineFor(
     byeWeek: player.byeWeek,
     byeInside: player.byeInside,
     rosValue,
-    startsWeeks: starts.get(player.playerId) ?? 0,
+    startsWeeks: starts.get(player.playerId)?.length ?? 0,
+    startsOn: starts.get(player.playerId) ?? [],
+    weekly: player.weekly,
+    rateParts: player.rateParts ?? null,
   };
 }
 
@@ -385,7 +400,11 @@ export function evaluateTrade(input: {
   if (unpriced.length > 0) {
     return empty(
       `No number can be put on ${listNames(unpriced.map((p) => p.name))}: ${unpriced[0]!.rateNote ?? 'nothing prices him'}. ` +
-        `A verdict needs a real projection for every player moved.`,
+        `A verdict needs a real projection for every player moved.` +
+        // Lines go up through the week, so a gap that is about the market is a gap that closes.
+        (unpriced.some((p) => !/ruled out/.test(p.rateNote ?? ''))
+          ? ' Betting lines fill in through the week, so check again Thursday or later.'
+          : ''),
     );
   }
   const lacking = [...new Set(moved.filter((p) => startable.has(p.position) && !replacement.has(p.position)).map((p) => p.position))];
@@ -498,6 +517,13 @@ export function evaluateTrade(input: {
       rosterId: side.rosterId,
       isMine: side.isMine,
       lineupChange: round1(lineupChange),
+      weekly: before.byWeek.map((w, i) => ({
+        week: w.week,
+        lineupBefore: round1(w.lineup),
+        lineupAfter: round1(post.byWeek[i]?.lineup ?? w.lineup),
+        depthBefore: round1(w.depth),
+        depthAfter: round1(post.byWeek[i]?.depth ?? w.depth),
+      })),
       depthChange: round1(depthChange),
       adjustments,
       adjustmentTotal,
@@ -551,13 +577,20 @@ function verdictFor(a: SideResult, b: SideResult, gap: number, band: number): Ve
   }
   const strong = size > band * TRADE_VALUE.edgeBands;
   const name = who(winner);
+  /*
+   * The gap is one side's change minus the other's, so a swap where one team
+   * gains 59 and the other loses 59 reads 118. That is the honest head-to-head
+   * difference and it is also double what either team experiences, so the two
+   * changes ride beside it and the larger number never appears alone.
+   */
+  const both = `${who(a)} ${signedPts(a.net)}, ${who(b)} ${signedPts(b.net)}`;
   return {
     kind: `${strong ? 'favors' : 'leans'}_${kindSuffix}` as VerdictKind,
     gap,
     band,
     headline: strong
-      ? `Favors ${name} by about ${pts} pts over the rest of the season.`
-      : `Leans toward ${name}, about ${pts} pts over the rest of the season.`,
+      ? `Favors ${name} by about ${pts} pts over the rest of the season (${both}).`
+      : `Leans toward ${name}, about ${pts} pts over the rest of the season (${both}).`,
   };
 }
 
@@ -681,6 +714,11 @@ function caveatsFor(
     .join(', ');
   if (level) out.push(`Replacement level (a free agent): ${level} pts a game.`);
   return out;
+}
+
+function signedPts(value: number): string {
+  const n = Math.round(Math.abs(value));
+  return value > 0 ? `+${n}` : value < 0 ? `\u2212${n}` : '0';
 }
 
 function listNames(names: readonly string[]): string {
