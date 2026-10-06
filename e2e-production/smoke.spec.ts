@@ -1749,9 +1749,18 @@ test.describe('the season features', () => {
        * is the slot it is for and its projection spoken as a projection, and
        * that is the claim this was defending — a row says what it means in words
        * and not only in colour.
+       *
+       * A player ruled Out speaks his figure differently since #309: no
+       * projection is shown, with what he would have scored in brackets
+       * (`out, no projection shown (10.1 if he played)`). That wording is
+       * accepted only alongside `out`, so a healthy starter cannot pass by
+       * saying it (owner's call, 6 October 2026).
        */
       await expect(card).toHaveAttribute('aria-label', /^[A-Z0-9_/]+: \S/);
-      await expect(card).toHaveAttribute('aria-label', /projected [\d.]+ points|projection unavailable/i);
+      await expect(card).toHaveAttribute(
+        'aria-label',
+        /projected [\d.]+ points|projection unavailable|, out, no projection shown \([\d.]+ if he played\)/i,
+      );
     }
     for (const card of await page.getByTestId('bench-row').all()) {
       await expect(card).not.toHaveClass(/card-pos/);
