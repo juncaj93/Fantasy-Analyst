@@ -361,8 +361,8 @@ function ResultBody({ state }: { state: Load<TradeCheckResponse> }) {
 
       <dl className="weekly-lines" data-testid="trade-check-rows">
         {rows.map((row) => (
-          <div className="weekly-line" key={row.key} data-testid="trade-check-row">
-            <dt>{row.label}</dt>
+          <div className="weekly-line weekly-line-team" key={row.key} data-testid="trade-check-row">
+            <dt title={row.label}>{row.label}</dt>
             <dd>
               <span className={`tally tally-${row.tone}`} data-testid="trade-check-figure">
                 {row.value}

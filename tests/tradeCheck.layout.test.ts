@@ -8,6 +8,7 @@
  * sentence never becomes a second column of numbers.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { horizonLine, resultRows, signed, sideName } from '../src/web/components/tradeCheck.tsx';
 import type { TradeEvaluation, SideResult } from '../src/core/tradeValue/evaluate.ts';
@@ -102,5 +103,32 @@ describe('the wording helpers', () => {
     expect(horizonLine({ ...base, weeksToDeadline: 1 })).toMatch(/\(1 week left\)/);
     expect(horizonLine({ ...base, deadlinePassed: true })).toMatch(/deadline was week 11/);
     expect(horizonLine({ ...base, deadlineWeek: null, weeksToDeadline: null })).not.toMatch(/deadline|close/);
+  });
+});
+
+describe('a long username on a result row', () => {
+  const css = readFileSync(new URL('../src/web/styles.css', import.meta.url), 'utf8');
+  const rule = (selector: string) => {
+    const at = css.lastIndexOf(`${selector} {`);
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+  };
+
+  it('keeps the name as one label, whole, with the full text available', () => {
+    const rows = resultRows(evaluation(side({ label: 'zackstephens54', isMine: false }), side({ label: 'Alex', isMine: true })));
+    expect(rows[0]!.label).toBe('zackstephens54');
+  });
+
+  it('is cut with an ellipsis, never split mid-word, in a column that fits 14 characters', () => {
+    const dt = rule('.weekly-line-team dt');
+    expect(dt).toMatch(/text-overflow:\s*ellipsis/);
+    expect(dt).toMatch(/white-space:\s*nowrap/);
+    expect(dt).toMatch(/overflow-wrap:\s*normal/);
+    expect(dt).not.toMatch(/anywhere|break-all|break-word/);
+    expect(rule('.weekly-line-team')).toMatch(/grid-template-columns:\s*120px/);
+  });
+
+  it('is marked in the markup so the rule applies only to result rows', () => {
+    const src = readFileSync(new URL('../src/web/components/tradeCheck.tsx', import.meta.url), 'utf8');
+    expect(src).toContain('weekly-line weekly-line-team');
   });
 });
