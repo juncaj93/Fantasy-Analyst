@@ -76,6 +76,18 @@ import { expect, test, type Page } from '@playwright/test';
 const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'setup'] as const;
 
+/**
+ * Wording that says this app made, is making or will make a transaction.
+ *
+ * Past tense (`added`, `claimed`, `bid placed`), the app speaking for itself
+ * (`we'll`, `will add`), and the act in progress (`adding`, `placing a bid`).
+ * A recommendation (`Add X`) passes, and so does Sleeper's activity quoted as
+ * a statistic: `most-added`, `Being added across Sleeper` and `Heavily added
+ * across Sleeper` are other managers, never us.
+ */
+const TRANSACTION_CLAIM =
+  /(?<!most-|being |heavily )\b(added|dropped|claimed|submitted)\b(?! (across|everywhere|on sleeper|in sleeper))|\bbid (placed|submitted)\b|\bplaced (a |your )?bid\b|\bwe(['’]ll| will| added| claimed| dropped)\b|\bwill (add|drop|claim|bid|submit)\b|\b(adding|dropping|claiming|submitting)\b|\bplacing (a |your )?bid\b/;
+
 type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 
 /**
@@ -826,8 +838,23 @@ test.describe('the deployed app', () => {
             })
             .slice(0, 4)
             .map((r) => {
-              const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement | null;
               const open = r.querySelector(way) as HTMLElement | null;
+              /*
+                Once the draft is over, Players draws the owner in place of the
+                heart (#323, #324): a label inside the way in, not a second
+                control. Production is past its draft, so that is the row it has.
+              */
+              const owner = r.querySelector('[data-testid="owner-pill"]') as HTMLElement | null;
+              if (open && owner && !r.querySelector(`[data-testid="${ctrl}"]`)) {
+                return {
+                  kind: 'owner' as const,
+                  nested: r.querySelector('button button') != null,
+                  actions: r.querySelectorAll('button').length,
+                  ownerIsControl: owner.closest('button') !== open || owner.matches('button, a, [tabindex]'),
+                  wayIn: open.getBoundingClientRect().height,
+                };
+              }
+              const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement | null;
               if (!el || !open) return null;
               const box = el.getBoundingClientRect();
               const hits: string[] = [];
@@ -840,6 +867,7 @@ test.describe('the deployed app', () => {
                 }
               }
               return {
+                kind: 'control' as const,
                 nested: r.querySelector('button button') != null,
                 /* The control is beside the way in, not inside it. */
                 sibling: !open.contains(el),
@@ -856,6 +884,13 @@ test.describe('the deployed app', () => {
       expect(rows.length, `${screen} drew no row clear of the app's own bars`).toBeGreaterThan(0);
       for (const r of rows) {
         expect(r.nested, 'a button is nested inside a button').toBe(false);
+        if (r.kind === 'owner') {
+          // One action, the way in; the owner is read, never pressed.
+          expect(r.actions, `${screen} row offers ${r.actions} buttons rather than one`).toBe(1);
+          expect(r.ownerIsControl, 'the owner has become a control of its own').toBe(false);
+          expect(r.wayIn, 'the way in is no longer a full target').toBeGreaterThanOrEqual(44);
+          continue;
+        }
         expect(r.sibling, 'the control is still inside the way in').toBe(true);
         expect(r.actions, `${screen} row offers ${r.actions} buttons rather than two`).toBe(2);
         expect(r.target.width, `the control is ${r.target.width}px wide`).toBeGreaterThanOrEqual(44);
@@ -1869,14 +1904,23 @@ test.describe('the season features', () => {
      * may read as an action this app does not take. A button labelled `Bid`,
      * `Place bid`, `Add`, `Drop`, `Claim` or `Submit` still fails.
      */
+    /*
+     * And the bare word is not the test.
+     *
+     * The rows quote Sleeper's own activity — `Add rate accelerated 2.4×`,
+     * `#47 most-added on Sleeper today` — which is other managers adding, not
+     * this app. That stood red from 4 October, the first day a free agent's add
+     * rate sped up on the live wire. A recommendation (`Add X`) is fine too: the
+     * app recommends. What may not appear is a control that *is* a transaction
+     * (a button labelled `Add` and nothing else), or wording that says this app
+     * did or will do one.
+     */
     const card = page.getByTestId('waiver-card');
     if ((await card.count()) > 0) {
-      const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
-      for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-        expect(
-          buttons,
-          `a control reading "${forbidden}" would imply a transaction`,
-        ).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
+      const texts = (await card.getByRole('button').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
+      for (const text of texts) {
+        expect(text, 'a control is itself a transaction').not.toMatch(/^(add|drop|claim|bid|place bid|submit)$/);
+        expect(text, 'the card says this app made or will make a transaction').not.toMatch(TRANSACTION_CLAIM);
       }
     }
   });
