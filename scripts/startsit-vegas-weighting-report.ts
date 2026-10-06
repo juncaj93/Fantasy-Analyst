@@ -43,7 +43,7 @@ const lineup = assembleLineup({
   now: snapshot.capturedAt,
 });
 
-type Comp = { key: string; value: number; unknown: boolean; preBudgetValue?: number; display?: string };
+type Comp = { key: string; value: number; unknown: boolean; preBudgetValue?: number; shownValue?: number; display?: string };
 const everyone = [...lineup.starters, ...lineup.bench, ...lineup.undecidable];
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -81,7 +81,7 @@ const rows: Row[] = everyone
       basis: d?.basis ?? 'none',
       base: d?.base ?? NaN,
       secondary: d == null ? 0 : d.adjustments - status,
-      news: sumOf(comps, NEWS),
+      news: comps.filter((c) => !c.unknown && NEWS.includes(c.key)).reduce((a, c) => a + (c.shownValue ?? c.value), 0),
       status,
       points: d?.points ?? null,
     };
@@ -89,7 +89,7 @@ const rows: Row[] = everyone
   .sort((a, b) => a.name.localeCompare(b.name));
 
 console.log(`week ${snapshot.decision.context.week} · ${inputs.mode} · ${rows.length} rostered players\n`);
-console.log('player | slot | basis | base | secondary | secondary % of base | news lines (engine) | availability | decision points');
+console.log('player | slot | basis | base | secondary | secondary % of base | news rows as printed | availability | decision points');
 for (const r of rows) {
   const ok = Number.isFinite(r.base) && r.base > 0 && r.basis !== 'unpriced';
   console.log(

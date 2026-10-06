@@ -152,3 +152,22 @@ describe('shortName', () => {
     expect(shortName('Texans')).toBe('Texans');
   });
 });
+
+describe('a row held to the published week', () => {
+  it('prints the settled value when the server sent one, and the engine value when not', async () => {
+    const { shownOf, explainGap } = await import('../src/web/compareLayout.ts');
+    expect(shownOf({ value: 1.75 })).toBe(1.75);
+    expect(shownOf({ value: 1.75, shownValue: 0.21 })).toBe(0.21);
+    const row = (value: number, shownValue?: number) => ({
+      key: 'news_recent',
+      label: 'Recent news',
+      value,
+      ...(shownValue === undefined ? {} : { shownValue }),
+      unknown: false,
+    });
+    const a = { playerId: 'a', name: 'A', score: 5, components: [row(2.1, 0.2)] };
+    const b = { playerId: 'b', name: 'B', score: 4, components: [row(0, undefined)] };
+    // The line under the score is built from what is printed, not from the larger raw value.
+    expect(explainGap(a, b).drivers).toEqual([{ label: 'Recent news', delta: 0.2 }]);
+  });
+});

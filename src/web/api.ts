@@ -1192,6 +1192,8 @@ export interface StartSitEvaluation {
     /** The value before the Floor/Ceiling multiplier, on newer deployments. */
     baseValue?: number;
     modeWeight?: number;
+    /** What to print when it differs from `value`: a row held to the published week's budget. */
+    shownValue?: number;
     unknown: boolean;
   }[];
   score: number | null;

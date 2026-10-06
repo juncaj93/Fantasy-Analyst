@@ -40,7 +40,7 @@ import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
 import { assessWeather, type GameWeather, type WeatherAssessment } from './weather.ts';
 import { projectDst, type DstProjection } from './dstProjection.ts';
 import { applyAdjustmentBudget } from './adjustmentBudget.ts';
-import { decisionPoints, type DecisionPoints } from './decisionPoints.ts';
+import { decisionPoints, settleOnPublishedWeek, type DecisionPoints } from './decisionPoints.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -168,6 +168,15 @@ export interface StartSitComponent {
    * responses lack it, and so does any component the budget left alone.
    */
   preBudgetValue?: number;
+  /**
+   * What the Compare sheet should print for this row, when it is not `value`.
+   *
+   * Set only on a player ranked on a published week, whose rows were budgeted
+   * against the market's partial number but whose decision number was budgeted
+   * against the published week. Display only: `value`, `score` and every ranking
+   * stay as the engine made them. See `settleOnPublishedWeek`.
+   */
+  shownValue?: number;
 }
 
 export interface StartSitEvaluation {
@@ -988,6 +997,7 @@ export function compareStartSit(
   const mode = opts.mode ?? 'balanced';
   const evaluations = inputs.map((i) => {
     const evaluation = evaluatePlayer({ ...i, mode: i.mode ?? mode }, profile);
+    settleOnPublishedWeek(evaluation, opts.published);
     return { ...evaluation, decision: decisionPoints(evaluation, opts.published) };
   });
   const pointsOf = (e: StartSitEvaluation): number => e.decision?.points ?? e.score ?? 0;

@@ -67,7 +67,7 @@ import { assessReplacement, type ReplacementAssessment } from './replacement.ts'
 import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
-import { decisionPoints } from './decisionPoints.ts';
+import { decisionPoints, settleOnPublishedWeek } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -374,7 +374,13 @@ export function recommendLineup(
   const mode = opts.mode ?? 'balanced';
   const now = opts.now ?? new Date();
   const currentStarters = new Set(opts.currentStarterIds ?? []);
-  const evaluations = inputs.map((i) => evaluatePlayer({ ...i, mode: i.mode ?? mode, now: i.now ?? now }, profile));
+  const evaluations = inputs.map((i) => {
+    const evaluation = evaluatePlayer({ ...i, mode: i.mode ?? mode, now: i.now ?? now }, profile);
+    // Rows for a player ranked on a published week show the values that week's
+    // number was built from; see `settleOnPublishedWeek`. Ranking is unchanged.
+    settleOnPublishedWeek(evaluation, opts.published);
+    return evaluation;
+  });
 
   /*
    * Locked players are removed from the optimisation entirely.
