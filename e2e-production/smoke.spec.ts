@@ -76,6 +76,18 @@ import { expect, test, type Page } from '@playwright/test';
 const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 const IN_SEASON = ['team', 'waivers', 'trades', 'players', 'setup'] as const;
 
+/**
+ * Wording that says this app made, is making or will make a transaction.
+ *
+ * Past tense (`added`, `claimed`, `bid placed`), the app speaking for itself
+ * (`we'll`, `will add`), and the act in progress (`adding`, `placing a bid`).
+ * A recommendation (`Add X`) passes, and so does Sleeper's activity quoted as
+ * a statistic: `most-added`, `Being added across Sleeper` and `Heavily added
+ * across Sleeper` are other managers, never us.
+ */
+const TRANSACTION_CLAIM =
+  /(?<!most-|being |heavily )\b(added|dropped|claimed|submitted)\b(?! (across|everywhere|on sleeper|in sleeper))|\bbid (placed|submitted)\b|\bplaced (a |your )?bid\b|\bwe(['’]ll| will| added| claimed| dropped)\b|\bwill (add|drop|claim|bid|submit)\b|\b(adding|dropping|claiming|submitting)\b|\bplacing (a |your )?bid\b/;
+
 type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
 
 /**
@@ -1892,14 +1904,23 @@ test.describe('the season features', () => {
      * may read as an action this app does not take. A button labelled `Bid`,
      * `Place bid`, `Add`, `Drop`, `Claim` or `Submit` still fails.
      */
+    /*
+     * And the bare word is not the test.
+     *
+     * The rows quote Sleeper's own activity — `Add rate accelerated 2.4×`,
+     * `#47 most-added on Sleeper today` — which is other managers adding, not
+     * this app. That stood red from 4 October, the first day a free agent's add
+     * rate sped up on the live wire. A recommendation (`Add X`) is fine too: the
+     * app recommends. What may not appear is a control that *is* a transaction
+     * (a button labelled `Add` and nothing else), or wording that says this app
+     * did or will do one.
+     */
     const card = page.getByTestId('waiver-card');
     if ((await card.count()) > 0) {
-      const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
-      for (const forbidden of ['add', 'drop', 'claim', 'bid', 'submit']) {
-        expect(
-          buttons,
-          `a control reading "${forbidden}" would imply a transaction`,
-        ).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
+      const texts = (await card.getByRole('button').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
+      for (const text of texts) {
+        expect(text, 'a control is itself a transaction').not.toMatch(/^(add|drop|claim|bid|place bid|submit)$/);
+        expect(text, 'the card says this app made or will make a transaction').not.toMatch(TRANSACTION_CLAIM);
       }
     }
   });
