@@ -24,6 +24,7 @@ import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
+import type { BillingPeriodView } from '../../core/vegas/billingPeriod.ts';
 import { NewsletterService } from './newsletterService.ts';
 import { PlayerDetailService } from './playerDetailService.ts';
 import { InjuryService, type InjuryHealth } from './injuryService.ts';
@@ -138,7 +139,10 @@ export interface SetupStatus {
       used: number;
       limit: number;
       remaining: number;
+      /** The billing period's key. Not a calendar month; say it with `period`. */
       month: string;
+      /** The period in words, and the fact that its start day is assumed. */
+      period: BillingPeriodView;
       source: string;
       note: string;
       bySource: Record<string, number>;
@@ -366,6 +370,7 @@ export class SetupService {
           limit: budget.limit,
           remaining: budget.remaining,
           month: budget.month,
+          period: budget.period,
           source: budget.source,
           note: budget.note,
           bySource: budgetBySource,

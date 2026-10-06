@@ -999,7 +999,7 @@ test.describe('vegas', () => {
 
     const budget = page.getByTestId('vegas-budget');
     await expect(budget).toBeVisible();
-    // "n of 2500 used in YYYY-MM", and a state said in words rather than a code.
+    // "n of 2500 used this billing period, 13 Sep to 12 Oct", and a state said in words rather than a code.
     await expect(budget).toContainText(/\d+ of \d+/);
     await expect(budget).toContainText(/plenty left|over half used|running low|into the reserve/);
     await expect(panel).toContainText('only about the games your own players are in');
