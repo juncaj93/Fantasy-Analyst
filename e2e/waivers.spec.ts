@@ -142,8 +142,14 @@ test.describe('the waivers page', () => {
 
     // No pill row on any card, and none of the phrases the pills carried.
     await expect(page.getByTestId('waiver-tags')).toHaveCount(0);
+    /*
+     * `0 of 9 teams need RB` was the repeat; a positive count on a player who
+     * costs money is the reason line `cardReason` chooses on purpose (owner's
+     * call, 1 October 2026). It only appears on a day a card is on waivers, so
+     * this stood green on 1 October and red from the first day one was.
+     */
     for (const text of await rows.allInnerTexts()) {
-      expect(text).not.toMatch(/Better than|Sleeper projection|Vegas lines|Nobody else needs him|teams need/);
+      expect(text).not.toMatch(/Better than|Sleeper projection|Vegas lines|Nobody else needs him|\b0 of \d+ teams need/);
     }
 
     // One status line: the pickup state or the cost, then the projection.
