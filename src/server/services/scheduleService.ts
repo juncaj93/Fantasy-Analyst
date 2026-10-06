@@ -19,7 +19,7 @@
  * of one day's write ceiling and happens a handful of times a year.
  *
  * **No new cron trigger.** The account has five and this needs none of them: it
- * rides the existing `0 9 * * *` tick in a try/catch of its own, after the
+ * rides the five-minute tick (and the `0 9 * * *` tick as a floor) in a try/catch of its own, after the
  * feeds a lineup actually depends on, because a fixture list that fails to
  * refresh costs a planning screen and must never take down the player
  * dictionary or the injury report.
@@ -37,9 +37,10 @@
 
 import { conditionalGet, type FetchLike } from '../../core/source/conditional.ts';
 import { parseSchedule, SCHEDULE_URL, type ScheduleTeamWeek } from '../../core/nfl/schedule.ts';
-import { gameWindowFrom } from '../../core/nfl/gameWindow.ts';
 import { NflScheduleRepo, ScheduleSourceRepo } from '../repos/nflSchedule.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { invalidateKickoffClock } from './vegasKickoffClock.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
 import type { Database } from '../db.ts';
 
 /** The feed's key in the shared state table. */
@@ -64,43 +65,27 @@ export const STARTED_NOTE = 'started and did not finish: cut off before it could
 export const SCHEDULE_WRITE_CEILING = 1_800;
 
 /**
- * The longest this feed may go unasked on an ordinary day.
+ * The longest this feed may go unasked: about once a day.
  *
- * Six hours, and the number is set by the **alarm** rather than by the file.
+ * It was six hours here, and ninety minutes while a game was on, and both
+ * numbers were set by the **alarm** rather than by the file.
  * `DAILY_ATTEMPT_STALE_MINUTES` calls a daily feed unhealthy at 36 hours, and
- * this ran on the 09:00 tick and nowhere else — so a once-a-day check had
- * twelve hours of slack against it, and a single tick that did not land read
- * as a degraded pipeline. That is what happened: the source was reported at
- * 37+ hours, which is one missed tick and change, on a feed whose data was
- * perfectly good the whole time.
+ * the check used to run on the 09:00 tick alone, so a once-a-day cadence had
+ * twelve hours of slack and one tick that did not land read as a degraded
+ * pipeline. That is what the 37+ hour report was.
  *
- * Four checks a day puts five and a half missed ticks between healthy and the
- * alarm instead of one and a half. The cost of the extra three is three
- * conditional GETs that answer 304 with no body — see the header.
+ * What changed is where it runs. The check now lives on the five-minute tick,
+ * which asks again every five minutes while it is overdue, so a missed tick
+ * delays the next attempt by five minutes and not by a day, and the daily tick
+ * is still the floor under it. The slack the six-hour interval bought is not
+ * needed, and what it cost was a conditional GET four to eight times a day for
+ * a file whose stored fields change only when the league flexes a game.
+ *
+ * Alex's call, in the round that moved the odds job onto the kickoff clock:
+ * about once a day, plus a look after the league announces flexes. Those extra
+ * looks are `core/nfl/flexCheck.ts`, and they bypass this interval.
  */
-export const SCHEDULE_CHECK_INTERVAL_MINUTES = 6 * 60;
-
-/**
- * …and the longest while football is actually being played.
- *
- * Ninety minutes. **This buys pipeline liveness, not fresher numbers, and the
- * distinction is worth stating because the opposite was assumed.** Nothing in
- * this file's output changes during a game: the parser keeps season, week,
- * team, opponent, home, kickoff and roof, and the only one of those that ever
- * moves mid-season is a flexed kickoff, which the league announces days ahead
- * on a weekday. A defence's Sunday numbers come from the Vegas lines and the
- * injury check, not from here.
- *
- * What a game window genuinely is, for this feed, is when nflverse rebuilds
- * `games.csv` — it regenerates around the slate — so it is the part of the
- * week where a conditional GET is most likely to come back 200 rather than
- * 304, and the part where a stalled ingest is worth noticing soonest.
- *
- * The write ceiling above is what stops a run of 200s turning into a run of
- * 544-row writes; at four checks in a Sunday window the ceiling is reached
- * after three and the fourth is declined, recorded, and costs nothing.
- */
-export const SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES = 90;
+export const SCHEDULE_CHECK_INTERVAL_MINUTES = 24 * 60;
 
 export interface ScheduleRefresh {
   outcome: 'ok' | 'not_modified' | 'not_published' | 'failed' | 'skipped';
@@ -116,11 +101,10 @@ export class ScheduleService {
   private readonly state: ScheduleSourceRepo;
 
   /**
-   * Retained for the week lookup `refreshIfDue` makes, and for nothing else.
+   * Retained for the two settings reads this service makes: the stored NFL week
+   * (to compare the kickoffs about to be written) and the odds job's gate.
    *
-   * The two repositories above are still how every row is touched. This is
-   * here because the cadence decision needs the stored NFL week, which lives
-   * in settings rather than in either of them.
+   * The two repositories above are still how every row is touched.
    */
   private readonly db: Database;
 
@@ -138,32 +122,29 @@ export class ScheduleService {
   }
 
   /**
-   * Check the fixture list, but only if it is due.
+   * Check the fixture list, but only if it is due: about once a day.
    *
    * The entry point the five-minute tick calls. `refresh` itself still does
    * exactly what it always did and is still what the daily tick calls; this
    * decides *whether*, and it is a separate method because the decision has a
    * cost of its own that the caller should be able to see.
    *
-   * ## The reads, in the order they are worth paying for
+   * ## The reads
    *
    * A five-minute trigger fires 288 times a day, so anything unconditional in
    * here is multiplied by 288 before it reaches the daily row allowance this
-   * repository has exhausted three times. So the cheap question is asked
-   * first and answers nearly every tick on its own:
+   * repository has exhausted three times. The decision is one indexed read of
+   * the state row, every tick, and nothing else: a tick less than a day after
+   * the last check returns on it. That was a two-step decision when the
+   * interval was six hours and ninety minutes while a game was on; with one
+   * interval there is nothing left to look up.
    *
-   *  1. **The state row.** One indexed read, every tick. If less time has
-   *     passed than even the *live* interval, nothing else is read and the
-   *     tick is over. At 90 minutes that is roughly 94% of ticks.
-   *  2. **This week's kickoffs**, and only on the remaining ~16 ticks a day.
-   *     One settings row for the week, then 32 rows on the primary key's own
-   *     `(season, week)` prefix. Not a scan, and deliberately not a range
-   *     query on `kickoff` — there is no index on that column, so asking the
-   *     obvious question would read the whole season to answer it.
+   * Measured against the 5,000,000-row daily allowance: about 288 rows a day,
+   * or 0.006%. See `tests/schedule.cadence.test.ts`, which counts them rather
+   * than trusting this paragraph.
    *
-   * Measured against the 5,000,000-row daily allowance: 288 + 16 × 33 ≈ 816
-   * rows, or about 0.016% of a day. See `tests/schedule.cadence.test.ts`,
-   * which counts them rather than trusting this paragraph.
+   * The league flexes games on a known cadence, and the checks that follow the
+   * announcement do not come through here: see {@link refreshAfterFlexAnnouncement}.
    *
    * Returns null when nothing was due, so a caller can tell "not yet" from
    * "checked, and here is what happened" without reading prose.
@@ -191,40 +172,53 @@ export class ScheduleService {
      * row, and treating a negative elapsed time as "not due" is the safe
      * reading: the alternative reads as overdue for ever.
      */
-    if (elapsedMinutes < SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES) return null;
-
-    const due = (await this.footballIsOn(season, now))
-      ? SCHEDULE_LIVE_CHECK_INTERVAL_MINUTES
-      : SCHEDULE_CHECK_INTERVAL_MINUTES;
-    if (elapsedMinutes < due) return null;
+    if (elapsedMinutes < SCHEDULE_CHECK_INTERVAL_MINUTES) return null;
 
     return this.refresh(season);
   }
 
   /**
-   * Is a game being played right now, according to the fixtures we stored?
+   * The check the flex windows make, whatever the daily interval says.
    *
-   * From this app's own schedule rather than from a table of Eastern kickoff
-   * times, for the four reasons `core/nfl/gameWindow.ts` sets out — daylight
-   * saving, London, Saturday football and Thanksgiving are each an hour or a
-   * whole slot that a clock-arithmetic answer gets wrong.
-   *
-   * False whenever the week cannot be established or no fixture is stored,
-   * which is the conservative direction: the slower cadence is the one that
-   * costs nothing, so an unknown week keeps this feed on it.
+   * Still one conditional request, still a 304 in every week nothing moved, and
+   * still behind the lease and the daily write ceiling. What it skips is only
+   * the wait.
    */
-  private async footballIsOn(season: string, now: Date): Promise<boolean> {
+  async refreshAfterFlexAnnouncement(season: string): Promise<ScheduleRefresh> {
+    return this.refresh(season);
+  }
+
+  /**
+   * Did any kickoff this week or next change in what is about to be stored?
+   *
+   * The odds job plans from these kickoffs, so this is the one change that
+   * matters to it. The file also changes when scores land, which is most days
+   * of the season and moves no kickoff; invalidating the job's gate on those
+   * would plan once a day to buy nothing. Reads the stored two weeks (64 rows)
+   * by primary-key prefix, once, and only on the check that is about to write.
+   *
+   * Conservative on every doubt: an unknown week, an empty store or a read that
+   * failed all say "moved", because planning once too often costs reads and
+   * planning once too rarely costs a flexed game's lines.
+   */
+  private async upcomingKickoffsMoved(incoming: readonly ScheduleTeamWeek[]): Promise<boolean> {
     try {
-      const state = await new SettingsRepo(this.db).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+      const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
       const week = Number(state?.week);
-      if (!Number.isInteger(week) || week <= 0) return false;
-      const fixtures = await this.schedule.forWeek(season, week);
-      return gameWindowFrom(
-        fixtures.map((f) => f.kickoff),
-        now,
-      ).live;
-    } catch {
+      if (!Number.isInteger(week) || week < 1) return true;
+      const season = incoming[0]?.season ?? '';
+      const [a, b] = await Promise.all([this.schedule.forWeek(season, week), this.schedule.forWeek(season, week + 1)]);
+      const stored = new Map<string, string | null>();
+      for (const row of [...a, ...b]) stored.set(`${row.week}|${row.team}`, row.kickoff);
+      if (stored.size === 0) return true;
+      for (const row of incoming) {
+        if (row.week !== week && row.week !== week + 1) continue;
+        const key = `${row.week}|${row.team}`;
+        if (!stored.has(key) || stored.get(key) !== row.kickoff) return true;
+      }
       return false;
+    } catch {
+      return true;
     }
   }
 
@@ -360,7 +354,10 @@ export class ScheduleService {
         };
       }
 
+      const moved = await this.upcomingKickoffsMoved(parsed.rows);
       const rowsWritten = await this.schedule.save(parsed.rows, nowIso);
+      // After the write, so a pass that wakes on the flag reads the new kickoffs.
+      if (moved) await invalidateKickoffClock(this.db).catch(() => undefined);
       await this.state.addWrites(day, rowsWritten, nowIso);
       await this.state.recordCheck(SCHEDULE_SOURCE, season, {
         checkedAt: nowIso,

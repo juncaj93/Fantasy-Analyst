@@ -174,8 +174,9 @@ Go to the **Setup** tab. Continue with Part B.
 
 ## What happens automatically after this
 
-- Every Saturday evening and Sunday morning: refresh betting data (currently
-  practice data only — no cost, no external calls).
+- Before each game, from two days out to half an hour: refresh that game's
+  betting lines, only if they are old for how close the game is (practice data
+  only until a provider key is set — no cost, no external calls).
 - Every morning: refresh the NFL player list from Sleeper.
 - Any time a newsletter arrives at your address: it is read and processed.
 

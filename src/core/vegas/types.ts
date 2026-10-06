@@ -182,6 +182,15 @@ export interface TeamPropsResult {
   /** Entities billed — one per event returned, and at least one per request. */
   entities: number;
   /**
+   * Set when a request failed for a reason other than "not now", after at least
+   * one earlier request had been answered and billed.
+   *
+   * The adapter used to throw, which discarded the earlier answers and the
+   * count of what they cost: those entities left the account and never reached
+   * the ledger. Now it stops, returns what it had, and says why it stopped.
+   */
+  failed?: string;
+  /**
    * Teams the adapter could not name in its provider's vocabulary, so did not
    * ask about.
    *

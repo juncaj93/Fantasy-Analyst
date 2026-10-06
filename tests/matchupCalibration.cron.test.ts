@@ -84,14 +84,14 @@ function sleeperServing(byWeek: (week: number) => unknown): SleeperClient {
 function dailyBranch(): string {
   const start = WORKER.indexOf(`event.cron.startsWith('0 9')`);
   expect(start, 'the daily 09:00 cron branch has gone').toBeGreaterThan(-1);
-  const end = WORKER.indexOf('await refreshVegas(appEnv)', start);
-  expect(end, 'the daily branch no longer ends before the weekly Vegas refresh').toBeGreaterThan(start);
+  const end = WORKER.indexOf('const weekend = new CronRunRecorder(', start);
+  expect(end, 'the daily branch no longer ends where the weekend fall-through begins').toBeGreaterThan(start);
   return WORKER.slice(start, end);
 }
 
 /** Everything after the daily branch returns: the Saturday and Sunday ticks. */
 function weekendBranch(): string {
-  const start = WORKER.indexOf('await refreshVegas(appEnv)');
+  const start = WORKER.indexOf('const weekend = new CronRunRecorder(');
   expect(start, 'the weekend fall-through has gone').toBeGreaterThan(-1);
   const end = WORKER.indexOf('async email(', start);
   expect(end, 'the weekend fall-through no longer ends before email()').toBeGreaterThan(start);

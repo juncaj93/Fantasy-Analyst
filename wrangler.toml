@@ -111,7 +111,12 @@ CLOUDFLARE_ACCOUNT_ID = ""
 #   players that changed, and writes. It is cheap in the only currency that
 #   was ever short here: measured against the daily row-read allowance it came
 #   to 0.4%, which is why removing it never helped.
-# Saturday 23:00 UTC and Sunday 15:00 UTC -> Vegas refresh.
+# Saturday 23:00 UTC and Sunday 15:00 UTC -> published projections and a late
+#   pregame calibration capture. They no longer refresh the odds: that follows
+#   each game's own kickoff from the stored schedule, on the five-minute tick
+#   above, so Thursday night, Monday night, holiday and flexed games are covered
+#   and no cron slot is spent on it. Manager tendencies run weekly, Wednesday
+#   midday Detroit time, on the same tick.
 # Daily 09:00 UTC -> Sleeper player dictionary sync + last season's statistics.
 # Day-of-week must be named or 1-7 here: Cloudflare rejects "0" for Sunday.
 crons = ["*/5 * * * *", "0 23 * * SAT", "0 15 * * SUN", "0 9 * * *"]

@@ -2,10 +2,10 @@ name: Refresh Vegas lines
 
 # Ask production to fetch this week's betting lines, once, on demand.
 #
-# The scheduled cadence is Saturday 23:00 and Sunday 15:00 UTC, which is the
-# right rhythm for a season and the wrong one for the two occasions this exists
-# for: proving a provider change actually works, and topping up before a
-# decision that will not wait for Saturday.
+# The scheduled job follows each game's own kickoff (six looks per game, from
+# 48 hours out to 30 minutes), which is the right rhythm for a season and the
+# wrong one for the two occasions this exists for: proving a provider change
+# actually works, and topping up before a decision that will not wait.
 #
 # It spends quota, so it goes through exactly the same gate the cron does — the
 # budget guard, the per-event cooldown and the endpoint's own rate limit all

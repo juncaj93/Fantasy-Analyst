@@ -23,6 +23,7 @@ import {
   type BudgetLedger,
 } from '../src/core/vegas/budget.ts';
 import { buildFetchPlan, simulateMonth, type PlannedPlayer } from '../src/core/vegas/plan.ts';
+import { KICKOFF_CHECKPOINT_HOURS } from '../src/core/vegas/kickoffClock.ts';
 
 const NOW = Date.parse('2026-09-13T14:00:00Z'); // Sunday, two hours to kickoff
 
@@ -222,16 +223,34 @@ describe('what a refresh asks for', () => {
 });
 
 describe('the cost of a season', () => {
-  /** The strategy this pass shipped, priced before it runs. */
+  /**
+   * The strategy now shipped, priced before it runs: the odds job on each game's
+   * own kickoff clock (`core/vegas/kickoffClock.ts`).
+   *
+   * Twelve roster games is the planner's own cap on one pass, so it is the worst
+   * a week can be rather than a typical one (the roster spans about ten). Six
+   * looks per game replace the two weekend refreshes and the near-kickoff
+   * top-ups, which were the same thing done less often. Discovery is one
+   * entity per covered team per week. Season markets are not here: they stop
+   * when the draft is over, and the job exists for the weeks after it.
+   */
   const STRATEGY = {
-    rosterGames: 8,
-    checkpointsPerWeek: 2,
-    nearKickoffEvents: 3,
+    rosterGames: 12,
+    checkpointsPerWeek: KICKOFF_CHECKPOINT_HOURS.length,
+    nearKickoffEvents: 0,
     weeksPerMonth: 5,
-    seasonEntitiesPerRun: 2,
-    seasonRunsPerMonth: 30,
-    scheduleEntitiesPerWeek: 9,
+    seasonEntitiesPerRun: 0,
+    seasonRunsPerMonth: 0,
+    scheduleEntitiesPerWeek: 12,
   };
+
+  /** What a person's own taps cost in the last full month: 255 entities, mostly one defect. */
+  const MANUAL_TAPS = 255;
+
+  it('leaves room for a person\'s own taps and still stays out of caution', () => {
+    const sim = simulateMonth(STRATEGY, BUDGET.monthlyEntities);
+    expect(sim.monthly + MANUAL_TAPS).toBeLessThan(BUDGET.monthlyEntities * BUDGET.cautionAt);
+  });
 
   it('fits inside the free plan with room to spare', () => {
     const sim = simulateMonth(STRATEGY, BUDGET.monthlyEntities);
@@ -255,6 +274,7 @@ describe('the cost of a season', () => {
       {
         ...STRATEGY,
         rosterGames: 16,
+        checkpointsPerWeek: 2,
         nearKickoffEvents: 16,
         scheduleEntitiesPerWeek: 16,
         seasonEntitiesPerRun: 50,
@@ -274,7 +294,7 @@ describe('the cost of a season', () => {
 
   it('shows its arithmetic', () => {
     const sim = simulateMonth(STRATEGY, BUDGET.monthlyEntities);
-    expect(sim.lines.join('\n')).toContain('roster games: 8');
+    expect(sim.lines.join('\n')).toContain('roster games: 12');
     expect(sim.lines.join('\n')).toContain(`month (5 weeks): ${sim.monthly} of ${BUDGET.monthlyEntities}`);
   });
 });

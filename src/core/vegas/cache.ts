@@ -10,7 +10,7 @@
  * returned and explicitly marked stale — never fabricated, never empty.
  */
 
-import { manualRefreshThresholdMinutes } from './plan.ts';
+import { manualRefreshThresholdMinutes } from './staleness.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from './types.ts';
 
 export interface CachedSnapshot {
@@ -75,12 +75,26 @@ function minutesBetween(a: string, b: number): number {
 /** Decide whether a refresh is allowed right now. */
 export function shouldRefresh(
   cached: CachedSnapshot | null,
-  opts: { now: number; manual?: boolean; policy?: RefreshPolicy },
+  opts: { now: number; manual?: boolean; perGame?: boolean; kickoff?: string | null; policy?: RefreshPolicy },
 ): { refresh: boolean; reason: string } {
   const policy = opts.policy ?? DEFAULT_POLICY;
   if (!cached) return { refresh: true, reason: 'no cached snapshot' };
 
   const age = minutesBetween(cached.fetchedAt, opts.now);
+  /*
+   * The scheduled kickoff job judges staleness by the same per-game table a
+   * person's tap does. The TTL below is the old weekend clock's rule: its
+   * ninety-minute near-game wait would quietly cancel the half-hour checkpoint,
+   * and its six-hour wait the second of two passes a few hours apart.
+   */
+  if (opts.perGame && !opts.manual) {
+    // The caller's kickoff when it has a better one: a game the league moved
+    // is still stored under the provider's old time until it is bought again.
+    const wait = manualRefreshThresholdMinutes((Date.parse(opts.kickoff ?? cached.gameStart) - opts.now) / 3_600_000);
+    if (wait === null) return { refresh: false, reason: 'game has started; the line is closed' };
+    if (age < wait) return { refresh: false, reason: `lines are ${Math.round(age)} min old, under this game's ${wait} min wait` };
+    return { refresh: true, reason: 'due on the kickoff clock' };
+  }
   if (opts.manual) {
     // Per game, by time to kickoff; see `manualRefreshThresholdMinutes`.
     const wait = manualRefreshThresholdMinutes((Date.parse(cached.gameStart) - opts.now) / 3_600_000);
@@ -112,7 +126,7 @@ export async function getPropsWithCache(
   eventId: string,
   provider: VegasProvider,
   store: SnapshotStore,
-  opts: { now?: number; manual?: boolean; policy?: RefreshPolicy } = {},
+  opts: { now?: number; manual?: boolean; perGame?: boolean; kickoff?: string | null; policy?: RefreshPolicy } = {},
 ): Promise<PropsResult> {
   const now = opts.now ?? Date.now();
   const cached = await store.get(eventId);
@@ -137,7 +151,13 @@ export async function getPropsWithCache(
         };
   }
 
-  const decision = shouldRefresh(cached, { now, manual: opts.manual ?? false, policy: opts.policy });
+  const decision = shouldRefresh(cached, {
+    now,
+    manual: opts.manual ?? false,
+    perGame: opts.perGame ?? false,
+    kickoff: opts.kickoff ?? null,
+    policy: opts.policy,
+  });
   if (!decision.refresh && cached) {
     return {
       origin: 'cache',

@@ -241,24 +241,18 @@ function budgetUsedFromLog(logs: string[]): number | null {
   return null;
 }
 
-/** The manager backfill's own traffic, which is the traffic that must yield. */
 /**
- * The backfill's own requests, told apart from the daily league sync above it.
+ * The manager backfill's own requests, told apart from the daily league sync.
  *
- * The two overlap in shape and no longer in subject, which is what this had to
- * be rewritten to notice. The daily tick now re-reads the *selected* league —
- * its settings, rosters, users and drafts, all under `/league/tony/…` — so a
- * pattern matching any `/rosters` or `/drafts` counted that read as history and
- * duly reported the backfill running before the feeds it is supposed to yield
- * to.
- *
- * What actually identifies the backfill is the season chain: it walks
+ * What identifies the backfill is the season chain: it walks
  * `previous_league_id` back through `L2025`, `L2024` and so on, and it walks
  * transactions and draft picks. None of those is reachable from a sync of the
- * league the user has selected today.
+ * league the user has selected today, and the calibration ledger's read of
+ * last week's scores (`/league/L2026/matchups/…`) is deliberately not matched:
+ * it is on the daily tick and is not history.
  */
-function historyCalls(urls: string[]): string[] {
-  return urls.filter((u) => /\/transactions\//.test(u) || /\/draft\//.test(u) || /\/league\/L20\d\d(\/|$)/.test(u));
+function chainCalls(urls: string[]): string[] {
+  return urls.filter((u) => /\/transactions\//.test(u) || /\/draft\//.test(u) || /\/league\/L20(22|23|24|25)$/.test(u));
 }
 
 const DAILY = { cron: '0 9 * * *' };
@@ -287,7 +281,7 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
     console.error = realError;
   });
 
-  it('stays under fifty on a healthy morning with an active backfill', async () => {
+  it('stays under fifty on a healthy morning', async () => {
     const run = stubWorld();
     await worker.scheduled(DAILY, cronEnv(db));
     run.logs = captured;
@@ -298,8 +292,9 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
     // Nothing on the tick fetched outside the budget.
     expect(budgetUsedFromLog(captured)).toBe(run.subrequests);
 
-    // The backfill did run: a healthy morning is when history is supposed to move.
-    expect(historyCalls(run.urls).length).toBeGreaterThan(0);
+    // The manager backfill is not on this tick any more: it has a weekly
+    // window of its own, below.
+    expect(chainCalls(run.urls)).toEqual([]);
 
     // And every critical feed was reached, rather than the total being small
     // because most of the tick never happened.
@@ -323,24 +318,25 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
     expect(run.subrequests).toBeLessThanOrEqual(MAX_CRON_SUBREQUESTS);
 
     /*
-     * And the budget was *binding*, which is what makes this test more than a
-     * restatement of the limit. The tick spent all but a request or two of what
-     * it was allowed and then stopped, so what it wanted was more than 48 — and
-     * what it wanted is what the pre-hardening tick would have put on the wire,
-     * against a ceiling of 50.
+     * What this used to also assert, and why it no longer does: that the budget
+     * was *binding* — the tick spent all but a request or two of its 48 because
+     * the manager backfill, last on the tick, took whatever was left. The
+     * backfill moved to its own weekly window, so the daily tick's worst case
+     * is now the fixed set of feeds, comfortably under the ceiling. The
+     * invariant that matters is the one above, and the one below: every
+     * subrequest was counted by the budget.
      */
-    expect(run.subrequests).toBeGreaterThan(MAX_CRON_SUBREQUESTS - REDIRECTING_FETCH_COST);
+    expect(chainCalls(run.urls)).toEqual([]);
     expect(budgetUsedFromLog(captured)).toBe(run.subrequests);
 
     // The invocation completed rather than throwing: a provider having a bad
     // morning is a quiet tick, not an unhandled rejection.
   });
 
-  it('yields the backfill first, and never the feeds above it', async () => {
+  it('never crowds the freshness-sensitive feeds out when Sleeper\'s bulk endpoints fail', async () => {
     /*
      * Sleeper's bulk endpoints fail and retry, which is where the headroom goes
-     * on a bad morning. What must survive is the freshness-sensitive work; what
-     * must give way is history.
+     * on a bad morning. What must survive is the freshness-sensitive work.
      */
     const run = stubWorld({ failMatching: ['/players/nfl', '/stats/nfl/', '/matchups/'] });
     await worker.scheduled(DAILY, cronEnv(db));
@@ -352,47 +348,90 @@ describe('the daily cron cannot exceed the free-plan subrequest ceiling', () => 
     for (const feed of ['github.com', 'trending', '/state/nfl']) {
       expect(run.urls.some((u) => u.includes(feed)), `${feed} must not be crowded out`).toBe(true);
     }
+  });
 
-    // Whatever the backfill got, it was the remainder — it is the last thing on
-    // the tick, so nothing it spent could have been taken from a feed above it.
-    const firstHistory = run.urls.findIndex((u) => historyCalls([u]).length > 0);
-    if (firstHistory >= 0) {
-      const nflverseAt = run.urls.findIndex((u) => u.includes('github.com'));
-      expect(nflverseAt).toBeGreaterThan(-1);
-      expect(nflverseAt, 'the backfill must come after the nflverse feeds').toBeLessThan(firstHistory);
+  // ------------------------------------------------- the weekly tendencies window
+
+  /*
+   * Manager tendencies run once a week, Wednesday midday Detroit time, on the
+   * five-minute tick. Noon in Detroit is 16:00 UTC until the first Sunday of
+   * November (1 November 2026) and 17:00 UTC after it.
+   */
+  const WEEKLY = (iso: string) => ({ cron: '*/5 * * * *', scheduledTime: Date.parse(iso) });
+  const EDT_NOON = '2026-10-28T16:00:00Z';
+  const EST_NOON = '2026-11-04T17:00:00Z';
+
+  it('runs the backfill at Wednesday noon Detroit time before the clocks change', async () => {
+    await seedActiveBackfill(db);
+    const run = stubWorld();
+    await worker.scheduled(WEEKLY(EDT_NOON), cronEnv(db));
+    expect(chainCalls(run.urls).length).toBeGreaterThan(0);
+    expect(run.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
+  });
+
+  it('runs it at the same local hour after the clocks change, which is an hour later in UTC', async () => {
+    await seedActiveBackfill(db);
+    const run = stubWorld();
+    await worker.scheduled(WEEKLY(EST_NOON), cronEnv(db));
+    expect(chainCalls(run.urls).length).toBeGreaterThan(0);
+    expect(run.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
+  });
+
+  it('does not run it an hour early after the change, which is where a fixed UTC hour would', async () => {
+    await seedActiveBackfill(db);
+    // 16:00 UTC on 4 November is 11:00 in Detroit.
+    const run = stubWorld();
+    await worker.scheduled(WEEKLY('2026-11-04T16:00:00Z'), cronEnv(db));
+    expect(chainCalls(run.urls)).toEqual([]);
+  });
+
+  it('stays off every other day, including the day before', async () => {
+    await seedActiveBackfill(db);
+    for (const iso of ['2026-10-27T16:00:00Z', '2026-10-29T16:00:00Z', '2026-10-31T16:00:00Z', '2026-11-01T17:00:00Z']) {
+      const run = stubWorld();
+      await worker.scheduled(WEEKLY(iso), cronEnv(db));
+      expect(chainCalls(run.urls), iso).toEqual([]);
     }
   });
 
-  it('skips the backfill entirely, and cleanly, when nothing is left', async () => {
-    /*
-     * The nflverse feeds are the expensive half of the tick at two subrequests
-     * each; failing the Sleeper bulk reads on top of them is a morning where
-     * the budget is gone before history is reached. "Nothing left" must read as
-     * a skip and a log line, not as an error and not as a partial unit.
-     */
-    const run = stubWorld({ failEverything: true });
-    await worker.scheduled(DAILY, cronEnv(db));
+  it('stops for the day once a batch has finished, and starts again the next Wednesday', async () => {
+    await seedActiveBackfill(db);
+    await new SettingsRepo(db).set(SETTING_KEYS.managerIntelWeekly, '2026-10-28');
 
-    const log = captured.join('\n');
-    expect(log).toContain('cron 09:00 subrequests');
-    expect(run.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
+    const same = stubWorld();
+    await worker.scheduled(WEEKLY('2026-10-28T16:05:00Z'), cronEnv(db));
+    expect(chainCalls(same.urls)).toEqual([]);
 
-    // Nothing was checkpointed as done on a morning that fetched nothing usable.
-    const checkpoints = await new ManagerLedgerRepo(db).checkpoints('tony');
-    expect(checkpoints.every((c) => !c.completed)).toBe(true);
+    const next = stubWorld();
+    await worker.scheduled(WEEKLY('2026-11-04T17:00:00Z'), cronEnv(db));
+    expect(chainCalls(next.urls).length).toBeGreaterThan(0);
   });
 
-  it('resumes the backfill on the next tick, and stays under the ceiling again', async () => {
+  it('is not marked done after a bad morning, so the next tick of the window tries again', async () => {
+    await seedActiveBackfill(db);
     const first = stubWorld({ failEverything: true });
-    await worker.scheduled(DAILY, cronEnv(db));
+    await worker.scheduled(WEEKLY(EDT_NOON), cronEnv(db));
     expect(first.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
+    expect(await new SettingsRepo(db).get(SETTING_KEYS.managerIntelWeekly, null)).toBeNull();
 
     const second = stubWorld();
-    await worker.scheduled(DAILY, cronEnv(db));
+    await worker.scheduled(WEEKLY('2026-10-28T16:05:00Z'), cronEnv(db));
     expect(second.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
+    expect(chainCalls(second.urls).length).toBeGreaterThan(0);
+  });
 
-    // The tick after a bad one does the history work the bad one could not.
-    expect(historyCalls(second.urls).length).toBeGreaterThan(0);
+  it('never shares a tick with the three-hourly league read, which makes its own Sleeper calls', async () => {
+    /*
+     * 18:15 UTC on 4 November is 13:15 in Detroit, inside the window, and is
+     * also a league-read tick (hour divisible by three, quarter past). Both
+     * spend Sleeper subrequests from budgets of their own in one invocation,
+     * so the weekly refresh waits for the next tick.
+     */
+    await seedActiveBackfill(db);
+    const run = stubWorld();
+    await worker.scheduled(WEEKLY('2026-11-04T18:15:00Z'), cronEnv(db));
+    expect(chainCalls(run.urls)).toEqual([]);
+    expect(run.subrequests).toBeLessThanOrEqual(CLOUDFLARE_FREE_SUBREQUEST_CEILING);
   });
 
   it('leaves the five-minute tick alone', async () => {

@@ -424,7 +424,7 @@ describe('the shared row assembler', () => {
     });
     expect(row.label).toBe('Manager tendencies');
     expect(row.severity).toBe('background');
-    expect(row.cadence).toContain('budget');
+    expect(row.cadence).toContain('Weekly');
   });
 });
 

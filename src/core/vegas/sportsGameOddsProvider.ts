@@ -304,7 +304,14 @@ export class SportsGameOddsProvider implements VegasProvider {
    * from another deployment sharing the key.
    */
   async getAccountUsage(): Promise<unknown> {
-    const body = await this.request<{ data?: unknown }>('/account/usage');
+    /*
+     * Not paced: the plan's ten-a-minute ceiling is counted by the provider, and
+     * this endpoint was measured to move neither that counter nor the entity
+     * one. Holding it behind the pacer spent one of the ten slots on a free
+     * read, and — now that a pass reads it again after buying — could have left
+     * a pass waiting up to a minute at its very end to learn a number.
+     */
+    const body = await this.request<{ data?: unknown }>('/account/usage', { paced: false });
     return body.data ?? null;
   }
 
@@ -437,6 +444,7 @@ export class SportsGameOddsProvider implements VegasProvider {
     const seen = new Map<string, RawPropSet>();
     let requests = 0;
     let entities = 0;
+    let failed: string | undefined;
 
     for (const teamId of [...new Set(teamIds)].filter(Boolean)) {
       // Distinct games, not rows: a game two teams share is one event.
@@ -471,7 +479,17 @@ export class SportsGameOddsProvider implements VegasProvider {
             `&startsAfter=${from}&startsBefore=${to}&oddsAvailable=true&limit=4`,
         );
       } catch (err) {
-        if (!isRateLimited(err)) throw err;
+        if (!isRateLimited(err)) {
+          /*
+           * Nothing billed yet: nothing to keep, so throw as before and let the
+           * caller account for the one failed ask. Something already billed:
+           * stop and hand it back. Throwing here threw away the earlier teams'
+           * answers and, with them, the only record of what they cost.
+           */
+          if (requests === 0) throw err;
+          failed = err instanceof Error ? err.message : String(err);
+          break;
+        }
         const all = [...new Set(teamIds)].filter(Boolean);
         refused.push(...all.slice(all.indexOf(teamId)));
         break;
@@ -504,7 +522,14 @@ export class SportsGameOddsProvider implements VegasProvider {
       }
     }
 
-    return { results, requests, entities, unmapped, ...(refused.length > 0 ? { refused } : {}) };
+    return {
+      results,
+      requests,
+      entities,
+      unmapped,
+      ...(refused.length > 0 ? { refused } : {}),
+      ...(failed ? { failed } : {}),
+    };
   }
 
   /**
@@ -591,7 +616,7 @@ export class SportsGameOddsProvider implements VegasProvider {
     };
   }
 
-  private async request<T>(path: string): Promise<T> {
+  private async request<T>(path: string, opts: { paced?: boolean } = {}): Promise<T> {
     if (!this.apiKey) {
       throw new VegasProviderError('no API key configured', this.name, 'auth');
     }
@@ -602,7 +627,7 @@ export class SportsGameOddsProvider implements VegasProvider {
      * everything above this treats the two alike — nothing billed, the rest of
      * the pass left for the next one. See `isRateLimited`.
      */
-    if (this.pacer && !(await this.pacer.admit())) {
+    if (this.pacer && opts.paced !== false && !(await this.pacer.admit())) {
       this.quota.lastError = 'rate limited';
       throw new VegasProviderError('rate limited (held for the next pass)', this.name, 'quota', 429);
     }

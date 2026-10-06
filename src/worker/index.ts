@@ -3,9 +3,10 @@
  *
  * Three entry surfaces:
  *   fetch()    — the API + static SPA assets
- *   scheduled() — Vegas refresh cadence + nightly Sleeper player sync, and the
- *                 daily captures nothing can reconstruct later (trending, and
- *                 the current week's league transactions)
+ *   scheduled() — the odds job on each game's own kickoff clock, the weekly
+ *                 manager-tendencies refresh, the nightly Sleeper player sync,
+ *                 and the daily captures nothing can reconstruct later
+ *                 (trending, and the current week's league transactions)
  *   email()    — inbound FF Newsletter delivery (Email Workers)
  *
  * Secrets (APP_PASSPHRASE, SESSION_SECRET, ODDS_API_KEY) live in the worker
@@ -26,7 +27,7 @@ import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
 import { SportsGameOddsProvider } from '../core/vegas/sportsGameOddsProvider.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
-import { createApp, refreshVegas, type AppEnv } from '../server/app.ts';
+import { createApp, type AppEnv } from '../server/app.ts';
 import type { Database } from '../server/db.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
@@ -39,6 +40,9 @@ import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
 import { nflverseFeedDue } from '../core/nflverse/cadence.ts';
 import { waiverReadDue } from '../core/league/waiverReadCadence.ts';
+import { managerIntelWindow } from '../core/league/managerIntelCadence.ts';
+import { scheduleFlexCheckDue } from '../core/nfl/flexCheck.ts';
+import { VegasKickoffClock } from '../server/services/vegasKickoffClock.ts';
 import { SeasonMarketService } from '../server/services/seasonMarketService.ts';
 import { LeagueRepo } from '../server/repos/league.ts';
 import { CronRunRecorder } from '../server/repos/cronRuns.ts';
@@ -205,20 +209,20 @@ export default {
    *                       plus, until it finishes, one step of last season's
    *                       history backfill; and every three hours at :15 the
    *                       league's rosters and transactions
-   *   Sat 23:00 UTC    -> Vegas refresh, and a late pregame calibration capture
-   *   Sun 15:00 UTC    -> Vegas refresh, and a late pregame calibration capture
+   *                       and, on the same tick, the odds job (when a game has
+   *                       reached one of its kickoff checkpoints) and the weekly
+   *                       manager-tendencies refresh (Wednesday midday Detroit)
+   *   Sat 23:00 UTC    -> published projections, and a late pregame calibration
+   *                       capture
+   *   Sun 15:00 UTC    -> published projections, and a late pregame calibration
+   *                       capture
    *   Daily 09:00 UTC  -> Sleeper player dictionary, last season's statistics,
    *                       one injury check, per-game usage (weekly stats
    *                       settle when a game ends, so a daily check learns
    *                       everything 288 of them would), the season-long
-   *                       market lines the draft board prices against, the
+   *                       market lines the draft board prices against, and the
    *                       matchup calibration ledger — the forecast written
-   *                       down and finished weeks closed out — and, last of
-   *                       everything and on whatever budget the rest of the
-   *                       tick leaves it, one bounded batch of manager
-   *                       history, which is why a league's four seasons of
-   *                       drafts and transactions arrive over a few days
-   *                       instead of failing in one invocation
+   *                       down and finished weeks closed out
    *
    * The daily tick is the one with a ceiling to defend. Every external call it
    * makes — Sleeper, nflverse, the Vegas provider — is charged to a single
@@ -322,7 +326,18 @@ export default {
       const feed = nflverseFeedDue(event.scheduledTime);
       if (!feed) {
         try {
-          const schedule = await new ScheduleService(env.DB).refreshIfDue(usageSeason());
+          /*
+           * About once a day, and again just after the league announces flexes.
+           *
+           * The flex windows (Tuesday evening and Wednesday, Eastern) ask
+           * whatever the daily interval says; every other tick asks only when
+           * a day has passed. See `core/nfl/flexCheck.ts` for what the app can
+           * and cannot read about an announcement, and why Tuesday.
+           */
+          const service = new ScheduleService(env.DB);
+          const schedule = scheduleFlexCheckDue(event.scheduledTime)
+            ? await service.refreshAfterFlexAnnouncement(usageSeason())
+            : await service.refreshIfDue(usageSeason());
           if (schedule?.outcome === 'failed') console.error('schedule refresh failed', schedule.note);
         } catch (err) {
           console.error('schedule check failed', err);
@@ -391,6 +406,59 @@ export default {
           console.error('league read failed', err);
         }
       }
+
+      /*
+       * The odds job, on each game's own kickoff clock.
+       *
+       * Replaces the Saturday 23:00 and Sunday 15:00 Vegas refresh, which had
+       * nothing for a Thursday night, a Monday night, a holiday game on a
+       * Wednesday or Saturday, or a game the league moved. The schedule drives
+       * it now: a game is looked at at fixed hours before its stored kickoff
+       * (`core/vegas/kickoffClock.ts`), and what it buys is only what the
+       * per-game staleness table says is old.
+       *
+       * On nearly every tick this reads one settings row and returns. It does
+       * not share a tick with an nflverse feed or the league read, for the
+       * reason those two do not share one with each other: a tick that parses a
+       * file or makes eight Sleeper calls is not the tick to add a provider
+       * pass to. A checkpoint is caught up rather than fired, so being pushed
+       * five minutes costs nothing.
+       *
+       * Last and separately caught, like everything on this tick: the odds job
+       * must never be the reason an injury check does not run.
+       */
+      if (!feed && !waiverReadDue(event.scheduledTime)) {
+        try {
+          const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);
+          const metered = toAppEnv(env, budgetedFetch(budget));
+          const run = await new VegasKickoffClock(env.DB, metered.vegas).runIfDue(event.scheduledTime ?? Date.now());
+          if (run?.report && (run.report.errors.length > 0 || run.report.blocked.length > 0)) {
+            console.log('odds kickoff clock', JSON.stringify({ errors: run.report.errors, blocked: run.report.blocked }));
+          }
+        } catch (err) {
+          console.error('odds kickoff clock failed', err);
+        }
+      }
+
+      /*
+       * Manager tendencies, once a week: Wednesday midday, Detroit time.
+       *
+       * Waivers have run by then. It used to be the last step of the 09:00 tick
+       * and got whatever that tick had left, which on most mornings was
+       * nothing. Here it has an invocation to itself. The window is two hours
+       * of ticks and the marker is the Detroit date, so a backfill that runs
+       * out of allowance carries on at the next tick of the same Wednesday and a
+       * finished one does not run again until the next. See
+       * `core/league/managerIntelCadence.ts` for the daylight-saving arithmetic.
+       */
+      const intelWindow = managerIntelWindow(event.scheduledTime);
+      if (intelWindow && !feed && !waiverReadDue(event.scheduledTime)) {
+        try {
+          await refreshManagerTendencies(env, intelWindow);
+        } catch (err) {
+          console.error('manager tendencies refresh failed', err);
+        }
+      }
       return;
     }
 
@@ -416,8 +484,6 @@ export default {
       const meteredFetch = budgetedFetch(budget);
       const meteredRedirectingFetch = budgetedFetch(budget, undefined, { cost: REDIRECTING_FETCH_COST });
       const cronEnv = toAppEnv(env, meteredFetch);
-      let intelNote = 'not reached';
-
       /*
        * What this tick did, written down rather than logged and lost.
        *
@@ -717,118 +783,11 @@ export default {
        */
 
       /*
-       * One bounded batch of manager history — **last on this tick, and last is
-       * now the truth rather than a claim.**
-       *
-       * The subsystem this feeds is the reason the batch exists. Sleeper keeps
-       * a league's drafts and transactions for every season it has ever played,
-       * and reading them is how `Next%` learns that the man three seats over
-       * takes his quarterback in round fourteen — but reading them all at once
-       * cost about sixty-six subrequests against a free-plan ceiling of fifty,
-       * and it failed in production for exactly that reason.
-       *
-       * So it is a batch, checkpointed at every unit and resumed here tomorrow.
-       * An established league fills its ledger over a few days and then costs
-       * two requests a day for ever — the live draft's index and the week still
-       * in play — because a finished draft and a finished week can never change
-       * and are never re-read.
-       *
-       * **Its allowance is whatever is left.** This used to be a flat
-       * twenty-four whatever the rest of the tick had spent, which is the
-       * defect: twenty-four is safe on a healthy morning and is exactly what
-       * takes an invocation over the ceiling on a morning where the feeds above
-       * retried. Now it is `budget.remaining`, capped at the batch maximum so a
-       * quiet morning does not turn into an unusually large one — and because
-       * nothing external runs after this, no reserve is held back. Every unit
-       * it does not get is a unit the feeds above already spent on something
-       * somebody is looking at today.
-       *
-       * A tight morning is not a failure. Zero remaining means the batch is
-       * skipped, the checkpoints stay exactly where they are, and tomorrow's
-       * tick picks up the same unit — the same thing that happens every day
-       * during the first week of a backfill.
-       *
-       * The position is the other half of it. Everything above feeds a surface
-       * somebody is looking at today: the player dictionary, the injury report,
-       * per-game usage, the market lines, the schedule, the trending list, the
-       * calibration ledger, the published projections and the three nflverse
-       * files. An earlier version of this comment claimed to be "last of the
-       * Sleeper work" while five Sleeper reads and three nflverse reads still
-       * ran after it, so a backfill could and did crowd out the calibration
-       * ledger. It is last now.
-       *
-       * Separately caught, like every other feed here: a history that fails to
-       * advance costs a small `Next%` adjustment and nothing else.
+       * Manager tendencies are no longer on this tick. They moved to a weekly
+       * Wednesday-midday window on the five-minute tick, where the batch has an
+       * invocation to itself instead of the budget left over here. See
+       * `refreshManagerTendencies` and `core/league/managerIntelCadence.ts`.
        */
-      await run.step('manager-intel', 'Manager tendencies', async () => {
-        const selected = await new LeagueRepo(env.DB).getSelectedLeague();
-        if (!selected) {
-          intelNote = 'no league selected';
-          return { outcome: 'skipped' as const, note: 'no league selected' };
-        }
-        {
-          const allowance = Math.min(MAX_SLEEPER_SUBREQUESTS_PER_BATCH, budget.remaining);
-          if (allowance <= 0) {
-            intelNote = 'skipped: no budget left after the feeds above';
-            console.log(`manager intelligence skipped: ${budget.used}/${budget.limit} subrequests already spent`);
-            /*
-             * `deferred`, not `failed`, and this is the §7 sentence the whole
-             * lane exists to be able to say. The batch yielded because the
-             * feeds a lineup depends on had already spent the invocation's
-             * budget, which is the strategy working exactly as designed. A run
-             * record calling it a failure would send somebody diagnosing a
-             * healthy system, and a run record staying silent about it would
-             * leave a thin `Next%` unexplained.
-             */
-            return {
-              outcome: 'deferred' as const,
-              note: `refresh budget reserved for higher-priority data (${budget.used}/${budget.limit} already spent)`,
-            };
-          }
-          {
-            const state = await new SettingsRepo(env.DB).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
-            const report = await new ManagerIntelService(env.DB, { sleeper: cronEnv.sleeper }).advance({
-              leagueId: selected.id,
-              sleeperLeagueId: selected.sleeperLeagueId,
-              season: selected.season,
-              week: state?.week ?? 1,
-              /*
-               * A cap on the shared pool, not a second charge against it.
-               *
-               * The batch runs on `cronEnv.sleeper` like everything else here,
-               * so the invocation counts its requests at the transport; this
-               * says only how many of them it may have. Handing it a budget
-               * that also charged the invocation would count every request
-               * twice and stop a batch that still had room — see
-               * `RequestBudget.allowance`.
-               */
-              budget: budget.allowance(allowance),
-            });
-            const allowanceBound = report.requestsUsed >= allowance;
-            intelNote =
-              `allowance ${allowance}, used ${report.requestsUsed}` +
-              (allowanceBound ? ' (allowance bound)' : ' (finished what it had to do)');
-            if (report.errors.length > 0) {
-              console.error('manager intelligence batch had failures', report.errors);
-            }
-            /*
-             * An allowance-bound batch is deferred too, and for the same reason.
-             *
-             * It advanced as far as its slice of the pool allowed and stopped
-             * with checkpoints intact — the steady state of a backfill's first
-             * few days. Calling that a success would hide from somebody reading
-             * a thin `Next%` that there is more history still to come.
-             */
-            return {
-              outcome: allowanceBound ? ('deferred' as const) : ('succeeded' as const),
-              items: report.requestsUsed,
-              note: allowanceBound
-                ? `advanced as far as this run's allowance of ${allowance} reached; more history arrives tomorrow`
-                : null,
-            };
-          }
-        }
-      });
 
       /*
        * What the invocation actually cost, once per tick.
@@ -843,8 +802,7 @@ export default {
        */
       const spent = budget.snapshot();
       console.log(
-        `cron 09:00 subrequests ${spent.used}/${spent.limit} (ceiling 50, ${spent.remaining} unspent); ` +
-          `manager intelligence: ${intelNote}`,
+        `cron 09:00 subrequests ${spent.used}/${spent.limit} (ceiling 50, ${spent.remaining} unspent)`,
       );
 
       /*
@@ -869,7 +827,7 @@ export default {
     /*
      * The two weekend clocks, recorded on the same terms as the daily one.
      *
-     * No budget: they make four external calls between them and pass the
+     * No budget: they make a handful of external calls between them and pass the
      * unmetered transport, so there is no ceiling to defend and none to report.
      * A zeroed budget here would read as "spent nothing" rather than as "this
      * clock does not have one", which is the distinction §7 asks for.
@@ -880,26 +838,13 @@ export default {
       releaseSha: env.RELEASE_SHA ?? null,
     });
 
-    await weekend.step('vegas', 'Vegas lines', async () => {
-      const report = await refreshVegas(appEnv);
-      if (report.fetched === 0 && report.blocked.length > 0) {
-        return { outcome: 'skipped' as const, items: 0, note: report.blocked[0] ?? report.note };
-      }
-      if (report.fetched === 0 && report.errors.length > 0) {
-        /*
-         * The category, never the provider's own words.
-         *
-         * `report.errors` carries whatever the odds provider said about a
-         * request this app made, which can include the URL it was made to — and
-         * this row is read by a support screen and copied into a snapshot. The
-         * text stays in the log, where an operator can see it and a user
-         * cannot.
-         */
-        console.error('vegas refresh failed', report.errors);
-        return { outcome: 'failed' as const, items: 0, note: 'the odds provider did not answer' };
-      }
-      return { outcome: 'succeeded' as const, items: report.fetched, note: report.note };
-    });
+    /*
+     * No Vegas step here any more. The odds job follows each game's kickoff on
+     * the five-minute tick (`VegasKickoffClock`), which covers Thursday and
+     * Monday nights and every flexed or holiday game these two fixed clocks
+     * never could. These two stay for what only a weekend needs: the published
+     * fallback and the late pregame calibration reading below.
+     */
     /*
      * And, on the two weekend ticks, the published fallback beside the market.
      *
@@ -1032,6 +977,56 @@ export function parseRawEmail(raw: string): {
   };
 }
 
+
+/**
+ * One batch of manager history, in the weekly Wednesday window.
+ *
+ * Moved here from the end of the 09:00 tick. What it does is unchanged: read
+ * the drafts and transactions the league's `Next%` learns from, checkpointed at
+ * every unit, bounded by a request allowance. What is different is the budget
+ * (an invocation of its own, not whatever the daily feeds left) and the
+ * cadence (weekly, because a finished draft or week never changes and the week
+ * in play needs one midweek read after waivers).
+ *
+ * The window spans several ticks and the marker is the Detroit date it last
+ * *finished* on. A batch that stopped because it spent its allowance with
+ * history still to read does not set it, so the next tick of the same
+ * Wednesday takes another batch; one that finished what it had sets it and the
+ * rest of the window does nothing. A league with no selected league sets
+ * nothing, which is a skip and not a failure.
+ *
+ * Cost: one settings row per tick inside the window (24 rows a week), then up
+ * to `MAX_SLEEPER_SUBREQUESTS_PER_BATCH` Sleeper requests. Sleeper requests are
+ * not odds lookups and the odds provider is not touched.
+ */
+async function refreshManagerTendencies(env: WorkerEnv, window: string): Promise<void> {
+  const settings = new SettingsRepo(env.DB);
+  if ((await settings.get<string | null>(SETTING_KEYS.managerIntelWeekly, null)) === window) return;
+
+  const selected = await new LeagueRepo(env.DB).getSelectedLeague();
+  if (!selected) return;
+
+  const budget = new RequestBudget(MAX_CRON_SUBREQUESTS);
+  const metered = toAppEnv(env, budgetedFetch(budget));
+  const allowance = Math.min(MAX_SLEEPER_SUBREQUESTS_PER_BATCH, budget.remaining);
+  const state = await settings.get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+  const report = await new ManagerIntelService(env.DB, { sleeper: metered.sleeper }).advance({
+    leagueId: selected.id,
+    sleeperLeagueId: selected.sleeperLeagueId,
+    season: selected.season,
+    week: state?.week ?? 1,
+    /* A cap on the shared pool, not a second charge against it; see `RequestBudget.allowance`. */
+    budget: budget.allowance(allowance),
+  });
+  if (report.errors.length > 0) console.error('manager intelligence batch had failures', report.errors);
+  const allowanceBound = report.requestsUsed >= allowance;
+  console.log(
+    `manager tendencies ${window}: allowance ${allowance}, used ${report.requestsUsed}` +
+      (allowanceBound ? ' (allowance bound, more on the next tick)' : ' (finished what it had to do)'),
+  );
+  // Not marked done after a failure: the next tick of the window tries again.
+  if (!allowanceBound && report.errors.length === 0) await settings.set(SETTING_KEYS.managerIntelWeekly, window);
+}
 
 /**
  * The calibration ledger, which is now the only thing that writes to it.

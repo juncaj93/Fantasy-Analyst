@@ -268,16 +268,77 @@ those are covered by the discovery-order fix above.
 
 | | Entities |
 |---|---|
-| Weekly discovery (8 roster teams) | 9 |
-| Preseason discovery, once, reaching the first slate | up to 32 |
-| Two scheduled refreshes (8 games each) | 16 |
-| Near-kickoff top-ups for close calls | 3 |
-| **Per week** | **28** |
-| Season markets (2 per run, daily, until the draft ends) | 60 |
-| **Per month (5 weeks)** | **200 of 2,500 — 8%** |
+| Discovery: one per covered team, when its game is inside 48 hours | 12 |
+| Six looks at each of up to 12 roster games | 72 |
+| **Per week, worst case** | **84** |
+| **Per month (5 weeks)** | **420 of 2,500 — 17%** |
+| A person's own taps (September's were 255, mostly one defect) | ~255 |
+| **With taps** | **~675 — 27%, still under the 50% caution line** |
+
+Typical is lower: the roster spans about ten games, and a look at a game whose
+lines are younger than the staleness table's wait buys nothing. Season markets
+are not in the table because they stop when the draft is over.
 
 `simulateMonth` in `src/core/vegas/plan.ts` computes this, and
 `tests/vegas.budget.test.ts` fails if the shipped strategy stops fitting.
+
+### The kickoff clock
+
+`src/core/vegas/kickoffClock.ts` (the arithmetic) and
+`src/server/services/vegasKickoffClock.ts` (the state). It replaces the two
+weekend Vegas runs, which had nothing for a Thursday night, a Monday night, a
+holiday game on a Wednesday or Saturday, or a game the league moved.
+
+**Driven by the stored NFL schedule.** A game is looked at 48, 24, 6, 3, 1.5 and
+0.5 hours before its own stored kickoff. Nothing in the code knows a weekday: a
+Thursday night, a Monday night and a Saturday game are the same case, and a
+flexed game moves its checkpoints with its kickoff.
+
+**Checkpoints are when it may look; staleness is when looking becomes buying.**
+At each checkpoint the job applies the per-game table from #326 (more than 24h
+out: 6h; 2 to 24h: 1h; under 2h: 15 min; kicked off: never), so a pass that
+arrives with nothing stale costs nothing. The table alone, run continuously on
+the five-minute tick, would buy about fifty times per game per week; the
+checkpoints are what make it six.
+
+**Catch-up, not firing.** A game is due when a checkpoint has passed since its
+lines were last bought, or when its lines were never bought. There is no
+per-checkpoint flag to lose, so a skipped tick or a flex heals on the next pass.
+
+**It rides the five-minute tick.** No cron trigger is spent. A one-row gate
+(`vegas.clock` in settings) holds the next tick that could have anything new, so
+nearly every tick reads that row and returns; a week is about forty planning
+passes. It never shares a tick with an nflverse file or the league read.
+
+**The schedule is the authority on kickoff.** The provider's event row keeps the
+time it had when the game was last bought, so on this pass the stored schedule's
+kickoff wins where the two are within four days, which is how a flexed game is
+on its new clock at once. The schedule refresh clears the gate only when an
+upcoming kickoff actually changed.
+
+**Discovery asks about a team only when its own game is inside 48 hours**, for
+no more than three days ahead, and is not held off by the old three-day stamp.
+
+`GET /api/vegas/budget` now carries `clock`: the gate, and the passes the stored
+schedule implies for the next seven days. The Probe workflow's
+`probe-vegas-clock.mjs` prints that beside the same passes recomputed from the
+database.
+
+### Why the app's count and the provider's differed by about ten
+
+The provider's counter is read at the top of a pass, so the guard decides on the
+real number, and that reading is what the app stores. Everything the pass then
+bought sat between the stored reading and the provider's counter until the next
+pass looked again. On 6 October 2026 the reading was 327, the pass spent ten,
+and the app went on showing 327 against a provider at 337. A pass that bought
+anything now reads the counter once more at the end (free, one request).
+
+Two smaller holes were closed with it, each a billed call with no ledger row: a
+database error after the provider answered (the ledger write used to be the last
+statement), and a discovery that failed on its third team and threw away what
+the first two had bought. Probe scripts that use the same key from the Probe
+workflow can never be in this ledger; the provider's own counter is what shows
+them, and `probe-vegas-count-gap.mjs` attributes any difference.
 
 ## The budget
 
@@ -414,8 +475,9 @@ this is the freshness policy.
 - **TTL**: 360 minutes normally, 90 minutes within 6 hours of kickoff.
 - **Manual refresh**: allowed only after a 15-minute cooldown per event, and the
   HTTP endpoint is additionally rate limited to 4 refreshes per 15 minutes.
-- **Scheduled cadence**: Saturday 23:00 UTC and Sunday 15:00 UTC, and each run
-  fetches only the roster's own games — never the slate.
+- **Scheduled cadence**: each game's own kickoff, from the stored NFL schedule
+  (see "The kickoff clock" below), and each pass fetches only the roster's own
+  games — never the slate. It used to be Saturday 23:00 and Sunday 15:00 UTC.
 - **Failure**: on quota exhaustion, auth failure or a network error, the last
   cached snapshot is returned with `stale: true` and the reason attached. It
   never throws and never fabricates a line.

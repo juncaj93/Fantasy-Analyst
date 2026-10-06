@@ -98,4 +98,18 @@ export const SETTING_KEYS = {
    * button re-buys the same nothing. See `VegasRefreshService.discoverIfNeeded`.
    */
   vegasDiscoveryEmpty: 'vegas.discoveryEmpty',
+  /**
+   * The kickoff clock's gate: `{ processedThrough, next, retries, last }`.
+   *
+   * What lets the five-minute tick read one row and go home on the 99% of ticks
+   * where no game has a new checkpoint. A missing or unreadable value means
+   * "look now", never "do nothing". See `VegasKickoffClock`.
+   */
+  vegasClock: 'vegas.clock',
+  /**
+   * The Detroit date the weekly manager-tendencies refresh last finished on,
+   * as `YYYY-MM-DD`, so a Wednesday window that spans several ticks stops once
+   * the work is done. See `core/league/managerIntelCadence.ts`.
+   */
+  managerIntelWeekly: 'managerIntel.weekly',
 } as const;

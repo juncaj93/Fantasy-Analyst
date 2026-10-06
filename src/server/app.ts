@@ -77,6 +77,7 @@ import { LeagueStrategyService, readFinalWeek } from './services/leagueStrategyS
 import { ManagerIntelService } from './services/managerIntelService.ts';
 import { ManagerLedgerRepo } from './repos/managerLedger.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './services/vegasRefresh.ts';
+import { VegasKickoffClock } from './services/vegasKickoffClock.ts';
 import { VegasUsageRepo } from './repos/vegasUsage.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import type { Database } from './db.ts';
@@ -3254,6 +3255,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       budget: view,
       bySource,
       recent,
+      /*
+       * The scheduled job's own state and what the stored schedule says it
+       * will do over the next week. Reads only: the gate row and the schedule.
+       */
+      clock: await (async () => {
+        const clock = new VegasKickoffClock(ctx.env.db, ctx.env.vegas);
+        const [state, upcoming] = await Promise.all([
+          clock.state().catch(() => null),
+          clock.plan().catch(() => []),
+        ]);
+        return { state, upcoming };
+      })(),
       nextPlan: {
         events: preview.plan.events.map((e) => ({
           eventId: e.eventId,
