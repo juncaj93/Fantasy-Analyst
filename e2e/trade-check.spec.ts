@@ -254,6 +254,27 @@ test.describe('check a trade: layout', () => {
     }
   });
 
+  test('a long username stays whole or is cut with an ellipsis, never split mid-word', async ({ page }) => {
+    const long = { ...OK, sides: { ...OK.sides, b: { rosterId: 2, label: 'zackstephens54', isMine: false } }, evaluation: { ...OK.evaluation, b: side(2, 'zackstephens54', false, -38.4) } };
+    await openTrades(page, long);
+    await openFold(page);
+    await pickTwo(page);
+    await page.getByTestId('trade-check-run').click();
+    await expect(page.getByTestId('trade-check-result')).toBeVisible();
+    const dt = page.getByTestId('trade-check-row').nth(1).locator('dt');
+    await expect(dt).toHaveText('zackstephens54');
+    // One line of text: the name did not split onto a second line. (The cell itself is stretched
+    // to the height of the reading beside it, so the text is measured, not the cell.)
+    const lines = await dt.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+    });
+    expect(lines).toBe(1);
+    // And it is not clipped: the text fits its column.
+    expect(await dt.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  });
+
   test('a player row is a pill, a name and a mark, and no more', async ({ page }) => {
     await openTrades(page);
     await openFold(page);

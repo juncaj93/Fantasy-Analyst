@@ -11074,3 +11074,20 @@ div.matchup-result {
 .weekly-line dt {
   overflow-wrap: anywhere;
 }
+
+/*
+ * A team name on a result row stays whole. A username is one long word, and
+ * "anywhere" above splits it mid-word ("zackstephens5" / "4"). Here the label
+ * column is 120px, enough for a 14-character name, and anything longer is cut
+ * with an ellipsis; the full name is in the headline and the tooltip.
+ */
+.weekly-line-team {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.weekly-line-team dt {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
