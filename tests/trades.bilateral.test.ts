@@ -174,7 +174,7 @@ describe('the three gates', () => {
      * reach a screen, and the rejection must be nameable.
      */
     const fixture = leagueOf({
-      '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 13], ['wr1', 'WR', 4], ['wr2', 'WR', 4], ['te1', 'TE', 9]],
+      '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 13], ['rb0', 'RB', 12], ['wr1', 'WR', 4], ['wr2', 'WR', 4], ['te1', 'TE', 9]],
       '2': [['qb2', 'QB', 17], ['rb3', 'RB', 14], ['rb4', 'RB', 13], ['wr5', 'WR', 16], ['wr6', 'WR', 4], ['te2', 'TE', 9]],
     });
 

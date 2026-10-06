@@ -77,13 +77,28 @@ describe('inside a comparison', () => {
     /*
      * Constructed so the two genuinely disagree and the model still wins.
      *
-     * B carries the bigger prop line — sixteen points against fourteen, which
-     * clears the market's own margin for having an opinion. A carries an
-     * emphatic news record worth about three points, which is enough to put him
-     * ahead on the total. The market therefore prefers B, the model prefers A,
-     * and the recommendation must be A: the line is already inside both scores,
-     * and deferring to it again would be counting it twice.
+     * The model's reads (here, news) are held to a tenth of the market number
+     * in total, so they can only overturn a gap that small. B carries the
+     * bigger prop line, 14.4 points against 14, and A carries an emphatic news
+     * record. The market prefers B, the model prefers A, and the recommendation
+     * must be A: the line is already inside both scores, and deferring to it
+     * again would be counting it twice.
      */
+    const comparison = compareStartSit(
+      [
+        candidate('a', 'Model Pick', 'WR', 14, { signal: signalWithNet(9) }),
+        candidate('b', 'Market Pick', 'WR', 14.4),
+      ],
+      HALF_PPR,
+    );
+
+    expect(comparison.market.marketPreferredId).toBe('b');
+    expect(comparison.recommendedPlayerId).toBe('a');
+  });
+
+  it('cannot be talked out of a clear market gap by news', () => {
+    // Two points of market gap is about 14%. News, however emphatic, is held to
+    // 3% of the number, so the better-priced player stays on top.
     const comparison = compareStartSit(
       [
         candidate('a', 'Model Pick', 'WR', 14, { signal: signalWithNet(9) }),
@@ -91,10 +106,7 @@ describe('inside a comparison', () => {
       ],
       HALF_PPR,
     );
-
-    expect(comparison.market.verdict).toBe('disagrees');
-    expect(comparison.market.marketPreferredId).toBe('b');
-    expect(comparison.recommendedPlayerId).toBe('a');
+    expect(comparison.recommendedPlayerId).toBe('b');
   });
 
   it('lowers confidence rather than the score when the disagreement is wide', () => {

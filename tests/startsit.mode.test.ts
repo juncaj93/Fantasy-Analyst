@@ -78,7 +78,7 @@ describe('the mode reweights one engine', () => {
     expect(Math.abs(usage.value)).toBeLessThanOrEqual(Math.abs(usage.baseValue * usage.modeWeight) + 1e-9);
 
     const td = floor.components.find((c) => c.key === 'td_dependency')!;
-    expect(td.value).toBeCloseTo(td.baseValue * td.modeWeight, 2);
+    expect(td.preBudgetValue ?? td.value).toBeCloseTo(td.baseValue * td.modeWeight, 2);
   });
 
   it('prefers the safe player in Floor and the volatile one in Ceiling', () => {

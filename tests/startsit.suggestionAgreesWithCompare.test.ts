@@ -128,8 +128,11 @@ describe('decisionPoints', () => {
 
   it('is the published week plus the player adjustments on a partial one', () => {
     const d = decisionPoints(evaluation({}), new Map([['p', 8]]));
-    /* 8 − 1.5 + 0.9: the market's partial sum and its coverage charge are left out. */
-    expect(d).toMatchObject({ basis: 'published', base: 8, points: 7.4 });
+    /*
+     * 8 − 1.5 + 0.24: the market's partial sum and its coverage charge are left
+     * out, and the 0.9 of opportunity is held to 3% of the 8-point week.
+     */
+    expect(d).toMatchObject({ basis: 'published', base: 8, points: 6.74 });
   });
 
   it('keeps the partial score when nobody published him', () => {

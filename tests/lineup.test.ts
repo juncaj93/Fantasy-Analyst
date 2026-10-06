@@ -196,7 +196,7 @@ describe('recommendLineup', () => {
     const swap = result.swaps.find((s) => s.inName === 'Catcher Three');
     expect(swap).toBeDefined();
     expect(swap!.outName).toBe('Catcher Two');
-    expect(swap!.gain).toBeCloseTo(3, 1);
+    expect(swap!.gain).toBeCloseTo(2.91, 2);
     expect(swap!.reason).toBeTruthy();
   });
 
@@ -290,7 +290,7 @@ describe('recommendLineup', () => {
     expect(result.warnings.join(' ')).toContain('Questionable');
   });
 
-  it('takes recent news into account when the market is level', () => {
+  it('lets recent news settle a level market without announcing a move', () => {
     const result = recommendLineup(
       [
         candidate('wr1', 'Catcher One', 'WR', 12, { signal: signalWithNet(-4) }),
@@ -301,7 +301,10 @@ describe('recommendLineup', () => {
       { currentStarterIds: ['wr1'] },
     );
     expect(result.slots[0]!.name).toBe('Catcher Two');
-    expect(result.swaps[0]!.reason).toContain('signal');
+    // Four net items each way is worth under a point once the news is held to
+    // 3% of a 12-point market: enough to settle a dead-level slot, not enough
+    // to tell anybody to move a player on its own.
+    expect(result.swaps).toEqual([]);
   });
 
   it('never returns more starters than the league has slots', () => {

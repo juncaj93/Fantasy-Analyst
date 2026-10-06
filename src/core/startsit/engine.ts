@@ -39,6 +39,7 @@ import { assessTdDependency, NO_TD_DATA, type TdDependencyAssessment } from './t
 import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
 import { assessWeather, type GameWeather, type WeatherAssessment } from './weather.ts';
 import { projectDst, type DstProjection } from './dstProjection.ts';
+import { applyAdjustmentBudget } from './adjustmentBudget.ts';
 import { decisionPoints, type DecisionPoints } from './decisionPoints.ts';
 
 export interface StartSitInput {
@@ -161,6 +162,12 @@ export interface StartSitComponent {
   /** What the mode did to it. 1 in Balanced, and 1 for anything mode-neutral. */
   modeWeight: number;
   unknown: boolean;
+  /**
+   * What `value` was before the adjustment budget shrank it, present only when
+   * it did. See `adjustmentBudget.ts`. Optional on the wire: older cached
+   * responses lack it, and so does any component the budget left alone.
+   */
+  preBudgetValue?: number;
 }
 
 export interface StartSitEvaluation {
@@ -560,6 +567,10 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
    */
   capPair(components, ['usage_level', 'role_trend'], USAGE_PAIR_CAP);
   if (expectation.points != null) capPair(components, ['game_script'], GAME_SCRIPT_WITH_MARKET_CAP);
+  // Last, and over the mode-weighted values: everything but the market and
+  // availability may move the score by at most a tenth of the market number.
+  // With no market there is no base to be a tenth of, and nothing is touched.
+  if (expectation.points != null) applyAdjustmentBudget(components, vegasBase(components));
 
   const known = components.filter((c) => !c.unknown);
   const score = expectation.points == null && recentItems === 0 && rawItems === 0 && statusPenalty === 0 && usage.unknown
@@ -744,6 +755,8 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
 
   confidenceReasons.push(...dst.reasons);
 
+  if (dst.points != null) applyAdjustmentBudget(components, vegasBase(components));
+
   /*
    * No anchor, no score. Not a floor, not the sum of the adjustments.
    *
@@ -808,6 +821,11 @@ function capPair(components: StartSitComponent[], keys: string[], cap: number): 
   if (Math.abs(total) <= cap || total === 0) return;
   const scale = cap / Math.abs(total);
   for (const component of group) component.value = round2(component.value * scale);
+}
+
+/** The market component's value as it sits in the score, after the mode weight. */
+function vegasBase(components: StartSitComponent[]): number {
+  return components.find((c) => c.key === 'vegas')?.value ?? 0;
 }
 
 /** Opportunity and its trend, together, may be worth this much. */
