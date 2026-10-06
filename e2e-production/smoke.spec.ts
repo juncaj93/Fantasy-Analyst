@@ -826,8 +826,23 @@ test.describe('the deployed app', () => {
             })
             .slice(0, 4)
             .map((r) => {
-              const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement | null;
               const open = r.querySelector(way) as HTMLElement | null;
+              /*
+                Once the draft is over, Players draws the owner in place of the
+                heart (#323, #324): a label inside the way in, not a second
+                control. Production is past its draft, so that is the row it has.
+              */
+              const owner = r.querySelector('[data-testid="owner-pill"]') as HTMLElement | null;
+              if (open && owner && !r.querySelector(`[data-testid="${ctrl}"]`)) {
+                return {
+                  kind: 'owner' as const,
+                  nested: r.querySelector('button button') != null,
+                  actions: r.querySelectorAll('button').length,
+                  ownerIsControl: owner.closest('button') !== open || owner.matches('button, a, [tabindex]'),
+                  wayIn: open.getBoundingClientRect().height,
+                };
+              }
+              const el = r.querySelector(`[data-testid="${ctrl}"]`) as HTMLElement | null;
               if (!el || !open) return null;
               const box = el.getBoundingClientRect();
               const hits: string[] = [];
@@ -840,6 +855,7 @@ test.describe('the deployed app', () => {
                 }
               }
               return {
+                kind: 'control' as const,
                 nested: r.querySelector('button button') != null,
                 /* The control is beside the way in, not inside it. */
                 sibling: !open.contains(el),
@@ -856,6 +872,13 @@ test.describe('the deployed app', () => {
       expect(rows.length, `${screen} drew no row clear of the app's own bars`).toBeGreaterThan(0);
       for (const r of rows) {
         expect(r.nested, 'a button is nested inside a button').toBe(false);
+        if (r.kind === 'owner') {
+          // One action, the way in; the owner is read, never pressed.
+          expect(r.actions, `${screen} row offers ${r.actions} buttons rather than one`).toBe(1);
+          expect(r.ownerIsControl, 'the owner has become a control of its own').toBe(false);
+          expect(r.wayIn, 'the way in is no longer a full target').toBeGreaterThanOrEqual(44);
+          continue;
+        }
         expect(r.sibling, 'the control is still inside the way in').toBe(true);
         expect(r.actions, `${screen} row offers ${r.actions} buttons rather than two`).toBe(2);
         expect(r.target.width, `the control is ${r.target.width}px wide`).toBeGreaterThanOrEqual(44);
