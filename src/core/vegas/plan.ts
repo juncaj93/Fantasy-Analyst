@@ -19,6 +19,7 @@
  */
 
 import type { FetchPriority } from './budget.ts';
+import { gameDueOnClock } from './kickoffClock.ts';
 
 /** A rostered player, as much as the planner needs to know about them. */
 export interface PlannedPlayer {
@@ -77,30 +78,18 @@ export interface PlanOptions {
    * pass leaves it unset and is unchanged.
    */
   thresholdMinutes?: (hoursToKickoff: number | null) => number | null;
+  /**
+   * The scheduled kickoff job's pass. A game is planned only when it is due on
+   * its own kickoff clock — a checkpoint has passed since its lines were last
+   * bought, or they never were — on top of the `thresholdMinutes` wait, which
+   * the caller sets alongside it. Leaving it unset changes nothing, which is
+   * what keeps the old clock's pass and the manual tap exactly as they were.
+   * See `kickoffClock.ts`.
+   */
+  kickoffClock?: boolean;
 }
 
-/**
- * How old a game's lines must be before a manual refresh re-buys them.
- *
- * Lines barely move early in the week and move fastest close to kickoff, so the
- * wait shrinks as the game nears. Judged per game, never as one app-wide timer:
- * Thursday night, Sunday and Monday night sit in different rows at once.
- *
- *   more than 24h out   6 hours
- *   2 to 24h out        1 hour
- *   under 2h out        15 minutes
- *   kicked off          never (books have closed the line)
- *
- * An unknown kickoff is treated as far out. A game never fetched is not decided
- * here: the callers fetch it whatever this says.
- */
-export function manualRefreshThresholdMinutes(hoursToKickoff: number | null): number | null {
-  if (hoursToKickoff == null || !Number.isFinite(hoursToKickoff)) return 360;
-  if (hoursToKickoff <= 0) return null;
-  if (hoursToKickoff < 2) return 15;
-  if (hoursToKickoff <= 24) return 60;
-  return 360;
-}
+export { manualRefreshThresholdMinutes } from './staleness.ts';
 
 export const PLAN_DEFAULTS = {
   staleAfterMinutes: 360,
@@ -170,6 +159,14 @@ export function buildFetchPlan(players: PlannedPlayer[], opts: PlanOptions): Fet
         reason: `lines are ${Math.round(player.ageMinutes)} min old, under this game's ${tableLimit ?? 0} min wait`,
       });
       continue;
+    }
+    if (opts.kickoffClock) {
+      const lastFetchedAt = player.ageMinutes == null ? null : opts.now - player.ageMinutes * 60_000;
+      const verdict = gameDueOnClock({ kickoff: player.kickoff, lastFetchedAt }, opts.now);
+      if (!verdict.due) {
+        skipped.push({ playerId: player.playerId, reason: `not due on the kickoff clock: ${verdict.reason}` });
+        continue;
+      }
     }
     if (
       tableLimit === undefined &&

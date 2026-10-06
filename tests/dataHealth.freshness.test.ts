@@ -26,11 +26,15 @@ import { FRESHNESS_HOURS } from '../src/core/injury/model.ts';
 import {
   DAILY_ATTEMPT_STALE_MINUTES,
   FREQUENT_ATTEMPT_STALE_MINUTES,
+  VEGAS_GATE_OVERDUE_MINUTES,
   VEGAS_REFRESH_GRACE_MINUTES,
+  WEEKLY_ATTEMPT_STALE_MINUTES,
   minutesSinceLastVegasClock,
+  policyFor,
   vegasFreshWithinMinutes,
 } from '../src/core/health/policy.ts';
 import { VEGAS_STALE_HOURS } from '../src/server/services/setupService.ts';
+import { SETTING_KEYS, SettingsRepo } from '../src/server/repos/settings.ts';
 import { needsAttention, type DataHealthView, type SourceHealth } from '../src/core/health/model.ts';
 
 const NOW = new Date('2026-09-15T12:00:00.000Z');
@@ -478,5 +482,80 @@ describe('every policy source is reported', () => {
       expect(source, source.id).toHaveProperty('lastSuccessAt');
       expect(source, source.id).toHaveProperty('lastAttemptAt');
     }
+  });
+});
+
+describe('the odds job\'s gate, which is the exact version of "did the last refresh land"', () => {
+  async function storedLines(db: NodeSqliteDatabase, fetchedAt: string): Promise<void> {
+    await db
+      .prepare(
+        `INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope)
+         VALUES ('sportsgameodds', 'evt-1', ?, ?, '{}', 'week')`,
+      )
+      .bind(new Date(NOW.getTime() + 86_400_000).toISOString(), fetchedAt)
+      .run();
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO players (id, full_name, normalized_name, created_at, updated_at)
+         VALUES ('p1', 'Priced Player', 'priced player', ?, ?)`,
+      )
+      .bind(fetchedAt, fetchedAt)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO player_props (snapshot_id, player_id, source_player_name, market, line, book_count, consensus_method, raw_json, scope)
+         SELECT id, 'p1', 'Priced Player', 'receiving_yards', 55.5, 3, 'median', '{}', 'week'
+           FROM prop_snapshots WHERE event_id = 'evt-1' AND fetched_at = ?`,
+      )
+      .bind(fetchedAt)
+      .run();
+  }
+
+  async function gate(db: NodeSqliteDatabase, next: string | null): Promise<void> {
+    await new SettingsRepo(db).set(SETTING_KEYS.vegasClock, { processedThrough: ago(600), next, retries: 0, last: null });
+  }
+
+  it('says the job has stopped when its gate is long past, though the lines are young', async () => {
+    const db = await createTestDb();
+    await storedLines(db, ago(60));
+    await gate(db, ago(VEGAS_GATE_OVERDUE_MINUTES + 30));
+    const vegas = find(await view(db), 'vegas');
+    expect(vegas.state).toBe('degraded');
+    expect(vegas.note).toMatch(/scheduled check/i);
+    expect(needsAttention(vegas)).toBe(true);
+  });
+
+  it('is patient with a tick that is merely late', async () => {
+    const db = await createTestDb();
+    await storedLines(db, ago(60));
+    await gate(db, ago(VEGAS_GATE_OVERDUE_MINUTES - 30));
+    expect(find(await view(db), 'vegas').state).toBe('current');
+  });
+
+  it('says nothing when no gate has ever been written', async () => {
+    const db = await createTestDb();
+    await storedLines(db, ago(60));
+    expect(find(await view(db), 'vegas').state).toBe('current');
+  });
+
+  it('is not alarmed by a gate in the future, which is every ordinary moment', async () => {
+    const db = await createTestDb();
+    await storedLines(db, ago(60));
+    await gate(db, new Date(NOW.getTime() + 3 * 3_600_000).toISOString());
+    expect(find(await view(db), 'vegas').state).toBe('current');
+  });
+});
+
+describe('the cadences the rows describe', () => {
+  it('say what the schedule now does', () => {
+    expect(policyFor('vegas').cadence).toMatch(/before each game/i);
+    expect(policyFor('schedule').cadence).toMatch(/daily/i);
+    expect(policyFor('schedule').cadence).toMatch(/flex/i);
+    expect(policyFor('manager-intel').cadence).toMatch(/weekly.*wednesday/i);
+  });
+
+  it('give a weekly feed a week and the same day and a half of slack a daily one gets', () => {
+    expect(WEEKLY_ATTEMPT_STALE_MINUTES).toBe(7 * 24 * 60 + 36 * 60);
+    expect(WEEKLY_ATTEMPT_STALE_MINUTES - 7 * 24 * 60).toBe(DAILY_ATTEMPT_STALE_MINUTES);
   });
 });

@@ -39,10 +39,10 @@ const SEASON = '2026';
 const KILLED_AT = new Date('2026-09-27T09:15:27.000Z');
 const NEXT_TICK = new Date('2026-09-27T09:20:27.000Z');
 
-/** The state row as it was at 09:15 that morning: last checked at 03:10. */
+/** The state row as it was at 09:15 that morning: last checked a day and a bit earlier. */
 async function overdue(db: Database): Promise<void> {
   await new ScheduleSourceRepo(db).recordCheck(SCHEDULE_SOURCE, SEASON, {
-    checkedAt: '2026-09-27T03:10:36.557Z',
+    checkedAt: '2026-09-26T03:10:36.557Z',
     etag: '"schedule-v1"',
     outcome: 'ok',
     note: null,

@@ -103,16 +103,43 @@ export const DAILY_ATTEMPT_STALE_MINUTES = 36 * 60;
 export const FREQUENT_ATTEMPT_STALE_MINUTES = 30;
 
 /**
- * The two UTC clocks the Vegas refresh actually runs on.
+ * A weekly feed that has not been *asked* in this long has a pipeline problem.
  *
- * Saturday 23:00 and Sunday 15:00, which is what `wrangler.toml` registers and
- * what `docs/VEGAS.md` §"The budget" commits to. The cadence is deliberately
- * weekend-only: a weekday refresh would buy entities against a 2,500-a-month
- * allowance to price games nobody's lineup is locked into yet.
+ * Manager tendencies run once a week, Wednesday midday Detroit time. A week is
+ * 10,080 minutes and the window adds the same day and a half of slack every
+ * other daily feed gets (`DAILY_ATTEMPT_STALE_MINUTES` is 36 hours against a
+ * 24-hour cadence), so one Wednesday that did not land does not read as a
+ * stopped pipeline and two do. Nothing recommendation-driving reads this feed
+ * (it is `background`), so a patient window costs no decision.
+ */
+export const WEEKLY_ATTEMPT_STALE_MINUTES = 7 * 24 * 60 + 36 * 60;
+
+/**
+ * How overdue the odds job's own gate may be before the pipeline is the story.
+ *
+ * The gate stores the next tick that could have a checkpoint to act on, and the
+ * five-minute tick reads it every time, so a gate more than this far in the
+ * past means the tick is not running the odds job at all. Ninety minutes, the
+ * same figure as {@link VEGAS_REFRESH_GRACE_MINUTES} and for the same reason:
+ * long enough to cover a run that had to retry or a tick the platform delayed.
+ */
+export const VEGAS_GATE_OVERDUE_MINUTES = 90;
+
+/**
+ * The two UTC marks the *age ceiling* on Vegas lines is measured from.
+ *
+ * Saturday 23:00 and Sunday 15:00. These were the two clocks the Vegas refresh
+ * ran on, and they no longer are: the odds job now follows each game's own
+ * kickoff (`core/vegas/kickoffClock.ts`), including Thursday and Monday nights.
+ * They are kept as a deliberately patient backstop on how old a stored line may
+ * be before the row says so, because the longest quiet stretch the kickoff
+ * schedule leaves (from Monday night's last look to Tuesday evening's first look
+ * at Thursday's game) is well inside what they allow, so the row cannot cry
+ * wolf. The truer signal that the job has stopped is the gate check
+ * ({@link VEGAS_GATE_OVERDUE_MINUTES}), which is exact where this is loose.
  *
  * Named here rather than derived from the cron strings because a cron parser is
- * a great deal of machinery for two instants that have not moved in a year, and
- * because the numbers are checked against `CRON_LABELS` by the freshness suite.
+ * a great deal of machinery for two instants that have not moved in a year.
  */
 export const VEGAS_REFRESH_CLOCKS: readonly { readonly day: number; readonly hour: number }[] = [
   { day: 6, hour: 23 },
@@ -238,7 +265,7 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     label: 'Vegas lines',
     severity: 'critical',
     measure: 'data',
-    cadence: 'Refreshed Saturday and Sunday',
+    cadence: 'Refreshed before each game, at that game\'s own kickoff time',
     impact: 'Projections fall back to older lines, and confidence is lowered rather than guessed at.',
   },
   {
@@ -286,7 +313,7 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     label: 'NFL schedule',
     severity: 'important',
     measure: 'attempt',
-    cadence: 'Checked every few hours, and more often during games',
+    cadence: 'Checked daily, and again after the league announces flexed games',
     impact: 'Byes and future opponents come from the last stored fixture list.',
   },
   {
@@ -318,8 +345,8 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     label: 'Manager tendencies',
     severity: 'background',
     measure: 'attempt',
-    cadence: 'Daily, on whatever refresh budget is left',
-    impact: 'Next% and trade fit lean on a thinner history. Deferring this is deliberate, not a fault.',
+    cadence: 'Weekly, Wednesday midday Detroit time, after waivers run',
+    impact: 'Next% and trade fit lean on a thinner history. Waiting for Wednesday is deliberate, not a fault.',
   },
 ] as const;
 

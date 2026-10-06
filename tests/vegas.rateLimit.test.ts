@@ -101,6 +101,35 @@ describe('the provider', () => {
     expect(clock.slept).toHaveLength(1);
   });
 
+  it('does not spend one of the ten slots, or wait, to read the free usage counter', async () => {
+    /*
+     * `/account/usage` was measured to move neither the entity counter nor the
+     * request counter, so the provider's ceiling never sees it. A pass reads it
+     * at the top to decide and again at the end to store the real number; if it
+     * took a slot each time, the end of a full pass would sleep a minute to
+     * learn what it spent.
+     */
+    const clock = fakeClock();
+    let usageReads = 0;
+    const provider = new SportsGameOddsProvider({
+      apiKey: 'k',
+      pacer: new RequestPacer({ now: clock.now, sleep: clock.sleep, maxWaitMs: 0 }),
+      fetch: async (url: string) => {
+        if (String(url).includes('/account/usage')) {
+          usageReads++;
+          return new Response(JSON.stringify({ data: { rateLimits: {} } }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      },
+    });
+    // Ten requests fill the window; an eleventh would be held, and with no wait
+    // allowed it would be refused outright.
+    await provider.getPropsForTeams(['KC', 'MIA', 'BUF', 'NYJ', 'NE', 'DAL', 'PHI', 'NYG', 'WAS', 'SF']);
+    await expect(provider.getAccountUsage()).resolves.toBeDefined();
+    expect(usageReads).toBe(1);
+    expect(clock.slept).toEqual([]);
+  });
+
   it('keeps the teams answered before a refusal, and names the ones never asked', async () => {
     let calls = 0;
     const provider = new SportsGameOddsProvider({

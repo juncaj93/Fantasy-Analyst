@@ -22,6 +22,7 @@
 import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
 import { buildFetchPlan, manualRefreshThresholdMinutes, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
+import { KICKOFF_CHECKPOINT_HOURS, reconcileKickoff } from '../../core/vegas/kickoffClock.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
@@ -52,6 +53,13 @@ export interface VegasRefreshReport {
   /** Set when discovery ran, with what it cost. */
   discovered: number;
   plan: { events: number; estimatedEntities: number };
+  /**
+   * Games the plan wanted and this pass did not reach: past the per-run cap, or
+   * held back by the provider's per-minute limit. Not the budget, which stops a
+   * pass on purpose. The kickoff clock reads it to decide whether to come back
+   * on the next tick or wait for the next checkpoint.
+   */
+  leftover: number;
   blocked: string[];
   errors: string[];
   note: string;
@@ -118,6 +126,20 @@ const NEXT_SLATE_MAX_DAYS = 28;
  */
 const EMPTY_TEAM_RETRY_HOURS = 6;
 
+/** How far the kickoff clock's discovery looks. See {@link VegasRefreshService.discoverIfNeeded}. */
+const CLOCK_DISCOVERY_DAYS = 3;
+
+/**
+ * nflverse's code for a team where it differs from Sleeper's.
+ *
+ * One exception, and the file's own: the Rams are `LA` in `games.csv` and `LAR`
+ * everywhere else in this app. Anything not listed is the same in both.
+ */
+function scheduleCode(team: string): string {
+  const code = team.toUpperCase();
+  return code === 'LAR' ? 'LA' : code;
+}
+
 export class VegasRefreshService {
   private readonly usage: VegasUsageRepo;
   private readonly events: VegasEventsRepo;
@@ -132,8 +154,17 @@ export class VegasRefreshService {
     this.props = new PropsRepo(db);
   }
 
-  async refresh(opts: { manual?: boolean; now?: number } = {}): Promise<VegasRefreshReport> {
+  /**
+   * `clock` is the scheduled pass that follows each game's own kickoff — see
+   * `core/vegas/kickoffClock.ts`. It buys a game only when a checkpoint has
+   * passed since its lines were last bought, judges "old enough" by the same
+   * per-game table a person's tap uses, and trusts the stored NFL schedule's
+   * kickoff over the provider's, so a flexed game is on its new clock at once.
+   * Without it the pass is exactly what it was, and `manual` is untouched.
+   */
+  async refresh(opts: { manual?: boolean; now?: number; clock?: boolean } = {}): Promise<VegasRefreshReport> {
     const now = opts.now ?? Date.now();
+    const clock = opts.clock === true && opts.manual !== true;
     const errors: string[] = [];
     const blocked: string[] = [];
 
@@ -150,6 +181,7 @@ export class VegasRefreshService {
       skipped: 0,
       discovered: 0,
       plan: { events: 0, estimatedEntities: 0 },
+      leftover: 0,
       blocked,
       errors,
       note: budget.note,
@@ -159,7 +191,7 @@ export class VegasRefreshService {
       return { ...base, note: `provider "${this.provider.name}" is not configured; nothing was fetched` };
     }
 
-    const players = await this.rosterPlayers(now);
+    const players = await this.rosterPlayersFor(now, clock);
     if (players.length === 0) {
       return { ...base, note: 'no roster to price — connect a league in Team first' };
     }
@@ -170,15 +202,17 @@ export class VegasRefreshService {
       errors,
       blocked,
       manual: opts.manual ?? false,
+      clock,
     });
     let spent = discovery.entities;
     let requests = discovery.requests;
     let fetched = discovery.events;
 
-    const mapped = discovery.entities > 0 ? await this.rosterPlayers(now) : players;
+    const mapped = discovery.entities > 0 ? await this.rosterPlayersFor(now, clock) : players;
     const plan = buildFetchPlan(mapped, {
       now,
-      ...(opts.manual ? { thresholdMinutes: manualRefreshThresholdMinutes } : {}),
+      ...(opts.manual || clock ? { thresholdMinutes: manualRefreshThresholdMinutes } : {}),
+      ...(clock ? { kickoffClock: true } : {}),
     });
 
     const decision = canSpend(budget, {
@@ -205,6 +239,10 @@ export class VegasRefreshService {
      * pass. Asking again for a game straight after it is the burst again.
      */
     const planned = discovery.refused ? [] : plan.events.slice(0, allowance);
+    // Over the per-run cap, or held for the provider's limit. A budget refusal
+    // (allowance 0) is not leftover: it was refused on purpose and retrying
+    // on the next tick would be refused the same way.
+    let leftover = discovery.refused ? plan.events.length : allowance > 0 ? Math.max(0, plan.events.length - planned.length) : 0;
     if (discovery.refused && allowance > 0 && plan.events.length > 0) {
       blocked.push(`${Math.min(allowance, plan.events.length)} game(s) left for the next pass: the provider's per-minute limit`);
     }
@@ -213,6 +251,8 @@ export class VegasRefreshService {
         const result = await getPropsWithCache(event.eventId, this.provider, this.props, {
           now,
           manual: opts.manual ?? false,
+          perGame: clock,
+          kickoff: clock ? event.kickoff : null,
         });
         if (result.rateLimited) {
           /*
@@ -234,25 +274,35 @@ export class VegasRefreshService {
           blocked.push(
             `${planned.length - i} game(s) left for the next pass: the provider's per-minute limit (${result.error ?? 'rate limited'})`,
           );
+          leftover += planned.length - i;
           break;
         }
         if (result.origin === 'fresh' && result.snapshot) {
           fetched++;
           spent += 1;
           requests += 1;
-          await this.persist(result.snapshot.raw);
-          // The same response carries the game's own total and spread. Stored
-          // here as well as at discovery, because these move during the week
-          // and this is the fetch that happens on a Sunday morning.
-          await this.storeGameLines(result.snapshot.raw);
+          /*
+           * The ledger first, then the storing.
+           *
+           * The provider billed the moment it answered, so the spend is a fact
+           * before anything below runs. It used to be written last, which meant
+           * a database error while resolving names or storing the game's lines
+           * (caught one level up, and reported as an error) left a billed
+           * entity that no row anywhere accounted for.
+           */
           await this.usage.record({
             source: opts.manual ? 'manual' : 'weekly',
             eventId: event.eventId,
             entities: 1,
             requests: 1,
             outcome: 'fetched',
-            reason: event.reason,
+            reason: clock ? `kickoff clock: ${event.reason}` : event.reason,
           });
+          await this.persist(result.snapshot.raw);
+          // The same response carries the game's own total and spread. Stored
+          // here as well as at discovery, because these move during the week
+          // and this is the fetch that happens on a Sunday morning.
+          await this.storeGameLines(result.snapshot.raw);
         } else if (result.origin === 'cache') {
           cached++;
         } else {
@@ -276,6 +326,20 @@ export class VegasRefreshService {
     }
 
     await new SettingsRepo(this.db).set(SETTING_KEYS.lastVegasRefresh, new Date(now).toISOString());
+    /*
+     * The provider's count again, now that this pass has spent.
+     *
+     * It is read at the top of a pass so the guard decides on the real number,
+     * and that reading is then what the app *stores*. Without this, everything
+     * the pass went on to buy sat between the stored reading and the provider's
+     * counter until the next pass looked again: on 6 October 2026 the app
+     * showed 327 while the provider stood at 337, the ten being the pass that
+     * had just run. Free to read (measured: it does not move either counter),
+     * one request, and only when something was actually bought. Silent when it
+     * fails: the pass already has its answer, and a refused read at the very end
+     * is not an error worth reporting.
+     */
+    if (spent > 0 || requests > 0) await this.syncProviderUsage(null);
     const after = await this.usage.view();
 
     return {
@@ -288,8 +352,21 @@ export class VegasRefreshService {
       discovered: discovery.events,
       skipped: plan.skipped.length + Math.max(0, plan.events.length - allowance),
       plan: { events: plan.events.length, estimatedEntities: plan.estimatedEntities },
+      leftover,
       note: after.note,
     };
+  }
+
+  /**
+   * The NFL teams the plan covers, in the schedule file's own codes.
+   *
+   * What the planned-runs view needs to say which of a week's games the job
+   * would actually buy, and nothing else: the roster's, the opponent's and the
+   * waiver tier's teams. A read, never a fetch.
+   */
+  async coveredTeams(now = Date.now()): Promise<string[]> {
+    const players = await this.rosterPlayers(now);
+    return [...new Set(players.map((p) => p.team).filter((t): t is string => t != null).map(scheduleCode))];
   }
 
   /** The plan, without spending anything. Used by diagnostics and by tests. */
@@ -305,7 +382,7 @@ export class VegasRefreshService {
    * authoritative, because it also sees spending from probes and from any other
    * deployment sharing the key.
    */
-  private async syncProviderUsage(errors: string[]): Promise<void> {
+  private async syncProviderUsage(errors: string[] | null): Promise<void> {
     const read = (this.provider as { getAccountUsage?: () => Promise<unknown> }).getAccountUsage;
     if (typeof read !== 'function') return;
     try {
@@ -314,7 +391,7 @@ export class VegasRefreshService {
       if (usage.entities != null) await this.usage.recordProviderUsage(usage);
     } catch (err) {
       // Not knowing is not a reason to stop; the local ledger still guards.
-      errors.push(`could not read provider usage: ${err instanceof Error ? err.message : String(err)}`);
+      errors?.push(`could not read provider usage: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -330,7 +407,7 @@ export class VegasRefreshService {
     players: readonly (PlannedPlayer & { team: string | null })[],
     budget: BudgetView,
     now: number,
-    sink: { errors: string[]; blocked: string[]; manual?: boolean },
+    sink: { errors: string[]; blocked: string[]; manual?: boolean; clock?: boolean },
   ): Promise<{ entities: number; requests: number; events: number; refused?: boolean }> {
     /*
      * At most one discovery per TTL, whatever the roster looks like.
@@ -359,7 +436,18 @@ export class VegasRefreshService {
     const settings = new SettingsRepo(this.db);
     const attempted = await settings.get<string | null>(SETTING_KEYS.lastVegasSchedule, null);
     const attemptedAge = attempted ? (now - Date.parse(attempted)) / 3_600_000 : Infinity;
-    if (!sink.manual && attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
+    /*
+     * The kickoff clock does not use the three-day stamp, and the reason is the
+     * reason it exists. A stamp says "we asked about the roster's fixtures"
+     * once a week; the clock has to find Thursday night on Tuesday and Sunday
+     * on Friday, which are different asks three days apart. What stops it
+     * buying the same game twice is the rest of this method: a team with its
+     * game already stored is not asked about, a bye is not asked about, and a
+     * team that answered with nothing is not asked again for a few hours. And
+     * below, it only asks about a team whose own game is inside the first
+     * checkpoint, so the next week's games are not bought on Sunday afternoon.
+     */
+    if (!sink.manual && !sink.clock && attemptedAge < SCHEDULE_TTL_HOURS) return { entities: 0, requests: 0, events: 0 };
 
     const fetchTeams = (this.provider as VegasProvider).getPropsForTeams;
     if (typeof fetchTeams !== 'function') {
@@ -369,7 +457,14 @@ export class VegasRefreshService {
 
     const ordered = this.discoveryOrder(players, await this.rosterTeams());
     if (ordered.length === 0) return { entities: 0, requests: 0, events: 0 };
-    const to = await this.discoveryWindowEnd(now, ordered);
+    /*
+     * The clock asks for the next three days and no more. A longer window
+     * returns, and bills, a team's second game whenever one falls inside it —
+     * an entity per extra event — and the first checkpoint is 48 hours out.
+     */
+    const to = sink.clock
+      ? new Date(now + CLOCK_DISCOVERY_DAYS * 86_400_000).toISOString()
+      : await this.discoveryWindowEnd(now, ordered);
 
     /*
      * Only the teams whose next game is genuinely unknown.
@@ -392,7 +487,17 @@ export class VegasRefreshService {
      * whose next game really has not been learned yet.
      */
     const emptyAt = await settings.get<Record<string, string>>(SETTING_KEYS.vegasDiscoveryEmpty, {});
-    const teams = (await this.teamsWithoutAFixture(ordered, now, to)).filter((team) => {
+    let unknown = await this.teamsWithoutAFixture(ordered, now, to);
+    if (sink.clock) {
+      const fixtures = await this.scheduleKickoffs(unknown);
+      const firstLook = KICKOFF_CHECKPOINT_HOURS[0]! * 3_600_000;
+      unknown = unknown.filter((team) => {
+        const next = (fixtures.get(scheduleCode(team)) ?? []).filter((at) => at > now).sort((a, b) => a - b)[0];
+        // No stored fixture is not evidence of a bye, so it is still asked.
+        return next == null || next - now <= firstLook;
+      });
+    }
+    const teams = unknown.filter((team) => {
       /*
        * And not a team asked about a few hours ago that had no game on offer.
        *
@@ -455,6 +560,17 @@ export class VegasRefreshService {
         to,
         maxEvents: decision.entities,
       });
+      /*
+       * A team that failed part-way, after others were bought, is an error with
+       * the bill still attached: what was answered before it is stored and
+       * recorded below like any other discovery, and the failure is reported.
+       */
+      if (result.failed) {
+        // Teams after the failure were never asked, which is not the same as
+        // having no game: the stamp goes back and they are not remembered as empty.
+        await unstamp();
+        sink.errors.push(`schedule discovery stopped part-way: ${result.failed}`);
+      }
       if ((result.refused?.length ?? 0) > 0) {
         await unstamp();
         sink.blocked.push(
@@ -562,7 +678,7 @@ export class VegasRefreshService {
        * the tail, and "not asked" is not "no game".
        */
       const gamesReturned = new Set(result.results.map((r) => r.set.eventId)).size;
-      const reachedAll = (result.refused?.length ?? 0) === 0 && gamesReturned < decision.entities;
+      const reachedAll = (result.refused?.length ?? 0) === 0 && !result.failed && gamesReturned < decision.entities;
       const answered = new Set(result.results.map((r) => r.teamId));
       const unmappedTeams = new Set(result.unmapped ?? []);
       const nextEmpty: Record<string, string> = {};
@@ -796,6 +912,65 @@ export class VegasRefreshService {
       .map((entry) => entry.team);
   }
 
+  /**
+   * Each team's kickoffs around now, from the stored NFL schedule.
+   *
+   * Three weeks centred on the NFL week in play, so a team's current, last and
+   * next fixtures are all there: about fifty rows for a roster of sixteen
+   * teams, read once per pass and never on a tick that has nothing due. Keyed
+   * by the schedule's own team code. Empty on any failure, which every caller
+   * reads as "no schedule opinion" and falls back to the provider's kickoff.
+   */
+  private async scheduleKickoffs(teams: readonly string[]): Promise<Map<string, number[]>> {
+    const out = new Map<string, number[]>();
+    try {
+      const league = await new LeagueRepo(this.db).getSelectedLeague();
+      if (!league?.season || teams.length === 0) return out;
+      const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
+      const week = Number(state?.week);
+      const range = Number.isInteger(week) && week > 0 ? { from: Math.max(1, week - 1), to: week + 1 } : { from: 1, to: 22 };
+      const rows = await new NflScheduleRepo(this.db).forTeams(league.season, teams.map(scheduleCode), range);
+      for (const row of rows) {
+        const at = row.kickoff == null ? NaN : Date.parse(row.kickoff);
+        if (!Number.isFinite(at) || row.opponent == null) continue;
+        const key = row.team.toUpperCase();
+        const list = out.get(key) ?? [];
+        list.push(at);
+        out.set(key, list);
+      }
+    } catch {
+      /* a schedule that cannot be read is a reason to use the provider's times */
+    }
+    return out;
+  }
+
+  /**
+   * {@link rosterPlayers}, with each game's kickoff checked against the stored
+   * schedule when this is the kickoff clock's pass.
+   *
+   * The provider's event row keeps the kickoff it had when the game was last
+   * bought, so a game the league flexed sits in `vegas_events` at its old time
+   * until something buys it again. The schedule file moves first, so on the
+   * clock's pass it is the schedule that says when the game starts — see
+   * `reconcileKickoff` for the two cases where the provider's time stands.
+   */
+  private async rosterPlayersFor(
+    now: number,
+    clock: boolean,
+  ): Promise<(PlannedPlayer & { team: string | null })[]> {
+    const players = await this.rosterPlayers(now, clock);
+    if (!clock || players.length === 0) return players;
+    const teams = [...new Set(players.map((p) => p.team).filter((t): t is string => t != null))];
+    const fixtures = await this.scheduleKickoffs(teams);
+    if (fixtures.size === 0) return players;
+    return players.map((p) => {
+      if (!p.team || !p.eventId) return p;
+      const own = fixtures.get(scheduleCode(p.team));
+      if (!own) return p;
+      return { ...p, kickoff: reconcileKickoff(p.kickoff, own, now) };
+    });
+  }
+
   /** The teams the user's own roster spans, in the provider's vocabulary. */
   private async rosterTeams(): Promise<string[]> {
     const players = await this.rosterPlayers(Date.now());
@@ -812,7 +987,10 @@ export class VegasRefreshService {
    * a lineup decision actually has, and everybody else is a player whose week
    * a fresh line cannot change.
    */
-  private async rosterPlayers(now: number): Promise<(PlannedPlayer & { team: string | null })[]> {
+  private async rosterPlayers(
+    now: number,
+    byEvent = false,
+  ): Promise<(PlannedPlayer & { team: string | null })[]> {
     const league = await new LeagueRepo(this.db).getSelectedLeague();
     if (!league) return [];
     const rosters = await new LeagueRepo(this.db).listRosters(league.id);
@@ -864,7 +1042,7 @@ export class VegasRefreshService {
       const team = index.get(id)?.team?.toUpperCase() ?? null;
       eventOf.set(id, team ? (window.get(team) ?? matchTeam(window, team)) : null);
     }
-    const ages = await this.snapshotAges(eventOf, now);
+    const ages = await this.snapshotAges(eventOf, now, byEvent);
 
     const out: (PlannedPlayer & { team: string | null })[] = [];
     for (const id of playerIds) {
@@ -966,6 +1144,7 @@ export class VegasRefreshService {
   private async snapshotAges(
     eventOf: ReadonlyMap<string, VegasEventRow | null>,
     now: number,
+    byEvent: boolean,
   ): Promise<Map<string, number>> {
     const playerIds = [...eventOf.keys()];
     const eventIds = [...eventOf.values()].map((e) => e?.eventId).filter((id): id is string => id != null);
@@ -975,7 +1154,16 @@ export class VegasRefreshService {
     ]);
     const out = new Map<string, number>();
     for (const id of playerIds) {
-      if ((props.get(id)?.length ?? 0) === 0) continue;
+      /*
+       * A player with no line on file is "never fetched", which is what earns
+       * his game a place in an ordinary pass. The kickoff clock asks a
+       * different question, "when was this *game* last bought", and cannot take
+       * that answer: a defence never has a player line (its number is the
+       * game's total and spread, which arrive in the same answer), so every
+       * defence would read as never fetched for ever and put its game in every
+       * pass of the week instead of its own six.
+       */
+      if (!byEvent && (props.get(id)?.length ?? 0) === 0) continue;
       const eventId = eventOf.get(id)?.eventId;
       const at = eventId ? Date.parse(fetched.get(eventId) ?? '') : NaN;
       if (Number.isFinite(at)) out.set(id, (now - at) / 60_000);

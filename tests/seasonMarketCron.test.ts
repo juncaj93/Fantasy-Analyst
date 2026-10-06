@@ -32,8 +32,8 @@ const WORKER = readFileSync(join(import.meta.dirname, '..', 'src', 'worker', 'in
 function dailyBranch(): string {
   const start = WORKER.indexOf(`event.cron.startsWith('0 9')`);
   expect(start, 'the daily 09:00 cron branch has gone').toBeGreaterThan(-1);
-  const end = WORKER.indexOf('await refreshVegas(appEnv)', start);
-  expect(end, 'the daily branch no longer ends before the weekly Vegas refresh').toBeGreaterThan(start);
+  const end = WORKER.indexOf('const weekend = new CronRunRecorder(', start);
+  expect(end, 'the daily branch no longer ends where the weekend fall-through begins').toBeGreaterThan(start);
   return WORKER.slice(start, end);
 }
 

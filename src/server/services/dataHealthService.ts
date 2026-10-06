@@ -47,6 +47,8 @@ import {
 import {
   DAILY_ATTEMPT_STALE_MINUTES,
   FREQUENT_ATTEMPT_STALE_MINUTES,
+  VEGAS_GATE_OVERDUE_MINUTES,
+  WEEKLY_ATTEMPT_STALE_MINUTES,
   classifyAge,
   policyFor,
   sourceHealth,
@@ -137,7 +139,7 @@ const WINDOW_MINUTES: Record<SourceId, Window> = {
   nflverse: DAILY_ATTEMPT_STALE_MINUTES,
   trending: DAILY_ATTEMPT_STALE_MINUTES,
   newsletter: null,
-  'manager-intel': DAILY_ATTEMPT_STALE_MINUTES,
+  'manager-intel': WEEKLY_ATTEMPT_STALE_MINUTES,
 };
 
 /**
@@ -414,6 +416,31 @@ export class DataHealthService {
         state: 'degraded',
         note: `${freshness.events} game(s) stored, but no player has a usable line — nothing on your roster is being ranked on the market.`,
         technical: { lastOutcome: `${freshness.provider}: 0 priced players` },
+      };
+    }
+    /*
+     * The odds job's own gate, which is the exact version of "did the last
+     * scheduled refresh land".
+     *
+     * The job stores the next tick that could have a checkpoint to act on and
+     * the five-minute tick re-reads it every time, so a gate that is well in the
+     * past means the tick is not running the job at all. That is the case the
+     * age window below cannot see, because lines bought before the stall are
+     * still young. An absent gate says nothing: a deployment that has not had a
+     * tick since the job shipped is not a stalled one.
+     */
+    const gate = await new SettingsRepo(this.db)
+      .get<{ next?: string | null } | null>(SETTING_KEYS.vegasClock, null)
+      .catch(() => null);
+    const due = gate?.next ? Date.parse(gate.next) : NaN;
+    if (Number.isFinite(due) && (this.now().getTime() - due) / 60_000 > VEGAS_GATE_OVERDUE_MINUTES) {
+      return {
+        id: 'vegas',
+        lastSuccessAt: freshness.fetchedAt,
+        lastAttemptAt: freshness.fetchedAt,
+        state: 'degraded',
+        note: 'A scheduled check of the betting lines was due and has not run. Lines are as old as the last one that did.',
+        technical: { lastOutcome: `scheduled check overdue since ${gate?.next}` },
       };
     }
     return {
