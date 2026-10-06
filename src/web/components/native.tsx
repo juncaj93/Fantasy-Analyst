@@ -187,6 +187,7 @@ export function ListRow({
   expanded,
   testId,
   dataState,
+  pressed,
 }: {
   /**
    * What kind of thing this row is, as a shape on the leading edge.
@@ -220,6 +221,11 @@ export function ListRow({
   expanded?: boolean;
   testId?: string;
   dataState?: string;
+  /**
+   * Whether a row that toggles a choice is on. `aria-pressed`, so the state is
+   * announced and not only coloured; absent for every row that is not a toggle.
+   */
+  pressed?: boolean;
 }) {
   const Tag = onClick ? 'button' : 'div';
   return (
@@ -229,6 +235,7 @@ export function ListRow({
       data-testid={testId}
       data-state={dataState}
       {...(expanded === undefined ? {} : { 'aria-expanded': expanded })}
+      {...(pressed === undefined || !onClick ? {} : { 'aria-pressed': pressed })}
     >
       {icon ? <span className="list-icon">{icon}</span> : null}
       {state ? <span className="list-state">{state}</span> : null}

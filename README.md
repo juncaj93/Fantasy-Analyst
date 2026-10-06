@@ -176,6 +176,20 @@ invented figure. Beside it, what a bid costs you in leverage
 Sleeper is chasing. Nothing here bids, claims, adds or drops: every transaction
 in this app happens in Sleeper, by hand, on purpose.
 
+**Check a trade** — on Trades, a closed control that answers one question about
+any trade, between you and a rival or between any two teams (it is the panel's
+tool as much as yours): *how many points does each team's best lineup score from
+now to the end of the league's playoffs, with the trade and without it?* The
+unit is points above what a free agent would give the same lineup, worked week by
+week with this league's real slots, FLEX rules, byes and injuries. It is
+roster-aware (a third quarterback is worth nothing to a team that starts one),
+shows both sides, calls a gap inside the model's noise a **close call** rather
+than a winner, and says how sure it is and why. Your own side carries your stated
+habits as labeled lines, and nobody else's does. No KeepTradeCut or other outside
+values are used. Picks and waiver money in a deal are not valued, and the card
+says so. A read of the numbers only: it never proposes, makes or answers a trade.
+See [docs/TRADE_VALUES.md](docs/TRADE_VALUES.md).
+
 **Players** — searchable intelligence with tallies by window (7d / 30d / season
 / life), category breakdown, cached prop lines and the full evidence
 timeline. Every original excerpt is preserved. Two filters narrow it: the
@@ -366,6 +380,7 @@ See [docs/SETUP.md](docs/SETUP.md) part A5 for the one-time email setup.
 | [docs/WAIVER_CLAIM_PLANNER.md](docs/WAIVER_CLAIM_PLANNER.md) | add-specific drop cost, the contingency claim structure, and what the reader sees |
 | [docs/MANAGER_INTELLIGENCE.md](docs/MANAGER_INTELLIGENCE.md) | the free, resumable history ledger, and the three bounded things it may change |
 | [docs/SMART_TRADES.md](docs/SMART_TRADES.md) | bilateral trade offers: roster need, counterparty defensibility, capped manager fit |
+| [docs/TRADE_VALUES.md](docs/TRADE_VALUES.md) | Check a trade: rest-of-season lineup change per side, replacement level from free agents, the close-call band |
 | [docs/IOS_WEB_APP.md](docs/IOS_WEB_APP.md) | installing it on the iPhone Home Screen, and who owns the bottom of the screen |
 | [docs/BUDGETS.md](docs/BUDGETS.md) | page-weight and free-tier budgets, and what enforces them |
 | [docs/DEMO_MODE.md](docs/DEMO_MODE.md) | the scenario registry, time injection, mutation isolation, audit hooks |

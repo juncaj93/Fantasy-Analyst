@@ -19,7 +19,7 @@ import {
   type SleeperScoringKey,
   type SleeperWeeklyProjection,
 } from '../../core/sleeper/weeklyProjections.ts';
-import { chunk, type Database } from '../db.ts';
+import { chunk, MAX_BOUND_PARAMS, type Database } from '../db.ts';
 
 /** How many rows go in one statement. Five bound values per row plus the key. */
 const ROWS_PER_BATCH = 200;
@@ -148,21 +148,32 @@ export class SleeperProjectionsRepo {
       )
       .bind(season, week)
       .all<Record<string, unknown>>();
+    return toStored(results);
+  }
 
+  /**
+   * The figures for a few players only.
+   *
+   * `forWeek` reads the whole feed, which is every player Sleeper publishes
+   * (hundreds of rows) to answer a question about a few dozen. This is the same
+   * answer through the table's own key, `(season, week, player_id)`, so it reads
+   * the rows asked for and no others. The trade check asks about two rosters and
+   * a free-agent shortlist, which is where that difference is the whole cost.
+   */
+  async forPlayers(season: string, week: number, playerIds: readonly string[]): Promise<Map<string, StoredWeeklyProjection>> {
     const out = new Map<string, StoredWeeklyProjection>();
-    for (const row of results ?? []) {
-      const playerId = String(row['player_id'] ?? '');
-      if (!playerId) continue;
-      out.set(playerId, {
-        playerId,
-        publisher: row['publisher'] == null ? null : String(row['publisher']),
-        points: {
-          pts_std: toNumber(row['pts_std']),
-          pts_half_ppr: toNumber(row['pts_half_ppr']),
-          pts_ppr: toNumber(row['pts_ppr']),
-        },
-        defense: toDefenseLine(row['defense_json']),
-      });
+    for (const batch of chunk([...new Set(playerIds)], MAX_BOUND_PARAMS - 2)) {
+      if (batch.length === 0) continue;
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(
+          `select player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json
+             from sleeper_weekly_projections
+            where season = ? and week = ? and player_id in (${placeholders})`,
+        )
+        .bind(season, week, ...batch)
+        .all<Record<string, unknown>>();
+      for (const [id, row] of toStored(results)) out.set(id, row);
     }
     return out;
   }
@@ -203,3 +214,22 @@ export class SleeperProjectionsRepo {
 
 /** What the app expects the feed to call itself, for callers that want to check. */
 export const EXPECTED_PUBLISHER = SLEEPER_PROJECTION_PUBLISHER;
+
+function toStored(results: Record<string, unknown>[] | undefined): Map<string, StoredWeeklyProjection> {
+  const out = new Map<string, StoredWeeklyProjection>();
+  for (const row of results ?? []) {
+    const playerId = String(row['player_id'] ?? '');
+    if (!playerId) continue;
+    out.set(playerId, {
+      playerId,
+      publisher: row['publisher'] == null ? null : String(row['publisher']),
+      points: {
+        pts_std: toNumber(row['pts_std']),
+        pts_half_ppr: toNumber(row['pts_half_ppr']),
+        pts_ppr: toNumber(row['pts_ppr']),
+      },
+      defense: toDefenseLine(row['defense_json']),
+    });
+  }
+  return out;
+}

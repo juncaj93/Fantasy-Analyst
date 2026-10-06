@@ -4025,3 +4025,35 @@ by the end of the morning the ledger read 174 against the provider's 120.
 Not changed: a manual pass still re-buys the whole schedule even when it is
 hours old. With spacing it no longer starves the games that follow, and at
 nine entities a press it is cheap next to the 2,500 a month.
+
+## Milestone — Check a trade, rest-of-season trade values (6 October 2026)
+
+Built from data the app already has: no KeepTradeCut, no FantasyCalc, no new
+table. On Trades, a closed control, **Check a trade**: any two teams, any
+players, and what the trade does to each team's best lineup from this week to
+the end of the league's playoffs (weeks 5 to 17 for Tony's Pizza Fantasy, read
+from Sleeper's own settings, with the deadline after week 11 on the card).
+
+- **Unit:** points above what a free agent would give the lineup. Replacement
+  level is the mean of the best three priced free agents at the position.
+- **Roster-aware:** the best legal lineup, week by week, with the league's real
+  slots, FLEX, byes and injuries, solved exactly. A spare QB adds nothing.
+- **Reuses Start/Sit:** the per-game rate is the Start/Sit decision number with
+  its availability charge taken out (an injury is counted as missing weeks).
+  No second news weighting is added; projections stay about 90%.
+- **Alex only:** his stated habits are labeled lines, capped at 10% of the value
+  moving. Rivals get the same math with none of them.
+- **Close call:** a gap inside the larger of 4 points or 12% of the package is
+  never called a winner.
+- **Thin data:** no basis, no number; the card says why and lowers confidence.
+- **Picks and FAAB** are not valued, and the card says so. This league does not
+  trade picks this season.
+
+One request reads two rosters and a free-agent shortlist, Sleeper's published
+week by key, and nothing per player. It never calls Sleeper. See
+`docs/TRADE_VALUES.md`.
+
+Found in the audit, kept as it was: the real league starts a **TE** slot, which
+the round's brief omitted. The model reads slots from Sleeper, so it was right
+anyway. The published projection feed is now a sanctioned input for trade values
+(allowed by the brief), and `sleeperProjectionFallback.test.ts` lists it.

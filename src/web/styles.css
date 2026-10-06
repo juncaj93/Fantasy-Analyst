@@ -11050,3 +11050,27 @@ div.matchup-result {
   font-weight: 600;
   color: var(--paper-ink);
 }
+
+/* ======================================================== check a trade */
+/*
+ * A player picked for a trade check is the same list row with the selection
+ * colour behind it and a check on the trailing edge. A side that is full dims
+ * the rows it will not take, rather than hiding them: the reader should see why
+ * a tap did nothing.
+ */
+.list-row[data-state='selected'] {
+  background: var(--selected-tint);
+}
+
+.list-row[data-state='selected'] .list-row-mark {
+  color: var(--selected);
+}
+
+.list-row[data-state='full'] {
+  opacity: 0.5;
+}
+
+/* A long team name wraps inside the label column instead of pushing past it. */
+.weekly-line dt {
+  overflow-wrap: anywhere;
+}

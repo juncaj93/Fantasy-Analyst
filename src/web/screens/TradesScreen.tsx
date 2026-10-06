@@ -33,6 +33,7 @@ import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
+import { TradeCheckFold } from '../components/tradeCheck.tsx';
 import { TradeLadderFold } from '../components/tradeLadder.tsx';
 import { unwindOne } from '../tabReset.ts';
 
@@ -348,6 +349,19 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         <StatusRow tone="warn" data-testid="smart-trades-arbitrage-off">
           {smart.arbitrageOff}
         </StatusRow>
+      ) : null}
+
+      {/*
+        Check a trade: any trade, between any two teams, over the rest of the season.
+
+        Closed, and free until it is used: opening it reads the rosters and
+        nothing else, and the check itself runs on a deliberate tap. It sits
+        between the ideas the app found and the research behind them because it
+        is the tool for the idea the reader brought. Absent when no league is
+        resolved, which is the one case with nothing to check.
+      */}
+      {(smart?.league?.id ?? board.league?.id) ? (
+        <TradeCheckFold leagueId={(smart?.league?.id ?? board.league?.id)!} />
       ) : null}
 
       {board.sections.length === 0 ? (

@@ -600,6 +600,8 @@ has seen fail is a gate nobody knows the shape of.
 - **Value is a weekly score, not rest-of-season.** It carries no schedule, bye
   or playoff weighting, so a trade is priced on this week's evidence about both
   players. This is the same limitation every other surface in the app has.
+  *Check a trade* (`docs/TRADE_VALUES.md`) is the rest-of-season view, for any
+  trade the reader brings. The ideas above are unchanged and still weekly.
 - **Need benchmarks come from rosters, not free agents.** A league where a
   position is scarce on rosters but plentiful on waivers will read as scarcer
   than it is.
