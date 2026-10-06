@@ -11,6 +11,7 @@
  */
 
 import { budgetView, emptyLedger, monthOf, type BudgetLedger, type BudgetView } from '../../core/vegas/budget.ts';
+import { billingPeriodOf, type BillingPeriod } from '../../core/vegas/billingPeriod.ts';
 import { nowIso, type Database } from '../db.ts';
 
 export type UsageSource = 'weekly' | 'season' | 'manual' | 'schedule';
@@ -32,32 +33,87 @@ export interface UsageEntry {
   reason: string | null;
 }
 
+/**
+ * The log's month labels a period can have rows under.
+ *
+ * A log row is filed under the calendar month it was written in, because that is
+ * what the log's index is on, and a billing period starting on the 13th spans
+ * two of them. Naming both lets the read use the index and then cut by instant.
+ */
+function logMonths(period: BillingPeriod): [string, string] {
+  return [monthOf(period.startMs), monthOf(period.endMs - 1)];
+}
+
+/** What a row of the log counts toward the month: everything except a refusal. */
+const COUNTED = "outcome NOT IN ('blocked', 'refused')";
+
 export class VegasUsageRepo {
   constructor(private readonly db: Database) {}
 
-  async ledger(month = monthOf()): Promise<BudgetLedger> {
-    const row = await this.db
-      .prepare('SELECT * FROM vegas_usage WHERE month = ?')
-      .bind(month)
-      .first<Record<string, unknown>>();
-    if (!row) return emptyLedger(month);
+  /**
+   * What this app spent in the billing period `now` falls in, from the log.
+   *
+   * **Derived from the log by date and never stored per period**, which is what
+   * makes the reset day a single setting: change `BILLING_RESET_DAY` and this is
+   * a different number on the next read, with nothing to migrate. It is also what
+   * the fallback is when the provider's own count cannot be read, so it counts
+   * from the same day as the provider is assumed to, and does not drop to zero
+   * on the 1st the way a calendar-month figure did (72 against the provider's
+   * 352 on 6 October 2026).
+   *
+   * The provider's own reading is the newest one taken *inside* the period. One
+   * taken before the period began described the last period and is not believed,
+   * which is also what keeps a stale reading from carrying over a reset.
+   */
+  async ledger(now: Date | number = Date.now()): Promise<BudgetLedger> {
+    const period = billingPeriodOf(now);
+    const [first, second] = logMonths(period);
+    const [sums, reading] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT COALESCE(SUM(entities), 0) AS entities, COALESCE(SUM(requests), 0) AS requests
+             FROM vegas_usage_log
+            WHERE month IN (?, ?) AND at >= ? AND at < ? AND ${COUNTED}`,
+        )
+        .bind(first, second, period.start, period.end)
+        .first<Record<string, unknown>>(),
+      this.providerReading(period),
+    ]);
     return {
-      month,
-      entities: Number(row['entities'] ?? 0),
-      requests: Number(row['requests'] ?? 0),
-      providerEntities: row['provider_entities'] == null ? null : Number(row['provider_entities']),
-      providerReadAt: row['provider_read_at'] == null ? null : String(row['provider_read_at']),
+      ...emptyLedger(period.key),
+      entities: Number(sums?.['entities'] ?? 0),
+      requests: Number(sums?.['requests'] ?? 0),
+      providerEntities: reading?.entities ?? null,
+      providerReadAt: reading?.readAt ?? null,
     };
   }
 
-  /** Where the month stands. The one call the fetch path makes before spending. */
-  async view(month = monthOf()): Promise<BudgetView> {
-    const stored = await this.db
-      .prepare('SELECT provider_limit FROM vegas_usage WHERE month = ?')
-      .bind(month)
-      .first<{ provider_limit: number | null }>();
-    const limit = stored?.provider_limit != null ? Number(stored.provider_limit) : undefined;
-    return budgetView(await this.ledger(month), limit);
+  /** The newest provider reading taken inside the period, with the ceiling it reported. */
+  private async providerReading(
+    period: BillingPeriod,
+  ): Promise<{ entities: number; readAt: string; limit: number | null } | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT provider_entities, provider_limit, provider_read_at
+           FROM vegas_usage
+          WHERE provider_entities IS NOT NULL AND provider_read_at >= ? AND provider_read_at < ?
+          ORDER BY provider_read_at DESC LIMIT 1`,
+      )
+      .bind(period.start, period.end)
+      .first<Record<string, unknown>>();
+    if (!row) return null;
+    return {
+      entities: Number(row['provider_entities']),
+      readAt: String(row['provider_read_at']),
+      limit: row['provider_limit'] == null ? null : Number(row['provider_limit']),
+    };
+  }
+
+  /** Where the period stands. The one call the fetch path makes before spending. */
+  async view(now: Date | number = Date.now()): Promise<BudgetView> {
+    const period = billingPeriodOf(now);
+    const [ledger, reading] = await Promise.all([this.ledger(now), this.providerReading(period)]);
+    return budgetView(ledger, reading?.limit ?? undefined);
   }
 
   /** Add what a fetch cost, and say what it was for. */
@@ -70,6 +126,7 @@ export class VegasUsageRepo {
     reason?: string | null;
     month?: string;
   }): Promise<void> {
+    // The log's own label is the calendar month the row is written in.
     const month = entry.month ?? monthOf();
     const at = nowIso();
     await this.db
@@ -84,6 +141,11 @@ export class VegasUsageRepo {
     // Counting it would make the guard tighten itself every time it fired.
     if (entry.outcome === 'blocked' || entry.outcome === 'refused') return;
 
+    /*
+     * The running total, kept for the probes that print it and under the period's
+     * key. Nothing reads it back: the gate reads the log, so this cannot drift
+     * the budget, and a changed reset day cannot strand it.
+     */
     await this.db
       .prepare(
         `INSERT INTO vegas_usage (month, entities, requests, updated_at) VALUES (?,?,?,?)
@@ -92,7 +154,7 @@ export class VegasUsageRepo {
            requests = requests + excluded.requests,
            updated_at = excluded.updated_at`,
       )
-      .bind(month, entry.entities, entry.requests, at)
+      .bind(billingPeriodOf().key, entry.entities, entry.requests, at)
       .run();
   }
 
@@ -101,13 +163,16 @@ export class VegasUsageRepo {
    *
    * Free to read and authoritative — it sees spending this app never made, from
    * a probe or another deployment sharing the key — so it is kept beside our
-   * own number rather than replacing it.
+   * own number rather than replacing it. Filed under the period it was read in,
+   * and only believed while that period lasts.
    */
   async recordProviderUsage(
     usage: { entities: number | null; limit: number | null },
-    month = monthOf(),
+    now: Date | number = Date.now(),
   ): Promise<void> {
     if (usage.entities == null) return;
+    const key = billingPeriodOf(now).key;
+    const at = nowIso();
     await this.db
       .prepare(
         `INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, provider_read_at, updated_at)
@@ -118,15 +183,19 @@ export class VegasUsageRepo {
            provider_read_at = excluded.provider_read_at,
            updated_at = excluded.updated_at`,
       )
-      .bind(month, usage.entities, usage.limit, nowIso(), nowIso())
+      .bind(key, usage.entities, usage.limit, at, at)
       .run();
   }
 
-  /** The month's most recent activity, newest first. For diagnostics. */
-  async recent(limit = 20, month = monthOf()): Promise<UsageEntry[]> {
+  /** The period's most recent activity, newest first. For diagnostics. */
+  async recent(limit = 20, now: Date | number = Date.now()): Promise<UsageEntry[]> {
+    const period = billingPeriodOf(now);
+    const [first, second] = logMonths(period);
     const rows = await this.db
-      .prepare('SELECT * FROM vegas_usage_log WHERE month = ? ORDER BY at DESC, id DESC LIMIT ?')
-      .bind(month, limit)
+      .prepare(
+        'SELECT * FROM vegas_usage_log WHERE month IN (?, ?) AND at >= ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?',
+      )
+      .bind(first, second, period.start, period.end, limit)
       .all<Record<string, unknown>>();
     return rows.results.map((r) => ({
       at: String(r['at']),
@@ -139,13 +208,15 @@ export class VegasUsageRepo {
     }));
   }
 
-  /** Entities by source this month, so the biggest spender is visible. */
-  async bySource(month = monthOf()): Promise<Record<string, number>> {
+  /** Entities by source this period, so the biggest spender is visible. */
+  async bySource(now: Date | number = Date.now()): Promise<Record<string, number>> {
+    const period = billingPeriodOf(now);
+    const [first, second] = logMonths(period);
     const rows = await this.db
       .prepare(
-        "SELECT source, SUM(entities) AS entities FROM vegas_usage_log WHERE month = ? AND outcome = 'fetched' GROUP BY source",
+        "SELECT source, SUM(entities) AS entities FROM vegas_usage_log WHERE month IN (?, ?) AND at >= ? AND at < ? AND outcome = 'fetched' GROUP BY source",
       )
-      .bind(month)
+      .bind(first, second, period.start, period.end)
       .all<{ source: string; entities: number }>();
     const out: Record<string, number> = {};
     for (const r of rows.results) out[String(r.source)] = Number(r.entities ?? 0);

@@ -19,9 +19,11 @@
  * provider without asking first.
  */
 
+import { billingPeriodForKey, billingPeriodOf, billingPeriodView, type BillingPeriodView } from './billingPeriod.ts';
+
 /** What the plan allows, and how much of it this app is willing to use. */
 export const BUDGET = {
-  /** Entities per calendar month on the free plan. Measured, not assumed. */
+  /** Entities per billing month on the free plan. The 2,500 is measured; the day the month starts is not (see `billingPeriod.ts`). */
   monthlyEntities: 2500,
 
   /**
@@ -64,7 +66,13 @@ export type BudgetState = 'healthy' | 'caution' | 'conservation' | 'hard_stop';
 export type FetchPriority = 'critical' | 'normal' | 'low';
 
 export interface BudgetLedger {
-  /** Calendar month, `YYYY-MM`, in UTC. */
+  /**
+   * The billing period, named by the month it starts in (`YYYY-MM`, UTC).
+   *
+   * Not a calendar month: the provider's month is assumed to run from the 13th
+   * to the 12th, so `2026-09` is 13 September to 12 October. The one place that
+   * says so is `billingPeriod.ts`.
+   */
   month: string;
   /** Entities this app believes it has spent this month. */
   entities: number;
@@ -83,7 +91,10 @@ export interface BudgetLedger {
 
 export interface BudgetView {
   state: BudgetState;
+  /** The period's key; see {@link BudgetLedger.month}. Use `period` to say it in words. */
   month: string;
+  /** The period in plain words, and the fact that its start day is assumed. */
+  period: BillingPeriodView;
   /** The number the decisions are made from: provider truth if known. */
   used: number;
   limit: number;
@@ -96,11 +107,17 @@ export interface BudgetView {
   note: string;
 }
 
+/**
+ * The **calendar** month, `YYYY-MM`, UTC.
+ *
+ * Only for filing a log row under a month label, which is what the log's index
+ * is on. It is not the budget month: that is `billingPeriodOf`.
+ */
 export function monthOf(now: Date | number = Date.now()): string {
   return new Date(now).toISOString().slice(0, 7);
 }
 
-export function emptyLedger(month = monthOf()): BudgetLedger {
+export function emptyLedger(month = billingPeriodOf().key): BudgetLedger {
   return { month, entities: 0, requests: 0, providerEntities: null, providerReadAt: null };
 }
 
@@ -135,6 +152,7 @@ export function budgetView(ledger: BudgetLedger, limit: number = BUDGET.monthlyE
   return {
     state,
     month: ledger.month,
+    period: billingPeriodView(billingPeriodForKey(ledger.month)),
     used,
     limit,
     remaining,

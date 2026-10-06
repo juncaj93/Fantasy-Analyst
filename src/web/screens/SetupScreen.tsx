@@ -3229,10 +3229,20 @@ function VegasPanel({ status }: { status: SetupStatus }) {
         <strong>
           {status.vegas.budget.used} of {status.vegas.budget.limit}
         </strong>{' '}
-        used in {status.vegas.budget.month} ({BUDGET_LABEL[status.vegas.budget.state] ?? status.vegas.budget.state})
+        used this billing period, {status.vegas.budget.period.label} (
+        {BUDGET_LABEL[status.vegas.budget.state] ?? status.vegas.budget.state})
         {status.vegas.budget.source === 'provider' ? ', counted by the provider' : ''}.{' '}
         {status.vegas.budget.note}.
       </div>
+      {/*
+        Said on the screen, not only in the docs: the provider does not publish
+        its reset day, so the period above starts where the signup date puts it.
+      */}
+      {!status.vegas.budget.period.confirmed ? (
+        <div className="faint" style={{ marginTop: 6 }} data-testid="vegas-budget-assumption">
+          {status.vegas.budget.period.note}
+        </div>
+      ) : null}
       {Object.keys(status.vegas.budget.bySource).length > 0 ? (
         <div className="faint" style={{ marginTop: 6 }} data-testid="vegas-budget-sources">
           Spent on:{' '}

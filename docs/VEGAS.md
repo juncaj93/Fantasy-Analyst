@@ -342,7 +342,7 @@ them, and `probe-vegas-count-gap.mjs` attributes any difference.
 
 ## The budget
 
-`src/core/vegas/budget.ts` holds every threshold. The month's usage is read
+`src/core/vegas/budget.ts` holds every threshold. The period's usage is read
 from the provider (free, authoritative — it also sees spending from a probe or
 another deployment sharing the key) and from the app's own ledger
 (`vegas_usage`, `vegas_usage_log`), and the **larger of the two** is believed,
@@ -355,6 +355,45 @@ because that is the only combination that cannot under-report.
 | conservation | ≥ 70% | only close or uncertain decisions |
 | hard stop | ≥ 85% | the reserve: close game-day decisions only |
 | exhausted | 100% | no provider call of any kind |
+
+### The billing month is not the calendar month, and its start day is assumed
+
+The provider counts entities per month and never says when the month starts: its
+usage response has no date or period field, its documentation gives the allowance
+and not the reset, and its account endpoints answer 404 (read on 6 October 2026).
+What the data does show is that it is **not the calendar month**. The count was
+still carrying September on 6 October (352 against 72 booked for "October"), and
+it fell from 641 to 279 somewhere between 30 August and 30 September.
+
+So the app does not use the calendar month. **The reset day is assumed to be the
+13th**, from the signup date (13 August 2026), which makes a billing month run
+from the 13th to the 12th (last reset about 13 September, next about 13 October).
+**This is an assumption and has not been confirmed by the provider.** Setup says
+so on the screen, and every budget response carries `period.confirmed: false` and
+the note.
+
+- **One place.** `BILLING_RESET_DAY` in `src/core/vegas/billingPeriod.ts`. Change
+  that number and nothing else.
+- **Nothing to migrate.** The ledger is derived from `vegas_usage_log` by date,
+  never stored per period, so a different day re-derives every number on the next
+  read. No schema change, and the log keeps its calendar-month labels because its
+  index is on them.
+- **The fallback counts from the same day.** When the provider's own count cannot
+  be read, the app uses its ledger for the same period, so it no longer drops to
+  zero on the 1st (72 against 352 on 6 October).
+- **A provider reading is only believed inside the period it was taken in.** One
+  from before the 13th described the last period, so a stale count cannot carry
+  over a reset.
+- **Midnight UTC** is assumed for the reset instant, which is also unconfirmed.
+- **How it gets checked.** After the 13th, `scripts/probe-vegas-count-gap.mjs`
+  compares the provider's live count with what the ledger booked since the 13th.
+  If the count is far above it (it did not fall to near zero), the probe says the
+  assumption looks wrong, annotates the run and fails it. `probe-sgo-reset.mjs`
+  looks for the real day in the ledger and the provider's count history.
+- **What the ledger alone says.** It fits a reset earlier in September better
+  than the 13th (a 13 September reset leaves about 59 calls the ledger never saw,
+  against about 21 explained by two probes written on 23 and 24 September). That
+  is weak evidence and the 13th is what Alex has asked for.
 
 A refusal is never an error. The last stored lines keep serving, marked stale,
 and Start/Sit lowers its confidence rather than showing a zero. No Vegas data

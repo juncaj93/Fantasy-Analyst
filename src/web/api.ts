@@ -960,6 +960,16 @@ export interface SetupStatus {
       limit: number;
       remaining: number;
       month: string;
+      /** The billing period in words, and the fact that its start day is assumed. */
+      period: {
+        start: string;
+        end: string;
+        label: string;
+        resetDay: number;
+        basis: string;
+        confirmed: boolean;
+        note: string;
+      };
       source: string;
       note: string;
       bySource: Record<string, number>;
