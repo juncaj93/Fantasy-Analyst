@@ -55,7 +55,11 @@ if (!KEY) {
   console.log('  headers:');
   for (const [k, v] of Object.entries(before.headers)) console.log(`    ${k}: ${String(v).slice(0, 120)}`);
   console.log('  body:');
-  console.log(JSON.stringify(before.json, null, 2).split('\n').map((l) => `    ${l}`).join('\n').slice(0, 6000));
+  // The response names the account owner and the billing customer. Neither is
+  // needed to answer the question, and a log is not the place for them.
+  const shown = JSON.parse(JSON.stringify(before.json ?? null));
+  for (const k of ['keyID', 'customerID', 'email']) if (shown?.data?.[k] != null) shown.data[k] = '(hidden)';
+  console.log(JSON.stringify(shown, null, 2).split('\n').map((l) => `    ${l}`).join('\n').slice(0, 6000));
   const flat = [];
   walk(before.json, '', flat);
   const hits = flat.filter(([p]) => WORDS.test(p.split('.').pop() ?? ''));
