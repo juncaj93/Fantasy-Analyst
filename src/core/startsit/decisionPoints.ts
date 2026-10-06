@@ -101,6 +101,51 @@ function publishedAdjustments(evaluation: DecisionEvaluation, base: number, rost
   return [...nudges.values()].reduce((a, v) => a + v, 0) + rest;
 }
 
+export interface SettleableEvaluation extends DecisionEvaluation {
+  components?: { key: string; value: number; unknown: boolean; preBudgetValue?: number; shownValue?: number }[];
+}
+
+/**
+ * Say, on each row, the value the published-week number was built from.
+ *
+ * `decisionPoints` ranks a partly priced player on Rotowire's week plus the
+ * adjustments held to 10% of that week, but the rows on the Compare sheet are
+ * the engine's own components, which were budgeted against the market's partial
+ * number (or against nothing, with no market at all). So the sheet's news and
+ * opportunity rows showed the larger values while the number beside them used
+ * the smaller ones, and the rows did not add up to it.
+ *
+ * This sets `shownValue` on those rows and nothing else. `value`, `score` and
+ * every ranking are left exactly as the engine made them, because a published
+ * figure ranks and never scores (`sleeperProjectionFallback.test.ts` holds that
+ * line). A complete market, an unpriced player and a player nobody published
+ * are left alone, and the rows' `shownValue`s plus the published week are the
+ * number `decisionPoints` returns. Safe to call twice.
+ */
+export function settleOnPublishedWeek(
+  evaluation: SettleableEvaluation & { score: number | null },
+  published?: ReadonlyMap<string, number>,
+): void {
+  if (evaluation.score == null || evaluation.components == null) return;
+  const figure = published?.get(evaluation.playerId);
+  if (figure == null || !Number.isFinite(figure)) return;
+  const hasMarket = evaluation.expectation?.points != null;
+  if (hasMarket && marketIsComplete({ score: evaluation.score, expectation: evaluation.expectation ?? null })) return;
+
+  const rows = evaluation.components.filter(
+    (c) => !c.unknown && !MARKET_KEYS.has(c.key) && BUDGETED_KEYS.includes(c.key),
+  );
+  const settled = budgetAdjustments(
+    rows.map((c) => ({ key: c.key, value: c.preBudgetValue ?? c.value })),
+    Math.max(0, figure),
+  );
+  for (const row of rows) {
+    const next = settled.get(row.key);
+    if (next === undefined || next === row.value) delete row.shownValue;
+    else row.shownValue = next;
+  }
+}
+
 /**
  * The decision number for one player, or null when there is nothing to decide on.
  *

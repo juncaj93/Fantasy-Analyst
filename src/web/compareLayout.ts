@@ -14,7 +14,14 @@ export interface LayoutComponent {
   key: string;
   label: string;
   value: number;
+  /** What to print instead of `value`, on a row held to the published week's budget. */
+  shownValue?: number;
   unknown: boolean;
+}
+
+/** The number a row prints: the settled value when the server sent one, else the engine's. */
+export function shownOf(component: { value: number; shownValue?: number }): number {
+  return component.shownValue ?? component.value;
 }
 
 /** The part of an evaluation this module reads. */
@@ -178,7 +185,7 @@ export function explainGap(leader: LayoutEvaluation, runnerUp: LayoutEvaluation,
   }
   const valueOf = (e: LayoutEvaluation, key: string) => {
     const c = e.components.find((x) => x.key === key);
-    return readable(c) ? c.value : 0;
+    return readable(c) ? shownOf(c) : 0;
   };
   const drivers = keys
     .map((k) => ({ label: k.label, delta: Math.round((valueOf(leader, k.key) - valueOf(runnerUp, k.key)) * 100) / 100 }))

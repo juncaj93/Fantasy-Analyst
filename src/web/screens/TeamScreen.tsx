@@ -62,6 +62,7 @@ import {
   explainGap,
   gapSentence,
   layoutFactors,
+  shownOf,
   matchupCell,
   plain,
   propRows,
@@ -2580,7 +2581,7 @@ function ComparisonCard({
                         <CompareMissing reason={c?.display ?? 'no usage data'} label="Opportunity" name={e.name} />
                       ) : (
                         <span className="cmpf-num" title={c.display}>
-                          {signed(c.value)}
+                          {signed(shownOf(c))}
                         </span>
                       )}
                     </td>
@@ -2665,7 +2666,7 @@ function ComparisonCard({
                     {c.label}
                     {c.unknown ? ' (unknown)' : ''}
                   </span>
-                  <span className="component-value">{c.unknown ? '—' : c.value.toFixed(2)}</span>
+                  <span className="component-value">{c.unknown ? '—' : shownOf(c).toFixed(2)}</span>
                   <span className="component-detail">{c.display}</span>
                 </div>
               ))}
