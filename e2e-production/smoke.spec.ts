@@ -2023,9 +2023,28 @@ test.describe('the season features', () => {
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
 
+    /*
+     * Whether there is a plan to look at is a fact about the data, so it is
+     * asked of the data. It used to be asked of the screen: the card's count
+     * was read the moment the tab had opened, before the request that fills it
+     * had come back, found zero, and skipped. The sweep then reported the
+     * check as skipped on a deployment that had a plan sitting in its own API
+     * answer, which is the failure this file's opening comment is about.
+     *
+     * Only a deployment whose own answer carries no plan to draw may skip.
+     */
+    const id = await selectedLeagueId(page);
+    const waivers = id
+      ? await apiJson<{ found: boolean; claimPlan: { surface?: boolean } | null }>(page, `/api/leagues/${id}/waivers`)
+      : null;
+    test.skip(!waivers?.found, 'no roster on this deployment');
+    test.skip(!waivers!.claimPlan?.surface, 'this deployment produced no plan to draw');
+
     await open(page, 'waivers');
+    // A bounded wait, and a failure rather than a skip when it runs out: the
+    // data says there is a plan, so a screen that never draws one is a defect.
     const card = page.getByTestId('waiver-plan');
-    test.skip((await card.count()) === 0, 'this deployment surfaced no plan to draw');
+    await expect(card, 'the data carries a plan and the screen never drew it').toBeVisible({ timeout: 20_000 });
 
     await expect(card.getByRole('button')).toHaveCount(0);
     await expect(card).not.toContainText('Keeping ');

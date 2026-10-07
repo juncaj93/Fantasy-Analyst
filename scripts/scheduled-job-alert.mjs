@@ -103,6 +103,16 @@ export function githubApi({ token, repository, fetchImpl = fetch }) {
       return call(`/issues/${number}`, { method: 'PATCH', body: JSON.stringify(fields) });
     },
 
+    /*
+     * The comments on an issue since a moment, oldest first. `since` filters on
+     * when a comment was last touched, so it can only ever return too many,
+     * never too few; callers still check each comment's own date.
+     */
+    async listComments(number, since) {
+      const query = since ? `&since=${encodeURIComponent(since)}` : '';
+      return (await call(`/issues/${number}/comments?per_page=100${query}`)) ?? [];
+    },
+
     async comment(number, body) {
       return call(`/issues/${number}/comments`, { method: 'POST', body: JSON.stringify({ body }) });
     },

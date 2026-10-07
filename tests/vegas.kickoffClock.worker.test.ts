@@ -10,7 +10,7 @@
  * nflverse file; the job must wait for the first tick after that is free.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/worker/index.ts';
 import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
@@ -66,6 +66,20 @@ const oddsCalls = () => urls.filter((u) => u.includes('sportsgameodds') && u.inc
 const tick = (iso: string, cron = '*/5 * * * *') => worker.scheduled({ cron, scheduledTime: Date.parse(iso) }, cronEnv());
 
 beforeEach(async () => {
+  /*
+   * The wall clock is pinned as well as the ticks.
+   *
+   * Every tick below carries its own `scheduledTime`, but the job also asks the
+   * machine what time it is when it judges how old a stored line is, and the
+   * rows seeded here are dated 7 October. Run before that date the lines looked
+   * fresh and the test passed; from the first run after it they looked old, the
+   * job bought the game a second time, and this failed on every machine with no
+   * change to the code. Only `Date` is faked: timers and promises stay real so
+   * the database still answers.
+   */
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-09T21:44:00.000Z'));
+
   db = await createTestDb();
   await seedDemoData(db);
 
@@ -98,6 +112,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  vi.useRealTimers();
 });
 
 describe('the odds job, on the deployed entry point', () => {

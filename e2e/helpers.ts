@@ -27,9 +27,27 @@ import type { Page } from '@playwright/test';
  */
 export async function inSeason(page: Page): Promise<void> {
   await page.route('**/api/leagues/*/roster', async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, body: JSON.stringify({ ...body, live: false, drafted: [] }) });
+    } catch (error) {
+      /*
+       * A reply nobody is waiting for any more is not a failure.
+       *
+       * The refresh on Team re-reads the roster, and the specs that press it end
+       * the moment the screen is readable, which can be while that re-read is
+       * still in flight. The page then closes under this handler, Playwright
+       * disposes the response it was holding, and `response.json()` throws
+       * "Response has been disposed" into a test that had already passed its
+       * assertions. It failed `refreshes from the button` at 360 on 2 October,
+       * on both attempts, and nowhere else.
+       *
+       * Only that one cause is let through. Anything else, such as a body that
+       * is not JSON, still throws, because that one is about the app.
+       */
+      if (!/disposed|has been closed|Target (page|closed)|Test ended/i.test(String(error))) throw error;
+    }
   });
 }
 

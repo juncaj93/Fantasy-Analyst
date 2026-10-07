@@ -66,6 +66,24 @@ on:
       # have; what changes is that a token which *is* set now arrives.
       CLOUDFLARE_API_TOKEN:
         required: false
+    # What the budget guard decided, handed back to the caller.
+    #
+    # Without these a caller cannot tell "the sweep ran and passed" from "the
+    # guard stood it down", because both end with every job that ran green: the
+    # guard job succeeds either way and the browser job is merely skipped. That
+    # is how 30 September and 6 October were recorded as passes with not one
+    # test run. `proceed` is `yes` only when the browser suite was allowed to
+    # start; it is empty on the deploy gate, which has no guard.
+    outputs:
+      proceed:
+        description: '`yes` when the full pass was allowed to run, `no` when the budget guard declined it'
+        value: ${{ jobs.budget.outputs.proceed }}
+      percent:
+        description: "Today's share of the D1 allowance already read when the guard looked"
+        value: ${{ jobs.budget.outputs.percent }}
+      ceiling:
+        description: 'The ceiling the guard compared that share against'
+        value: ${{ jobs.budget.outputs.ceiling }}
   workflow_dispatch:
     inputs:
       full:
@@ -119,7 +137,9 @@ jobs:
   # it declines *loudly*, as a failed job rather than a skipped one, because a
   # guard that has quietly disabled the sweep for a month is worse than no
   # guard. Being over the ceiling is the opposite: an ordinary, expected
-  # outcome, reported in the summary and green.
+  # outcome. This job still ends green, because the guard did its work, so the
+  # verdict travels in the `proceed` output instead and `smoke-daily.yml` acts
+  # on it: a stood-down sweep is recorded as not run, never as passed.
   budget:
     if: ${{ inputs.full }}
     runs-on: ubuntu-latest
@@ -127,6 +147,9 @@ jobs:
     outputs:
       proceed: ${{ steps.guard.outputs.proceed }}
       percent: ${{ steps.guard.outputs.percent }}
+      # The ceiling in force, so a caller quoting the percentage can quote what
+      # it was measured against rather than a number it hard-coded.
+      ceiling: ${{ inputs.ceiling_percent || '30' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -172,7 +195,7 @@ jobs:
     if: ${{ always() && (!inputs.full || needs.budget.outputs.proceed == 'yes') }}
     # Which third of the suite, because that is what a red tick has to answer
     # first. GitHub would otherwise label these `smoke (1)`.
-    name: smoke ${{ inputs.full && format('({0}/3)', matrix.shard) || '(deploy gate)' }}
+    name: smoke ${{ inputs.full && format('({0}/{1})', matrix.shard, strategy['job-total']) || '(deploy gate)' }}
     runs-on: ubuntu-latest
     # The browser and its system libraries arrive with the image, rather than
     # being installed onto a runner that is busy installing something else.
@@ -232,7 +255,15 @@ jobs:
         # same specs at four widths on every pull request against a local
         # build. So the gate runs one shard of the `@critical` tests and the
         # full sweep runs daily, or on demand.
-        shard: ${{ fromJSON(inputs.full && '[1, 2, 3]' || '[1]') }}
+        #
+        # And why the split is sized to the work rather than fixed at three.
+        # A shard is a whole spec file per project, and the production suite is
+        # one file. At three widths that is three units, one per runner, so the
+        # split earns its keep. At the daily sweep's single width it is one
+        # unit: `--shard=1/3` took all fifty specs and `2/3` and `3/3` each
+        # started a runner, installed everything and ran nothing. So one width
+        # is one runner, and only an all-width pass fans out to three.
+        shard: ${{ fromJSON(inputs.full && inputs.widths != 'primary' && '[1, 2, 3]' || '[1]') }}
     env:
       PRODUCTION_URL: ${{ inputs.url || 'https://fantasy-analyst.juncaj93.workers.dev' }}
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_sha }}
@@ -325,7 +356,8 @@ jobs:
         run: |
           set -eu
           if [ "$FULL" = "true" ] && [ "$WIDTHS" = "primary" ]; then
-            # One width, still split three ways so no shard runs long.
+            # One width, one runner. Not split: a shard is a whole file per
+            # project, so splitting a single project only produced empty runners.
             #
             # A third of the executions and a third of the D1 cost. What it
             # gives up is layout at 375 and 360 *against production data* —
@@ -337,13 +369,12 @@ jobs:
             # stranger's write refused — is width-independent and still runs
             # here, every day.
             npx playwright test --config playwright.production.config.ts \
-              --project=webkit-iphone-390 \
-              --shard=${{ matrix.shard }}/3
+              --project=webkit-iphone-390
           elif [ "$FULL" = "true" ]; then
-            # Every width, split three ways, exactly as before.
+            # Every width, split three ways: one width per runner.
             npx playwright test --config playwright.production.config.ts \
               --project=webkit-iphone-390 --project=webkit-iphone-375 --project=webkit-small-360 \
-              --shard=${{ matrix.shard }}/3
+              --shard=${{ matrix.shard }}/${{ strategy['job-total'] }}
           else
             # The deploy gate: the `@critical` specs at one width, on one
             # runner. Around eight executions rather than 150, and every one of
@@ -381,7 +412,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: production-test-results-shard-${{ matrix.shard }}-of-3
+          name: production-test-results-shard-${{ matrix.shard }}-of-${{ strategy['job-total'] }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
@@ -390,7 +421,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Production smoke test — shard ${{ matrix.shard }}/3"
+            echo "## Production smoke test — shard ${{ matrix.shard }}/${{ strategy['job-total'] }}"
             echo
             echo "**Site:** $PRODUCTION_URL"
             echo
