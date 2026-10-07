@@ -18,7 +18,8 @@ const leagueId = process.env.LEAGUE_ID || leagues?.leagues?.find((l) => l.isSele
 const res = await fetch(`${APP}/api/leagues/${leagueId}/support-snapshot?context=lineup`);
 console.log(`GET support-snapshot (lineup) -> HTTP ${res.status}`);
 const snap = await res.json();
-const inputs = snap?.decision?.inputs?.startSit ?? [];
+const raw = snap?.decision?.inputs?.startSit;
+const inputs = Array.isArray(raw) ? raw : (raw?.inputs ?? []);
 console.log(`captured ${snap.capturedAt}  week ${snap?.decision?.context?.week}  players ${inputs.length}\n`);
 const lines = new Map();
 for (const input of inputs) {
@@ -27,6 +28,10 @@ for (const input of inputs) {
   if (props.length === 0) {
     console.log(`${String(name).padEnd(24)} no touchdown quote`);
     continue;
+  }
+  const before = (input.previousProps ?? []).filter((p) => p.market === 'anytime_td');
+  if (before.length > 0) {
+    console.log(`${''.padEnd(24)} previous snapshot: ${before.map((p) => `line ${p.line} over ${p.overPrice} under ${p.underPrice} implied ${p.impliedProbability == null ? '-' : (p.impliedProbability * 100).toFixed(0) + '%'}`).join(' | ')}`);
   }
   for (const p of props) {
     const key = String(p.line);
