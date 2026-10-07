@@ -227,3 +227,32 @@ for (const p of found ?? []) {
   for (const r of trend ?? []) console.log(`  trending add rank ${r.rank} (${r.count}) captured ${z(r.captured_at)}`);
 }
 if (found && found.length === 0) console.log('  no such player in the table');
+
+// ------------------------------------------- 8. can the board read his number?
+console.log('\n=== 8. can the board read a published number for him? ===');
+const { buildScoringProfile } = await import('../src/core/sleeper/scoring.ts');
+const { sleeperScoringKey, publishedRefusal } = await import('../src/core/sleeper/weeklyProjections.ts');
+const lg = await safe('league settings', () => select('SELECT scoring_settings_json, roster_positions_json FROM leagues WHERE is_selected = 1 LIMIT 1'));
+if (lg?.[0]) {
+  const scoring = JSON.parse(lg[0].scoring_settings_json || '{}');
+  const profile = buildScoringProfile(scoring, JSON.parse(lg[0].roster_positions_json || '[]'));
+  const shown = ['pass_yd', 'pass_td', 'pass_int', 'rush_yd', 'rush_td', 'rec', 'rec_yd', 'rec_td', 'fum_lost', 'bonus_rec_te'].map((k) => `${k}=${scoring[k] ?? '(unset)'}`);
+  console.log(`  scoring: ${shown.join('  ')}`);
+  for (const pos of ['QB', 'RB', 'WR', 'TE', 'DEF']) {
+    console.log(`  ${pos}: key ${sleeperScoringKey(profile, pos) ?? 'NONE'}  refusal: ${publishedRefusal(profile, pos) ?? '(none)'}`);
+  }
+}
+for (const p of found ?? []) {
+  const mk = await safe('his markets', () =>
+    select(
+      `SELECT pp.market, pp.line, pp.over_price, pp.implied_probability, pp.book_count FROM player_props pp WHERE pp.snapshot_id = (SELECT s.id FROM player_props q JOIN prop_snapshots s ON s.id = q.snapshot_id WHERE q.player_id = '${p.id}' ORDER BY s.fetched_at DESC LIMIT 1) AND pp.player_id = '${p.id}'`,
+    ),
+  );
+  console.log(`  his newest odds lines: ${(mk ?? []).map((m) => `${m.market} ${m.line ?? '-'} (${m.book_count} books)`).join('; ') || 'none'}`);
+}
+if (board) {
+  const ids = (board.unknowns ?? []).map((u) => u.playerId);
+  console.log(`  unknown rows on the board: ${JSON.stringify((board.unknowns ?? []).map((u) => ({ ...u, reasons: undefined })))}`);
+  console.log(`  unknown row reasons: ${JSON.stringify((board.unknowns ?? []).map((u) => u.reasons ?? u.trending ?? null))}`);
+  void ids;
+}
