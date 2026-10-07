@@ -419,7 +419,20 @@ count — eight specs at one width is not this check.
 **Every full pass asks first.** `scripts/d1-budget-guard.mjs` reads today's
 usage before the suite starts and declines when the day is already past a
 ceiling (30% by default, raisable per run). Being over the ceiling is an
-ordinary green outcome reported in the summary.
+ordinary, expected outcome and is reported in the summary. It is never a pass:
+nothing was tested, so the run is ended as cancelled (grey), the tracking issue
+("Scheduled job failures") is left exactly as it was, and it gets one comment a
+day, `Sweep did not run today: D1 reads at X% (guard 30%).` Until 7 October it
+ended green and closed that issue with "Nothing is failing" over a day with no
+test run (30 September and 6 October).
+
+**It starts just after the reset.** The sweep is scheduled for 00:47 UTC, 47
+minutes after Cloudflare resets the allowance. GitHub starts a scheduled run
+late, and from 8 September to 6 October the old 07:30 slot began between 11:39
+and 16:14 UTC, by which time deploys and use had usually taken the day past the
+30% line. From 00:47 even the worst start seen (8h44 late) lands at 09:31 UTC
+with the allowance almost untouched. To see the stand-down work, dispatch
+`Daily production sweep` by hand with `ceiling_percent` set to 0.
 
 The number comes from what a sweep costs, not from a round figure. Measured
 with `D1 read insights`: 0.64M rows on 28 September, 1.92M on 25 September and
