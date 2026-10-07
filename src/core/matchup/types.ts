@@ -124,6 +124,12 @@ export interface MatchupPlayerInput {
    * note at the assignment in `build.ts`.
    */
   projectionEstimated?: boolean;
+  /**
+   * True when his club has no game this week. {@link projection} is then 0,
+   * known rather than estimated, and the row says `BYE`. Optional like the two
+   * flags above, so a forecast cached by an older build still reads.
+   */
+  onBye?: boolean;
   /** Sleeper's settled points for him so far. Never written by this app. */
   actual: number;
   /** ISO kickoff for his game, when the schedule is known. */

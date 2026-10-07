@@ -263,6 +263,44 @@ export function byeWeeks(
  * the road, and an entry saying otherwise would put a road penalty on a defence
  * that is not playing.
  */
+/**
+ * How many teams a week's fixture list must name before a missing team is a bye.
+ *
+ * The NFL has never given more than six teams the same week off, so a real
+ * week names at least twenty-six. A list naming fewer than twenty is partial
+ * or not ingested yet, and on such a list a missing team is *unknown*, not
+ * resting: calling him on a bye would turn a gap in this app's data into a
+ * zero on somebody's lineup.
+ */
+export const MIN_TEAMS_FOR_BYE = 20;
+
+/**
+ * The teams with a game this week, or null when the list cannot say who rests.
+ *
+ * A row with no opponent is not a game. Null below {@link MIN_TEAMS_FOR_BYE},
+ * so a caller holding null knows nothing about byes and must assume nobody is
+ * on one.
+ */
+export function playingTeams(fixtures: readonly ScheduleTeamWeek[]): Set<string> | null {
+  const teams = new Set<string>();
+  for (const row of fixtures) {
+    if (row.opponent && row.team) teams.add(row.team.toUpperCase());
+  }
+  return teams.size >= MIN_TEAMS_FOR_BYE ? teams : null;
+}
+
+/**
+ * Whether this club has no game this week, on a fixture list that can say so.
+ *
+ * False for a player with no club (a free agent has no game, which is not a
+ * bye) and false whenever {@link playingTeams} returned null.
+ */
+export function isOnBye(team: string | null | undefined, playing: ReadonlySet<string> | null | undefined): boolean {
+  const club = (team ?? '').trim().toUpperCase();
+  if (!club || !playing) return false;
+  return !playing.has(club);
+}
+
 export function homeByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, boolean> {
   const out = new Map<string, boolean>();
   for (const row of fixtures) {

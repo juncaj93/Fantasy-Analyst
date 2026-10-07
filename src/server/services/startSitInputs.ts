@@ -16,7 +16,7 @@ import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { slateWindow } from '../../core/nfl/slateWindow.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
-import { homeByTeam, indoorByTeam } from '../../core/nfl/schedule.ts';
+import { homeByTeam, indoorByTeam, isOnBye, playingTeams } from '../../core/nfl/schedule.ts';
 import { seasonStartIso } from '../../core/dst/assemble.ts';
 import { InjuryService } from './injuryService.ts';
 import { UsageService, roleMetricsFrom } from './usageService.ts';
@@ -246,6 +246,11 @@ export async function startSitInputsFor(
        * input for anybody else is exactly what it was.
        */
       ...(reserved.has(id) ? { onReserve: true } : {}),
+      /*
+       * On a bye, when the fixture list is whole enough to say so. Only when
+       * true, like `onReserve`, so every other input is exactly what it was.
+       */
+      ...(isOnBye(player.team, context.playing) ? { onBye: true as const } : {}),
       propsStale: false,
     });
   }
@@ -299,6 +304,13 @@ export interface StartSitContext {
    * this week.
    */
   opponentForm: Map<string, { impliedTotal: number; games: number }>;
+  /**
+   * The clubs with a game this week, from the stored fixture list, or null when
+   * that list is too thin to say who is resting (see `playingTeams`). Optional
+   * so a context built by hand in a test still type-checks; absent reads as
+   * "nobody is known to be on a bye".
+   */
+  playing?: ReadonlySet<string> | null;
 }
 
 export async function buildStartSitContext(
@@ -418,6 +430,6 @@ export async function buildStartSitContext(
           .catch(() => new Map<string, { impliedTotal: number; games: number }>())
       : new Map<string, { impliedTotal: number; games: number }>();
 
-  return { schedule, defense, home, indoor, opponentForm };
+  return { schedule, defense, home, indoor, opponentForm, playing: playingTeams(fixtures) };
 }
 
