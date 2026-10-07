@@ -29,10 +29,40 @@ name: Daily production sweep
 
 on:
   schedule:
-    # 07:30 UTC: after the daily 09:00 tick has not yet run and well clear of
-    # the game-day windows, so a sweep never competes with a refresh.
-    - cron: '30 7 * * *'
+    # 00:47 UTC, 47 minutes after Cloudflare resets the D1 allowance at 00:00.
+    #
+    # It was 07:30 and never ran at 07:30. GitHub starts a scheduled run when it
+    # has capacity, and every run since 8 September began between 11:39 and
+    # 16:14 UTC: 4h09 to 8h44 late, 6h on a typical day. By then the day's
+    # allowance has usually been spent past the 30% line by deploys and by
+    # people using the app, so the guard stood the sweep down on 30 September
+    # and 6 October and nothing was tested.
+    #
+    # Right after the reset the whole allowance is free, and a morning's worth
+    # of lateness leaves it that way: the app's own jobs read about half a
+    # percent of a day, and nobody is deploying at 1am Eastern. The worst start
+    # seen (8h44) from 00:47 lands at 09:31 UTC, still before the 09:00 tick has
+    # had hours to matter and before a US morning. Even a start that late finds
+    # the budget close to untouched.
+    #
+    # Why :47 and not :30. Cloudflare's usage figures lag a few minutes, so
+    # :00 would read yesterday's tail, and GitHub's own scheduler is busiest on
+    # the hour and half hour, where a start is delayed longest. An odd minute
+    # is picked up soonest.
+    #
+    # Nothing else keys off this time: no test, workflow or document names it,
+    # and the deploy-time smoke is a separate, called workflow with its own
+    # gate. The day boundary is the only thing that matters, and it is UTC on
+    # both sides: this file's `recent` check and the guard each ask about "today"
+    # in UTC.
+    - cron: '47 0 * * *'
   workflow_dispatch:
+    inputs:
+      ceiling_percent:
+        description: "Stand the sweep down when today has read this much of the D1 allowance. Leave blank for the guard's 30. Set 0 to see a stand-down on purpose."
+        required: false
+        default: ''
+        type: string
 
 jobs:
   # Has somebody already run this by hand today?
@@ -104,6 +134,78 @@ jobs:
       # already runs four widths against a seeded local build on every pull
       # request, and what only production can answer is width-independent.
       widths: primary
+      # Blank on a schedule, which `smoke.yml` reads as the guard's own 30. It is
+      # only ever filled by a person dispatching this by hand to see the
+      # stand-down path work, and the 30 itself is not changed by it.
+      ceiling_percent: ${{ inputs.ceiling_percent }}
+
+  # Did the guard stand the sweep down? Then nothing was tested today.
+  #
+  # `sweep` ends `success` in that case, because the guard job did its work and
+  # the browser job was skipped, and a skipped job does not turn a run red. Read
+  # naively that is a pass: the alert below recorded it as one, cleared this
+  # workflow's row on "Scheduled job failures" and closed #204 with "Nothing is
+  # failing" on 30 September and 6 October, with not one spec run.
+  #
+  # So the stand-down is told apart here, from the guard's own answer, and is
+  # recorded as what it is: a day that was not checked.
+  #
+  # Only a *successful* sweep that says `no` is a stand-down. A guard that could
+  # not read usage exits non-zero and also writes `no`; that is a failed sweep
+  # and still goes to the alarm as one.
+  stood-down:
+    needs: [recent, sweep]
+    if: ${{ always() && needs.recent.outputs.ran_today == 'no' && needs.sweep.result == 'success' && needs.sweep.outputs.proceed == 'no' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      # Only to end this run as cancelled; see the last step.
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # One short comment on the tracking issue, at most one a day, and nothing
+      # else on it: not its state, not its body, not this workflow's row. The
+      # issue is left exactly as it was, open or closed, failing or clear.
+      - name: Say the sweep did not run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SWEEP_PERCENT: ${{ needs.sweep.outputs.percent }}
+          SWEEP_CEILING: ${{ needs.sweep.outputs.ceiling }}
+        run: node scripts/sweep-stand-down-note.mjs
+      - name: Write the summary
+        env:
+          SWEEP_PERCENT: ${{ needs.sweep.outputs.percent }}
+          SWEEP_CEILING: ${{ needs.sweep.outputs.ceiling }}
+        run: |
+          {
+            echo "### Daily sweep did NOT run"
+            echo ""
+            echo "D1 reads were at ${SWEEP_PERCENT}% of today's allowance (guard ${SWEEP_CEILING}%), so no spec was run."
+            echo "This run is ended as cancelled on purpose: it must not read as a pass."
+            echo "The tracking issue was left as it was."
+          } >> "$GITHUB_STEP_SUMMARY"
+      # End the whole run as cancelled, which GitHub draws grey rather than
+      # green. A run cannot be given a "neutral" conclusion from inside, and a
+      # green tick on a day nothing was checked is the thing this exists to
+      # stop. Last, and only if the note above succeeded: if it did not, this
+      # job fails red, which is the louder outcome and the right one.
+      - name: End the run as not run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/cancel"
+          # Cancelling interrupts this very job. Wait to be stopped rather than
+          # finishing first and letting the run end green.
+          sleep 120
+          echo "::error::the run was asked to cancel and is still going"
+          exit 1
 
   # Scheduled work that fails silently is scheduled work nobody is doing.
   # `Refresh draft order` failed on every run for eleven days in August and was
@@ -111,10 +213,12 @@ jobs:
   # scheduled workflow that has no alarm.
   alert:
     needs: [recent, sweep]
-    # A sweep that stood down is not a sweep that failed. `skipped` reaching
-    # `alert-on-failure` would open an issue every time the guard worked, which
-    # is the fastest way to teach somebody to close these unread.
-    if: ${{ always() && needs.recent.outputs.ran_today == 'no' }}
+    # A sweep that stood down is not a sweep that failed, and it is not one
+    # that passed either, so it never reaches the alarm at all. `skipped`
+    # reaching `alert-on-failure` would be ignored, but a `success` would clear
+    # this workflow's row and close the issue, which is the false clear this
+    # guard exists to prevent. `stood-down` above owns that day.
+    if: ${{ always() && needs.recent.outputs.ran_today == 'no' && !(needs.sweep.result == 'success' && needs.sweep.outputs.proceed == 'no') }}
     uses: ./.github/workflows/alert-on-failure.yml
     permissions:
       contents: read

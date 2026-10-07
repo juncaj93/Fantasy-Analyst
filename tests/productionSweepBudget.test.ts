@@ -124,3 +124,134 @@ describe('the width that was given up', () => {
     }
   });
 });
+
+/**
+ * The two mornings (30 September, 6 October) the guard stood the sweep down and
+ * the day was still recorded as a pass. The run ended green because the guard
+ * job succeeded and the browser job was merely skipped, the alert read that as
+ * a success, and #204 closed itself with "Nothing is failing" over a day on
+ * which no spec had run.
+ */
+describe('a stood-down sweep is never recorded as a pass', () => {
+  const daily = () => readWorkflow('smoke-daily.yml').yaml;
+
+  it('hands the guard’s answer back from the called workflow', () => {
+    const { yaml } = readWorkflow('smoke.yml');
+    const on = yaml['on'] as Record<string, YamlValue>;
+    const outputs = (on['workflow_call'] as Record<string, YamlValue>)['outputs'] as Record<string, YamlValue>;
+    for (const name of ['proceed', 'percent', 'ceiling']) {
+      expect(outputs[name], `smoke.yml does not return \`${name}\``).toBeDefined();
+    }
+    expect(String((outputs['proceed'] as Record<string, YamlValue>)['value'])).toContain('jobs.budget.outputs.proceed');
+  });
+
+  it('has a job for the stand-down, which runs only when the sweep succeeded and said no', () => {
+    const standDown = job(daily(), 'stood-down');
+    const condition = String(standDown['if'] ?? '');
+    expect(condition).toContain("needs.sweep.result == 'success'");
+    expect(condition).toContain("needs.sweep.outputs.proceed == 'no'");
+    // A guard that could not read usage also writes `no`, but it fails the job.
+    // That is a failure and must not be filed as a polite stand-down.
+    expect(condition, 'a failed guard must not count as a stand-down').toContain("== 'success'");
+  });
+
+  it('keeps the stand-down away from the alarm that would clear the issue', () => {
+    const condition = String(job(daily(), 'alert')['if'] ?? '');
+    expect(condition, 'the alert must skip a stood-down day').toContain("needs.sweep.outputs.proceed == 'no'");
+    expect(condition).toContain('!(');
+    // Everything that is not a stand-down still reaches the alarm, failures included.
+    expect(condition).toContain('always()');
+  });
+
+  it('comments on the issue and ends the run as not-run, in that order', () => {
+    const standDown = job(daily(), 'stood-down');
+    const steps = standDown['steps'] as Record<string, YamlValue>[];
+    const names = steps.map((step) => String(step['name'] ?? step['uses']));
+    const note = names.findIndex((n) => n.includes('Say the sweep did not run'));
+    const end = names.findIndex((n) => n.includes('End the run as not run'));
+    expect(note).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(note);
+    expect(String((standDown['permissions'] as Record<string, YamlValue>)['issues'])).toBe('write');
+    expect(String((standDown['permissions'] as Record<string, YamlValue>)['actions'])).toBe('write');
+    expect(JSON.stringify(steps[end])).toContain('/cancel');
+  });
+
+  it('lets a person dispatch it with a lower ceiling, and leaves the default at 30', () => {
+    const { yaml } = readWorkflow('smoke-daily.yml');
+    const on = yaml['on'] as Record<string, YamlValue>;
+    const dispatch = on['workflow_dispatch'] as Record<string, YamlValue>;
+    const input = (dispatch['inputs'] as Record<string, YamlValue>)['ceiling_percent'] as Record<string, YamlValue>;
+    expect(input['default'], 'blank means the guard’s own default').toBe('');
+    const wth = job(yaml, 'sweep')['with'] as Record<string, YamlValue>;
+    expect(String(wth['ceiling_percent'])).toContain('inputs.ceiling_percent');
+    // The guard's own default is unchanged.
+    expect(readWorkflow('smoke.yml').text).toContain("inputs.ceiling_percent || '30'");
+  });
+});
+
+describe('when the daily sweep is scheduled to start', () => {
+  /**
+   * GitHub starts a scheduled run late. Between 8 September and 6 October the
+   * 07:30 run began between 11:39 and 16:14 UTC, up to 8h44 late. The schedule
+   * has to sit just after the 00:00 UTC reset and leave room for a start that
+   * late to still land before the morning's reads.
+   */
+  const WORST_OBSERVED_LATENESS_MINUTES = 8 * 60 + 44;
+  const cron = (): string[] => {
+    const { text } = readWorkflow('smoke-daily.yml');
+    const match = /- cron: '([^']+)'/.exec(text);
+    expect(match, 'the sweep has a cron').not.toBeNull();
+    return match![1]!.split(' ');
+  };
+
+  it('runs once a day, after the D1 reset and before anything else wakes', () => {
+    const [minute, hour, dom, month, dow] = cron();
+    expect([dom, month, dow]).toEqual(['*', '*', '*']);
+    const startMinutes = Number(hour) * 60 + Number(minute);
+    expect(startMinutes, 'later than the 00:00 UTC reset plus analytics lag').toBeGreaterThanOrEqual(15);
+    expect(startMinutes, 'early enough to be well clear of the day’s use').toBeLessThanOrEqual(120);
+  });
+
+  it('still starts before the 09:00 UTC tick when GitHub is as late as it has ever been', () => {
+    const [minute, hour] = cron();
+    const startMinutes = Number(hour) * 60 + Number(minute);
+    expect(startMinutes + WORST_OBSERVED_LATENESS_MINUTES).toBeLessThan(10 * 60);
+  });
+
+  it('is not on the hour or the half hour, where GitHub starts runs latest', () => {
+    const [minute] = cron();
+    expect(['0', '30']).not.toContain(minute);
+  });
+});
+
+describe('how the production suite is split', () => {
+  const smoke = () => readWorkflow('smoke.yml').yaml;
+  const matrixShards = () => {
+    const strategy = job(smoke(), 'smoke')['strategy'] as Record<string, YamlValue>;
+    return String((strategy['matrix'] as Record<string, YamlValue>)['shard']);
+  };
+
+  /**
+   * A shard is a whole spec file per project. The suite is one file, so one
+   * width is one unit of work: `--shard=2/3` and `3/3` started a runner each and
+   * ran nothing. Only an all-width pass has three units to hand out.
+   */
+  it('gives one width one runner, and only an all-width pass three', () => {
+    const expression = matrixShards();
+    expect(expression, 'primary must not fan out').toContain("inputs.widths != 'primary' && '[1, 2, 3]'");
+    expect(expression, 'the deploy gate stays on one runner').toContain("|| '[1]'");
+  });
+
+  it('never asks Playwright for a shard count the matrix did not create', () => {
+    const { text } = readWorkflow('smoke.yml');
+    expect(text, 'a hard-coded /3 would leave empty shards').not.toMatch(/--shard=\$\{\{ matrix\.shard \}\}\/3/);
+    expect(text).toContain("--shard=${{ matrix.shard }}/${{ strategy['job-total'] }}");
+  });
+
+  it('does not shard the single-width run at all', () => {
+    const { text } = readWorkflow('smoke.yml');
+    const primary = /if \[ "\$FULL" = "true" \] && \[ "\$WIDTHS" = "primary" \]; then([\s\S]*?)elif/.exec(text);
+    expect(primary, 'found the single-width branch').not.toBeNull();
+    expect(primary![1]).not.toContain('--shard');
+  });
+});
