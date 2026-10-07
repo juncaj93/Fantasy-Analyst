@@ -243,6 +243,8 @@ export interface WaiverPlanInputs {
   draftRankOf?: Record<string, number>;
   /** Sleeper's published week, the waiver yardstick's fallback. Absent on older files. */
   published?: Record<string, number>;
+  /** Positions refused a published total in this league, for the unscored reasons. Absent on older files. */
+  refusedPositions?: string[];
   /** Depth-chart rank per rostered player, for the handcuff read. Absent on older files. */
   depth?: Record<string, { rank: number }>;
   /** Sleeper's trending drops, entry by entry. Absent on older files. */

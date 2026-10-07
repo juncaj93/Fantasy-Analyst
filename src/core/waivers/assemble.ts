@@ -159,6 +159,11 @@ export interface WaiverAssemblyRequest {
    */
   published?: ReadonlyMap<string, number> | undefined;
   /**
+   * Positions whose published projection this league may not read (its scoring
+   * differs from the feed's). Only used to say why a free agent has no number.
+   */
+  refusedPositions?: readonly string[] | undefined;
+  /**
    * Where the stored depth chart puts each rostered player at his position,
    * by player id. Read for one thing: whether a bench player is the backup to
    * one of your starters. Absent falls back to same club and position.
@@ -371,6 +376,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     trendingDrops: new Map([...(request.trendingDrops ?? new Map<string, TrendingVelocity>())].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
     ...(request.recentlyDropped === undefined ? {} : { recentlyDropped: request.recentlyDropped }),
     openSpots,
+    ...(request.refusedPositions === undefined ? {} : { refusedPositions: request.refusedPositions }),
     now: request.now,
   });
 
