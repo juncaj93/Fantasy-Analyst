@@ -1,0 +1,62 @@
+name: Browser stability check
+
+# TEMPORARY. Repeats named browser specs ten times each under WebKit, in the
+# same image CI uses, with no retries, to show a fix to a flaky spec is stable.
+# Runs on push to the branch carrying it and is deleted before merge.
+
+on:
+  push:
+    branches: [claude/new-session-zpjl3r]
+    paths: ['.github/workflows/stability-proof.yml', 'e2e/**']
+
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    name: ${{ matrix.project }} x10 (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --user 1001
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: refresh button
+            project: webkit-small-360
+            grep: 'refreshes from the button, not only from the pull'
+          - label: swipe
+            project: webkit-iphone-430
+            grep: 'swipe'
+          - label: sheet then pull
+            project: webkit-iphone-430
+            grep: 'and gives it straight back'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check the image carries the browser this Playwright wants
+        timeout-minutes: 10
+        run: |
+          npx playwright install webkit
+      - name: Run the specs ten times, no retries
+        timeout-minutes: 25
+        env:
+          PROJECT: ${{ matrix.project }}
+          GREP: ${{ matrix.grep }}
+        run: |
+          set -eu
+          npx playwright test --project="$PROJECT" --grep "$GREP" --repeat-each=10 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: stability-report-${{ matrix.label }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
