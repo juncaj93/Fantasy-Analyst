@@ -179,6 +179,50 @@ export class SleeperProjectionsRepo {
   }
 
   /**
+   * The figures for a few players across several weeks, in one statement.
+   *
+   * For the trade check's stand-in when a player has no number this week:
+   * the same keyed read as `forPlayers`, over a short list of earlier weeks
+   * at once, so looking back three weeks is one statement and not three.
+   */
+  async forPlayersInWeeks(
+    season: string,
+    weeks: readonly number[],
+    playerIds: readonly string[],
+  ): Promise<Map<number, Map<string, StoredWeeklyProjection>>> {
+    const out = new Map<number, Map<string, StoredWeeklyProjection>>();
+    const wanted = [...new Set(weeks)].filter((w) => Number.isInteger(w) && w > 0);
+    if (wanted.length === 0) return out;
+    const weekMarks = wanted.map(() => '?').join(',');
+    for (const batch of chunk([...new Set(playerIds)], MAX_BOUND_PARAMS - 1 - wanted.length)) {
+      if (batch.length === 0) continue;
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(
+          `select week, player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json
+             from sleeper_weekly_projections
+            where season = ? and week in (${weekMarks}) and player_id in (${placeholders})`,
+        )
+        .bind(season, ...wanted, ...batch)
+        .all<Record<string, unknown>>();
+      const byWeek = new Map<number, Record<string, unknown>[]>();
+      for (const row of results ?? []) {
+        const week = Number(row['week']);
+        if (!Number.isInteger(week)) continue;
+        const list = byWeek.get(week) ?? [];
+        list.push(row);
+        byWeek.set(week, list);
+      }
+      for (const [week, rows] of byWeek) {
+        const into = out.get(week) ?? new Map<string, StoredWeeklyProjection>();
+        for (const [id, row] of toStored(rows)) into.set(id, row);
+        out.set(week, into);
+      }
+    }
+    return out;
+  }
+
+  /**
    * How much of a week is stored and how old it is.
    *
    * `publisher` is reported only when every stored row agrees on it, because
