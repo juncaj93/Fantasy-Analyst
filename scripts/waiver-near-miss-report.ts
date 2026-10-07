@@ -239,3 +239,81 @@ for (const [label, pick] of [
 }
 console.log(`\nUNREADABLE FREE AGENTS: ${[...unreadable.values()].reduce((a, v) => a + v.length, 0)}`);
 for (const [why, names] of unreadable) console.log(`  ${names.length} · ${why}: ${names.slice(0, 12).join(', ')}${names.length > 12 ? ', ...' : ''}`);
+
+/*
+ * The planner's own verdict on every bench add, rebuilt with the same inputs
+ * `assembleWaiverPlan` hands it (market holds, handcuffs, the 7-day form,
+ * trending drops, open spots), so a gap between the near-miss table above and
+ * the plan can be read off one line per player.
+ */
+{
+  const { planMoves, findHandcuffs } = await import('../src/core/waivers/yardstick.ts');
+  const { marketHoldFor } = await import('../src/core/waivers/marketHold.ts');
+  const { roomIsAdding } = await import('../src/core/waivers/assemble.ts');
+  const { dropSignal } = await import('../src/core/waivers/signals.ts');
+  const { recentFormOf } = await import('../src/core/waivers/recentForm.ts');
+  const trending = inputs.strategy == null ? new Map() : new Map(inputs.strategy.trending);
+  const draftCapitalRank = inputs.rosters.length > 0 ? inputs.rosters.length * shape.totalStarters : undefined;
+  const held = new Map(
+    [
+      ...marketHoldFor({
+        ...(inputs.draftRankOf === undefined ? {} : { draftRankOf: new Map(Object.entries(inputs.draftRankOf)) as Map<string, number> }),
+        ...(draftCapitalRank === undefined ? {} : { draftCapitalRank }),
+        roomIsAdding: roomIsAdding(trending as never),
+        week: inputs.week,
+      }),
+    ].map(([id, hold]) => [id, `${hold.condition} #${Math.round(hold.rank)}`] as const),
+  );
+  const handcuffs = findHandcuffs({
+    roster: roster.map((i) => ({ playerId: i.player.id, name: i.player.fullName, position: i.player.position, team: i.player.team })),
+    starterIds,
+    depth: inputs.depth === undefined ? new Map() : (new Map(Object.entries(inputs.depth)) as never),
+  });
+  const realPool = buildCutPool({
+    roster: roster.map((i) => readingOf(i.player.id)),
+    starterIds,
+    reserveIds,
+    ruledOutIds: new Set(roster.filter((i) => evalOf.get(i.player.id)!.ruledOut).map((i) => i.player.id)),
+    held,
+    handcuffs,
+    excludedPositions: new Set(['DEF']),
+    form: new Map(roster.map((i) => [i.player.id, recentFormOf(i.signal).points] as const)),
+  });
+  const openSpots = Math.max(0, shape.totalStarters + shape.benchSlots - roster.filter((i) => !reserveIds.has(i.player.id)).length);
+  const drops = new Map(inputs.trendingDrops === undefined ? [] : (inputs.trendingDrops as [string, { heat: number; rank: number | null }][]));
+  console.log(`\nTHE PLANNER'S OWN VERDICT (open spots ${openSpots})`);
+  for (const c of realPool.candidates) {
+    console.log(
+      `  pool: ${c.reading.name.padEnd(22)} ${c.starting ? 'starter' : 'bench  '} standing ${fmt(c.standing, 2).padStart(6)} protection ${c.protection ?? '-'}${c.backs ? ` (backs ${c.backs.name})` : ''}${c.holdNote ? ` (${c.holdNote})` : ''}`,
+    );
+  }
+  const moveCandidates = misses.map((m) => {
+    const slots = lineup.slots.filter((s) => s.accepts.includes(m.position));
+    const cap = depthCap(m.position, { shape, week: inputs.week ?? 1, playoffWeeks: inputs.playoff?.weeks ?? [] });
+    const heldAtPos = roster.filter((i) => {
+      const ev = evalOf.get(i.player.id)!;
+      return ev.position === m.position && !reserveIds.has(ev.playerId) && !ev.ruledOut;
+    }).length;
+    const overCap = cap != null && heldAtPos >= cap;
+    const t = trending.get(m.reading.playerId) as { heat: number } | undefined;
+    return {
+      reading: m.reading,
+      tier: 'value' as const,
+      competes: (other: string) => slots.some((s) => s.accepts.includes(other)),
+      overCap,
+      ...(overCap ? { minBar: MEANINGFUL_UPGRADE_GAIN } : {}),
+      nudges: { lift: t ? Math.round(0.75 * Math.max(0, Math.min(1, t.heat)) * 100) / 100 : 0, order: 0 },
+      planExcluded: dropSignal(drops.get(m.reading.playerId) as never).planExcluded,
+    };
+  });
+  const plan = planMoves({ candidates: moveCandidates, pool: realPool, openSpots });
+  for (const m of misses) {
+    const mv = plan.moves.get(m.reading.playerId);
+    if (!mv) continue;
+    console.log(
+      `  ${m.name.padEnd(22)} cut ${(mv.cut?.reading.name ?? '-').padEnd(20)} gap ${mv.comparison ? signed(mv.comparison.gap) : '-'} bar ${mv.comparison ? mv.comparison.bar.toFixed(1) : '-'} clears ${mv.clears}${mv.planExcluded ? `  EXCLUDED: ${mv.planExcluded}` : ''}`,
+    );
+  }
+  console.log(`  groups: ${JSON.stringify(plan.groups.map((g) => ({ drop: g.drop?.name ?? 'open spot', adds: g.addIds.length })))}`);
+  console.log(`  the real plan's value adds: ${decision.valueAdds.length}, upgrades: ${decision.upgrades.length}, moveGroups: ${decision.moveGroups.length}`);
+}
