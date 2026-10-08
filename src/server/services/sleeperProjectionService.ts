@@ -56,6 +56,27 @@ export interface ProjectionRefreshReport {
   detail: string | null;
 }
 
+/**
+ * A newest fetch that wrote less than this share of the stored week is a
+ * sliver, not a refresh.
+ *
+ * On Wednesday 7 October 2026 the 09:00 fetch caught Sleeper's feed mid-update
+ * and wrote 30 rows; the table is upserted, so the other 376 stayed from the day
+ * before, `fetchedAt` read as minutes old, and the twelve-hour gate declined
+ * every refresh until the next morning. A whole refetch writes about all of the
+ * week (players who dropped out of the feed keep their old rows, so it is never
+ * quite 100%), which is far above this line; a mid-update answer is far below.
+ */
+export const SLIVER_SHARE = 0.5;
+
+/** Too few stored players to judge: an early-week feed can be genuinely small. */
+const SLIVER_MIN_PLAYERS = 50;
+
+export function isSliver(held: { players: number; latestRows: number }): boolean {
+  if (held.players < SLIVER_MIN_PLAYERS) return false;
+  return held.latestRows < held.players * SLIVER_SHARE;
+}
+
 export class SleeperProjectionService {
   private readonly repo: SleeperProjectionsRepo;
 
@@ -103,7 +124,7 @@ export class SleeperProjectionService {
        * genuinely publishes no defences for costs one extra fetch per tick —
        * four hundred upserts on a table that holds one week — and cannot loop.
        */
-      const whole = held.players > 0 && held.defenses > 0;
+      const whole = held.players > 0 && held.defenses > 0 && !isSliver(held);
       if (whole && ageHours != null && Number.isFinite(ageHours) && ageHours < MAX_AGE_HOURS) {
         return { ...base, outcome: 'current', detail: `${held.players} player(s), refreshed within the day` };
       }

@@ -1624,6 +1624,8 @@ export interface WaiverAdvice {
 export interface WaiverRefreshReport {
   transactions: { weeksFetched: number[]; transactions: number } | null;
   trending: { captured: number; capturedAt: string; drops: number | null } | null;
+  /** Published projection rows written by this refresh; 0 when the gate declined. */
+  projections?: number;
   refreshedAt: string;
 }
 

@@ -49,6 +49,15 @@ export interface WeeklyProjectionFreshness {
   defenses: number;
   /** ISO of the most recent fetch that wrote into this week. */
   fetchedAt: string | null;
+  /**
+   * How many of `players` that most recent fetch wrote.
+   *
+   * The table is upserted, never cleared, so a fetch that caught the feed
+   * mid-update (30 rows, on Wednesday 7 October 2026) still moves `fetchedAt`
+   * to now and leaves the other 376 rows from the day before. Read beside
+   * `players` this tells a whole week from a sliver of one.
+   */
+  latestRows: number;
   /** What the feed called itself, when every stored row agrees. */
   publisher: string | null;
 }
@@ -186,27 +195,52 @@ export class SleeperProjectionsRepo {
    * somehow mixed two publishers should report neither rather than the first.
    */
   async freshness(season: string, week: number): Promise<WeeklyProjectionFreshness> {
-    const row = await this.db
+    /*
+     * Grouped by fetch, so one pass over the week's rows answers both "how much
+     * is stored" and "how much did the last fetch write". The same rows the
+     * ungrouped count read; a handful of result rows instead of one.
+     */
+    const { results } = await this.db
       .prepare(
-        `select count(*) as players,
+        `select fetched_at,
+                count(*) as players,
                 sum(case when defense_json is not null then 1 else 0 end) as defenses,
-                max(fetched_at) as fetched_at,
                 min(coalesce(publisher, '')) as lo,
                 max(coalesce(publisher, '')) as hi
            from sleeper_weekly_projections
-          where season = ? and week = ?`,
+          where season = ? and week = ?
+          group by fetched_at`,
       )
       .bind(season, week)
-      .first<Record<string, unknown>>();
+      .all<Record<string, unknown>>();
 
-    const lo = String(row?.['lo'] ?? '');
-    const hi = String(row?.['hi'] ?? '');
+    let players = 0;
+    let defenses = 0;
+    let fetchedAt: string | null = null;
+    let latestRows = 0;
+    const los: string[] = [];
+    const his: string[] = [];
+    for (const row of results ?? []) {
+      const n = Number(row['players'] ?? 0) || 0;
+      players += n;
+      defenses += Number(row['defenses'] ?? 0) || 0;
+      const at = row['fetched_at'] == null ? null : String(row['fetched_at']);
+      if (at != null && (fetchedAt == null || at > fetchedAt)) {
+        fetchedAt = at;
+        latestRows = n;
+      }
+      los.push(String(row['lo'] ?? ''));
+      his.push(String(row['hi'] ?? ''));
+    }
+    const lo = los.length === 0 ? '' : los.reduce((a, b) => (b < a ? b : a));
+    const hi = his.length === 0 ? '' : his.reduce((a, b) => (b > a ? b : a));
     return {
       season,
       week,
-      players: Number(row?.['players'] ?? 0) || 0,
-      defenses: Number(row?.['defenses'] ?? 0) || 0,
-      fetchedAt: row?.['fetched_at'] == null ? null : String(row['fetched_at']),
+      players,
+      defenses,
+      fetchedAt,
+      latestRows,
       publisher: lo !== '' && lo === hi ? lo : null,
     };
   }
