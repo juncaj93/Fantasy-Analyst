@@ -44,8 +44,13 @@ pass three budgets. Each file is gzipped **individually** and then summed,
 because that is how a browser fetches them — measuring the concatenation would
 report a compression ratio no client will ever see.
 
-**Two things are excluded from the render-path budgets, and each is capped
-separately.** The Draft screen ships as `assets/draft-*.js`: `App.tsx` reaches
+**Three things are excluded from the render-path budgets, and each is capped
+separately.** Setup (with Review and Data health under it) ships as
+`assets/setup-*.js` since 8 October 2026: `App.tsx` reaches it through `lazy()`
+and fetches it 1.5 seconds after the first screen renders, so it is cached
+before anybody taps the tab but never delays Team, Matchup or Waivers. That took
+the entry chunk from ~133.5KB to ~113.9KB under the same 135KB ceiling. The
+Draft screen ships as `assets/draft-*.js`: `App.tsx` reaches
 it only through `lazy()`, and draws it only while the season says a draft is
 ahead (`web/draftGate.ts`, which reads the same `draftVisible` that puts the tab
 in the bar), so for most of the year no page load fetches it. Demo Mode ships as `assets/demo-*.js` — a name `vite.config.ts`

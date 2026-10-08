@@ -25,7 +25,6 @@ import { useKeyboardOpen } from './viewport.ts';
 import { shouldDrawDraftScreen } from './draftGate.ts';
 import { MatchupScreen } from './screens/MatchupScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
-import { SetupScreen } from './screens/SetupScreen.tsx';
 import { TradesScreen } from './screens/TradesScreen.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
@@ -44,6 +43,14 @@ import { currentWorld } from './world.ts';
  */
 const loadDraftScreen = () => import('./screens/DraftScreen.tsx');
 const lazyDraftScreen = () => lazy(() => loadDraftScreen().then((m) => ({ default: m.DraftScreen })));
+/*
+ * Setup, the same way (October 2026): its own chunk, fetched once the first
+ * screen is drawn rather than before it. See `vite.config.ts`.
+ */
+const loadSetupScreen = () => import('./screens/SetupScreen.tsx');
+const lazySetupScreen = () => lazy(() => loadSetupScreen().then((m) => ({ default: m.SetupScreen })));
+/** How long after the first render to fetch Setup's code, so it never competes with it. */
+const SETUP_PREFETCH_MS = 1500;
 
 type Tab = 'draft' | 'team' | 'matchup' | 'waivers' | 'trades' | 'players' | 'setup';
 
@@ -297,6 +304,18 @@ export function App() {
     if (prefetchDraft) void loadDraftScreen().catch(() => {});
   }, [prefetchDraft]);
 
+  /*
+   * Setup's code, fetched shortly after the first screen is up: off the render
+   * path, and in the browser's cache before anybody taps the tab, so a reader
+   * who loses signal on Team can still open Setup.
+   */
+  const [SetupScreen, setSetupScreen] = useState(lazySetupScreen);
+  useEffect(() => {
+    if (!ready) return;
+    const timer = setTimeout(() => void loadSetupScreen().catch(() => {}), SETUP_PREFETCH_MS);
+    return () => clearTimeout(timer);
+  }, [ready]);
+
   if (!ready) return <Loading what="Fantasy Analyst" />;
 
   /*
@@ -404,18 +423,22 @@ export function App() {
         {tab === 'trades' ? <TradesScreen resetNonce={resetNonce} /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} draftAhead={draftVisible} /> : null}
         {tab === 'setup' ? (
-          <SetupScreen
-            leagues={leagues}
-            resetNonce={resetNonce}
-            reviewPending={reviewPending}
-            onChanged={() => void refresh()}
-            unlocked={unlocked}
-            canUnlock={canUnlock}
-            onUnlocked={() => {
-              setUnlocked(true);
-              void refresh();
-            }}
-          />
+          <ScreenLoadBoundary what="Setup" onRetry={() => setSetupScreen(lazySetupScreen)}>
+            <Suspense fallback={<Loading what="Setup" />}>
+              <SetupScreen
+                leagues={leagues}
+                resetNonce={resetNonce}
+                reviewPending={reviewPending}
+                onChanged={() => void refresh()}
+                unlocked={unlocked}
+                canUnlock={canUnlock}
+                onUnlocked={() => {
+                  setUnlocked(true);
+                  void refresh();
+                }}
+              />
+            </Suspense>
+          </ScreenLoadBoundary>
         ) : null}
       </main>
 
