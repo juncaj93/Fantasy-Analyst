@@ -3185,6 +3185,34 @@ body,
  * "small position pills, slim accent bars" asks for and what keeps a hundred
  * rows readable as a column of names rather than a column of colours.
  */
+/*
+ * A heading over a list's leading column (the Players rank, October 2026).
+ *
+ * Outside the group and padded like the row inside it, so the word starts on
+ * the same x as the numbers under it. Small and faint: it names a column, it
+ * is not a section title.
+ */
+.list-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2) var(--sp-1);
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  min-width: 0;
+}
+.list-head-rank {
+  font-weight: 620;
+  color: var(--text-dim);
+  flex: none;
+}
+.list-head-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dense-group {
   background: var(--surface);
   border-radius: var(--radius);

@@ -623,7 +623,20 @@ export function PlayersScreen({
         <Empty>{playersEmptyLine({ query, position, owner: ownerFilter, ownerLabel })}</Empty>
       ) : (
         <>
-          <div className="dense-group" role="list" aria-label="Players, best first" data-testid="players-list">
+          {/*
+            The number on the left, said once (October 2026, finding P1).
+
+            Every row leads with a number and nothing said what it was. It is
+            Sleeper's draft order after the research nudge (`adjustedRank`),
+            the same number the draft board orders by, so the heading names it
+            once over its own column instead of printing a word on every row.
+            Aligned to the rank's x: the row's padding, the rank slot's width.
+          */}
+          <div className="list-head" data-testid="players-rank-head">
+            <span className="list-head-rank">Rank</span>
+            <span className="list-head-note">Sleeper’s draft order, moved by your research</span>
+          </div>
+          <div className="dense-group" role="list" aria-label="Players, by rank" data-testid="players-list">
             {players.map((p) => (
               <PlayerRow
                 key={p.id}
