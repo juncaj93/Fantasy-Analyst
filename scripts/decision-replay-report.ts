@@ -12,7 +12,8 @@
  *    real `assembleLineup`;
  *  - every file: the replay's outcome against what production captured, and
  *    each decision-level difference (starters, swaps, claims, the defense
- *    pick, Best move, win probability), with player ids turned into names.
+ *    pick, Best move, win probability, trade offers), with player ids turned
+ *    into names.
  *
  * On the code production runs, the replay should say `reproduced`.
  */
@@ -56,6 +57,7 @@ const DECISION_TERMS = [
   /^dst\.decision$/,
   /^decision\./,
   /^winProbability$/,
+  /^offers$/,
   /^output\.upgrades\[\d+\]\.(playerId|kind|verdict|claim)$/,
 ];
 

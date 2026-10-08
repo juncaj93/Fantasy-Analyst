@@ -1,12 +1,12 @@
 /**
  * Live decisions, replayed on the code before a change and after it.
  *
- * Fetches the public `lineup`, `waiver-plan` and `matchup` support snapshots
+ * Fetches the public `lineup`, `waiver-plan`, `matchup` and `trade-offer` support snapshots
  * and runs `scripts/decision-replay-report.ts` on BEFORE_SHA (default: the SHA
  * production reports) and on this checkout, then prints both and the lines
  * that differ. For the "replay before and after, with names and reasons" rule.
  *
- * Reads only: GETs of /api/health, /api/leagues and three support snapshots,
+ * Reads only: GETs of /api/health, /api/leagues and four support snapshots,
  * and a shallow fetch of the earlier commit. No odds are bought, nothing is
  * written.
  */
@@ -25,7 +25,7 @@ const leagues = await fetch(`${APP}/api/leagues`).then((r) => r.json());
 const leagueId = process.env.LEAGUE_ID || leagues?.leagues?.find((l) => l.isSelected)?.id;
 const dir = mkdtempSync(join(tmpdir(), 'decision-replay-'));
 const files = [];
-for (const context of ['lineup', 'waiver-plan', 'matchup']) {
+for (const context of ['lineup', 'waiver-plan', 'matchup', 'trade-offer']) {
   const res = await fetch(`${APP}/api/leagues/${leagueId}/support-snapshot?context=${context}`);
   console.log(`GET support-snapshot (${context}) -> HTTP ${res.status}`);
   if (!res.ok) continue;
