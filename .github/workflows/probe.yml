@@ -67,7 +67,7 @@ jobs:
             })")
           export DRAFT_ID
           case "$SCRIPT" in
-            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs)
+            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs)
               export CLOUDFLARE_API_TOKEN="$CF_TOKEN" ACCOUNT_ID="$CF_ACCOUNT" ;;
           esac
           unset CF_TOKEN CF_ACCOUNT
