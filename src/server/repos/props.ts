@@ -204,6 +204,16 @@ export class PropsRepo implements SnapshotStore {
    * the previous Sunday's kickoff for nine of ten starters and locked every
    * one of them. A kickoff that may be any week's is worse than no kickoff at
    * all: unknown is never treated as a lock, and a wrong one silently is.
+   *
+   * ## `+ps.fetched_at`, and why the plus is load-bearing
+   *
+   * The same trick as `+s2.scope` below, for the sort this time. The rows are
+   * few, so sorting them costs nothing; but an `ORDER BY` an index can answer
+   * is one SQLite will walk that index to avoid, and `(scope, fetched_at)`
+   * answers this one by walking every weekly snapshot of the season. The plus
+   * changes no value and no order; it only leaves the planner the window
+   * index from migration 0044, which reads this slate's snapshots and no
+   * others. Production, 8 October 2026: 2,623 rows a call before.
    */
   async kickoffsForPlayers(playerIds: string[], window: SlateWindow): Promise<Map<string, string>> {
     const out = new Map<string, string>();
@@ -218,7 +228,7 @@ export class PropsRepo implements SnapshotStore {
             WHERE pp.player_id IN (${placeholders})
               AND ps.scope = 'week'
               AND ps.game_start >= ? AND ps.game_start <= ?
-            ORDER BY ps.fetched_at ASC`,
+            ORDER BY +ps.fetched_at ASC`,
         )
         .bind(...batch, window.from, window.to)
         .all<Record<string, unknown>>();

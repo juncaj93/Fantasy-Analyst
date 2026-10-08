@@ -81,6 +81,8 @@ jobs:
           {
             ask "indexes on injury_source_runs" "PRAGMA index_list('injury_source_runs')"
             ask "indexes on usage_source_runs"  "PRAGMA index_list('usage_source_runs')"
+            ask "indexes on prop_snapshots"     "PRAGMA index_list('prop_snapshots')"
+            ask "indexes on player_props"       "PRAGMA index_list('player_props')"
             ask "plan: injury latestRun()" \
               "EXPLAIN QUERY PLAN SELECT * FROM injury_source_runs ORDER BY fetched_at DESC, id DESC LIMIT 1"
             ask "plan: usage latestRun()" \

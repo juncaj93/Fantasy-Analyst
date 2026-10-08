@@ -39,6 +39,13 @@ const fingerprint = (rows) =>
     .digest('hex')
     .slice(0, 10);
 
+/** What `kickoffsForPlayers` keeps: the last row per player, in the order returned. */
+const kickoffFingerprint = (rows) => {
+  const kept = new Map();
+  for (const r of rows) kept.set(String(r.player_id), String(r.game_start));
+  return fingerprint([...kept.entries()].map(([id, at]) => ({ id, at })));
+};
+
 const now = Date.now();
 const from = new Date(now - 12 * 3_600_000).toISOString();
 const to = new Date(now + 9 * 86_400_000).toISOString();
@@ -86,6 +93,8 @@ function variants(inList) {
     kickoffs: {
       current: `SELECT pp.player_id AS player_id, ps.game_start AS game_start FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (${inList}) AND ps.scope = 'week' ${W} ORDER BY ps.fetched_at ASC`,
       byPlayer: `SELECT pp.player_id AS player_id, ps.game_start AS game_start FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (${inList}) AND +ps.scope = 'week' ${W} ORDER BY ps.fetched_at ASC`,
+      // D5: the sort no longer picks the index, so the window can.
+      byWindow: `SELECT pp.player_id AS player_id, ps.game_start AS game_start FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (${inList}) AND ps.scope = 'week' ${W} ORDER BY +ps.fetched_at ASC`,
     },
   };
 }
@@ -120,12 +129,40 @@ for (const size of process.env.SIZES ? process.env.SIZES.split(",").map(Number) 
     for (const [form, sql] of Object.entries(forms)) {
       const plan = run(`EXPLAIN QUERY PLAN ${sql}`).rows.map((r) => r.detail).join(' | ');
       const r = run(sql);
-      const fp = fingerprint(r.rows);
+      const fp = query === 'kickoffs' ? kickoffFingerprint(r.rows) : fingerprint(r.rows);
       base ??= fp;
       console.log(
         `${query.padEnd(9)} ${form.padEnd(13)} rows_read ${String(r.read).padStart(7)}   returned ${String(r.rows.length).padStart(4)}   ${fp}${fp === base ? '' : '  <-- DIFFERENT ROWS'}`,
       );
       console.log(`          plan: ${plan}`);
     }
+  }
+}
+
+// D5: the latest injury report per player, as written and rewritten. The
+// join form scans every report of the season through the (season, week)
+// index; the correlated form looks each player up by the primary key.
+{
+  const season = run(`SELECT MAX(season) AS s FROM player_injury_reports`).rows[0]?.s;
+  const reported = run(
+    `SELECT DISTINCT player_id AS id FROM player_injury_reports WHERE season = ${lit(season)} LIMIT 38`,
+  ).rows.map((r) => r.id);
+  const ids = [...reported, ...unpriced.slice(0, 2)].map(lit).join(',');
+  const forms = {
+    current: `SELECT r.* FROM player_injury_reports r JOIN (SELECT player_id, MAX(week) AS week FROM player_injury_reports WHERE season = ${lit(season)} AND player_id IN (${ids}) GROUP BY player_id) latest ON latest.player_id = r.player_id AND latest.week = r.week WHERE r.season = ${lit(season)}`,
+    byPlayer: `SELECT r.* FROM player_injury_reports r WHERE r.season = ${lit(season)} AND r.player_id IN (${ids}) AND r.week = (SELECT MAX(r2.week) FROM player_injury_reports r2 WHERE r2.player_id = r.player_id AND r2.season = r.season)`,
+  };
+  console.log('');
+  console.log(`== latest injury report, ${reported.length + 2} players, season ${season}`);
+  let base = null;
+  for (const [form, sql] of Object.entries(forms)) {
+    const plan = run(`EXPLAIN QUERY PLAN ${sql}`).rows.map((r) => r.detail).join(' | ');
+    const r = run(sql);
+    const fp = fingerprint(r.rows);
+    base ??= fp;
+    console.log(
+      `injury    ${form.padEnd(13)} rows_read ${String(r.read).padStart(7)}   returned ${String(r.rows.length).padStart(4)}   ${fp}${fp === base ? '' : '  <-- DIFFERENT ROWS'}`,
+    );
+    console.log(`          plan: ${plan}`);
   }
 }
