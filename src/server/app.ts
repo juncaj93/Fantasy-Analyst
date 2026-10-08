@@ -139,7 +139,7 @@ import { findTradeFits, type TradeAsset, type TradeTeam } from '../core/league/t
 import { SleeperSyncService } from './services/sleeperSync.ts';
 /* Which season it is, from Sleeper's own state rather than from the clock. */
 import { currentSeason } from './services/seasonService.ts';
-import { StartSitRefreshService } from './services/startSitRefresh.ts';
+import { StartSitRefreshService, refreshPublishedWeek } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
 import { startSitInputsFor, buildStartSitContext } from './services/startSitInputs.ts';
 import { D1QuotaService } from './services/d1QuotaService.ts';
@@ -1032,8 +1032,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * The Waivers screen's own refresh: Sleeper, and nothing else.
    *
    * This week's and last week's transactions (last week's waiver claims post
-   * on Wednesday morning), and the trending adds and drops lists: about four
-   * Sleeper requests, no paid provider. The props behind the Vegas yardstick
+   * on Wednesday morning), the trending adds and drops lists, and this week's
+   * published projections when their gate lets them through: about four or
+   * five Sleeper requests, no paid provider. The props behind the Vegas yardstick
    * stay on their own schedule and budget and are never bought from here; the
    * pull-to-refresh on this screen used to run the start/sit refresh, which
    * did.
@@ -1060,9 +1061,20 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       })
       .catch(() => null);
     const trending = await service.captureTrending().catch(() => null);
+    /*
+     * And Sleeper's published week, behind its own gate (October 2026).
+     *
+     * The waiver yardstick reads it for every free agent the market has not
+     * fully priced, and until now only the crons and the Team refresh offered
+     * it a refresh, so a 09:00 fetch that caught the feed mid-update stood on
+     * this screen until the next morning. Sleeper only; it declines for one
+     * read when the stored week is young and whole.
+     */
+    const projections = await refreshPublishedWeek(db, ctx.env.sleeper, league.season);
     return jsonResponse({
       transactions,
       trending,
+      projections,
       refreshedAt: new Date().toISOString(),
     });
   });
