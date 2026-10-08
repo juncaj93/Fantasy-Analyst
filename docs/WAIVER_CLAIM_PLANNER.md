@@ -70,6 +70,11 @@ ten (19 in 20 with fewer than 30 claims on record). It is capped at what the
 pricing pass says he is worth to this roster, and says so. A free agent outside
 the waiver window carries no bid.
 
+Decided by Alex on 8 October 2026: the chaser's points weight stays as it is
+and is revisited after two or three more weeks of claims (the backtest found
+last week's points barely predict competition here); an IR stash stays paired
+with a drop, because Sleeper needs a free roster spot at claim time.
+
 Seeds: RonJonathan (roster 6) savvy; MattyB2317 (roster 10, not MattLee04)
 slightly savvy; cheeseking (roster 8) rarely adds; everyone else a last-week
 chaser until his own claims say otherwise.
