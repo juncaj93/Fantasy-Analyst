@@ -30,6 +30,9 @@ import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } f
 import { noMoveSummary, unscoredNotes } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { RefreshIcon } from '../components/icons.tsx';
+import { TierDetailSheet, TierRowButton, TierSections } from '../components/waiverTiers.tsx';
+import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
+import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
 
 const ALL_FILTER = 'ALL';
 
@@ -40,6 +43,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [open, setOpen] = useState<WaiverBoardRow | null>(null);
+  const [openTier, setOpenTier] = useState<TierRow | null>(null);
 
   /*
    * Tapping Waivers while already on Waivers.
@@ -53,6 +57,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     if (resetNonce === 0) return;
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
+      { when: openTier != null, undo: () => setOpenTier(null) },
       { when: filter !== ALL_FILTER, undo: () => setFilter(ALL_FILTER) },
     ]);
   }, [resetNonce]);
@@ -151,6 +156,9 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const noMove = advice?.found === true && !advice.claimPlan?.surface && recommended.length === 0;
   const summary = useMemo(() => (advice ? noMoveSummary(advice) : null), [advice]);
   const defenceSpeaks = board?.dst?.surface === true;
+  const tiers = advice?.found ? (advice.tiers ?? null) : null;
+  /* The defence planner's named rows: drawn with the considered moves. */
+  const dstNamed = useMemo(() => (board?.rows ?? []).filter((row) => row.dst != null), [board]);
 
   /*
    * Who this roster would cut for each target, by player.
@@ -219,64 +227,98 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             in the order to enter them, and hiding it behind a filter for WRs
             would hide the tight end claim that the same plan depends on.
           */}
-          <div className="section-title" data-testid="waivers-recommended-title">
-            Recommended move
-          </div>
-          <section data-testid="waivers-recommended">
-            <WaiverPlanCard plan={advice.claimPlan} />
-            {noMove && summary ? (
-              <NoMoveCard summary={summary} {...(defenceSpeaks ? { headline: 'No player move this week' } : {})} />
-            ) : null}
-
-            {/*
-              The defence, when it has no row of its own to be said in.
-
-              A `wait` or a `hold` names nobody, so it cannot be a row — and it
-              is still the answer to "which defence should I add". When the
-              planner *has* named somebody, his row below carries the same words
-              and this line would be the same recommendation twice.
-            */}
-            {recommended.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
-
-            {recommended.map((row) => (
-              <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
-            ))}
-          </section>
-
-          {scoredOthers.length > 0 ? (
+          {tiers ? (
             <>
-              <div className="section-title" data-testid="waivers-others-title">
-                Other options to consider
-              </div>
               {/*
-                Under a plan, the heading says it all; the note that said
-                "not part of the plan above" was removed on 1 October 2026.
-                With no plan, the note is the reason nothing is recommended.
+                The tiers. "Do this" holds the plan card (the instruction to type
+                into Sleeper, no controls on it) and the move's own row; the
+                tiers below it are scored by what each move adds to your best
+                lineup over the next three weeks. See core/waivers/tiers.ts.
               */}
-              {planMoves ? null : (
-                <div className="faint waivers-others-note" data-testid="waivers-others-note">
-                  Each beats someone on your bench on paper, but none is worth a roster move this week.
-                </div>
-              )}
-              {segments.length > 1 ? (
-                <SegmentedControl
-                  label="Filter by position"
-                  testId="waiver-filters"
-                  compact
-                  value={filter}
-                  onChange={setFilter}
-                  segments={segments.map((p) => ({ id: p, label: p, testId: `waiver-filter-${p.toLowerCase()}` }))}
-                />
-              ) : null}
-              <section className="waivers-others" data-testid="waivers-others">
-                {rows.length === 0 ? (
-                  <Empty>{`Nothing else at ${filter} is worth a look.`}</Empty>
+              <div className="section-title" data-testid="waivers-recommended-title">
+                Do this
+              </div>
+              <section data-testid="waivers-recommended">
+                <WaiverPlanCard plan={advice.claimPlan} />
+                {tiers.doThis ? (
+                  <TierRowButton row={tiers.doThis} onOpen={() => setOpenTier(tiers.doThis)} />
                 ) : (
-                  rows.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
+                  <NoMoveCard summary={tierNoMove(tiers)} />
                 )}
+                {dstNamed.length > 0 ? null : <DstLine plan={board?.dst ?? null} />}
               </section>
+              <TierSections
+                tiers={tiers}
+                onOpen={setOpenTier}
+                afterConsider={
+                  dstNamed.length > 0
+                    ? dstNamed.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
+                    : undefined
+                }
+              />
             </>
-          ) : null}
+          ) : (
+            <>
+            <div className="section-title" data-testid="waivers-recommended-title">
+              Recommended move
+            </div>
+            <section data-testid="waivers-recommended">
+              <WaiverPlanCard plan={advice.claimPlan} />
+              {noMove && summary ? (
+                <NoMoveCard summary={summary} {...(defenceSpeaks ? { headline: 'No player move this week' } : {})} />
+              ) : null}
+
+              {/*
+                The defence, when it has no row of its own to be said in.
+
+                A `wait` or a `hold` names nobody, so it cannot be a row — and it
+                is still the answer to "which defence should I add". When the
+                planner *has* named somebody, his row below carries the same words
+                and this line would be the same recommendation twice.
+              */}
+              {recommended.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
+
+              {recommended.map((row) => (
+                <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+              ))}
+            </section>
+
+            {scoredOthers.length > 0 ? (
+              <>
+                <div className="section-title" data-testid="waivers-others-title">
+                  Other options to consider
+                </div>
+                {/*
+                  Under a plan, the heading says it all; the note that said
+                  "not part of the plan above" was removed on 1 October 2026.
+                  With no plan, the note is the reason nothing is recommended.
+                */}
+                {planMoves ? null : (
+                  <div className="faint waivers-others-note" data-testid="waivers-others-note">
+                    Each beats someone on your bench on paper, but none is worth a roster move this week.
+                  </div>
+                )}
+                {segments.length > 1 ? (
+                  <SegmentedControl
+                    label="Filter by position"
+                    testId="waiver-filters"
+                    compact
+                    value={filter}
+                    onChange={setFilter}
+                    segments={segments.map((p) => ({ id: p, label: p, testId: `waiver-filter-${p.toLowerCase()}` }))}
+                  />
+                ) : null}
+                <section className="waivers-others" data-testid="waivers-others">
+                  {rows.length === 0 ? (
+                    <Empty>{`Nothing else at ${filter} is worth a look.`}</Empty>
+                  ) : (
+                    rows.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
+                  )}
+                </section>
+              </>
+            ) : null}
+            </>
+          )}
 
           {/*
             Popular adds this app cannot rate, under their own heading, with
@@ -320,7 +362,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             which `e2e-production/smoke.spec.ts` asserts by reading every button
             on it.
           */}
-          {board && board.pending.length > 0 ? (
+          {!tiers && board && board.pending.length > 0 ? (
             <div className="faint" data-testid="waivers-pending" style={{ margin: '4px 4px 8px' }}>
               {joinFields(board.pending)} {board.pending.length === 1 ? 'arrives' : 'arrive'} with league
               intelligence — shown as unknown rather than estimated.
@@ -341,14 +383,35 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             a screen about a lineup. The bids it qualifies are the rows above.
           */}
           <BudgetFooter faab={advice?.faab ?? null} />
+          {tiers?.freeAgentRule ? (
+            <div className="faint" data-testid="waivers-free-agent-rule" style={{ margin: '0 4px 8px' }}>
+              {tiers.freeAgentRule}
+            </div>
+          ) : null}
         </>
       )}
 
+      {openTier && tiers ? <TierDetailSheet row={openTier} tiers={tiers} onClose={() => setOpenTier(null)} /> : null}
       {open ? (
         <WaiverDetailSheet row={open} onClose={() => setOpen(null)} dropHint={dropHints.get(open.playerId) ?? null} />
       ) : null}
     </PullToRefresh>
   );
+}
+
+/** The empty "Do this", said as an answer: what else the tiers hold. */
+export function tierNoMove(tiers: WaiverTiersView): NoMoveSummary {
+  const consider = tiers.consider.length;
+  return {
+    headline: 'No must-do move this week',
+    detail:
+      consider > 0
+        ? `${consider} move${consider === 1 ? ' is' : 's are'} worth considering below.`
+        : tiers.watch.length > 0
+          ? 'Nothing on the wire adds enough to your lineup to act on now.'
+          : 'Nothing on the wire would improve your lineup over the next three weeks.',
+    nearest: null,
+  };
 }
 
 /**

@@ -131,17 +131,14 @@ const HABITS: ManagerHabit[] = [
  * one screen and shows a different one having landed on the next is telling two
  * stories about one week.
  *
- * **A dollar, and that is the demonstration rather than a weakening of it.**
- * This was $27, which is what the receiver is worth to that roster, and the
- * engine used to recommend exactly that. It no longer does: the league read
- * says one rival needs a receiver and cannot afford the going rate, so nobody
- * is bidding, and a claim nobody is bidding against is won at the minimum. The
- * whole point of the wallet on this screen is that the money buys something
- * later, and the plan saying "pay a dollar, keep twenty-six" is the strongest
- * thing this lane does. See `UNCONTESTED_BID` in `core/faab/strategy.ts`.
+ * **Ten dollars, from the bid model (October 2026).** It was a dollar while
+ * the plan priced a claim nobody needed as uncontested. The bid model now reads
+ * how this league's managers actually bid (`core/waivers/bidModel.ts`): with no
+ * history to the contrary, about one other manager is likely to chase the #2
+ * add on Sleeper, so the plan says $10, and that is what landed.
  */
 export const WEEK_SEVEN_RUN = new Map<number, { bid: number }>([
-  [MY_ROSTER_ID, { bid: 1 }],
+  [MY_ROSTER_ID, { bid: 10 }],
   [2, { bid: 9 }],
   [6, { bid: 17 }],
 ]);

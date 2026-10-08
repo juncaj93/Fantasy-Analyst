@@ -34,8 +34,8 @@ export interface TierBid {
   ceiling: number | null;
   /** The competition probably goes above what he is worth to you. */
   overCeiling: boolean;
-  /** The rivals most likely to bid, most likely first. */
-  rivals: { name: string; chance: number; style: string }[];
+  /** The other managers most likely to bid, most likely first. */
+  likely: { name: string; chance: number; style: string }[];
   /** Set when the record is thin. */
   thin: string | null;
   /** When a claim clears, ISO. */
@@ -62,8 +62,8 @@ export interface WaiverTiersView {
   freeAgentRule: string | null;
   /** Every valued free agent's best move, top 20 by gain: the audit behind the thresholds. Not drawn. */
   audit: { playerId: string; name: string; position: string; gain: number; reason: string; drop: string | null }[];
-  /** The rival profiles behind the bids, for the detail sheet. */
-  rivals: { name: string; style: string; source: 'seed' | 'default'; note: string | null; claimsPerRun: number; bids: number[] }[];
+  /** Each other manager's bidding profile behind the bids. */
+  profiles: { name: string; style: string; source: 'seed' | 'default'; note: string | null; claimsPerRun: number; bids: number[] }[];
 }
 
 export interface TierViewInput {
@@ -126,11 +126,11 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         low: Math.min(advice.low, recommended ?? advice.low),
         high: overCeiling ? ceiling : advice.high,
         reason: overCeiling
-          ? `${advice.reason.replace(/, so bid \$\d+\.$/, '')}. That is more than he is worth to you ($${ceiling}), so bid $${ceiling} only if you want him anyway.`
+          ? `${advice.why}. He is worth about $${ceiling} to you, less than the $${advice.recommended} it likely takes, so bid $${ceiling} only if you want him anyway.`
           : advice.reason,
         ceiling,
         overCeiling,
-        rivals: advice.rivals
+        likely: advice.rivals
           .filter((r) => r.chance >= 0.1)
           .slice(0, 3)
           .map((r) => ({ name: r.name, chance: r.chance, style: STYLE_PRIORS[r.style].label })),
@@ -159,7 +159,7 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       drop: m.drop?.name ?? null,
     })),
     freeAgentRule: input.rules ? freeAgentRule(input.rules) : null,
-    rivals: profiles.map((p) => ({
+    profiles: profiles.map((p) => ({
       name: p.name,
       style: STYLE_PRIORS[p.style].label,
       source: p.styleSource,
@@ -196,7 +196,7 @@ function ceilingFor(m: TierMove, input: TierViewInput): number | null {
 }
 
 function emptyBid(kind: TierBid['kind'], reason: string, pickup: PickupState | null): TierBid {
-  return { kind, recommended: null, low: null, high: null, reason, ceiling: null, overCeiling: false, rivals: [], thin: null, until: pickup?.until ?? null };
+  return { kind, recommended: null, low: null, high: null, reason, ceiling: null, overCeiling: false, likely: [], thin: null, until: pickup?.until ?? null };
 }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

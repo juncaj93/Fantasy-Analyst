@@ -254,6 +254,12 @@ export interface WaiverPlanInputs {
   recentlyDropped?: Record<string, string>;
   /** The league's waiver window: its rules and every recent drop. Absent on older files. */
   waiverWindow?: { rules: WaiverRules; drops: Record<string, string> } | null;
+  /** Last week's points, for the bid model. Absent on a capture before the tiers. */
+  lastWeekPoints?: { week: number; points: Record<string, number> } | null;
+  /** The earlier-week projection for players with no number this week. */
+  recentPublished?: Record<string, { week: number; points: number }>;
+  /** Injured-reserve slots the league allows. */
+  reserveSlots?: number;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.

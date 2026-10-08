@@ -133,6 +133,8 @@ export interface BidAdvice {
   rivals: RivalOdds[];
   /** One plain sentence: why this number. */
   reason: string;
+  /** The same, without the closing "so bid $N": for a caller that ends it differently. */
+  why: string;
   /** Set when the record is thin, said on screen. */
   thin: string | null;
 }
@@ -258,14 +260,21 @@ export function adviseBid(opts: {
     noRival,
     rivals,
     reason: reasonFor(recommended, opts.signals, rivals, expectedRivals),
+    why: whyFor(opts.signals, rivals, expectedRivals),
     thin,
   };
 }
 
 function reasonFor(bid: number, signals: BidSignals, rivals: readonly RivalOdds[], expected: number): string {
   if (expected < 0.3) return `Nobody is likely chasing him, so $${bid} should win.`;
+  return `${whyFor(signals, rivals, expected)}, so bid $${bid}.`;
+}
+
+/** What draws the competition, or how much of it there is: one clause, no closing number. */
+function whyFor(signals: BidSignals, rivals: readonly RivalOdds[], expected: number): string {
+  if (expected < 0.3) return 'Nobody is likely chasing him';
   const drivers: string[] = [];
-  if (signals.freshDrop) drivers.push('just dropped and drafted early');
+  if (signals.freshDrop) drivers.push('just dropped, and the room rated him');
   if (signals.lastWeekPoints != null && signals.lastWeekPoints >= 12) {
     drivers.push(`scored ${signals.lastWeekPoints.toFixed(1)} last week, which draws the chasers`);
   }
@@ -274,8 +283,8 @@ function reasonFor(bid: number, signals: BidSignals, rivals: readonly RivalOdds[
     const why = signals.trendRank != null && signals.trendRank <= 25 ? `#${signals.trendRank} on Sleeper's adds` : signals.roleRising ? 'a rising role' : null;
     drivers.push(`a likely ${savvy.name} target${why ? ` (${why})` : ''}`);
   }
-  const lead = drivers.length > 0 ? capitalise(drivers.join('; ')) : `About ${expected.toFixed(1)} rival${expected >= 1.5 ? 's' : ''} likely`;
-  return `${lead}, so bid $${bid}.`;
+  if (drivers.length > 0) return capitalise(drivers.join('; '));
+  return expected < 1.5 ? 'One other manager is likely to bid' : 'Two or more other managers are likely to bid';
 }
 
 function quantile(sorted: readonly number[], p: number): number {

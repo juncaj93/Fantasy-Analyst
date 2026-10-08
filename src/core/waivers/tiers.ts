@@ -91,7 +91,7 @@ export const TIER_RULES = {
    */
   holePoints: 3,
   /** A hole has to give the move at least this much in its week to be the reason. */
-  holeGain: 3,
+  holeGain: 1,
   /** Drop-ready: cutting him costs under this, lineup and depth together. */
   deadCost: 0.25,
   /** ...and he is no more than this many points a game above a free agent. */
@@ -555,7 +555,8 @@ function valueRoster(
       value: (p.rate ?? 0) * (p.weekly[k] ?? 1),
     }));
     const result = bestLineup(slots, pool);
-    const started = new Set(result.picks.filter((x): x is LineupCandidate => x != null).map((x) => x.id));
+    /* A zero-point pick (a bye, Out) fills nothing: he is not "starting" that week. */
+    const started = new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
     /*
      * The insurance credit, exactly as Check a trade counts it: the best few
      * bench players' edge over a free agent, times the share of a week a

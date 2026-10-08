@@ -47,6 +47,8 @@ async function serveEmptyWeek(page: Page) {
       response,
       body: JSON.stringify({
         ...original,
+        /* The board an older payload drew; the tiers' own empty week is in waiver-tiers.spec.ts. */
+        tiers: null,
         upgrades: [],
         valueAdds: [],
         moveGroups: [],

@@ -282,6 +282,17 @@ export async function captureWaiverSnapshot(
                 drops: Object.fromEntries(input.request.waiverWindow.drops),
               },
             }),
+        /* The tier planner's three inputs, so a replay scores the same moves and bids. */
+        ...(input.request.lastWeekPoints === undefined
+          ? {}
+          : {
+              lastWeekPoints:
+                input.request.lastWeekPoints == null
+                  ? null
+                  : { week: input.request.lastWeekPoints.week, points: Object.fromEntries(input.request.lastWeekPoints.points) },
+            }),
+        ...(input.request.recentPublished === undefined ? {} : { recentPublished: Object.fromEntries(input.request.recentPublished) }),
+        ...(input.request.reserveSlots === undefined ? {} : { reserveSlots: input.request.reserveSlots }),
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -413,6 +424,16 @@ export async function replayWaiverSnapshot(
     ...(inputs.waiverWindow == null
       ? {}
       : { waiverWindow: { rules: inputs.waiverWindow.rules, drops: new Map(Object.entries(inputs.waiverWindow.drops)) } }),
+    ...(inputs.lastWeekPoints === undefined
+      ? {}
+      : {
+          lastWeekPoints:
+            inputs.lastWeekPoints == null
+              ? null
+              : { week: inputs.lastWeekPoints.week, points: new Map(Object.entries(inputs.lastWeekPoints.points)) },
+        }),
+    ...(inputs.recentPublished === undefined ? {} : { recentPublished: new Map(Object.entries(inputs.recentPublished)) }),
+    ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
     rosters: inputs.rosters,
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,

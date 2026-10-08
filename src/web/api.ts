@@ -3,6 +3,7 @@
 import type { DstPlan } from '../core/dst/planner.ts';
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 import type { WaiverClaimPlan } from '../core/waivers/claimPlan.ts';
+import type { WaiverTiersView } from '../core/waivers/tierPlan.ts';
 import type { WaiverNearMiss } from '../core/startsit/waivers.ts';
 /*
  * The rule about what a response has to be before it is parsed.
@@ -1617,6 +1618,13 @@ export interface WaiverAdvice {
    * the screen reads as "no plan" and never as "no move".
    */
   claimPlan?: WaiverClaimPlan | null;
+  /**
+   * The moves in three tiers (Do this, Worth considering, Watch list), each
+   * scored by what it adds to the best lineup over the next three weeks, with
+   * its drop and its bid, and the bench players who are drop-ready. Absent on
+   * an older payload, which the screen draws the old way.
+   */
+  tiers?: WaiverTiersView | null;
   /**
    * When the Sleeper-side inputs — the trending lists and the league's
    * transactions — were last read. Drawn as `Updated 5:00 AM`. Null before the

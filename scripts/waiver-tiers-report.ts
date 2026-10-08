@@ -76,14 +76,19 @@ const dstSources: DstPlanSources = {
 const kickoffs = [...roster, ...candidates].map((i) => i.kickoff ?? null);
 const lastWeek = lastCompletedWeek(week, kickoffs, now);
 const statsFile = join(sleeperDir, `stats${lastWeek}.json`);
-const lastWeekPoints = existsSync(statsFile)
-  ? { week: lastWeek, points: new Map(Object.entries(scoreWeek(readJson(statsFile), scoring))) }
-  : null;
+/* A capture taken after the tiers shipped carries its own; prefer it. */
+const lastWeekPoints = inputs.lastWeekPoints
+  ? { week: inputs.lastWeekPoints.week as number, points: new Map(Object.entries(inputs.lastWeekPoints.points as Record<string, number>)) }
+  : existsSync(statsFile)
+    ? { week: lastWeek, points: new Map(Object.entries(scoreWeek(readJson(statsFile), scoring))) }
+    : null;
 
 /* The earlier-week projection, for players with no number this week. */
 const published = new Map<string, number>(Object.entries((inputs.published ?? {}) as Record<string, number>));
-const recentPublished = new Map<string, { week: number; points: number }>();
-for (let back = 1; back <= 3; back++) {
+const recentPublished = new Map<string, { week: number; points: number }>(
+  Object.entries((inputs.recentPublished ?? {}) as Record<string, { week: number; points: number }>),
+);
+for (let back = 1; back <= 3 && inputs.recentPublished == null; back++) {
   const w = week - back;
   const path = join(sleeperDir, `proj${w}.json`);
   if (w < 1 || !existsSync(path)) continue;
@@ -217,4 +222,4 @@ console.log('top of the board, with reasons:');
 for (const r of t.audit.slice(0, 12)) console.log(`  ${pad(r.name, 22)} ${pad(r.position, 3)} ${r.gain.toFixed(2)}  drop ${r.drop ?? '(open)'}  | ${r.reason}`);
 
 console.log('\nRIVAL PROFILES (seed or default, blended with this season):');
-for (const r of t.rivals) console.log(`  ${pad(r.name, 16)} ${pad(r.style, 28)} ${r.source}  ${r.claimsPerRun.toFixed(2)} claims/run  bids ${r.bids.join(',') || '-'}`);
+for (const r of t.profiles) console.log(`  ${pad(r.name, 16)} ${pad(r.style, 28)} ${r.source}  ${r.claimsPerRun.toFixed(2)} claims/run  bids ${r.bids.join(',') || '-'}`);
