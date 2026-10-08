@@ -33,6 +33,12 @@ export interface BidObservation {
   playerId: string | null;
   amount: number;
   outcome: 'won' | 'lost';
+  /**
+   * Sleeper voided the claim because the roster would have been over its
+   * limit (an earlier claim of the same manager landed first). It never
+   * competed, so the bid model does not count it as a rival bid.
+   */
+  voided?: boolean;
 }
 
 export interface BidHistory {
@@ -86,6 +92,7 @@ export function collectBids(transactions: SleeperTransaction[], weeksRead: numbe
       playerId,
       amount: Math.round(amount),
       outcome,
+      ...(outcome === 'lost' && /too many players/i.test(String(txn.metadata?.['notes'] ?? '')) ? { voided: true } : {}),
     });
   }
 
