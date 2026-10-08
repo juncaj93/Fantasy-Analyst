@@ -3,7 +3,7 @@
  *
  *   node --experimental-transform-types --no-warnings scripts/td-line-options-report.ts snapshot.json
  *
- * Audit finding F4 (October 2026). The odds provider quotes one full-game
+ * Audit finding F1 (October 2026). The odds provider quotes one full-game
  * touchdowns over/under per player, and the adapter files it as `anytime_td`
  * whatever its line. On the week-5 board 14 of Alex's 15 quotes were "over 1.5"
  * (two or more touchdowns), so `expectation.ts` scored a two-touchdown chance

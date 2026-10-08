@@ -1,5 +1,5 @@
 /**
- * The touchdown-line question (audit finding F4), replayed on the live lineup.
+ * The touchdown-line question (audit finding F1), replayed on the live lineup.
  *
  * Fetches the public `lineup` support snapshot and runs
  * `scripts/td-line-options-report.ts` on it: the lineup as stored, option A

@@ -14,15 +14,17 @@
  *
  * Env:
  *   BASE       site to probe (default production)
- *   MINUTES    how long to sample (default 60)
- *   INTERVAL   seconds between rounds (default 20)
+ *   MINUTES    how long to sample (default 10)
+ *   INTERVAL   seconds between rounds (default 60)
  *   SLOW_MS    what counts as slow in the summary (default 5000)
  */
 
 const BASE = process.env.BASE ?? 'https://fantasy-analyst.juncaj93.workers.dev';
-// A round a minute for 75 minutes: every minute-of-the-five-minute-cron gets
-// sampled fifteen times, at a read cost the daily allowance does not notice.
-const MINUTES = Number(process.env.MINUTES ?? 75);
+// A round a minute for 10 minutes: every minute of the five-minute cron gets
+// sampled twice. It was 75 until October 2026, when one run was measured at a
+// few percent of the day's D1 reads before it was cancelled; the Probe
+// workflow passes no MINUTES, so the default is what every run costs.
+const MINUTES = Number(process.env.MINUTES ?? 10);
 const INTERVAL = Number(process.env.INTERVAL ?? 60);
 const SLOW_MS = Number(process.env.SLOW_MS ?? 5000);
 const LIMIT_MS = 60_000;
