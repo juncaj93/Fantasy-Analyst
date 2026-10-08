@@ -49,16 +49,36 @@ export function noMoveSummary(advice: {
   return { headline: 'No move this week', detail, nearest: nearestLine(advice.nearestMiss ?? null) };
 }
 
-/** `Closest: KC Concepcion, 0.3 pts more than Kendre Miller on Sleeper's projection. A claim needs 1.0.` */
+/**
+ * How much more a comparison on Sleeper's projection has to show than one on
+ * betting lines. The engine adds it to both bars: the starter bar
+ * (`MEANINGFUL_UPGRADE_GAIN` 2.5, 3.0 on Sleeper's) and the bench bar
+ * (`MARKET_BAR` 0.5, `SLEEPER_BAR` 1.0). Written here rather than imported so
+ * this render-path module pulls in none of the engine.
+ */
+const BORROWED_EXTRA = 0.5;
+
+/**
+ * `Closest: KC Concepcion, 0.3 pts more than Kendre Miller on your bench, on
+ * Sleeper's projection. Replacing a bench player needs 1.0 on Sleeper's
+ * projection, 0.5 on betting lines.`
+ *
+ * Names which bar applies (bench or starter) and both yardsticks, because "a
+ * claim needs 1.0" read as the whole rule when the starter bar is 2.5
+ * (October 2026, question from Alex).
+ */
 export function nearestLine(miss: WaiverNearMiss | null): string | null {
   if (!miss || !(miss.gap > 0) || !(miss.bar > miss.gap)) return null;
-  const yardstick = miss.basis === 'market' ? 'betting lines' : 'Sleeper’s projection';
+  const onSleeper = miss.basis !== 'market';
+  const yardstick = onSleeper ? 'Sleeper’s projection' : 'betting lines';
   const gap = miss.gap.toFixed(1);
-  const bar = miss.bar.toFixed(1);
+  const sleeperBar = (onSleeper ? miss.bar : miss.bar + BORROWED_EXTRA).toFixed(1);
+  const marketBar = (onSleeper ? miss.bar - BORROWED_EXTRA : miss.bar).toFixed(1);
+  const bars = `${sleeperBar} on Sleeper’s projection, ${marketBar} on betting lines`;
   if (miss.kind === 'starter') {
-    return `Closest: ${miss.name}, ${gap} pts more than ${miss.overName}${miss.slot ? ` at ${miss.slot}` : ''} on ${yardstick}. Replacing a starter needs ${bar}.`;
+    return `Closest: ${miss.name}, ${gap} pts more than ${miss.overName}${miss.slot ? ` at ${miss.slot}` : ''}, on ${yardstick}. Replacing a starter needs ${bars}.`;
   }
-  return `Closest: ${miss.name}, ${gap} pts more than ${miss.overName} on ${yardstick}. A claim needs ${bar}.`;
+  return `Closest: ${miss.name}, ${gap} pts more than ${miss.overName} on your bench, on ${yardstick}. Replacing a bench player needs ${bars}.`;
 }
 
 const ORDER: WaiverUnscoredReason[] = ['scoring', 'no_team', 'partial_market', 'no_data'];

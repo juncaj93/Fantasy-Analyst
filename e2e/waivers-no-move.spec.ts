@@ -110,7 +110,7 @@ test.describe('a week with no claim', () => {
       'None of the 42 free agents this app could compare beats your roster by enough to be worth a roster spot.',
     );
     await expect(page.getByTestId('waivers-no-move-nearest')).toHaveText(
-      'Closest: KC Concepcion, 0.3 pts more than Kendre Miller on Sleeper’s projection. A claim needs 1.0.',
+      'Closest: KC Concepcion, 0.3 pts more than Kendre Miller on your bench, on Sleeper’s projection. Replacing a bench player needs 1.0 on Sleeper’s projection, 0.5 on betting lines.',
     );
 
     /* The card sits under the heading it answers, and the false note is gone. */
@@ -144,7 +144,7 @@ test.describe('a week with no claim', () => {
     const verdict = page.getByTestId('waiver-verdict');
     await expect(verdict).toBeVisible();
     await expect(verdict).toHaveText(
-      'No waiver move this week. Closest: KC Concepcion, 0.3 pts more than Kendre Miller on Sleeper’s projection. A claim needs 1.0.',
+      'No waiver move this week. Closest: KC Concepcion, 0.3 pts more than Kendre Miller on your bench, on Sleeper’s projection. Replacing a bench player needs 1.0 on Sleeper’s projection, 0.5 on betting lines.',
     );
     await expect(page.locator('[data-testid="waiver-row"][data-strength="unknown"]')).toHaveCount(0);
     await noSidewaysScroll(page);

@@ -107,7 +107,7 @@ describe('the words', () => {
     const summary = noMoveSummary(advice);
     expect(summary.headline).toBe('No move this week');
     expect(summary.detail).toMatch(/^None of the \d+ free agents? this app could compare beats your roster/);
-    expect(summary.nearest).toBe('Closest: fa1, 0.4 pts more than rb3 on Sleeper’s projection. A claim needs 1.0.');
+    expect(summary.nearest).toBe('Closest: fa1, 0.4 pts more than rb3 on your bench, on Sleeper’s projection. Replacing a bench player needs 1.0 on Sleeper’s projection, 0.5 on betting lines.');
   });
 
   it('says so when nothing could be compared at all', () => {
@@ -122,7 +122,7 @@ describe('the words', () => {
     expect(nearestLine({ ...base, kind: 'bench', gap: 0, bar: 0.5 })).toBeNull();
     expect(nearestLine({ ...base, kind: 'bench', gap: 0.6, bar: 0.5 })).toBeNull();
     expect(nearestLine({ ...base, kind: 'starter', slot: 'FLEX', gap: 1.2, bar: 2.5 })).toBe(
-      'Closest: X, 1.2 pts more than Y at FLEX on betting lines. Replacing a starter needs 2.5.',
+      'Closest: X, 1.2 pts more than Y at FLEX, on betting lines. Replacing a starter needs 3.0 on Sleeper’s projection, 2.5 on betting lines.',
     );
     expect(nearestLine(null)).toBeNull();
   });
