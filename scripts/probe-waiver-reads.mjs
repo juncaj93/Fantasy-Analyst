@@ -20,6 +20,41 @@ const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const WINDOWS_HOURS = [24, 2];
 /* The tables a Waivers load reads. */
 const WAIVERS = /\b(leagues|rosters|prop_snapshots|player_props|settings|adp_snapshots|adp_rows|league_transactions|league_transaction_weeks|vegas_events|drafts|trending_snapshots|players|player_signal_cache|evidence_items|preseason_projection_snapshots|preseason_projections|manager_intel_profiles|sleeper_weekly_projections|player_injury_reports|player_usage_weeks|depth_chart_entries|nfl_schedule)\b/;
+/*
+ * The statements one Waivers load issues, by their opening words, as
+ * `scripts/measure-api-budgets.ts` lists them on the seeded database. Summing
+ * their rows a call gives an estimate of one load's cost (estimate: a batched
+ * statement reads more or fewer rows with the size of its list).
+ */
+const WAIVER_LOAD = [
+  'SELECT * FROM adp_snapshots WHERE source != ?',
+  'SELECT * FROM drafts WHERE id = ?',
+  'SELECT * FROM evidence_items WHERE player_id IN',
+  'SELECT * FROM league_transaction_weeks WHERE league_id = ?',
+  'SELECT * FROM leagues WHERE id = ?',
+  'SELECT * FROM manager_intel_profiles WHERE league_id = ?',
+  'SELECT * FROM player_signal_cache WHERE player_id IN',
+  'SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN',
+  'SELECT * FROM players WHERE id IN',
+  'SELECT * FROM rosters WHERE league_id = ?',
+  'SELECT * FROM vegas_events WHERE kickoff IS NOT NULL',
+  'SELECT DISTINCT captured_at FROM depth_chart_entries',
+  'SELECT captured_at, lookback_hours FROM trending_snapshots',
+  'SELECT id FROM preseason_projection_snapshots',
+  'SELECT p.id AS row_id, p.player_id, p.market',
+  'SELECT payload_json FROM league_transactions',
+  'SELECT player_id, source_player_name, adp, rank, match_status FROM adp_rows',
+  'SELECT pp.* FROM player_props pp JOIN prop_snapshots ps',
+  'SELECT pp.player_id AS player_id, ps.game_start',
+  'SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id)',
+  'SELECT r.* FROM player_injury_reports r',
+  'SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule',
+  'SELECT team, AVG(implied) AS implied',
+  'SELECT value_json FROM settings WHERE key = ?',
+  'select player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json from sleeper_weekly_projections',
+  'select week, player_id, pts_std',
+];
+
 const NEW = [
   { label: 'fixture read for byes (new)', test: /nfl_schedule WHERE season = \? AND week >= \? AND week <= \? AND team IN/ },
   { label: 'earlier-week projections (new)', test: /sleeper_weekly_projections/i },
@@ -93,6 +128,10 @@ for (const hours of WINDOWS_HOURS) {
       console.log(`  ${watch.label}: ${r.calls} calls, ${n(r.read / Math.max(1, r.calls))} rows a call   ${r.q.slice(0, 120)}`);
     }
   }
+  /* One load: each statement's rows a call, once per distinct statement text. */
+  const load = rows.filter((r) => WAIVER_LOAD.some((prefix) => r.q.startsWith(prefix)));
+  const perLoad = load.reduce((a, r) => a + r.read / Math.max(1, r.calls), 0);
+  console.log(`\none Waivers load, estimated from ${load.length} statement shapes: about ${n(perLoad)} rows read`);
   console.log('\nevery SELECT on a table the Waivers screen reads');
   console.log('   calls    rows read   per call   query');
   for (const r of rows.filter((r) => WAIVERS.test(r.q) && /^SELECT/i.test(r.q)).sort((a, b) => b.read - a.read).slice(0, 45)) {

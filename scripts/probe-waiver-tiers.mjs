@@ -9,6 +9,15 @@
  *    and `scripts/waiver-bid-backtest.ts` (this season's claims, predicted vs
  *    actual).
  *
+ * 4. When Cloudflare's token is present, reads D1's own per-statement counts
+ *    (`probe-waiver-reads.mjs`), so one run answers the deployed SHA, the
+ *    replay and the rows-read question together.
+ *
+ * Production D1 cost of one run: the support snapshot is one Waivers load on
+ * production (its rows are printed at the end as "one Waivers load"); /api/health
+ * and /api/leagues read a handful of rows; Sleeper and Cloudflare's analytics
+ * read none.
+ *
  * Reads only: GETs to the app and to Sleeper's public API. Nothing is written
  * and no odds are bought.
  */
@@ -76,3 +85,8 @@ const run = (script, args) =>
 console.log(run('scripts/waiver-tiers-report.ts', [snapshotFile, dir]));
 console.log('\n=== BID BACKTEST: this season\'s claims, predicted vs actual ===');
 console.log(run('scripts/waiver-bid-backtest.ts', [dir]));
+
+if (process.env.CLOUDFLARE_API_TOKEN) {
+  console.log('\n=== D1 ROWS READ (Cloudflare analytics; costs no D1 rows) ===');
+  console.log(execFileSync('node', ['scripts/probe-waiver-reads.mjs'], { encoding: 'utf8', env: process.env, maxBuffer: 16 * 1024 * 1024 }));
+}
