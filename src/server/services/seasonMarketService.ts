@@ -223,8 +223,12 @@ export class SeasonMarketService {
    * "not finished", because the cost of being wrong in that direction is two
    * entities and the cost of being wrong in the other is a draft board with no
    * market context on the one day it matters.
+   *
+   * Public so the data-health screen reports the same rule the refresh obeys:
+   * after the draft these lines are not refreshed on purpose, and an old
+   * snapshot is that decision working, not a feed gone stale.
    */
-  private async draftIsDone(): Promise<boolean> {
+  async draftIsDone(): Promise<boolean> {
     const league = await new LeagueRepo(this.db).getSelectedLeague();
     if (!league?.draftId) return false;
     const draft = await new LeagueRepo(this.db).getDraft(league.draftId);

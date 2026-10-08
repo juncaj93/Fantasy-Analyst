@@ -244,6 +244,50 @@ export interface WaiverUnknown {
   position: string;
   team: string;
   statusFlag: string | null;
+  /**
+   * Why there was nothing to read, so the screen can say it instead of
+   * `Not scored` on its own. See {@link unscoredReason}.
+   */
+  why?: WaiverUnscoredReason;
+}
+
+/**
+ * Why a free agent could not be compared, most specific first.
+ *
+ *  - `no_team`: he is not on an NFL roster, so there is no game to price.
+ *  - `scoring`: Sleeper's published number for his position assumes scoring
+ *    this league does not use (in Tony's league, quarterbacks: 6-point passing
+ *    touchdowns), and no complete betting line is posted to use instead. The
+ *    caller says which positions those are (`refusedPositions`), so this file
+ *    never reads the feed's rules itself.
+ *  - `partial_market`: a book has posted some of his lines but not all, and
+ *    nothing else covers him.
+ *  - `no_data`: no lines and no published number at all.
+ */
+export type WaiverUnscoredReason = 'no_team' | 'scoring' | 'partial_market' | 'no_data';
+
+/**
+ * The free agent who came closest to a claim without making one.
+ *
+ * Shown when there is no move, so "nothing to do" arrives with how close the
+ * wire came: a reader who sees `0.3 pts more than Kendre Miller, a claim needs
+ * 1.0` can tell a thin week from a broken screen. Never a recommendation: he
+ * did not clear the bar, and the screen says so.
+ */
+export interface WaiverNearMiss {
+  playerId: string;
+  name: string;
+  position: string;
+  /** Who he was measured against: the starter in the slot, or the bench player a claim would cut. */
+  overName: string;
+  kind: 'starter' | 'bench';
+  /** The slot, for a starter comparison. */
+  slot: string | null;
+  /** His number minus the other man's, availability charges included, on one yardstick. */
+  gap: number;
+  /** What the gap had to reach. */
+  bar: number;
+  basis: YardstickBasis;
 }
 
 export interface WaiverAdvice {
@@ -273,6 +317,11 @@ export interface WaiverAdvice {
    */
   headline: string | null;
   notes: string[];
+  /**
+   * The closest anybody came to a claim without making one, or null. Set
+   * whatever the plan holds; the screen reads it only when there is no move.
+   */
+  nearestMiss: WaiverNearMiss | null;
   /** How many unrostered players were actually scored. */
   considered: number;
   /**
@@ -337,6 +386,13 @@ export function recommendWaiverUpgrades(opts: {
   recentlyDropped?: ReadonlyMap<string, string>;
   /** Free roster spots, bench included and IR excluded. */
   openSpots?: number;
+  /**
+   * Positions whose published projection this league may not read, because
+   * its scoring differs from what the feed assumes. Computed by the caller,
+   * which is allowed to read the feed's rules; used only to say why a player
+   * has no number.
+   */
+  refusedPositions?: readonly string[];
   now?: Date;
 }): WaiverAdvice {
   const base = opts.minGain ?? MEANINGFUL_UPGRADE_GAIN;
@@ -444,6 +500,13 @@ export function recommendWaiverUpgrades(opts: {
     plainOrder: string[];
   }
 
+  /* The closest call that did not clear, kept as the scan goes. See `WaiverNearMiss`. */
+  let nearestMiss: WaiverNearMiss | null = null;
+  const noteMiss = (miss: WaiverNearMiss) => {
+    if (!(miss.gap > 0)) return;
+    if (nearestMiss == null || miss.gap - miss.bar > nearestMiss.gap - nearestMiss.bar) nearestMiss = miss;
+  };
+
   const considered: Considered[] = [];
   for (const slot of lineup.slots) {
     // A settled slot is not a decision any more, so it gets no advice.
@@ -469,7 +532,7 @@ export function recommendWaiverUpgrades(opts: {
      * both are fully priced, Sleeper against Sleeper when not — and has to
      * clear the starter bar, half a point higher on a borrowed number.
      */
-    const ranked = playable
+    const measured = playable
       .filter((e) => slot.accepts.includes(e.position))
       .map((e) => {
         if (current == null) {
@@ -480,7 +543,22 @@ export function recommendWaiverUpgrades(opts: {
         const bar = round2(base + (comparison.basis === 'sleeper' ? 0.5 : 0));
         return { evaluation: e, gain: comparison.gap, bar, basis: comparison.basis };
       })
-      .filter((c): c is NonNullable<typeof c> => c != null && c.gain >= c.bar && c.gain > 0);
+      .filter((c): c is NonNullable<typeof c> => c != null);
+    for (const c of measured) {
+      if (current == null || c.basis == null || c.gain >= c.bar) continue;
+      noteMiss({
+        playerId: c.evaluation.playerId,
+        name: c.evaluation.name,
+        position: c.evaluation.position,
+        overName: current.name,
+        kind: 'starter',
+        slot: slot.slot,
+        gap: c.gain,
+        bar: c.bar,
+        basis: c.basis,
+      });
+    }
+    const ranked = measured.filter((c) => c.gain >= c.bar && c.gain > 0);
 
     /* Gain first; the week's news only orders near-ties. Without it, gain alone. */
     const byGain = [...ranked].sort((a, b) => b.gain - a.gain || a.evaluation.name.localeCompare(b.evaluation.name));
@@ -643,6 +721,22 @@ export function recommendWaiverUpgrades(opts: {
     pool,
     ...(opts.openSpots === undefined ? {} : { openSpots: opts.openSpots }),
   });
+  for (const move of plan.moves.values()) {
+    if (move.tier !== 'value' || move.clears || move.planExcluded != null || !move.cut || !move.comparison) continue;
+    const e = evaluated.find((x) => x.playerId === move.playerId);
+    if (!e) continue;
+    noteMiss({
+      playerId: e.playerId,
+      name: e.name,
+      position: e.position,
+      overName: move.cut.reading.name,
+      kind: 'bench',
+      slot: null,
+      gap: move.comparison.gap,
+      bar: move.comparison.bar,
+      basis: move.comparison.basis,
+    });
+  }
 
   /*
    * The same plan with the week's news taken out, so the app can say when it
@@ -831,6 +925,7 @@ export function recommendWaiverUpgrades(opts: {
       position: e.position,
       team: e.team,
       statusFlag: e.statusFlag,
+      why: unscoredReason(e, opts.refusedPositions ?? []),
     }));
 
   return {
@@ -843,6 +938,7 @@ export function recommendWaiverUpgrades(opts: {
       unscored,
     }),
     notes,
+    nearestMiss,
     considered: evaluated.length,
     skipped: evaluated.length - playable.length,
     threshold: base,
@@ -901,6 +997,14 @@ function emptyBoardHeadline(counts: { upgrades: number; playable: number; unscor
     `Your current options grade better than the ${freeAgents(playable)} that could be scored. ` +
     `${cap(freeAgents(unscored))} had nothing to read: unknown, not ruled out.`
   );
+}
+
+/** Why a free agent had nothing to read, most specific first. See {@link WaiverUnscoredReason}. */
+function unscoredReason(e: StartSitEvaluation, refused: readonly string[]): WaiverUnscoredReason {
+  if (!(e.team ?? '').trim()) return 'no_team';
+  if (refused.includes(e.position)) return 'scoring';
+  if (e.expectation?.points != null) return 'partial_market';
+  return 'no_data';
 }
 
 /**

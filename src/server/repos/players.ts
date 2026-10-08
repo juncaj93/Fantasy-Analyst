@@ -174,6 +174,53 @@ async function dropAnEmptyTable(read: () => Promise<number>, db: Database): Prom
   return n;
 }
 
+/**
+ * Where `upsertMany` leaves the two counts, so a reader never has to walk the
+ * table to get them.
+ *
+ * The hour-long memo above capped how often an isolate counted, but every new
+ * isolate still paid a full pass for each count: the October 2026 insights read
+ * had `COUNT(*) FROM players` at 542,840 rows over 164 calls and its ranked
+ * twin at 264,800, about 16% of the daily allowance, to produce two integers
+ * that change once a day. The settings table is a key/value store, so this is
+ * a new key and not a schema change.
+ *
+ * A missing or unreadable value, or a stored total of zero, falls back to the
+ * live count, so a database that has never been synced behaves as it did.
+ */
+export const PLAYER_COUNTS_KEY = 'players.counts';
+
+interface StoredCounts {
+  total: number;
+  ranked: number;
+  at: string;
+}
+
+async function readStoredCounts(db: Database): Promise<StoredCounts | null> {
+  try {
+    const row = await db
+      .prepare('SELECT value_json FROM settings WHERE key = ?')
+      .bind(PLAYER_COUNTS_KEY)
+      .first<{ value_json: string }>();
+    if (!row) return null;
+    const value = parseJson<Partial<StoredCounts> | null>(row.value_json, null);
+    if (!value || !Number.isFinite(value.total) || !Number.isFinite(value.ranked)) return null;
+    return { total: Number(value.total), ranked: Number(value.ranked), at: String(value.at ?? '') };
+  } catch {
+    return null;
+  }
+}
+
+async function storeCounts(db: Database, counts: StoredCounts): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+    )
+    .bind(PLAYER_COUNTS_KEY, toJson(counts), counts.at)
+    .run();
+}
+
 /** Drop every memo for this database. Exported for tests. */
 export function forgetPlayerReads(db: Database): void {
   DICTIONARY.forget(db);
@@ -193,13 +240,18 @@ export class PlayerRepo {
    * the day that ran the allowance out, for 28.6% of it. Memoised for an hour,
    * because the count changes when `upsertMany` runs and at no other time --
    * except for zero, which {@link dropAnEmptyTable} refuses to hold.
+   *
+   * Since October 2026 a miss reads the pair `upsertMany` stored under
+   * {@link PLAYER_COUNTS_KEY} (one row) and only walks the table when nothing
+   * is stored yet.
    */
   async count(): Promise<number> {
     return dropAnEmptyTable(
       () =>
         TOTAL.get(this.db, 'all', async () => {
-          const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
-          return Number(row?.n ?? 0);
+          const stored = await readStoredCounts(this.db);
+          if (stored && stored.total > 0) return stored.total;
+          return this.countLive();
         }),
       this.db,
     );
@@ -211,7 +263,8 @@ export class PlayerRepo {
    * Another full pass — neither column is indexed, and indexing them would not
    * help much on a table this small where most rows match. Memoised for the
    * same hour as {@link count}, and refreshed by `upsertMany`, which is the
-   * only writer of `draft_rank`.
+   * only writer of `draft_rank`. A miss reads the stored pair first, like
+   * {@link count}.
    *
    * Not zero-guarded, unlike its twin, and deliberately: zero here means the
    * filter matched nothing, not that there was nothing to read. The scan
@@ -220,11 +273,22 @@ export class PlayerRepo {
    */
   async countRanked(): Promise<number> {
     return RANKED.get(this.db, 'all', async () => {
-      const row = await this.db
-        .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
-        .first<{ n: number }>();
-      return Number(row?.n ?? 0);
+      const stored = await readStoredCounts(this.db);
+      if (stored && stored.total > 0) return stored.ranked;
+      return this.countRankedLive();
     });
+  }
+
+  private async countLive(): Promise<number> {
+    const row = await this.db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  private async countRankedLive(): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
   }
 
   /**
@@ -401,6 +465,16 @@ export class PlayerRepo {
      * minutes later, and it is why the window is safe to have at all.
      */
     forgetPlayerReads(this.db);
+    /*
+     * Count once, here, and store both answers. This is the only writer of
+     * the table, so the stored pair is exact until the next sync, and every
+     * isolate that wakes up after it reads one settings row instead of
+     * walking all 3,300 players twice. See {@link PLAYER_COUNTS_KEY}.
+     */
+    if (written > 0) {
+      const [total, ranked] = await Promise.all([this.countLive(), this.countRankedLive()]);
+      await storeCounts(this.db, { total, ranked, at: now });
+    }
     return { written };
   }
 

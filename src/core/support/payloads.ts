@@ -38,6 +38,7 @@
  * engine's answer, and would start failing the day somebody renamed a key.
  */
 
+import type { SeasonCheck } from '../trades/seasonCheck.ts';
 import type { LineupAssembly } from '../startsit/assemble.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 import type { WaiverAssembly } from '../waivers/assemble.ts';
@@ -243,6 +244,8 @@ export interface WaiverPlanInputs {
   draftRankOf?: Record<string, number>;
   /** Sleeper's published week, the waiver yardstick's fallback. Absent on older files. */
   published?: Record<string, number>;
+  /** Positions refused a published total in this league, for the unscored reasons. Absent on older files. */
+  refusedPositions?: string[];
   /** Depth-chart rank per rostered player, for the handcuff read. Absent on older files. */
   depth?: Record<string, { rank: number }>;
   /** Sleeper's trending drops, entry by entry. Absent on older files. */
@@ -402,6 +405,12 @@ export interface TradeOfferInputs {
   /** Every rostered player, evaluated once for the whole league. */
   pool: SnapshotStartSitBundle;
   limit: number | null;
+  /**
+   * Check a trade's verdict on each surfaced idea, by offer id (finding T3).
+   * An input to the board rather than part of it: the replay applies the same
+   * rule to the same verdicts. Absent on a snapshot taken before it existed.
+   */
+  seasonChecks?: [string, SeasonCheck][];
   /**
    * The behavioural half, with both of its `Map`s hoisted and keyed by alias.
    *

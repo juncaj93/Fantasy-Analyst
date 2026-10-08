@@ -20,6 +20,7 @@
 
 import { CATEGORY_LABELS, type OfferCategory } from '../../core/trades/category.ts';
 import type { OfferEvaluation } from '../api.ts';
+import { seasonCheckLabel } from '../../core/trades/seasonCheck.ts';
 import { DetailLabel } from './common.tsx';
 import { ReasonList, withoutRepeats } from './decisions.tsx';
 import { Sheet } from './native.tsx';
@@ -36,6 +37,7 @@ import { TradeLadderFold } from './tradeLadder.tsx';
 export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpen: () => void }) {
   const cue = managerCue(offer);
   const category = categoryOf(offer);
+  const season = seasonCheckLabel(offer.seasonCheck);
 
   return (
     <button type="button" className="smart-trade" data-testid="smart-trade-row" onClick={onOpen}>
@@ -95,6 +97,18 @@ export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpe
           </span>
         ) : null}
       </div>
+
+      {/*
+        What Check a trade says about this same deal over the rest of the
+        season (finding T3). Ideas it says favour the other team never reach
+        the board, so this only ever reads as yours, close or unchecked.
+        Absent on a payload from before it existed.
+      */}
+      {season ? (
+        <div className="smart-trade-season" data-testid="smart-trade-season" data-kind={offer.seasonCheck?.kind ?? 'unchecked'}>
+          {season}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -195,6 +209,19 @@ export function SmartTradeSheet({
               </span>
             </dd>
           </div>
+          {offer.seasonCheck ? (
+            <div className="weekly-line">
+              <dt>Rest of season</dt>
+              <dd data-testid="smart-trade-season-detail">
+                {offer.seasonCheck.status === 'ok'
+                  ? offer.seasonCheck.headline
+                  : `Not checked: ${offer.seasonCheck.reason ?? 'a player in it has no number this week'}`}
+                {offer.seasonCheck.confidence ? (
+                  <span className="faint"> · {offer.seasonCheck.confidence} confidence, from Check a trade</span>
+                ) : null}
+              </dd>
+            </div>
+          ) : null}
           <div className="weekly-line">
             <dt>This manager</dt>
             <dd data-testid="smart-trade-manager">

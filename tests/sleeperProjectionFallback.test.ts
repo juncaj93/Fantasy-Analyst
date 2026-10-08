@@ -210,11 +210,22 @@ describe('which leagues may read a published total', () => {
     });
 
     it('names the settings that differ, so a reader can check them in Sleeper', () => {
-      const reason = publishedRefusal(live, 'QB');
+      const fourPointRushTds = buildScoringProfile({ rec: 0.5, rush_td: 4 }, []);
+      const reason = publishedRefusal(fourPointRushTds, 'RB');
       expect(reason).not.toBeNull();
-      expect(reason).toContain('QB');
-      expect(reason).toContain('4 points per passing touchdown');
-      expect(reason).toContain('-1 per interception');
+      expect(reason).toContain('RB');
+      expect(reason).toContain('6 points per rushing touchdown');
+    });
+
+    /*
+     * Until October 2026 the quarterback in this league was refused here, with
+     * "the feed assumes 4 points per passing touchdown and -1 per
+     * interception". Alex approved rescoring him from his stat line instead
+     * (finding F5), so the sentence would now be false. See
+     * `tests/qbRescore.test.ts`.
+     */
+    it('does not refuse a quarterback whose total is rebuilt for this league', () => {
+      expect(publishedRefusal(live, 'QB')).toBeNull();
     });
 
     it('names the reception value when that is what disqualified the league', () => {

@@ -3,6 +3,7 @@
 import type { DstPlan } from '../core/dst/planner.ts';
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 import type { WaiverClaimPlan } from '../core/waivers/claimPlan.ts';
+import type { WaiverNearMiss } from '../core/startsit/waivers.ts';
 /*
  * The rule about what a response has to be before it is parsed.
  *
@@ -1589,6 +1590,10 @@ export interface WaiverAdvice {
   headline: string | null;
   notes: string[];
   considered: number;
+  /** How many of `considered` could not be compared. Absent on an older payload. */
+  skipped?: number;
+  /** The closest anybody came to a claim without making one. See `core/waivers/noMove.ts`. */
+  nearestMiss?: WaiverNearMiss | null;
   threshold?: number;
   pool?: { scanned: number; perPosition: number };
   /** What each upgrade would cost, or why no price can honestly be quoted. */
@@ -1624,6 +1629,8 @@ export interface WaiverAdvice {
 export interface WaiverRefreshReport {
   transactions: { weeksFetched: number[]; transactions: number } | null;
   trending: { captured: number; capturedAt: string; drops: number | null } | null;
+  /** Published projection rows written by this refresh; 0 when the gate declined. */
+  projections?: number;
   refreshedAt: string;
 }
 

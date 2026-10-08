@@ -364,9 +364,18 @@ export async function buildMatchupResponse(
    * reason: this fills a blank, and a blank is a state the screen already says
    * out loud.
    */
+  /*
+   * Who has no game this week, read off the fixture list the inputs were built
+   * from. A resting player projects zero and never reaches the preseason tier:
+   * on 7 October 2026 that tier projected Kenneth Walker (KC, bye) at 11.6 and
+   * Best move told the reader to start him. See `toPlayer`.
+   */
+  const onBye = new Set(inputs.filter((input) => input.onBye === true).map((input) => input.player.id));
   const unpriced = allIds.filter(
     (playerId) =>
-      completeMarketProjection(evaluations.get(playerId)) == null && !Number.isFinite(published.get(playerId) ?? NaN),
+      !onBye.has(playerId) &&
+      completeMarketProjection(evaluations.get(playerId)) == null &&
+      !Number.isFinite(published.get(playerId) ?? NaN),
   );
   let preseason: ReadonlyMap<string, number> = new Map();
   if (sources.preseasonProjections && unpriced.length > 0) {
@@ -384,8 +393,8 @@ export async function buildMatchupResponse(
   const slots = buildSlotSpecs(league.rosterPositions);
   const theirs = rosters.find((r) => r.rosterId === theirsRow.roster_id) ?? null;
   const players = [
-    ...toPlayers(mineRow, 'mine', evaluations, slots, published, preseason, mine),
-    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published, preseason, theirs),
+    ...toPlayers(mineRow, 'mine', evaluations, slots, published, preseason, mine, onBye),
+    ...toPlayers(theirsRow, 'theirs', evaluations, slots, published, preseason, theirs, onBye),
   ];
 
   const forecastInput = {
@@ -636,6 +645,7 @@ function toPlayers(
   published: ReadonlyMap<string, number>,
   preseason: ReadonlyMap<string, number>,
   roster: RosterRecord | null,
+  onBye: ReadonlySet<string> = new Set(),
 ): MatchupPlayerInput[] {
   const starters = startersFor(row, roster);
   const points = row.players_points ?? {};
@@ -647,13 +657,13 @@ function toPlayers(
     if (!playerId || playerId === '0') return;
     const slot = slots[index];
     out.push(
-      toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true, published, preseason),
+      toPlayer(playerId, side, evaluations, points[playerId] ?? 0, slot?.key ?? null, true, published, preseason, onBye.has(playerId)),
     );
   });
 
   for (const playerId of row.players ?? []) {
     if (startingIds.has(playerId)) continue;
-    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false, published, preseason));
+    out.push(toPlayer(playerId, side, evaluations, points[playerId] ?? 0, null, false, published, preseason, onBye.has(playerId)));
   }
 
   return out;
@@ -735,7 +745,7 @@ function gameRemaining(kickoff: string | null, now: Date): number {
 
 
 /** Whose number a player ended up being simulated on. */
-type ProjectionTier = 'market' | 'published' | 'preseason' | 'none';
+type ProjectionTier = 'market' | 'published' | 'preseason' | 'bye' | 'none';
 
 /**
  * The one number a player is simulated on, and whose it is.
@@ -799,13 +809,19 @@ function toPlayer(
   starting: boolean,
   published: ReadonlyMap<string, number>,
   preseason: ReadonlyMap<string, number>,
+  onBye = false,
 ): MatchupPlayerInput {
   const evaluation = evaluations.get(playerId);
-  const figure = projectionFor(
-    evaluation,
-    published.get(playerId) ?? null,
-    preseason.get(playerId) ?? null,
-  );
+  /*
+   * A player with no game this week scores nothing, and that is known rather
+   * than estimated. Every tier below the market is a fallback for a game
+   * nobody has priced; on a bye there is no game, so none of them applies and
+   * the preseason tier in particular would invent one. Zero, flagged, so the
+   * row can say why.
+   */
+  const figure: { points: number | null; tier: ProjectionTier } = onBye
+    ? { points: 0, tier: 'bye' }
+    : projectionFor(evaluation, published.get(playerId) ?? null, preseason.get(playerId) ?? null);
   return {
     playerId,
     name: evaluation?.name ?? playerId,
@@ -857,6 +873,7 @@ function toPlayer(
      */
     ...(figure.tier === 'published' ? { projectionBorrowed: true } : {}),
     ...(figure.tier === 'preseason' ? { projectionEstimated: true } : {}),
+    ...(figure.tier === 'bye' ? { onBye: true } : {}),
     actual: Number.isFinite(actual) ? actual : 0,
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',

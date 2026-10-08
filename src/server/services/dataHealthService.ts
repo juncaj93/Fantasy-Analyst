@@ -68,6 +68,7 @@ import { NewsletterRepo } from '../repos/newsletter.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { SleeperProjectionsRepo } from '../repos/sleeperProjections.ts';
+import { isSliver } from './sleeperProjectionService.ts';
 import { TrendingRepo } from '../repos/trending.ts';
 import { InjuryService } from './injuryService.ts';
 import { SCHEDULE_SOURCE } from './scheduleService.ts';
@@ -468,12 +469,24 @@ export class DataHealthService {
     const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
     const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
     const held = await new SleeperProjectionsRepo(this.db).freshness(league.season, week);
+    /*
+     * A newest fetch that wrote a sliver of the week (October 2026: 30 of 406
+     * rows, the feed caught mid-update) leaves most players on an older read
+     * while the timestamp says minutes ago. Thin coverage is what `degraded`
+     * means; the next refresh the gate offers clears it.
+     */
+    const sliver = held.players > 0 && isSliver(held);
     return {
       id: 'published-projections',
       lastSuccessAt: held.fetchedAt,
       lastAttemptAt: held.fetchedAt,
-      ...(held.players === 0 ? { state: 'waiting' as const } : {}),
-      note: held.players === 0 ? `Nothing published for week ${week} yet.` : null,
+      ...(held.players === 0 ? { state: 'waiting' as const } : sliver ? { state: 'degraded' as const } : {}),
+      note:
+        held.players === 0
+          ? `Nothing published for week ${week} yet.`
+          : sliver
+            ? `The last fetch caught the feed mid-update: ${held.latestRows} of ${held.players} players are current, the rest are from an earlier read. Pull to refresh on Team or Waivers.`
+            : null,
       technical: { lastOutcome: held.publisher },
     };
   }
@@ -508,7 +521,26 @@ export class DataHealthService {
      * exactly this snapshot, so the screen and the board have to be saying the
      * same thing about it.
      */
-    const status = await new SeasonMarketService(this.db, this.deps.vegas ?? nullProvider()).status(now);
+    const service = new SeasonMarketService(this.db, this.deps.vegas ?? nullProvider());
+    const status = await service.status(now);
+    /*
+     * After the draft the refresh stops on purpose (`SeasonMarketService.refresh`
+     * declines once the draft is complete), so the snapshot only ever gets
+     * older. Calling that stale put "1 input needs attention" on Setup every
+     * day from the draft onward, for a source nobody is drafting against. It is
+     * deferred work, which is what `deferred` means, and needs nobody.
+     */
+    const retired = await service.draftIsDone().catch(() => false);
+    if (retired) {
+      return {
+        id: 'season-markets',
+        lastSuccessAt: status.fetchedAt,
+        lastAttemptAt: status.fetchedAt,
+        state: 'deferred' as const,
+        note: 'Not refreshed after the draft, on purpose: weekly lines use the odds allowance instead.',
+        technical: { lastOutcome: `${status.quotes} quote(s), ${status.unresolved} unresolved; draft complete` },
+      };
+    }
     return {
       id: 'season-markets',
       lastSuccessAt: status.fetchedAt,

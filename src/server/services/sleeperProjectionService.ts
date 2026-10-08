@@ -28,11 +28,19 @@ import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import {
   parseSleeperWeeklyProjections,
+  qbRescore,
+  rescoreQbTotal,
   scorePublishedDefense,
   sleeperScoringKey,
+  type QbStatLine,
   type SleeperWeeklyProjection,
 } from '../../core/sleeper/weeklyProjections.ts';
-import { SleeperProjectionsRepo, type WeeklyProjectionFreshness } from '../repos/sleeperProjections.ts';
+import { SettingsRepo } from '../repos/settings.ts';
+import {
+  SleeperProjectionsRepo,
+  type StoredWeeklyProjection,
+  type WeeklyProjectionFreshness,
+} from '../repos/sleeperProjections.ts';
 import type { Database } from '../db.ts';
 
 /**
@@ -56,8 +64,49 @@ export interface ProjectionRefreshReport {
   detail: string | null;
 }
 
+/**
+ * A newest fetch that wrote less than this share of the stored week is a
+ * sliver, not a refresh.
+ *
+ * On Wednesday 7 October 2026 the 09:00 fetch caught Sleeper's feed mid-update
+ * and wrote 30 rows; the table is upserted, so the other 376 stayed from the day
+ * before, `fetchedAt` read as minutes old, and the twelve-hour gate declined
+ * every refresh until the next morning. A whole refetch writes about all of the
+ * week (players who dropped out of the feed keep their old rows, so it is never
+ * quite 100%), which is far above this line; a mid-update answer is far below.
+ */
+export const SLIVER_SHARE = 0.5;
+
+/** Too few stored players to judge: an early-week feed can be genuinely small. */
+const SLIVER_MIN_PLAYERS = 50;
+
+export function isSliver(held: { players: number; latestRows: number }): boolean {
+  if (held.players < SLIVER_MIN_PLAYERS) return false;
+  return held.latestRows < held.players * SLIVER_SHARE;
+}
+
+/**
+ * Where a week's quarterback stat lines are kept, one settings row per week.
+ *
+ * Alex approved rescoring quarterbacks for this league's scoring (finding F5,
+ * October 2026) and asked first whether it could be stored without a
+ * migration. It can: the settings table is key/value, and a week's lines are
+ * about forty quarterbacks, a few kilobytes. The stat line is kept rather than
+ * a rescored number because the rescoring depends on each league's settings
+ * and the stored week does not. `sleeper_weekly_projections` is untouched.
+ */
+export function qbLinesKey(season: string, week: number): string {
+  return `sleeper.qbLines.${season}.${week}`;
+}
+
+interface StoredQbLines {
+  fetchedAt: string;
+  lines: Record<string, QbStatLine>;
+}
+
 export class SleeperProjectionService {
   private readonly repo: SleeperProjectionsRepo;
+  private readonly settings: SettingsRepo;
 
   constructor(
     db: Database,
@@ -65,6 +114,15 @@ export class SleeperProjectionService {
     private readonly now: () => Date = () => new Date(),
   ) {
     this.repo = new SleeperProjectionsRepo(db);
+    this.settings = new SettingsRepo(db);
+  }
+
+  /** A week's stored quarterback lines, by player id; empty when none are kept. */
+  private async qbLines(season: string, week: number): Promise<Record<string, QbStatLine>> {
+    const stored = await this.settings
+      .get<StoredQbLines | null>(qbLinesKey(season, week), null)
+      .catch((): StoredQbLines | null => null);
+    return stored?.lines ?? {};
   }
 
   freshness(season: string, week: number): Promise<WeeklyProjectionFreshness> {
@@ -103,7 +161,14 @@ export class SleeperProjectionService {
        * genuinely publishes no defences for costs one extra fetch per tick —
        * four hundred upserts on a table that holds one week — and cannot loop.
        */
-      const whole = held.players > 0 && held.defenses > 0;
+      /*
+       * And a week fetched before quarterback lines were kept (8 October 2026)
+       * is refetched once, so a league that rescores quarterbacks reads them
+       * from the next refresh rather than the next morning.
+       */
+      const linesHeld =
+        (await this.settings.get<StoredQbLines | null>(qbLinesKey(season, week), null).catch(() => null)) != null;
+      const whole = held.players > 0 && held.defenses > 0 && !isSliver(held) && linesHeld;
       if (whole && ageHours != null && Number.isFinite(ageHours) && ageHours < MAX_AGE_HOURS) {
         return { ...base, outcome: 'current', detail: `${held.players} player(s), refreshed within the day` };
       }
@@ -132,7 +197,19 @@ export class SleeperProjectionService {
       return { ...base, outcome: 'unavailable', detail: 'nothing published for this week yet' };
     }
 
-    const written = await this.repo.save(season, week, rows, this.now().toISOString());
+    const fetchedAt = this.now().toISOString();
+    const written = await this.repo.save(season, week, rows, fetchedAt);
+    const lines: Record<string, QbStatLine> = {};
+    for (const row of rows) if (row.qb) lines[row.playerId] = row.qb;
+    /*
+     * Merged into what is held rather than replacing it, the same reason the
+     * table is upserted: a fetch that caught the feed mid-update must not
+     * blank the quarterbacks it happened to miss.
+     */
+    const held = await this.qbLines(season, week);
+    await this.settings
+      .set(qbLinesKey(season, week), { fetchedAt, lines: { ...held, ...lines } } satisfies StoredQbLines)
+      .catch((err) => console.error('quarterback lines could not be stored', err));
     return { season, week, outcome: 'fetched', rows: written, detail: `${written} player(s) published` };
   }
 
@@ -177,36 +254,101 @@ export class SleeperProjectionService {
       : await this.repo.forWeek(opts.season, opts.week);
     if (stored.size === 0) return out;
 
+    const lines = (await this.needsQbLines(opts.profile, opts.playerIds, opts.positionOf))
+      ? await this.qbLines(opts.season, opts.week)
+      : {};
     for (const playerId of opts.playerIds) {
       const row = stored.get(playerId);
       if (!row) continue;
-      const position = opts.positionOf?.(playerId) ?? null;
-
-      /*
-       * A defence is computed, not quoted.
-       *
-       * `sleeperScoringKey` answers null for a defence in every league, because
-       * the three published totals are somebody else's defensive rules applied
-       * to somebody else's table. What is quotable is the projected stat line
-       * beside them, scored here under this league's own settings — so a league
-       * paying nothing for a shutout and a league paying ten both get a number
-       * that is right for them. See `core/sleeper/weeklyProjections.ts`.
-       */
-      const pos = String(position ?? '').trim().toUpperCase();
-      if (pos === 'DEF' || pos === 'DST') {
-        if (!row.defense) continue;
-        const points = scorePublishedDefense(row.defense, opts.profile.dst);
-        if (points == null) continue;
-        out.set(playerId, points);
-        continue;
-      }
-
-      const key = sleeperScoringKey(opts.profile, position);
-      if (!key) continue;
-      const points = row.points[key];
-      if (points == null) continue;
-      out.set(playerId, points);
+      const points = scoreStored(row, opts.profile, opts.positionOf?.(playerId) ?? null, lines[playerId]);
+      if (points != null) out.set(playerId, points);
     }
     return out;
   }
+
+  /** Only a league that rescores quarterbacks, asking about one, reads the lines row. */
+  private async needsQbLines(
+    profile: ScoringProfile,
+    playerIds: readonly string[],
+    positionOf?: (playerId: string) => string | null | undefined,
+  ): Promise<boolean> {
+    if (sleeperScoringKey(profile, 'QB') != null || qbRescore(profile) == null) return false;
+    return playerIds.some((id) => String(positionOf?.(id) ?? '').trim().toUpperCase() === 'QB');
+  }
+
+  /**
+   * Each player's most recent earlier week with a real published figure.
+   *
+   * The trade check's stand-in for a player with no number this week (a bye,
+   * an injury, nothing posted yet). One keyed read over `weeks`, scored through
+   * the same gate as `publishedFor`, so a position this league's scoring
+   * refuses is refused here too. A figure under `floor` is a zero for a game
+   * he did not play and is passed over for the week before it.
+   */
+  async publishedRecent(opts: {
+    season: string;
+    weeks: readonly number[];
+    playerIds: readonly string[];
+    profile: ScoringProfile;
+    positionOf?: (playerId: string) => string | null | undefined;
+    floor: number;
+  }): Promise<Map<string, { week: number; points: number }>> {
+    const out = new Map<string, { week: number; points: number }>();
+    if (opts.playerIds.length === 0 || opts.weeks.length === 0) return out;
+    const stored = await this.repo.forPlayersInWeeks(opts.season, opts.weeks, opts.playerIds);
+    const latestFirst = [...stored.keys()].sort((a, b) => b - a);
+    const wantLines = await this.needsQbLines(opts.profile, opts.playerIds, opts.positionOf);
+    const linesByWeek = new Map<number, Record<string, QbStatLine>>();
+    for (const week of wantLines ? latestFirst : []) linesByWeek.set(week, await this.qbLines(opts.season, week));
+    for (const playerId of opts.playerIds) {
+      const position = opts.positionOf?.(playerId) ?? null;
+      for (const week of latestFirst) {
+        const row = stored.get(week)!.get(playerId);
+        if (!row) continue;
+        const points = scoreStored(row, opts.profile, position, linesByWeek.get(week)?.[playerId]);
+        if (points == null || !Number.isFinite(points) || points < opts.floor) continue;
+        out.set(playerId, { week, points });
+        break;
+      }
+    }
+    return out;
+  }
+}
+
+/** One stored row in this league's scoring, or null when the league cannot use it. */
+function scoreStored(
+  row: StoredWeeklyProjection,
+  profile: ScoringProfile,
+  position: string | null,
+  qbLine?: QbStatLine,
+): number | null {
+  /*
+   * A defence is computed, not quoted.
+   *
+   * `sleeperScoringKey` answers null for a defence in every league, because
+   * the three published totals are somebody else's defensive rules applied
+   * to somebody else's table. What is quotable is the projected stat line
+   * beside them, scored here under this league's own settings — so a league
+   * paying nothing for a shutout and a league paying ten both get a number
+   * that is right for them. See `core/sleeper/weeklyProjections.ts`.
+   */
+  const pos = String(position ?? '').trim().toUpperCase();
+  if (pos === 'DEF' || pos === 'DST') {
+    if (!row.defense) return null;
+    return scorePublishedDefense(row.defense, profile.dst) ?? null;
+  }
+
+  const key = sleeperScoringKey(profile, position);
+  if (key) return row.points[key] ?? null;
+
+  /*
+   * A quarterback this league scores differently from the feed: the total,
+   * rebuilt from his stat line (`qbRescore`). Without a stored line he has no
+   * number, exactly as before.
+   */
+  if (pos === 'QB') {
+    const rescore = qbRescore(profile);
+    if (rescore) return rescoreQbTotal(row.points, qbLine, rescore);
+  }
+  return null;
 }

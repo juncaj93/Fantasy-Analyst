@@ -7,6 +7,9 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 /** The modules that make a chunk the Draft screen's own. See `chunkFileNames`. */
 const DRAFT_SCREEN_MODULES = ['/web/screens/DraftScreen.tsx', '/web/components/mockDraft.tsx'];
 
+/** The modules that make a chunk the Setup screen's own (October 2026). See `chunkFileNames`. */
+const SETUP_SCREEN_MODULES = ['/web/screens/SetupScreen.tsx', '/web/screens/ReviewScreen.tsx'];
+
 export default defineConfig({
   plugins: [react()],
   root: r('./src/web'),
@@ -50,12 +53,24 @@ export default defineConfig({
          * most of the year no page load fetches it. The prefix lets the budget
          * count it on its own line rather than against the shell.
          */
+        /*
+         * And Setup as `setup-*.js` (October 2026), for the same reason again.
+         *
+         * The largest screen left in the entry chunk (about 16KB gzipped with
+         * Review and Data health under it) and the one a reader opens least:
+         * nothing about a lineup, a claim or a trade needs it to render.
+         * `App.tsx` reaches it through `lazy()` and fetches it once the first
+         * screen is up, so it is in the browser's cache before anybody taps
+         * the tab. Budgeted on its own line in `perf-budgets.json`.
+         */
         chunkFileNames: (chunk) =>
           chunk.moduleIds.some((id) => id.includes('/core/demo/') || id.includes('/web/demo/'))
             ? 'assets/demo-[hash].js'
             : chunk.moduleIds.some((id) => DRAFT_SCREEN_MODULES.some((m) => id.endsWith(m)))
               ? 'assets/draft-[hash].js'
-              : 'assets/[name]-[hash].js',
+              : chunk.moduleIds.some((id) => SETUP_SCREEN_MODULES.some((m) => id.endsWith(m)))
+                ? 'assets/setup-[hash].js'
+                : 'assets/[name]-[hash].js',
       },
     },
   },

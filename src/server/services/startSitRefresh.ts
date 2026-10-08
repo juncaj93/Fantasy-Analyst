@@ -98,6 +98,30 @@ export interface StartSitRefreshReport {
  */
 const recent = new WeakMap<Database, { at: number; report: StartSitRefreshReport }>();
 
+/**
+ * Offer this week's published projections a refresh, behind their own gate.
+ *
+ * Shared by the Team refresh and the Waivers pull-to-refresh, which is why it
+ * lives beside the first rather than inside it. Sleeper only, never the odds
+ * provider. `SleeperProjectionService.refresh` declines for one indexed read
+ * when the stored week is young and whole, so an ordinary tap costs almost
+ * nothing; it fetches when the week is old, has no defences, or the newest
+ * fetch was a sliver of the feed.
+ *
+ * Returns the rows written, zero when it declined. Never throws: a projection
+ * that could not be fetched is a dash on a screen, not a failed refresh.
+ */
+export async function refreshPublishedWeek(db: Database, sleeper: SleeperClient, season: string): Promise<number> {
+  try {
+    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+    const report = await new SleeperProjectionService(db, sleeper).refresh(season, week);
+    return report.outcome === 'fetched' ? report.rows : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export class StartSitRefreshService {
   constructor(
     private readonly db: Database,
@@ -178,15 +202,8 @@ export class StartSitRefreshService {
        * lineup being wrong, and reporting the first as though it were the second
        * would teach the reader to ignore the line.
        */
-      let projections = '';
-      try {
-        const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
-        const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
-        const report = await new SleeperProjectionService(this.db, sleeper).refresh(league.season, week);
-        if (report.outcome === 'fetched') projections = `, ${report.rows} projection(s)`;
-      } catch {
-        // Deliberately silent — see above.
-      }
+      const fetched = await refreshPublishedWeek(this.db, sleeper, league.season);
+      const projections = fetched > 0 ? `, ${fetched} projection(s)` : '';
       return {
         source: 'sleeper',
         outcome: 'updated',

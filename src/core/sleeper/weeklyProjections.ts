@@ -323,6 +323,9 @@ export function publishedRefusal(
   if (sleeperScoringKey(profile, position) != null) return null;
 
   const pos = String(position ?? '').trim().toUpperCase();
+  /* A quarterback whose total can be rebuilt for this league is read, not
+   * refused: see `qbRescore`. */
+  if (pos === 'QB' && qbRescore(profile) != null) return null;
   /* A defence is scored under this league's own rules, so the only refusal
    * left is that those rules could not be read at all. */
   if (pos === 'DEF' || pos === 'DST') return publishedDefenseRefusal(profile.dst);
@@ -367,6 +370,93 @@ export interface SleeperWeeklyProjection {
   points: Record<SleeperScoringKey, number | null>;
   /** The projected counts, on a defence's row only. Null for everybody else. */
   defense: PublishedDefenseLine | null;
+  /**
+   * A quarterback's projected stat line, on a quarterback's row only.
+   *
+   * What lets a league whose quarterback scoring differs from the feed's still
+   * read his number: see {@link qbRescore}. Not a column; the service keeps it
+   * in one settings row per week (October 2026, no migration).
+   */
+  qb?: QbStatLine | null;
+}
+
+/**
+ * The counts a quarterback's published total is built from, for the settings
+ * a league can score differently.
+ *
+ * Each one pairs with one setting in `RELEVANT.QB`, so whichever of those a
+ * league changes, its difference times the count is exactly what the total
+ * is off by.
+ */
+export interface QbStatLine {
+  passYards: number;
+  passTds: number;
+  interceptions: number;
+  rushYards: number;
+  rushTds: number;
+  fumblesLost: number;
+}
+
+/** Which count each QB setting multiplies. */
+const QB_STAT_FOR: Partial<Record<AssumedSetting, keyof QbStatLine>> = {
+  pointsPerPassYard: 'passYards',
+  passTd: 'passTds',
+  interception: 'interceptions',
+  pointsPerRushYard: 'rushYards',
+  rushTd: 'rushTds',
+  fumbleLost: 'fumblesLost',
+};
+
+/** How to turn a published QB total into this league's scoring. */
+export interface QbRescore {
+  /** Which published total to start from, by the league's reception value. */
+  key: SleeperScoringKey;
+  /** Points per unit of each count, league minus the feed's assumption. Only the ones that differ. */
+  per: Partial<Record<keyof QbStatLine, number>>;
+}
+
+/**
+ * Whether this league's quarterback number can be rebuilt from the feed, and how.
+ *
+ * Until October 2026 a league that pays six for a passing touchdown read no
+ * quarterback projection at all, because the published total assumes four (and
+ * -1 an interception, where this league charges -2). Alex approved rescoring:
+ * the total plus, for each QB setting that differs, (league value - feed value)
+ * x the projected count. On the week-5 feed this rebuilt all 30 QB totals from
+ * their stat lines within 0.05 points.
+ *
+ * Null when there is nothing to rescore (the league already matches) or when
+ * the reception value picks none of the three totals.
+ */
+export function qbRescore(profile: ScoringProfile | null | undefined): QbRescore | null {
+  if (!profile) return null;
+  const key = scoringKeyFor(profile);
+  if (!key) return null;
+  const per: QbRescore['per'] = {};
+  for (const setting of RELEVANT['QB']!) {
+    if (same(profile[setting] as number, PUBLISHED_ASSUMPTIONS[setting])) continue;
+    const stat = QB_STAT_FOR[setting];
+    // A QB setting with no count to multiply cannot be rebuilt: refuse, as before.
+    if (!stat) return null;
+    per[stat] = (profile[setting] as number) - PUBLISHED_ASSUMPTIONS[setting];
+  }
+  if (Object.keys(per).length === 0) return null;
+  return { key, per };
+}
+
+/** A published QB total in this league's scoring, or null without both halves. */
+export function rescoreQbTotal(
+  points: Record<SleeperScoringKey, number | null>,
+  line: QbStatLine | null | undefined,
+  rescore: QbRescore,
+): number | null {
+  const base = points[rescore.key];
+  if (base == null || !line) return null;
+  let total = base;
+  for (const [stat, delta] of Object.entries(rescore.per) as [keyof QbStatLine, number][]) {
+    total += delta * (line[stat] ?? 0);
+  }
+  return Math.round(total * 100) / 100;
 }
 
 interface RawRow {
@@ -408,7 +498,8 @@ export function parseSleeperWeeklyProjections(payload: unknown): SleeperWeeklyPr
     if (points.pts_std == null && points.pts_half_ppr == null && points.pts_ppr == null) continue;
 
     const company = raw.company == null ? '' : String(raw.company).trim().toLowerCase();
-    out.push({ playerId, publisher: company || null, points, defense: defenseLine(raw, stats) });
+    const qb = qbLine(raw, stats);
+    out.push({ playerId, publisher: company || null, points, defense: defenseLine(raw, stats), ...(qb ? { qb } : {}) });
   }
 
   return out;
@@ -443,6 +534,26 @@ function defenseLine(raw: RawRow, stats: Record<string, unknown>): PublishedDefe
     blockedKicks: count('blk_kick'),
     pointsAllowed: finite(stats['pts_allow']),
     yardsAllowed: finite(stats['yds_allow']),
+  };
+}
+
+/**
+ * A quarterback's projected counts, or null when this row is not a quarterback.
+ *
+ * Zero where a count is absent, which is what the feed means by omitting it,
+ * the same reading as a defence's counts.
+ */
+function qbLine(raw: RawRow, stats: Record<string, unknown>): QbStatLine | null {
+  const position = String(raw.player?.position ?? '').trim().toUpperCase();
+  if (position !== 'QB') return null;
+  const count = (key: string): number => finite(stats[key]) ?? 0;
+  return {
+    passYards: count('pass_yd'),
+    passTds: count('pass_td'),
+    interceptions: count('pass_int'),
+    rushYards: count('rush_yd'),
+    rushTds: count('rush_td'),
+    fumblesLost: count('fum_lost'),
   };
 }
 

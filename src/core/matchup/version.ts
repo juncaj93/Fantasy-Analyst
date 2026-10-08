@@ -18,4 +18,4 @@
 import { composeEngineVersion } from '../engineVersion.ts';
 import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
 
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@1', STARTSIT_ENGINE_VERSION);
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@2', STARTSIT_ENGINE_VERSION);

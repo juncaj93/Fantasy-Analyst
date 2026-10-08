@@ -569,8 +569,13 @@ describe('a season that answers with nothing is asked once', () => {
       if (report.complete) break;
     }
 
-    // Age every identity checkpoint by a fortnight.
-    const old = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    /*
+     * Age every identity checkpoint by a fortnight, measured from the run's
+     * pinned clock. Measured from the real one, the gap to `RUN.now` shrank by
+     * a day each day and fell under a week on 8 October 2026, and the re-read
+     * this test asks for stopped being due.
+     */
+    const old = new Date(RUN.now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
     await db
       .prepare('UPDATE manager_history_checkpoints SET last_success_at = ? WHERE dataset = ?')
       .bind(old, 'identity')

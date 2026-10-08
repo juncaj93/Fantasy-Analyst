@@ -1488,3 +1488,50 @@ async function returnToScreen(page: Page) {
     document.dispatchEvent(new Event('visibilitychange'));
   });
 }
+
+/**
+ * A player on a bye says so, in the row, at every width.
+ *
+ * October 2026 audit: the forecast projected two resting players from their
+ * preseason totals and Best move recommended starting one of them. A resting
+ * player now projects zero and carries `onBye`, and the row prints `BYE` in
+ * place of the number, inside the half it belongs to.
+ */
+test.describe('a player on a bye', () => {
+  test('reads BYE in the row, inside the screen', async ({ page }) => {
+    const body = response({}, {
+      phase: 'not_started',
+      slots: [
+        {
+          slot: 'QB',
+          mine: player('m1', 'J. Allen', 'QB', 'mine', { actual: 0, projectedFinal: 25.6, phase: 'not_started' }),
+          theirs: player('t1', 'D. Maye', 'QB', 'theirs', { actual: 0, projectedFinal: 21.8, phase: 'not_started' }),
+        },
+        {
+          slot: 'FLEX',
+          mine: player('m2', 'B. Hall', 'RB', 'mine', { actual: 0, projectedFinal: 11.5, phase: 'not_started' }),
+          theirs: player('t2', 'C. Hubbard', 'RB', 'theirs', {
+            actual: 0,
+            projectedFinal: 0,
+            remaining: 0,
+            phase: 'not_started',
+            onBye: true,
+            opponent: null,
+          }),
+        },
+      ],
+    });
+    await serve(page, body);
+    const cell = page.locator('[data-testid="matchup-player-proj"][data-projection-source="bye"]');
+    await expect(cell).toHaveCount(1);
+    await expect(cell).toHaveText('BYE');
+    await expect(cell).toHaveAttribute('aria-label', /bye/i);
+
+    const viewport = page.viewportSize()!;
+    const box = (await cell.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    const scroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(scroll).toBeLessThanOrEqual(0);
+  });
+});

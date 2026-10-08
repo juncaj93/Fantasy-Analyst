@@ -58,6 +58,17 @@ function toItem(row: EvidenceRow): EvidenceItem & { numericId: number } {
   };
 }
 
+/** Where `summary()` keeps its answer between writes. A settings key, not a schema change. */
+export const EVIDENCE_SUMMARY_KEY = 'evidence.summary';
+const EVIDENCE_SUMMARY_TTL_MS = 60 * 60 * 1_000;
+
+export interface EvidenceSummary {
+  total: number;
+  pending: number;
+  autoAppliedPositive: number;
+  autoAppliedNegative: number;
+}
+
 export class EvidenceRepo {
   constructor(private readonly db: Database) {}
 
@@ -104,6 +115,7 @@ export class EvidenceRepo {
       );
       await this.db.batch(statements);
     }
+    await this.forgetSummary();
 
     const after = await this.countAll();
     const inserted = after - before;
@@ -199,6 +211,7 @@ export class EvidenceRepo {
         changed.push(item);
       }
     }
+    if (changed.length > 0) await this.forgetSummary();
 
     return { changed, keptForUserOverride };
   }
@@ -322,6 +335,7 @@ export class EvidenceRepo {
         .run();
       reinstated.push({ ...toItem(row), reviewStatus: status });
     }
+    await this.forgetSummary();
     return reinstated;
   }
 
@@ -390,6 +404,7 @@ export class EvidenceRepo {
         .run();
       superseded.push(item);
     }
+    if (superseded.length > 0) await this.forgetSummary();
 
     return { superseded, keptForUserOverride };
   }
@@ -416,12 +431,53 @@ export class EvidenceRepo {
   }
 
   /** Headline counts for the Settings screen. */
-  async summary(): Promise<{
-    total: number;
-    pending: number;
-    autoAppliedPositive: number;
-    autoAppliedNegative: number;
-  }> {
+  async summary(): Promise<EvidenceSummary> {
+    /*
+     * Stored, and cleared by every write (October 2026, finding D2).
+     *
+     * A full pass over the table to produce four integers, asked on every
+     * Setup load: the nightly sweep's window read it 64 times for 84,224 rows,
+     * and each Probe run asks for /api/setup/status. Every write in this repo
+     * clears the stored copy, so the next read recomputes once and stores it
+     * again; the hour is only a ceiling in case a read and a write ever race.
+     */
+    const stored = await this.storedSummary();
+    if (stored) return stored;
+    const fresh = await this.computeSummary();
+    await this.db
+      .prepare(
+        `INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      )
+      .bind(EVIDENCE_SUMMARY_KEY, toJson({ ...fresh, at: nowIso() }), nowIso())
+      .run()
+      .catch(() => undefined);
+    return fresh;
+  }
+
+  private async storedSummary(): Promise<EvidenceSummary | null> {
+    const row = await this.db
+      .prepare('SELECT value_json FROM settings WHERE key = ?')
+      .bind(EVIDENCE_SUMMARY_KEY)
+      .first<{ value_json: string }>()
+      .catch(() => null);
+    const value = row ? parseJson<(EvidenceSummary & { at?: string }) | null>(row.value_json, null) : null;
+    if (!value || !value.at || Date.now() - Date.parse(value.at) > EVIDENCE_SUMMARY_TTL_MS) return null;
+    const { total, pending, autoAppliedPositive, autoAppliedNegative } = value;
+    if (![total, pending, autoAppliedPositive, autoAppliedNegative].every((n) => Number.isFinite(n))) return null;
+    return { total, pending, autoAppliedPositive, autoAppliedNegative };
+  }
+
+  /** Clear the stored summary; the next read recomputes it. Never throws. */
+  private async forgetSummary(): Promise<void> {
+    await this.db
+      .prepare('DELETE FROM settings WHERE key = ?')
+      .bind(EVIDENCE_SUMMARY_KEY)
+      .run()
+      .catch(() => undefined);
+  }
+
+  private async computeSummary(): Promise<EvidenceSummary> {
     const rows = await this.db
       .prepare('SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, polarity')
       .all<{ review_status: string; polarity: string; n: number }>();
@@ -522,6 +578,7 @@ export class EvidenceRepo {
         now,
       )
       .run();
+    await this.forgetSummary();
 
     return this.getById(id);
   }
