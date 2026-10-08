@@ -188,6 +188,7 @@ const line = (r: NonNullable<typeof t.doThis>) =>
   `  | ${r.bid.kind === 'claim' ? `bid $${r.bid.recommended} ($${r.bid.low}-${r.bid.high}): ${r.bid.reason}` : r.bid.reason}` +
   (r.competesWith.length > 0 ? `  | competes with ${r.competesWith.join(', ')} for that spot` : '') +
   (r.alternativeTo ? `  | an alternative to ${r.alternativeTo}` : '') +
+  (r.alternatives.length > 0 ? `  | alternatives: ${r.alternatives.join(', ')}` : '') +
   `  | last wk ${r.lastWeekPoints == null ? '-' : r.lastWeekPoints.toFixed(1)}`;
 console.log(`DO THIS: ${t.doThis ? line(t.doThis) : 'nothing'}`);
 console.log('WORTH CONSIDERING:');

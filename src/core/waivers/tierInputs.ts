@@ -167,6 +167,8 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
     request: {
       shape: input.shape,
       weeks: window.weeks,
+      weights: window.thisWeekOpen ? TIER_RULES.openWeights : TIER_RULES.weights,
+      leadWeeks: window.thisWeekOpen ? 2 : 1,
       roster,
       candidates,
       openSpots,

@@ -69,6 +69,14 @@ import type { RosterShape } from '../sleeper/rosterShape.ts';
 export const TIER_RULES = {
   /** Week weights: the first week the move counts, then the two after it. */
   weights: [1, 0.5, 0.5] as readonly number[],
+  /**
+   * While this week's games are still ahead, this week and next are both
+   * "next week" to a reader: a free agent can still play Sunday, and a claim
+   * entered now runs before next week. Both count in full.
+   */
+  openWeights: [1, 1, 0.5] as readonly number[],
+  /** Moves for the same need (one bye, one injury) shown as alternatives on the best one, at most this many. */
+  maxAlternatives: 3,
   /** A gain this large is "Do this" even without a hole. */
   doThis: 4,
   /** "Worth considering" from here. */
@@ -98,8 +106,6 @@ export const TIER_PREFS = {
   spareQbTe: -1.5,
   /** Ordering only: backs first when two moves are close. */
   rbLean: 0.25,
-  /** A gain this large overrides the spare QB/TE charge: a standout. */
-  standout: TIER_RULES.doThis,
 } as const;
 
 export type TierName = 'do_this' | 'consider' | 'watch';
@@ -148,6 +154,11 @@ export interface TierRequest {
   /** The NFL weeks of the window, oldest first. Same length as `weights`. */
   weeks: readonly number[];
   weights?: readonly number[];
+  /**
+   * How many leading weeks count as "next week" for a hole: 2 while this
+   * week's games are still ahead, else 1.
+   */
+  leadWeeks?: number;
   roster: readonly TierPlayer[];
   candidates: readonly TierCandidate[];
   /** Free bench spots (IR excluded). Each one is a move that needs no drop. */
@@ -194,6 +205,8 @@ export interface TierMove {
   dropCost: number | null;
   /** Other moves on this list that want the same roster spot. */
   competesWith: string[];
+  /** Other free agents who answer the same need, weaker first-choice alternatives. */
+  alternatives: string[];
   /** Set when he is an alternative to the "Do this" move rather than a second one. */
   alternativeTo: string | null;
   planExcluded: string | null;
@@ -329,9 +342,10 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     return out.sort((a, b) => b.lineup + b.insurance - (a.lineup + a.insurance) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
   };
 
-  const prefsFor = (c: TierCandidate, option: Option, gain: number): TierPreference[] => {
+  const prefsFor = (c: TierCandidate, option: Option): TierPreference[] => {
     const prefs: TierPreference[] = [];
-    if ((c.position === 'QB' || c.position === 'TE') && !option.after.starters[0]?.has(c.playerId) && gain < TIER_PREFS.standout) {
+    /* Clearly better means he starts next week; a body for a later bye is still a spare. */
+    if ((c.position === 'QB' || c.position === 'TE') && !option.after.starters[0]?.has(c.playerId)) {
       prefs.push({
         key: 'spare_qb_te',
         label: `You don’t carry a spare ${c.position} unless he is clearly better`,
@@ -343,7 +357,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
 
   const moveFor = (c: TierCandidate, option: Option, before: Valuation): TierMove => {
     const raw = round2(option.lineup + option.insurance);
-    const prefs = prefsFor(c, option, raw);
+    const prefs = prefsFor(c, option);
     const gain = round2(raw + prefs.reduce((s, p) => s + p.points, 0));
     const byWeek = weeks.map((week, k) => ({ week, change: round2((option.after.weekly[k] ?? 0) - (before.weekly[k] ?? 0)) }));
     const { code, reason } = reasonFor(c, option, before, byWeek, request, weeks);
@@ -364,6 +378,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       drop: option.drop ? { playerId: option.drop.playerId, name: option.drop.name, position: option.drop.position } : null,
       dropCost: option.drop ? (dropCost.get(option.drop.playerId) ?? null) : null,
       competesWith: [],
+      alternatives: [],
       alternativeTo: null,
       planExcluded: c.planExcluded ?? null,
     };
@@ -399,10 +414,16 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     sortKey(b) - sortKey(a) || b.gain - a.gain || a.name.localeCompare(b.name);
   const ranked = best.filter((m) => m.planExcluded == null).sort(order);
 
-  /* Do this: a hole in the first week, or a big gain. */
+  /*
+   * Do this: a hole in the first week, or a big upgrade. Depth for a bye two
+   * weeks out is worth considering however large, because nothing needs doing
+   * about it yet.
+   */
   const isHole = (m: TierMove) => m.reasonCode === 'hole_bye' || m.reasonCode === 'hole_injury' || m.reasonCode === 'hole_empty';
   const doThis =
-    ranked.find((m) => (isHole(m) && m.gain >= TIER_RULES.consider) || m.gain >= TIER_RULES.doThis) ?? null;
+    ranked.find(
+      (m) => (isHole(m) && m.gain >= TIER_RULES.consider) || (m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis),
+    ) ?? null;
   if (doThis) {
     doThis.tier = 'do_this';
     if (doThis.reasonCode === 'upgrade') doThis.reasonCode = 'big_upgrade';
@@ -423,7 +444,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       }
       if (option !== list[0]) {
         const replaced = moveFor(candidates.find((c) => c.playerId === m.playerId)!, option, base);
-        Object.assign(m, { ...replaced, tier: m.tier, competesWith: m.competesWith, reasonCode: m.reasonCode === 'ir_stash' ? 'ir_stash' : replaced.reasonCode, reason: m.reasonCode === 'ir_stash' ? m.reason : replaced.reason });
+        Object.assign(m, { ...replaced, tier: m.tier, competesWith: m.competesWith, alternatives: m.alternatives, reasonCode: m.reasonCode === 'ir_stash' ? 'ir_stash' : replaced.reasonCode, reason: m.reasonCode === 'ir_stash' ? m.reason : replaced.reason });
       }
       if (option.drop == null) openLeft -= 1;
       else used.set(option.drop.playerId, m.name);
@@ -436,19 +457,38 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   const consider: TierMove[] = [];
   const watch: TierMove[] = [];
   let stashTaken = false;
+  /*
+   * One row per need. Four quarterbacks for one bye are one decision: the best
+   * is listed and the rest ride on it as alternatives, sharing its drop rather
+   * than reaching for a starter to cut.
+   */
+  const needOf = (m: TierMove) =>
+    m.reasonCode === 'hole_bye' || m.reasonCode === 'hole_injury' || m.reasonCode === 'hole_empty' || m.reasonCode === 'bye_depth' || m.reasonCode === 'injury_backup'
+      ? m.reason
+      : null;
+  const byNeed = new Map<string, TierMove>();
+  if (doThis && needOf(doThis)) byNeed.set(needOf(doThis)!, doThis);
   for (const m of ranked) {
     if (m === doThis) continue;
+    const need = needOf(m);
+    const holder = need ? byNeed.get(need) : undefined;
+    if (holder) {
+      if (holder.alternatives.length < TIER_RULES.maxAlternatives) holder.alternatives.push(m.name);
+      continue;
+    }
     const stash = m.reasonCode === 'ir_stash' && !stashTaken;
     const qualifies = m.gain >= TIER_RULES.consider || stash;
     if (qualifies && consider.length < TIER_RULES.maxConsider && assign(m)) {
       m.tier = 'consider';
       if (stash) stashTaken = true;
       consider.push(m);
+      if (need) byNeed.set(need, m);
       continue;
     }
     if (m.gain >= TIER_RULES.watch && watch.length < TIER_RULES.maxWatch) {
       m.tier = 'watch';
       watch.push(m);
+      if (need) byNeed.set(need, m);
     }
   }
 
@@ -567,7 +607,7 @@ function reasonFor(
     );
     if (weak) {
       const missing = missingStarter(c, request, before, k);
-      const first = k === 0;
+      const first = k < (request.leadWeeks ?? 1);
       if (missing) {
         const out = missing.weekly[k] === 0 && missing.byeWeek === week;
         const label = `${missing.position} ${missing.name}`;
@@ -602,7 +642,7 @@ function reasonFor(
 
   if (option.lineup > 0 && option.after.starters.some((s) => s.has(c.playerId))) {
     /* He pays in a later week because somebody is away then: that is bye depth. */
-    if (k > 0 && startsThen) {
+    if (k >= (request.leadWeeks ?? 1) && startsThen) {
       const missing = missingStarter(c, request, before, k);
       if (missing && (missing.weekly[k] ?? 1) === 0) {
         const bye = missing.byeWeek === week;

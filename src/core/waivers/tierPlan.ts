@@ -101,7 +101,7 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       return {
         ...m,
         lastWeekPoints,
-        bid: emptyBid('free', input.rules ? `Free agent: first come, no bid. ${freeAgentRule(input.rules)}` : 'Free agent: first come, no bid.', pickup),
+        bid: emptyBid('free', 'Free agent: first come, no bid', pickup),
       };
     }
     const trend = input.trending.get(m.playerId);
