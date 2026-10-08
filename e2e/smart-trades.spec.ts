@@ -92,6 +92,18 @@ const BOARD = {
   warnings: [],
 };
 
+/*
+ * Check a trade's verdict on each idea (finding T3): one that favours you, one
+ * close call, one that could not be checked. Every layout test below runs with
+ * the extra line on the row, so the line is measured, not assumed.
+ */
+const SEASON = [
+  { status: 'ok', kind: 'favors_a', headline: 'Favors You by about 31 pts over the rest of the season (30 for you, -1 for Dermot).', confidence: 'medium', reason: null },
+  { status: 'ok', kind: 'close', headline: 'Close call. Within about 12 pts, which is more than this model can separate.', confidence: 'medium', reason: null },
+  { status: 'insufficient', kind: null, headline: null, confidence: null, reason: 'No number can be put on Tony Pollard: on a bye and no season line is stored for him' },
+];
+BOARD.offers.forEach((o, i) => Object.assign(o, { seasonCheck: SEASON[i] }));
+
 function offer(o: {
   id: string;
   partner: string;
@@ -312,6 +324,11 @@ test.describe('the trade ideas', () => {
     expect(visible).toBe(3);
   });
 
+  test('says what Check a trade says about each idea over the rest of the season', async ({ page }) => {
+    const labels = page.getByTestId('smart-trade-season');
+    await expect(labels).toHaveText(['Season: favors you', 'Season: close call', 'Season: not checked']);
+  });
+
   test('shows a manager cue only where the history says something', async ({ page }) => {
     /*
      * Two of the three fixtures have a measured manager and one is unknown. A
@@ -345,6 +362,11 @@ test.describe('the detail sheet', () => {
     await openTrades(page);
     await page.getByTestId('smart-trade-row').first().click();
     await expect(page.getByTestId('smart-trade-detail')).toBeVisible();
+  });
+
+  test('gives Check a trade’s full verdict in the sheet', async ({ page }) => {
+    await expect(page.getByTestId('smart-trade-season-detail')).toContainText('Favors You by about 31 pts over the rest of the season');
+    await expect(page.getByTestId('smart-trade-season-detail')).toContainText('medium confidence, from Check a trade');
   });
 
   test('says what each side gets, how fair it is, and who the manager is', async ({ page }) => {

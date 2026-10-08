@@ -44,6 +44,7 @@
  * anybody.
  */
 
+import type { SeasonCheck } from './seasonCheck.ts';
 import { MANAGER_FIT_CAP, managerFitFor, type ActivityClass, type ManagerFit, type ManagerFitInput } from './managerFit.ts';
 import type { ArbitrageRead } from './arbitrage.ts';
 import type { OfferCategory } from './category.ts';
@@ -436,6 +437,12 @@ export interface OfferEvaluation {
   caveats: string[];
   /** One line for a collapsed row: the net benefit. */
   headline: string;
+  /**
+   * Check a trade's verdict on this same deal over the rest of the season.
+   * Set by the caller after the search; absent on a board that was not
+   * checked. See `seasonCheck.ts`.
+   */
+  seasonCheck?: SeasonCheck;
 }
 
 export interface TradePartnerView {

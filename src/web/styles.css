@@ -9732,6 +9732,18 @@ div.matchup-result {
   min-width: 0;
 }
 
+/* Check a trade's verdict on the same idea (T3). Quiet, like the cue. */
+.smart-trade-season {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.smart-trade-season[data-kind='favors_a'],
+.smart-trade-season[data-kind='leans_a'] {
+  color: var(--pos);
+}
+
 /*
   The manager cue.
 

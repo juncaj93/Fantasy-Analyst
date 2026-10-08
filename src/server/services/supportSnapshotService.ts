@@ -27,6 +27,8 @@ import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { MatchupService } from './matchupService.ts';
 import { SmartTradeService } from './smartTradeService.ts';
+import { seasonChecksFor } from './tradeIdeaCheck.ts';
+import { assembleSmartTrades } from '../../core/trades/assemble.ts';
 import { gatherLineupInputs, gatherWaiverInputs, NoDecision } from './decisionInputs.ts';
 import { captureLineupSnapshot } from '../../core/support/lineupSnapshot.ts';
 import { captureMatchupSnapshot } from '../../core/support/matchupSnapshot.ts';
@@ -197,6 +199,13 @@ export async function captureSupportSnapshot(
       const gathered = await new SmartTradeService(db).gather({ leagueId });
       if (gathered.league == null) throw new NoDecision('league not found', 404);
       const nflState = await new SettingsRepo(db).get<{ week?: number } | null>(SETTING_KEYS.nflState, null);
+      /* The same season checks the Trades screen applies, recorded as inputs. */
+      const seasonChecks = await seasonChecksFor(
+        db,
+        sleeper,
+        gathered.league.id,
+        assembleSmartTrades(gathered.request).offers,
+      );
       return captureTradeSnapshot({
         gitSha,
         dataHealth,
@@ -209,6 +218,7 @@ export async function captureSupportSnapshot(
           history: gathered.request.history,
           limit: gathered.request.limit,
           warnings: gathered.request.warnings ?? [],
+          seasonChecks,
         },
         nflState: nflState as never,
         props: await freshness(db),
