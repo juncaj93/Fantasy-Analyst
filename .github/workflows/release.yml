@@ -60,7 +60,7 @@ jobs:
       # the event carries, which for every trigger that could reach here is
       # "main, now" — the one thing this workflow may not deploy, because it is
       # not necessarily what CI validated.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.sha }}
 
@@ -86,7 +86,7 @@ jobs:
           fi
           echo "::notice::Releasing $want (${{ inputs.origin }})"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm

@@ -82,7 +82,7 @@ jobs:
       sha: ${{ steps.check.outputs.sha }}
       proceed: ${{ steps.check.outputs.proceed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The whole history, because this asks an ancestry question.
           fetch-depth: 0

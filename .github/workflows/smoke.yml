@@ -151,8 +151,8 @@ jobs:
       # it was measured against rather than a number it hard-coded.
       ceiling: ${{ inputs.ceiling_percent || '30' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -276,7 +276,7 @@ jobs:
       # — a wall of failures that says nothing about whether the rollback worked.
       # Checking out the released revision asks the right question: does this
       # code do what this code was shipped believing it does?
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Empty (a hand-started run with no revision named) means the default:
           # whatever ref this workflow was started from.
@@ -286,7 +286,7 @@ jobs:
       # check below. Rolling back far enough reaches code from before releases
       # had identities at all, and the check has to be able to say that clearly
       # rather than fail on a missing file.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: .release-tools
 
@@ -326,7 +326,7 @@ jobs:
           fi
           node .release-tools/scripts/check-release-sha.mjs "$PRODUCTION_URL" "$EXPECTED_RELEASE_SHA" --attempts 6 --delay 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm

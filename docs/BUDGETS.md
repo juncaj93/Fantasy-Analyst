@@ -26,10 +26,11 @@ built assets and compares them against `perf-budgets.json`.
 
 | what | budget (gzip) | roughly today |
 | --- | --- | --- |
-| app JavaScript | 135 kB | 124.8 kB |
-| app CSS | 20 kB | 16.5 kB |
+| app JavaScript | 125 kB | 115.0 kB |
+| app CSS | 20 kB | 18.4 kB |
 | HTML shell | 4 kB | 1.6 kB |
-| everything needed to render | 168 kB | 142 kB |
+| everything needed to render | 168 kB | 135 kB |
+| Setup screen, fetched after the first screen is drawn | 24 kB | 20.8 kB |
 | Draft screen, fetched only while a draft is ahead | 24 kB | 20 kB |
 | Demo Mode, fetched only when opened | 32 kB | 26 kB |
 
@@ -49,7 +50,8 @@ separately.** Setup (with Review and Data health under it) ships as
 `assets/setup-*.js` since 8 October 2026: `App.tsx` reaches it through `lazy()`
 and fetches it 1.5 seconds after the first screen renders, so it is cached
 before anybody taps the tab but never delays Team, Matchup or Waivers. That took
-the entry chunk from ~133.5KB to ~113.9KB under the same 135KB ceiling. The
+the entry chunk from ~133.5KB to ~113.9KB under the same 135KB ceiling, which
+the owner then lowered to 125KB so the freed space stays freed. The
 Draft screen ships as `assets/draft-*.js`: `App.tsx` reaches
 it only through `lazy()`, and draws it only while the season says a draft is
 ahead (`web/draftGate.ts`, which reads the same `draftVisible` that puts the tab
