@@ -113,7 +113,17 @@ export class InjuryRepo {
     }
   }
 
-  /** The most recent report for each of these players, in one round trip. */
+  /**
+   * The most recent report for each of these players, in one round trip.
+   *
+   * Each player is looked up by the primary key `(player_id, season, week)`,
+   * and so is the newest week the subquery asks for. The form this replaced
+   * joined a `GROUP BY` of the same lookup back to the table, and SQLite,
+   * which keeps no statistics on D1, ran that join from the table side through
+   * `(season, week)`: every report of the season read on every call to return
+   * one row per player. Production, 8 October 2026, 40 players: 998 rows read
+   * as written, 251 rewritten, the same 38 rows back. Finding D5.
+   */
   async latestFor(playerIds: string[], season: string): Promise<Map<string, StoredInjuryReport>> {
     const out = new Map<string, StoredInjuryReport>();
     if (playerIds.length === 0) return out;
@@ -124,14 +134,11 @@ export class InjuryRepo {
       const { results } = await this.db
         .prepare(
           `SELECT r.* FROM player_injury_reports r
-             JOIN (SELECT player_id, MAX(week) AS week
-                     FROM player_injury_reports
-                    WHERE season = ? AND player_id IN (${holes})
-                 GROUP BY player_id) latest
-               ON latest.player_id = r.player_id AND latest.week = r.week
-            WHERE r.season = ?`,
+            WHERE r.season = ? AND r.player_id IN (${holes})
+              AND r.week = (SELECT MAX(r2.week) FROM player_injury_reports r2
+                             WHERE r2.player_id = r.player_id AND r2.season = r.season)`,
         )
-        .bind(season, ...batch, season)
+        .bind(season, ...batch)
         .all<Record<string, unknown>>();
       for (const row of results ?? []) {
         const report = toReport(row);
