@@ -10,6 +10,9 @@
  *
  * IDEAS names players, "give,give>get,get", separated by ";". Each is checked
  * against the roster holding the get side. Cost: one trade check per idea.
+ *
+ * The Probe workflow passes no IDEAS, so the default is the one idea the
+ * touchdown fix (#345) surfaced in its replay on 8 October 2026.
  */
 
 const APP = (process.env.URL ?? 'https://fantasy-analyst.juncaj93.workers.dev').replace(/\/$/, '');
@@ -32,7 +35,7 @@ const ideas = (board?.offers ?? []).map((o) => ({
   get: o.get.map((p) => p.playerId),
   source: `live board (${o.category ?? 'upgrade'})`,
 }));
-for (const spec of (process.env.IDEAS ?? '').split(';').map((s) => s.trim()).filter(Boolean)) {
+for (const spec of (process.env.IDEAS ?? 'Sam LaPorta>Carnell Tate').split(';').map((s) => s.trim()).filter(Boolean)) {
   const [g, r] = spec.split('>');
   const give = g.split(',').map((n) => byName.get(n.trim().toLowerCase()));
   const take = r.split(',').map((n) => byName.get(n.trim().toLowerCase()));
