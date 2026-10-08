@@ -32,8 +32,8 @@ jobs:
     name: typecheck + unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           # node:sqlite (used by the local test database) needs 22.5+
           node-version: '22'
@@ -130,8 +130,8 @@ jobs:
         # Each width across three runners instead of one. See the test step.
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm

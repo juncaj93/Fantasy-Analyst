@@ -18,8 +18,8 @@ jobs:
     steps:
       # Some probes run the repo's own parsers, so a source that changes shape
       # fails here rather than in the app.
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 

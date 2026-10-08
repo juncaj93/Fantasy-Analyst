@@ -92,8 +92,8 @@ jobs:
     outputs:
       ran_today: ${{ steps.check.outputs.ran_today }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - id: check
@@ -156,8 +156,8 @@ jobs:
       # Only to end this run as cancelled; see the last step.
       actions: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       # One short comment on the tracking issue, at most one a day, and nothing

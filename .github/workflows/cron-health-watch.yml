@@ -32,8 +32,8 @@ jobs:
     outputs:
       verdicts: ${{ steps.watch.outputs.verdicts }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       # No `npm ci`: the script depends on nothing, like the alert it feeds.
