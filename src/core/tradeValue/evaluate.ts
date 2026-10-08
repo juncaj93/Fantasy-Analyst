@@ -657,6 +657,13 @@ function confidenceFor(
     lower('low');
     reasons.push(`${listNames(weak.map((p) => p.name))} ${weak.length === 1 ? 'is' : 'are'} valued on the season line, not a current week.`);
   }
+  const earlier = moved.filter((p) => p.basis === 'recent_week');
+  if (earlier.length > 0) {
+    lower('medium');
+    reasons.push(
+      `${listNames(earlier.map((p) => p.name))} ${earlier.length === 1 ? 'has' : 'have'} no number this week, so ${earlier.length === 1 ? 'he is' : 'they are'} valued on an earlier week’s Sleeper projection.`,
+    );
+  }
   const published = moved.filter((p) => p.basis === 'published');
   if (published.length > 0) {
     lower('medium');

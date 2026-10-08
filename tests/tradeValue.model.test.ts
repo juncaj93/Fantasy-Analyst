@@ -324,6 +324,71 @@ describe('the rate ladder', () => {
     });
     expect(r).toMatchObject({ rate: null, basis: 'none' });
   });
+
+  it('values a player on a bye by his most recent earlier week when there is no season line', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: null }),
+      seasonLine: null,
+      byeThisWeek: true,
+      recentWeek: { week: 4, points: 12.34 },
+    });
+    expect(r).toMatchObject({ rate: 12.34, basis: 'recent_week' });
+    expect(r.note).toMatch(/bye/);
+    expect(r.note).toMatch(/week 4 Sleeper projection/);
+  });
+
+  it('values an out player by his earlier week instead of this week’s published zero', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: null, designation: 'out', ruledOut: true, status: -99 }),
+      published: new Map([['p', 0]]),
+      seasonLine: null,
+      byeThisWeek: false,
+      recentWeek: { week: 3, points: 9 },
+    });
+    expect(r).toMatchObject({ rate: 9, basis: 'recent_week' });
+    expect(r.note).toMatch(/out this week/);
+  });
+
+  it('prefers the season line to an earlier week when both exist', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: null }),
+      seasonLine: 8.4,
+      byeThisWeek: true,
+      recentWeek: { week: 4, points: 12 },
+    });
+    expect(r).toMatchObject({ rate: 8.4, basis: 'season_line' });
+  });
+
+  it('never lets an earlier week override a complete Vegas week', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: 10 }),
+      seasonLine: null,
+      byeThisWeek: false,
+      recentWeek: { week: 4, points: 20 },
+    });
+    expect(r).toMatchObject({ rate: 10, basis: 'market' });
+  });
+
+  it('never lets an earlier week override this week’s published projection', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: 3, missing: ['player_receptions'] }),
+      published: new Map([['p', 11]]),
+      seasonLine: null,
+      byeThisWeek: false,
+      recentWeek: { week: 4, points: 20 },
+    });
+    expect(r).toMatchObject({ rate: 11, basis: 'published' });
+  });
+
+  it('ignores an earlier week below a point, which is a zero and not a read of him', () => {
+    const r = resolveRate({
+      evaluation: evaluation({ market: null }),
+      seasonLine: null,
+      byeThisWeek: true,
+      recentWeek: { week: 4, points: 0.4 },
+    });
+    expect(r).toMatchObject({ rate: null, basis: 'none' });
+  });
 });
 
 describe('what a trade does to a lineup', () => {
@@ -462,6 +527,15 @@ describe('thin data', () => {
     });
     expect(r.status).toBe('insufficient');
     expect(r.insufficientReason).toMatch(/DEF/);
+  });
+
+  it('lowers confidence to medium for a player valued on an earlier week', () => {
+    const a = side('A', roster('a'));
+    const b = side('B', roster('b').map((p) => (p.playerId === 'b-wr1' ? { ...p, basis: 'recent_week' as const } : p)));
+    const r = run(a, b, ['a-wr1'], ['b-wr1']);
+    expect(r.status).toBe('ok');
+    expect(r.confidence).not.toBe('high');
+    expect(r.confidenceReasons.join(' ')).toMatch(/earlier week/);
   });
 
   it('lowers confidence for a player valued on the season line', () => {

@@ -141,6 +141,13 @@ export function rosterLimitOf(league: LeagueRecord, shape: ReturnType<typeof bui
 
 const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 
+/**
+ * How far back to look for an earlier week's published projection when a
+ * player has no number this week. Three weeks covers a bye plus a week or two
+ * of injury without reaching back to a different role.
+ */
+const RECENT_WEEKS_BACK = 3;
+
 export class TradeValueService {
   private readonly leagues: LeagueRepo;
 
@@ -511,6 +518,32 @@ export class TradeValueService {
       return baseline.points / SEASON_GAMES;
     };
 
+    /*
+     * An earlier week, for the needy players the season line does not cover.
+     *
+     * This provider publishes no season lines, so on a bye week every player
+     * on that club had no rate and any trade that moved one got no verdict.
+     * His most recent earlier week's published projection is the stand-in,
+     * read through the same scoring gate as this week's (a quarterback this
+     * league's scoring refuses stays refused). One keyed read for the players
+     * still missing, over the last few weeks, so a few dozen rows at most.
+     */
+    const missing = needy.filter((id) => seasonLineOf(id) == null);
+    const lookBack = Array.from({ length: RECENT_WEEKS_BACK }, (_, i) => week - 1 - i).filter((w) => w >= 1);
+    const recentWeeks =
+      missing.length === 0 || lookBack.length === 0
+        ? new Map<string, { week: number; points: number }>()
+        : await new SleeperProjectionService(this.db, this.sleeper)
+            .publishedRecent({
+              season: league.season,
+              weeks: lookBack,
+              playerIds: missing,
+              profile,
+              positionOf: (id) => positionOf.get(id) ?? null,
+              floor: 1,
+            })
+            .catch(() => new Map<string, { week: number; points: number }>());
+
     const reserved = new Set(opts.reserveIds);
     const rates = new Map<string, PlayerRate>();
     for (const input of inputs) {
@@ -522,6 +555,7 @@ export class TradeValueService {
           evaluation: evaluations.get(id)!,
           published,
           seasonLine: seasonLineOf(id),
+          recentWeek: recentWeeks.get(id) ?? null,
           weeks: horizon.weeks,
           byeWeek: bye.byeWeek,
           byeKnown: bye.known,

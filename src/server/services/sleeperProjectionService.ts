@@ -32,7 +32,11 @@ import {
   sleeperScoringKey,
   type SleeperWeeklyProjection,
 } from '../../core/sleeper/weeklyProjections.ts';
-import { SleeperProjectionsRepo, type WeeklyProjectionFreshness } from '../repos/sleeperProjections.ts';
+import {
+  SleeperProjectionsRepo,
+  type StoredWeeklyProjection,
+  type WeeklyProjectionFreshness,
+} from '../repos/sleeperProjections.ts';
 import type { Database } from '../db.ts';
 
 /**
@@ -180,33 +184,67 @@ export class SleeperProjectionService {
     for (const playerId of opts.playerIds) {
       const row = stored.get(playerId);
       if (!row) continue;
-      const position = opts.positionOf?.(playerId) ?? null;
-
-      /*
-       * A defence is computed, not quoted.
-       *
-       * `sleeperScoringKey` answers null for a defence in every league, because
-       * the three published totals are somebody else's defensive rules applied
-       * to somebody else's table. What is quotable is the projected stat line
-       * beside them, scored here under this league's own settings — so a league
-       * paying nothing for a shutout and a league paying ten both get a number
-       * that is right for them. See `core/sleeper/weeklyProjections.ts`.
-       */
-      const pos = String(position ?? '').trim().toUpperCase();
-      if (pos === 'DEF' || pos === 'DST') {
-        if (!row.defense) continue;
-        const points = scorePublishedDefense(row.defense, opts.profile.dst);
-        if (points == null) continue;
-        out.set(playerId, points);
-        continue;
-      }
-
-      const key = sleeperScoringKey(opts.profile, position);
-      if (!key) continue;
-      const points = row.points[key];
-      if (points == null) continue;
-      out.set(playerId, points);
+      const points = scoreStored(row, opts.profile, opts.positionOf?.(playerId) ?? null);
+      if (points != null) out.set(playerId, points);
     }
     return out;
   }
+
+  /**
+   * Each player's most recent earlier week with a real published figure.
+   *
+   * The trade check's stand-in for a player with no number this week (a bye,
+   * an injury, nothing posted yet). One keyed read over `weeks`, scored through
+   * the same gate as `publishedFor`, so a position this league's scoring
+   * refuses is refused here too. A figure under `floor` is a zero for a game
+   * he did not play and is passed over for the week before it.
+   */
+  async publishedRecent(opts: {
+    season: string;
+    weeks: readonly number[];
+    playerIds: readonly string[];
+    profile: ScoringProfile;
+    positionOf?: (playerId: string) => string | null | undefined;
+    floor: number;
+  }): Promise<Map<string, { week: number; points: number }>> {
+    const out = new Map<string, { week: number; points: number }>();
+    if (opts.playerIds.length === 0 || opts.weeks.length === 0) return out;
+    const stored = await this.repo.forPlayersInWeeks(opts.season, opts.weeks, opts.playerIds);
+    const latestFirst = [...stored.keys()].sort((a, b) => b - a);
+    for (const playerId of opts.playerIds) {
+      const position = opts.positionOf?.(playerId) ?? null;
+      for (const week of latestFirst) {
+        const row = stored.get(week)!.get(playerId);
+        if (!row) continue;
+        const points = scoreStored(row, opts.profile, position);
+        if (points == null || !Number.isFinite(points) || points < opts.floor) continue;
+        out.set(playerId, { week, points });
+        break;
+      }
+    }
+    return out;
+  }
+}
+
+/** One stored row in this league's scoring, or null when the league cannot use it. */
+function scoreStored(row: StoredWeeklyProjection, profile: ScoringProfile, position: string | null): number | null {
+  /*
+   * A defence is computed, not quoted.
+   *
+   * `sleeperScoringKey` answers null for a defence in every league, because
+   * the three published totals are somebody else's defensive rules applied
+   * to somebody else's table. What is quotable is the projected stat line
+   * beside them, scored here under this league's own settings — so a league
+   * paying nothing for a shutout and a league paying ten both get a number
+   * that is right for them. See `core/sleeper/weeklyProjections.ts`.
+   */
+  const pos = String(position ?? '').trim().toUpperCase();
+  if (pos === 'DEF' || pos === 'DST') {
+    if (!row.defense) return null;
+    return scorePublishedDefense(row.defense, profile.dst) ?? null;
+  }
+
+  const key = sleeperScoringKey(profile, position);
+  if (!key) return null;
+  return row.points[key] ?? null;
 }

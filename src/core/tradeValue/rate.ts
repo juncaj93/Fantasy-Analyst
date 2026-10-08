@@ -28,7 +28,15 @@
  *  3. `season_line`: the market's season-long totals divided by the games in a
  *     season, used only when this week's number is not a real read of him: he
  *     is on a bye, he is ruled out, or nothing is priced or published.
- *  4. `none`: nothing trustworthy. His rate is null, he is never valued at
+ *  4. `recent_week`: Sleeper's published projection for him from the most
+ *     recent earlier week of this season, under the same conditions as the
+ *     season line and only when there is none (this provider publishes no
+ *     season lines, so in practice this is the rung that fires). Added in the
+ *     October 2026 audit: on a bye week every Chiefs and Panthers player had no
+ *     value at all. On Sleeper's own weeks 1 to 4, an earlier week's projection
+ *     predicted later weeks almost as well as the current week's (mean error
+ *     +0.03 to +0.11 points), so it is a fair stand-in for "no number".
+ *  5. `none`: nothing trustworthy. His rate is null, he is never valued at
  *     zero, and a trade that moves him gets no verdict.
  *
  * A partial market (a book that posted one of four lines) is not a rung. It is
@@ -41,12 +49,13 @@ import type { StartSitEvaluation } from '../startsit/engine.ts';
 import type { Designation } from '../injury/model.ts';
 import { isOutNow, weeklyAvailability } from './availability.ts';
 
-export type RateBasis = 'market' | 'published' | 'season_line' | 'none';
+export type RateBasis = 'market' | 'published' | 'season_line' | 'recent_week' | 'none';
 
 export const RATE_BASIS_LABEL: Record<RateBasis, string> = {
   market: 'Vegas week',
   published: 'Sleeper projection',
   season_line: 'season line',
+  recent_week: 'earlier week’s Sleeper projection',
   none: 'no projection',
 };
 
@@ -148,6 +157,11 @@ export function resolveRate(args: {
   seasonLine: number | null;
   /** True when this week's number is not a read of him (bye week). */
   byeThisWeek: boolean;
+  /**
+   * His most recent earlier week's published projection this season, already
+   * cleared for this league's scoring by the caller. Null when there is none.
+   */
+  recentWeek?: { week: number; points: number } | null;
 }): { rate: number | null; basis: RateBasis; note: string | null; parts?: { base: number; nudges: number } | null } {
   const { seasonLine } = args;
   const week = readWeek(args);
@@ -171,6 +185,21 @@ export function resolveRate(args: {
         ? 'out this week, so this week\u2019s number is not a read of him'
         : 'no complete Vegas week and nothing published for him';
     return { rate: round2(season), basis: 'season_line', note: `${why}; valued on the market\u2019s season line` };
+  }
+  const recent = args.recentWeek;
+  if (recent != null && Number.isFinite(recent.points) && recent.points >= OUT_PLAYER_FLOOR) {
+    const why = args.byeThisWeek
+      ? 'on a bye this week, so this week has no number for him'
+      : week.out
+        ? 'out this week, so this week\u2019s number is not a read of him'
+        : week.partial
+          ? 'only part of his Vegas week is priced and nothing is published for him yet'
+          : 'no complete Vegas week and nothing published for him yet';
+    return {
+      rate: round2(recent.points),
+      basis: 'recent_week',
+      note: `${why}; valued on his week ${recent.week} Sleeper projection`,
+    };
   }
   if (week.weekRate != null && week.weekRate >= OUT_PLAYER_FLOOR) {
     // A bye week with a real published figure and no season line: it is the only
@@ -196,6 +225,8 @@ export function buildPlayerRate(args: {
   byeWeek: number | null;
   byeKnown: boolean;
   onReserve?: boolean;
+  /** See `resolveRate`'s `recentWeek`. */
+  recentWeek?: { week: number; points: number } | null;
 }): PlayerRate {
   const { evaluation } = args;
   const designation = evaluation.injury.designation;
@@ -205,6 +236,7 @@ export function buildPlayerRate(args: {
     ...(args.published ? { published: args.published } : {}),
     seasonLine: args.seasonLine,
     byeThisWeek,
+    ...(args.recentWeek === undefined ? {} : { recentWeek: args.recentWeek }),
   });
   const availability = weeklyAvailability({
     designation,
