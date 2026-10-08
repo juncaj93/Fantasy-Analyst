@@ -41,9 +41,12 @@ import { composeEngineVersion } from '../engineVersion.ts';
  *
  * `startsit@2`, 6 October 2026: everything except the market and availability
  * is held to a tenth of the market number, with smaller caps on news; see
- * `adjustmentBudget.ts`. Scores move for unchanged inputs, hence the bump.
+ * `adjustmentBudget.ts`. Scores move for unchanged inputs, hence the bump. *
+ * `startsit@3`, 8 October 2026: a touchdown over/under above 0.5 is converted
+ * to the any-touchdown chance it implies (`touchdownLine.ts`) instead of being
+ * read as one. Market numbers rise for unchanged inputs, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@2';
+export const STARTSIT_ENGINE_VERSION = 'startsit@3';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
