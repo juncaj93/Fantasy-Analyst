@@ -208,12 +208,18 @@ export class LeagueStrategyService {
    * Sleeper requests.
    */
   async context(leagueId: string, opts: { week: number; season: string }): Promise<StrategyContext | null> {
-    const league = await this.leagues.getLeague(leagueId);
+    /*
+     * Four reads keyed by nothing but the league and season, together: one
+     * round trip where there were four, on every Waivers open.
+     */
+    const [league, rosters, stored, weekRows] = await Promise.all([
+      this.leagues.getLeague(leagueId),
+      this.leagues.listRosters(leagueId),
+      this.transactions.list(leagueId, { season: opts.season }),
+      this.transactions.weeksRead(leagueId, opts.season),
+    ]);
     if (!league) return null;
 
-    const rosters = await this.leagues.listRosters(leagueId);
-    const stored = await this.transactions.list(leagueId, { season: opts.season });
-    const weekRows = await this.transactions.weeksRead(leagueId, opts.season);
     const weeksRead = weekRows.map((w) => w.week);
     const transactionsReadAt = weekRows.reduce<string | null>((latest, w) => (latest == null || w.fetchedAt > latest ? w.fetchedAt : latest), null);
 
@@ -231,9 +237,12 @@ export class LeagueStrategyService {
     const bidHistory = collectBids(stored, weeksRead);
     const prices = summarisePrices(bidHistory);
 
-    const current = await this.trending.capture('add');
+    // The add and drop captures are independent; the comparison waits only on the adds.
+    const [current, dropCapture] = await Promise.all([
+      this.trending.capture('add'),
+      this.trending.capture('drop').catch(() => null),
+    ]);
     const previous = current ? await this.trending.comparablePrevious(current) : null;
-    const dropCapture = await this.trending.capture('drop').catch(() => null);
 
     /*
      * Your own cuts, newest first, keyed by player. Completed transactions only:

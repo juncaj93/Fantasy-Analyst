@@ -173,11 +173,14 @@ export interface EndpointMeasurement {
  *
  * Player detail because it is opened constantly and was the one that had grown
  * a seventeen-deep chain; the board because it is the largest answer this API
- * sends and the one whose payload nobody was watching.
+ * sends and the one whose payload nobody was watching; Waivers because it was
+ * the slowest screen in production (1.35 s from a runner, 8 October 2026) and
+ * eighteen waves deep, mostly reads that needed only the league id.
  */
 export const MEASURED_ENDPOINTS: { name: string; path: string }[] = [
   { name: 'player detail', path: '/api/players/1001/detail' },
   { name: 'draft board', path: '/api/drafts/demo-draft/board' },
+  { name: 'waivers board', path: '/api/leagues/demo-league/waivers' },
 ];
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations/', import.meta.url));

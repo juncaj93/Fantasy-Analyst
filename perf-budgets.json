@@ -175,6 +175,12 @@
       "maxGzipBytes": 7000,
       "maxWaves": 20,
       "why": "The largest answer this API sends, and the one whose growth nobody was watching. It was 11kB gzipped over 125kB of JSON, mid-draft, on a phone; the two known Draft-side trims have since landed and it is 4.9kB over 32kB \u2014 the ranking rationale is computed on every board, drawn on none, and no longer travels to a client. See core/draft/boardWire.ts. The ceiling came down with the payload: a 14kB ceiling over a 5kB answer would let the whole explanation creep back without failing. 17 waves today."
+    },
+    {
+      "name": "waivers board",
+      "maxGzipBytes": 6000,
+      "maxWaves": 14,
+      "why": "The slowest screen in production on 8 October 2026 (1.35 s from a GitHub runner). It was 21 waves deep on the demo data, mostly reads that needed nothing but the league id waiting on each other: the league, its rosters, the draft ranks, the strategy context's four ledger reads and two trending captures, the slate, the draft. Started together they are 10 waves, with the same 39 statements and the same answer byte for byte; at a modelled 20 ms a round trip that is 456 ms down to 202 ms. 3.5kB today. Fourteen waves is room for a dependency layer added on purpose, and not for the chain to grow back."
     }
   ],
   "$flowComment": [
