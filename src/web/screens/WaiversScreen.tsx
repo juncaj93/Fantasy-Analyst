@@ -157,8 +157,14 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const summary = useMemo(() => (advice ? noMoveSummary(advice) : null), [advice]);
   const defenceSpeaks = board?.dst?.surface === true;
   const tiers = advice?.found ? (advice.tiers ?? null) : null;
-  /* The defence planner's named rows: drawn with the considered moves. */
+  /*
+   * The defence planner's named rows. A defence that fills an empty or bye-week
+   * DEF slot is a hole, so it sits with "Do this"; a stream or a playoff stash is
+   * worth considering.
+   */
   const dstNamed = useMemo(() => (board?.rows ?? []).filter((row) => row.dst != null), [board]);
+  const dstHole = dstNamed.filter((row) => row.dst?.decision === 'add');
+  const dstConsider = dstNamed.filter((row) => row.dst?.decision !== 'add');
 
   /*
    * Who this roster would cut for each target, by player.
@@ -246,13 +252,16 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                   <NoMoveCard summary={tierNoMove(tiers)} />
                 )}
                 {dstNamed.length > 0 ? null : <DstLine plan={board?.dst ?? null} />}
+                {dstHole.map((row) => (
+                  <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+                ))}
               </section>
               <TierSections
                 tiers={tiers}
                 onOpen={setOpenTier}
                 afterConsider={
-                  dstNamed.length > 0
-                    ? dstNamed.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
+                  dstConsider.length > 0
+                    ? dstConsider.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)
                     : undefined
                 }
               />
