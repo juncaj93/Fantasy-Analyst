@@ -10,7 +10,8 @@
  * Pinned here over the production schema:
  *  - the read is one keyed statement however many weeks it looks back over;
  *  - the latest real week wins, and a zero for a game he missed is passed over;
- *  - a position this league's scoring refuses stays refused;
+ *  - a quarterback with no stored stat line for a week gets no number from it
+ *    (with one, he is rescored for this league: see `qbRescore.test.ts`);
  *  - a trade that moves such a player gets a verdict, says why, and is not
  *    reported with high confidence.
  */
@@ -80,7 +81,7 @@ describe('the earlier-week read', () => {
     expect((await recent()).get('hurt')).toEqual({ week: 3, points: 10 });
   });
 
-  it('keeps refusing a quarterback this league’s scoring cannot read', async () => {
+  it('gives a quarterback no earlier week when no quarterback lines were stored for it', async () => {
     expect((await recent()).has('qb')).toBe(false);
   });
 

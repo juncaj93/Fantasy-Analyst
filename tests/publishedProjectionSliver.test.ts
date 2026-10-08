@@ -11,7 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { SleeperProjectionsRepo } from '../src/server/repos/sleeperProjections.ts';
-import { SleeperProjectionService, isSliver } from '../src/server/services/sleeperProjectionService.ts';
+import { SleeperProjectionService, isSliver, qbLinesKey } from '../src/server/services/sleeperProjectionService.ts';
+import { SettingsRepo } from '../src/server/repos/settings.ts';
 import type { SleeperWeeklyProjection } from '../src/core/sleeper/weeklyProjections.ts';
 import { createApp } from '../src/server/app.ts';
 import { SleeperClient } from '../src/core/sleeper/client.ts';
@@ -74,6 +75,8 @@ describe('the refresh gate', () => {
     const db = await createTestDb();
     const repo = new SleeperProjectionsRepo(db);
     for (const s of stored) await repo.save('2026', 5, week(s.n), s.at);
+    // A week fetched since quarterback lines are kept (8 October 2026).
+    await new SettingsRepo(db).set(qbLinesKey('2026', 5), { fetchedAt: stored.at(-1)!.at, lines: {} });
     let asked = 0;
     const sleeper = {
       getWeeklyProjections: async () => {
@@ -109,7 +112,9 @@ describe('the Waivers pull-to-refresh', () => {
     await seed(db);
     if (seedProjections) {
       // Young and whole: the gate should decline without asking Sleeper.
-      await new SleeperProjectionsRepo(db).save('2026', 5, week(400), new Date(Date.now() - 60 * 60_000).toISOString());
+      const at = new Date(Date.now() - 60 * 60_000).toISOString();
+      await new SleeperProjectionsRepo(db).save('2026', 5, week(400), at);
+      await new SettingsRepo(db).set(qbLinesKey('2026', 5), { fetchedAt: at, lines: {} });
     }
     const asked: string[] = [];
     const sleeper = new SleeperClient({
