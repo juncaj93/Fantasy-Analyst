@@ -463,3 +463,58 @@ describe('reading the stored history', () => {
     }
   });
 });
+
+
+/*
+ * Finding T3: every idea on the board is held to Check a trade's own answer
+ * for the same deal, and the page still asks Sleeper for nothing.
+ */
+describe('the ideas and Check a trade agree', () => {
+  let db: NodeSqliteDatabase;
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedTradingLeague(db);
+  });
+
+  it('puts Check a trade’s verdict on every idea it shows, with no Sleeper request', async () => {
+    const { client, calls } = forbiddenSleeper();
+    const res = await createApp()(new Request('http://x/api/trades/smart'), makeEnv(db, client));
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([]);
+    const board = (await res.json()) as { offers: { id: string; give: { playerId: string }[]; get: { playerId: string }[]; seasonCheck?: { status: string; kind: string | null } }[] };
+    expect(board.offers.length).toBeGreaterThan(0);
+    for (const o of board.offers) {
+      expect(o.seasonCheck, `idea ${o.id} carries no season check`).toBeDefined();
+      expect(['leans_b', 'favors_b']).not.toContain(o.seasonCheck!.kind);
+    }
+  });
+
+  it('records the season checks in the support snapshot, and the snapshot replays to the same board', async () => {
+    const { captureSupportSnapshot } = await import('../src/server/services/supportSnapshotService.ts');
+    const { replaySnapshot, readSnapshot } = await import('../src/core/support/dispatch.ts');
+    const { client, calls } = forbiddenSleeper();
+    const snapshot = await captureSupportSnapshot({ db, sleeper: client, leagueId: 'trade-league', context: 'trade-offer', gitSha: 'test' });
+    const payload = snapshot.decision as unknown as {
+      inputs: { seasonChecks?: [string, unknown][] };
+      output: { offers: { id: string; seasonCheck?: unknown }[] };
+    };
+    expect(payload.inputs.seasonChecks?.length ?? 0).toBeGreaterThan(0);
+    expect(payload.output.offers.every((o) => o.seasonCheck != null)).toBe(true);
+    const report = await replaySnapshot(readSnapshot(JSON.parse(JSON.stringify(snapshot))));
+    expect(report.outcome, report.summary).toBe('reproduced');
+    expect(calls).toEqual([]);
+  });
+
+  it('gives each idea the same verdict Check a trade gives when asked directly', async () => {
+    const { client } = forbiddenSleeper();
+    const env = makeEnv(db, client);
+    const app = createApp();
+    const board = (await (await app(new Request('http://x/api/trades/smart'), env)).json()) as {
+      offers: { partner: { rosterId: number }; give: { playerId: string }[]; get: { playerId: string }[]; seasonCheck?: { kind: string | null } }[];
+    };
+    const idea = board.offers[0]!;
+    const q = `/api/leagues/trade-league/trades/check?a=1&b=${idea.partner.rosterId}&give=${idea.give.map((p) => p.playerId).join(',')}&get=${idea.get.map((p) => p.playerId).join(',')}`;
+    const direct = (await (await app(new Request(`http://x${q}`), env)).json()) as { evaluation: { verdict: { kind: string } | null } };
+    expect(idea.seasonCheck?.kind ?? null).toBe(direct.evaluation.verdict?.kind ?? null);
+  });
+});

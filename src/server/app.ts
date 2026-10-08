@@ -124,6 +124,8 @@ import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
+import { seasonChecksFor } from './services/tradeIdeaCheck.ts';
+import { applySeasonChecks } from '../core/trades/seasonCheck.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
 import { meterDatabase } from './meter.ts';
 import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
@@ -2828,9 +2830,14 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/trades/smart', async (ctx) => {
     const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 5) || 5, 20);
     const leagueId = ctx.url.searchParams.get('leagueId');
-    return jsonResponse(
-      await new SmartTradeService(ctx.env.db).build({ limit, ...(leagueId ? { leagueId } : {}) }),
-    );
+    const board = await new SmartTradeService(ctx.env.db).build({ limit, ...(leagueId ? { leagueId } : {}) });
+    /*
+     * Held to Check a trade's answer (finding T3, October 2026): an idea the
+     * rest-of-season check says favours the other team is left off, and every
+     * idea shown carries that verdict. See `core/trades/seasonCheck.ts`.
+     */
+    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, board.offers);
+    return jsonResponse(applySeasonChecks(board, checks).board);
   });
 
   /**

@@ -31,6 +31,7 @@
 
 import { assembleSmartTrades, type TradeAssemblyRequest, type TradeHistoryContext } from '../trades/assemble.ts';
 import { TRADE_ENGINE_VERSION } from '../trades/version.ts';
+import { applySeasonChecks, type SeasonCheck } from '../trades/seasonCheck.ts';
 import type { ManagerTradeTendencies } from '../managers/tradeTendencies.ts';
 import type { LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import type { NflState } from '../sleeper/phase.ts';
@@ -80,6 +81,8 @@ export interface TradeCaptureInput {
   /** Everything `assembleSmartTrades` is about to be handed. */
   request: Omit<TradeAssemblyRequest, 'leagueSettings' | 'shape' | 'rosters'> & {
     shape: TradeAssemblyRequest['shape'];
+    /** Check a trade's verdict on each surfaced idea, by offer id. See `seasonCheck.ts`. */
+    seasonChecks?: ReadonlyMap<string, SeasonCheck>;
   };
   nflState: NflState | null;
   props: { fetchedAt: string | null; provider: string | null; events: number };
@@ -144,7 +147,8 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
    * never hashed, so `manager-3` resolves exactly as the real id did — and the
    * history above is keyed to match.
    */
-  const decision = assembleSmartTrades({
+  const seasonChecks = input.request.seasonChecks ?? new Map<string, SeasonCheck>();
+  const decision = applySeasonChecks(assembleSmartTrades({
     leagueSettings: input.league.leagueSettings,
     shape: input.request.shape,
     profile: input.request.profile,
@@ -162,7 +166,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
       seasonsByUser: new Map(history.seasonsByUser),
     },
     limit: input.request.limit,
-  });
+  }), seasonChecks).board;
 
   /*
    * And the identifiers, which cannot be aliased ahead of the assembly.
@@ -221,6 +225,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
         pool: captureStartSitInputs(input.request.inputs),
         limit: input.request.limit ?? null,
         history,
+        ...(seasonChecks.size > 0 ? { seasonChecks: [...seasonChecks] } : {}),
       },
       output,
       warnings: output.warnings,
@@ -242,7 +247,7 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
   };
 
   const { shape, profile, derivation } = rehydrateLeagueRules(inputs.rules);
-  const replayed = assembleSmartTrades({
+  const replayed = applySeasonChecks(assembleSmartTrades({
     leagueSettings: inputs.leagueSettings,
     shape,
     profile,
@@ -256,7 +261,7 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
     inputs: rehydrateStartSitInputs(inputs.pool),
     history,
     limit: inputs.limit ?? undefined,
-  });
+  }), new Map(inputs.seasonChecks ?? [])).board;
 
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);

@@ -270,6 +270,103 @@ export class TradeValueService {
   }
 
   /**
+   * Several trades from one league, with the data read once.
+   *
+   * For the Trades screen's ideas (finding T3, October 2026): every surfaced
+   * idea is held to the same rest-of-season verdict a reader would get by
+   * typing it into Check a trade. `check` prepares two rosters per call; this
+   * prepares the union of every roster the ideas touch once and evaluates each
+   * deal in memory, so five ideas cost about one check, not five.
+   *
+   * A deal that is not valid (a player not on the roster sending him, too many
+   * players, the same team twice) is skipped rather than thrown on: the caller
+   * is a board that must not fail because one idea went stale.
+   */
+  async checkMany(
+    leagueId: string,
+    deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
+  ): Promise<Map<string, TradeEvaluation>> {
+    if (deals.length === 0) return new Map<string, TradeEvaluation>();
+    const { league, rosters, state } = await this.leagueOf(leagueId);
+    return this.evaluateDeals(league, rosters, state, deals);
+  }
+
+  /**
+   * The Trades screen's ideas, each checked from the user's side.
+   *
+   * The same as {@link checkMany} with side A always the user's own roster,
+   * resolved here from the one roster read the check makes anyway. Returns
+   * nothing when the league has no roster marked as the user's.
+   */
+  async checkIdeas(
+    leagueId: string,
+    ideas: readonly { id: string; partnerRosterId: number; give: readonly string[]; get: readonly string[] }[],
+  ): Promise<Map<string, TradeEvaluation>> {
+    if (ideas.length === 0) return new Map<string, TradeEvaluation>();
+    const { league, rosters, state } = await this.leagueOf(leagueId);
+    const mine = rosters.find((r) => r.isMine);
+    if (!mine) return new Map<string, TradeEvaluation>();
+    return this.evaluateDeals(
+      league,
+      rosters,
+      state,
+      ideas.map((i) => ({ id: i.id, a: mine.rosterId, b: i.partnerRosterId, aSends: i.give, bSends: i.get })),
+    );
+  }
+
+  private async evaluateDeals(
+    league: LeagueRecord,
+    rosters: RosterRecord[],
+    state: NflState | null,
+    deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
+  ): Promise<Map<string, TradeEvaluation>> {
+    const out = new Map<string, TradeEvaluation>();
+    const byId = new Map(rosters.map((r) => [r.rosterId, r] as const));
+    const valid = deals.filter((d) => {
+      const a = byId.get(d.a);
+      const b = byId.get(d.b);
+      if (!a || !b || a.rosterId === b.rosterId) return false;
+      if (d.aSends.length + d.bSends.length === 0) return false;
+      if (d.aSends.length > MAX_PLAYERS_PER_SIDE || d.bSends.length > MAX_PLAYERS_PER_SIDE) return false;
+      return d.aSends.every((id) => a.playerIds.includes(id)) && d.bSends.every((id) => b.playerIds.includes(id));
+    });
+    if (valid.length === 0) return out;
+
+    const involved = [...new Set(valid.flatMap((d) => [d.a, d.b]))].map((id) => byId.get(id)!);
+    const prepared = await this.prepare({
+      league,
+      rosters,
+      state,
+      playerIds: [...new Set(involved.flatMap((r) => r.playerIds))],
+      reserveIds: [...new Set(involved.flatMap((r) => r.reserveIds))],
+      movedIds: [...new Set(valid.flatMap((d) => [...d.aSends, ...d.bSends]))],
+    });
+    const sideOf = (roster: RosterRecord): TradeSide => ({
+      label: labelOf(roster),
+      rosterId: roster.rosterId,
+      isMine: roster.isMine,
+      roster: roster.playerIds.map((id) => prepared.rates.get(id)).filter((p): p is PlayerRate => p != null),
+      starterIds: roster.starterIds,
+    });
+    for (const d of valid) {
+      out.set(
+        d.id,
+        evaluateTrade({
+          horizon: prepared.horizon,
+          shape: prepared.shape,
+          replacement: prepared.replacement,
+          a: sideOf(byId.get(d.a)!),
+          b: sideOf(byId.get(d.b)!),
+          rosterLimit: rosterLimitOf(league, prepared.shape),
+          aSends: [...d.aSends],
+          bSends: [...d.bSends],
+        }),
+      );
+    }
+    return out;
+  }
+
+  /**
    * Past trades from this league, replayed through the model.
    *
    * For a person asking "does this say anything absurd", not a prediction test:
