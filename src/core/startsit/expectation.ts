@@ -8,6 +8,7 @@
 
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import type { MarketKey, PlayerProp } from '../vegas/types.ts';
+import { anytimeChance } from './touchdownLine.ts';
 
 export interface MarketContribution {
   market: MarketKey;
@@ -122,11 +123,21 @@ export function buildExpectation(
       }
       case 'anytime_td': {
         if (position === 'QB') break;
-        const prob = prop.impliedProbability;
+        /*
+         * The quote may be "two or more" rather than "any": see
+         * `touchdownLine.ts`. Converted to the any-touchdown chance it implies,
+         * so the market stays the base and is no longer understated. A line
+         * too far into the tail to convert is a missing market, never a guess.
+         */
+        const prob = anytimeChance(prop.line, prop.impliedProbability);
         if (prob == null) break;
         const tdPoints = position === 'RB' ? profile.rushTd : profile.recTd;
+        const quoted =
+          prop.line != null && prop.line > 0.5 && prop.impliedProbability != null
+            ? `${Math.round(prop.impliedProbability * 100)}% for over ${prop.line} TDs, so `
+            : '';
         contributions.push({
-          ...contribution(market, null, prob * tdPoints, `${Math.round(prob * 100)}% anytime TD x ${tdPoints}`),
+          ...contribution(market, null, prob * tdPoints, `${quoted}${Math.round(prob * 100)}% anytime TD x ${tdPoints}`),
           probability: prob,
         });
         break;
