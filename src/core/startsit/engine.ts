@@ -143,6 +143,15 @@ export interface StartSitInput {
    * roster in hand.
    */
   onReserve?: boolean;
+  /**
+   * True when his club has no game this week, read off a fixture list whole
+   * enough to say so (`core/nfl/schedule.ts`, `isOnBye`).
+   *
+   * Absent means not known to be on a bye: a week whose fixtures are not
+   * stored yet never marks anybody. The Matchup forecast reads it so a resting
+   * player projects zero instead of a preseason estimate.
+   */
+  onBye?: boolean;
 }
 
 export interface StartSitComponent {
