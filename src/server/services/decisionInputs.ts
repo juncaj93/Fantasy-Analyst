@@ -90,17 +90,21 @@ export class NoDecision extends Error {
 
 async function leagueBase(db: Database, leagueId: string): Promise<LeagueDecisionBase> {
   const leagueRepo = new LeagueRepo(db);
-  const league = await leagueRepo.getLeague(leagueId);
-  if (!league) throw new NoDecision('league not found', 404);
-
-  const rosters = await leagueRepo.listRosters(league.id);
-  const mine = rosters.find((roster) => roster.isMine) ?? null;
-  if (!mine) throw new NoDecision('Your team was not found in this league.', 409);
-
-  const [props, nflState] = await Promise.all([
+  /*
+   * Four reads that need nothing but the id, in one round trip rather than
+   * three. A league that is not there costs the other three for nothing,
+   * which is the rare case; every screen open pays for the chain otherwise.
+   */
+  const [league, rosters, props, nflState] = await Promise.all([
+    leagueRepo.getLeague(leagueId),
+    leagueRepo.listRosters(leagueId),
     new PropsRepo(db).freshness(),
     new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
   ]);
+  if (!league) throw new NoDecision('league not found', 404);
+
+  const mine = rosters.find((roster) => roster.isMine) ?? null;
+  if (!mine) throw new NoDecision('Your team was not found in this league.', 409);
 
   return {
     league,
@@ -516,26 +520,45 @@ export async function gatherWaiverInputs(
   const rosteredIds = new Set<string>();
   for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
 
-  const players = await new PlayerRepo(db).listAll();
-  /*
-   * Read once and used twice: to bound the wire scan, and to say who this room
-   * drafted early enough that a September claim may not cut him.
-   */
-  const ranks = await draftRanks(db);
   const startable = startablePositions(shape);
   const week = base.nflState?.week ?? 1;
 
   /*
-   * What the ledger and the league's own transactions know.
+   * Everything that needs only the league, started together.
    *
-   * Both are reads of stored rows and never a fetch: the manager-history
-   * backfill fills them on the daily clock, and a waiver board that triggered
-   * ingestion would turn a page load into a walk of the previous-league chain.
-   * Read before the scan, because the scan reaches the league's fresh drops.
+   * These were five awaits in a row and none of them reads another's answer,
+   * so each one waited out the round trips of the ones above it for nothing.
+   * On D1 a round trip is a network hop; the chain was most of the time this
+   * screen took. Same reads, same answers, fewer waits.
    */
-  const strategy = await new LeagueStrategyService(db, { sleeper })
-    .context(league.id, { week, season: league.season })
-    .catch(() => null);
+  const [players, ranks, strategy, context, draft] = await Promise.all([
+    new PlayerRepo(db).listAll(),
+    /*
+     * Read once and used twice: to bound the wire scan, and to say who this room
+     * drafted early enough that a September claim may not cut him.
+     */
+    draftRanks(db),
+    /*
+     * What the ledger and the league's own transactions know.
+     *
+     * Both are reads of stored rows and never a fetch: the manager-history
+     * backfill fills them on the daily clock, and a waiver board that triggered
+     * ingestion would turn a page load into a walk of the previous-league chain.
+     * Read before the scan, because the scan reaches the league's fresh drops.
+     */
+    new LeagueStrategyService(db, { sleeper })
+      .context(league.id, { week, season: league.season })
+      .catch(() => null),
+    /*
+     * The slate, the defences and the fixture list, built once for both scans.
+     *
+     * Passing it guarantees the roster and the wire are read against the *same*
+     * week — which includes which teams are at home, the input the defence
+     * model's smallest residual has been waiting for.
+     */
+    buildStartSitContext(db),
+    league.draftId ? new LeagueRepo(db).getDraft(league.draftId).catch(() => null) : Promise.resolve(null),
+  ]);
 
   /*
    * The wire scan, plus anybody this league dropped inside the waiver window.
@@ -551,18 +574,19 @@ export async function gatherWaiverInputs(
     return p != null && p.active && (startable.size === 0 || startable.has(p.position));
   });
   const candidateIds = [...scanned, ...inWindow];
+  const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
 
   /*
-   * The slate, the defences and the fixture list, built once for both scans.
-   *
-   * Passing it guarantees the roster and the wire are read against the *same*
-   * week — which includes which teams are at home, the input the defence
-   * model's smallest residual has been waiting for.
+   * The roster's inputs, and the depth chart read that needs them, as one
+   * chain beside the reads below rather than ahead of them.
    */
-  const context = await buildStartSitContext(db);
+  const rosterInputsRead = startSitInputsFor(db, mine.playerIds, { context, reserveIds: mine.reserveIds });
+  const depthRead = rosterInputsRead.then((inputs) =>
+    rosterDepthRanks(db, league.season, inputs).catch(() => new Map<string, { rank: number }>()),
+  );
 
-  const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints] = await Promise.all([
-    startSitInputsFor(db, mine.playerIds, { context, reserveIds: mine.reserveIds }),
+  const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints, history, published, depth] = await Promise.all([
+    rosterInputsRead,
     startSitInputsFor(db, candidateIds, { context }),
     /*
      * The season market for the candidates, and only the candidates.
@@ -595,45 +619,38 @@ export async function gatherWaiverInputs(
      * previous valuation exactly rather than degrading it.
      */
     preseasonPointsFor(db, base.league.season, profile, mine.playerIds),
+    new ManagerIntelService(db)
+      .waiverHistory({
+        leagueId: league.id,
+        rosters,
+        week,
+        finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
+      })
+      .catch(() => undefined),
+    /*
+     * Sleeper's published week for the roster and the scanned wire: the
+     * fallback yardstick for any pair Vegas has not fully priced. Owner-approved
+     * for waivers on 30 September 2026. Read from the stored feed, never from
+     * Sleeper on a page load; a failure is an empty map, which leaves only fully
+     * priced pairs comparable.
+     */
+    new SleeperProjectionService(db, sleeper)
+      .publishedFor({
+        season: league.season,
+        week,
+        /*
+         * Every rostered player too: the competition read asks whether each
+         * rival's starters are weak enough that he needs the position. One
+         * stored week is read either way, so the wider list costs nothing.
+         */
+        playerIds: [...new Set([...mine.playerIds, ...candidateIds, ...rosteredIds])],
+        profile,
+        positionOf: (id) => positionOfId.get(id) ?? null,
+      })
+      .catch((): ReadonlyMap<string, number> => new Map<string, number>()),
+    depthRead,
   ]);
 
-  const history = await new ManagerIntelService(db)
-    .waiverHistory({
-      leagueId: league.id,
-      rosters,
-      week,
-      finalWeek: strategy?.finalWeek ?? DEFAULT_FINAL_WEEK,
-    })
-    .catch(() => undefined);
-
-  /*
-   * Sleeper's published week for the roster and the scanned wire: the
-   * fallback yardstick for any pair Vegas has not fully priced. Owner-approved
-   * for waivers on 30 September 2026. Read from the stored feed, never from
-   * Sleeper on a page load; a failure is an empty map, which leaves only fully
-   * priced pairs comparable.
-   */
-  const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
-  const published = await new SleeperProjectionService(db, sleeper)
-    .publishedFor({
-      season: league.season,
-      week,
-      /*
-       * Every rostered player too: the competition read asks whether each
-       * rival's starters are weak enough that he needs the position. One
-       * stored week is read either way, so the wider list costs nothing.
-       */
-      playerIds: [...new Set([...mine.playerIds, ...candidateIds, ...rosteredIds])],
-      profile,
-      positionOf: (id) => positionOfId.get(id) ?? null,
-    })
-    .catch((): ReadonlyMap<string, number> => new Map<string, number>());
-
-  const depth = await rosterDepthRanks(db, league.season, rosterInputs).catch(
-    () => new Map<string, { rank: number }>(),
-  );
-
-  const draft = league.draftId ? await new LeagueRepo(db).getDraft(league.draftId).catch(() => null) : null;
   const format = detectBestBall({ leagueSettings: league.leagueSettings, draftSettings: draft?.settings ?? null });
   const playoffs = playoffContextFor({
     leagueSettings: league.leagueSettings,
