@@ -92,6 +92,8 @@ export interface MatchupPlayerView {
    * reason that one is: a forecast cached by an older build still reads.
    */
   projectionEstimated?: boolean;
+  /** True when his club has no game this week; carried from the input. */
+  onBye?: boolean;
   /** What is still expected to come. Zero once his game is over. */
   remaining: number | null;
   phase: PlayerDistribution['phase'];
@@ -451,6 +453,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       remaining: distribution.projectionUnknown ? null : effectiveRemaining(distribution),
       ...(player.projectionBorrowed ? { projectionBorrowed: true } : {}),
       ...(player.projectionEstimated ? { projectionEstimated: true } : {}),
+      ...(player.onBye ? { onBye: true } : {}),
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),

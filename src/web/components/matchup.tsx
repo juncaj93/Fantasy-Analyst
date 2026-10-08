@@ -812,7 +812,22 @@ function PlayerHalf({
         confident zero is the worse estimate. None of them reaches the lineup.
         See `MatchupPlayerInput.projection`.
       */}
-      {(player.projectionBorrowed || player.projectionEstimated) && player.projectedFinal != null ? (
+      {/*
+        A bye, said as a word. The number would be 0.0, which is true and reads
+        like a forecast of a bad game; `BYE` is the reason, and the row is the
+        one place a reader checks before trusting the total above it.
+      */}
+      {player.onBye ? (
+        <span
+          className="matchup-player-proj matchup-player-proj-bye"
+          data-testid="matchup-player-proj"
+          data-projection-source="bye"
+          title="No game this week"
+          aria-label="On a bye, no game this week"
+        >
+          BYE
+        </span>
+      ) : (player.projectionBorrowed || player.projectionEstimated) && player.projectedFinal != null ? (
         <span
           className={`matchup-player-proj matchup-player-proj-borrowed${
             player.projectionEstimated ? ' matchup-player-proj-estimated' : ''

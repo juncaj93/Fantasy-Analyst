@@ -268,6 +268,7 @@ export async function captureWaiverSnapshot(
           : { draftRankOf: Object.fromEntries(input.request.draftRankOf) }),
         /* The waiver yardstick's inputs, so a replay measures on the same numbers. */
         ...(input.request.published === undefined ? {} : { published: Object.fromEntries(input.request.published) }),
+        ...(input.request.refusedPositions === undefined ? {} : { refusedPositions: [...input.request.refusedPositions] }),
         ...(input.request.depth === undefined ? {} : { depth: Object.fromEntries(input.request.depth) }),
         ...(input.request.trendingDrops === undefined ? {} : { trendingDrops: [...input.request.trendingDrops.entries()] }),
         ...(input.request.recentlyDropped === undefined
@@ -403,6 +404,7 @@ export async function replayWaiverSnapshot(
       ? {}
       : { draftRankOf: new Map(Object.entries(inputs.draftRankOf)) }),
     ...(inputs.published === undefined ? {} : { published: new Map(Object.entries(inputs.published)) }),
+    ...(inputs.refusedPositions === undefined ? {} : { refusedPositions: inputs.refusedPositions }),
     ...(inputs.depth === undefined ? {} : { depth: new Map(Object.entries(inputs.depth)) }),
     ...(inputs.trendingDrops === undefined ? {} : { trendingDrops: new Map(inputs.trendingDrops) }),
     ...(inputs.recentlyDropped === undefined

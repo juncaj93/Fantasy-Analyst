@@ -521,7 +521,26 @@ export class DataHealthService {
      * exactly this snapshot, so the screen and the board have to be saying the
      * same thing about it.
      */
-    const status = await new SeasonMarketService(this.db, this.deps.vegas ?? nullProvider()).status(now);
+    const service = new SeasonMarketService(this.db, this.deps.vegas ?? nullProvider());
+    const status = await service.status(now);
+    /*
+     * After the draft the refresh stops on purpose (`SeasonMarketService.refresh`
+     * declines once the draft is complete), so the snapshot only ever gets
+     * older. Calling that stale put "1 input needs attention" on Setup every
+     * day from the draft onward, for a source nobody is drafting against. It is
+     * deferred work, which is what `deferred` means, and needs nobody.
+     */
+    const retired = await service.draftIsDone().catch(() => false);
+    if (retired) {
+      return {
+        id: 'season-markets',
+        lastSuccessAt: status.fetchedAt,
+        lastAttemptAt: status.fetchedAt,
+        state: 'deferred' as const,
+        note: 'Not refreshed after the draft, on purpose: weekly lines use the odds allowance instead.',
+        technical: { lastOutcome: `${status.quotes} quote(s), ${status.unresolved} unresolved; draft complete` },
+      };
+    }
     return {
       id: 'season-markets',
       lastSuccessAt: status.fetchedAt,

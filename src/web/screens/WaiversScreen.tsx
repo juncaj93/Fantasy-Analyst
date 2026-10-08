@@ -24,9 +24,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LeagueSummary, type WaiverAdvice, type WaiverRefreshReport } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
-import { BudgetFooter, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
+import { BudgetFooter, NoMoveCard, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { noMoveSummary, unscoredNotes } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { RefreshIcon } from '../components/icons.tsx';
 
@@ -128,10 +129,28 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     () => (board?.rows ?? []).filter((row) => !claimed.has(row.playerId) && row.dst == null),
     [board, claimed],
   );
-  /* The chips narrow the options, which is the only list long enough to need them. */
-  const segments = useMemo(() => [ALL_FILTER, ...offeredPositions(others)], [others]);
-  const rows = useMemo(() => others.filter((row) => rowMatches(row, filter)), [others, filter]);
+  /*
+   * Scored options and unscored ones, apart.
+   *
+   * An unscored row is somebody the rest of Sleeper is adding whom this app
+   * cannot rate. It does not beat anybody on paper, so it may not sit under a
+   * note saying every row does (October 2026 audit), and it gets its own
+   * heading and its reasons instead.
+   */
+  const scoredOthers = useMemo(() => others.filter((row) => row.strength.level !== 'unknown'), [others]);
+  const unscored = useMemo(() => others.filter((row) => row.strength.level === 'unknown'), [others]);
+  /* The chips narrow the scored options, which is the only list long enough to need them. */
+  const segments = useMemo(() => [ALL_FILTER, ...offeredPositions(scoredOthers)], [scoredOthers]);
+  const rows = useMemo(() => scoredOthers.filter((row) => rowMatches(row, filter)), [scoredOthers, filter]);
   const planMoves = (advice?.claimPlan?.claims.length ?? 0) > 0;
+  /*
+   * No claim and nobody recommended: the empty answer, said where the plan
+   * would be. When the defence line below carries an answer of its own, the
+   * headline is about players only, so the two cannot contradict each other.
+   */
+  const noMove = advice?.found === true && !advice.claimPlan?.surface && recommended.length === 0;
+  const summary = useMemo(() => (advice ? noMoveSummary(advice) : null), [advice]);
+  const defenceSpeaks = board?.dst?.surface === true;
 
   /*
    * Who this roster would cut for each target, by player.
@@ -205,6 +224,9 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           </div>
           <section data-testid="waivers-recommended">
             <WaiverPlanCard plan={advice.claimPlan} />
+            {noMove && summary ? (
+              <NoMoveCard summary={summary} {...(defenceSpeaks ? { headline: 'No player move this week' } : {})} />
+            ) : null}
 
             {/*
               The defence, when it has no row of its own to be said in.
@@ -221,7 +243,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             ))}
           </section>
 
-          {others.length > 0 ? (
+          {scoredOthers.length > 0 ? (
             <>
               <div className="section-title" data-testid="waivers-others-title">
                 Other options to consider
@@ -254,12 +276,29 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 )}
               </section>
             </>
-          ) : recommended.length === 0 && !board?.dst?.surface ? (
-            /*
-              Nothing on the board at all, said once — and not said when the
-              defence line is already carrying an answer.
-            */
-            <Empty>{board?.headline ?? 'Nothing available beats what you already have.'}</Empty>
+          ) : null}
+
+          {/*
+            Popular adds this app cannot rate, under their own heading, with
+            the reason said once per reason rather than `Not scored` alone on
+            every row.
+          */}
+          {unscored.length > 0 ? (
+            <>
+              <div className="section-title" data-testid="waivers-unscored-title">
+                Being added across Sleeper, not scored here
+              </div>
+              <div className="faint waivers-others-note" data-testid="waivers-unscored-note">
+                {unscoredNotes(unscored).map((note) => (
+                  <div key={note}>{note}</div>
+                ))}
+              </div>
+              <section className="waivers-others" data-testid="waivers-unscored">
+                {unscored.map((row) => (
+                  <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+                ))}
+              </section>
+            </>
           ) : null}
 
           {/*

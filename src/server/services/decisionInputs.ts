@@ -674,6 +674,12 @@ export async function gatherWaiverInputs(
        */
       waiverWindow: strategy?.waiverRules ? { rules: strategy.waiverRules, drops: strategy.leagueDrops } : null,
       published,
+      /*
+       * The positions this league may not read a published total for, so a
+       * free agent with no number can say why. Read here because this file
+       * is sanctioned to know the feed's rules; the engine gets the list.
+       */
+      refusedPositions: ['QB', 'RB', 'WR', 'TE'].filter((position) => publishedRefusal(profile, position) != null),
       depth,
       /*
        * The season market for the candidates on the board, for the
