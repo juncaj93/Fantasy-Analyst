@@ -76,38 +76,30 @@ jobs:
   # a few hours later learns nothing and costs a third of the allowance. So on
   # a day that already had one, this stands down and says so.
   #
-  # Only `workflow_dispatch` runs count. A deploy's smoke is the eight-spec
-  # gate at one width, which is not this check and does not substitute for it.
+  # Two kinds of run count: a hand-dispatched `smoke.yml`, and an earlier run
+  # of this workflow whose full-pass browser jobs actually ran, scheduled or by
+  # hand. Until October 2026 only the first was counted, so starting this
+  # workflow by hand and the 00:47 schedule could both run a full pass on one
+  # day. A run that stood down tested nothing and does not count. A deploy's
+  # smoke is the eight-spec gate at one width, which is not this check and does
+  # not substitute for it. See `scripts/sweep-ran-today.mjs`.
   recent:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     outputs:
       ran_today: ${{ steps.check.outputs.ran_today }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          today=$(date -u +%Y-%m-%d)
-          # Runs of the reusable smoke workflow started by a person today.
-          count=$(gh api "repos/$REPO/actions/workflows/smoke.yml/runs?event=workflow_dispatch&created=>=$today" \
-                    --jq '[.workflow_runs[] | select(.created_at | startswith("'"$today"'"))] | length' 2>/dev/null || echo 0)
-          echo "manual full passes already run today: $count"
-          if [ "$count" -gt 0 ]; then
-            echo "ran_today=yes" >> "$GITHUB_OUTPUT"
-            {
-              echo "### Daily sweep stood down"
-              echo ""
-              echo "$count full production pass(es) were already dispatched by hand today, against the same live site."
-              echo "Running a second one learns nothing and costs about a third of the daily D1 allowance."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "ran_today=no" >> "$GITHUB_OUTPUT"
-          fi
+        run: node scripts/sweep-ran-today.mjs
 
   sweep:
     needs: recent

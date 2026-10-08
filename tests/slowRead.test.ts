@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { TEST_PLAYERS, player } from './helpers/players.ts';
-import { PlayerRepo, COUNT_TTL_MS, DICTIONARY_TTL_MS } from '../src/server/repos/players.ts';
+import { PlayerRepo, COUNT_TTL_MS, DICTIONARY_TTL_MS, PLAYER_COUNTS_KEY, forgetPlayerReads } from '../src/server/repos/players.ts';
 import { PlayerDetailRepo } from '../src/server/repos/playerDetail.ts';
 import { SlowRead, SLOW_READ_TTL_MS } from '../src/server/repos/slowRead.ts';
 import type { Database } from '../src/server/db.ts';
@@ -103,8 +103,10 @@ describe('the counts behind the diagnostics', () => {
     for (let i = 0; i < 20; i += 1) expect(await repo.count()).toBe(expected);
     for (let i = 0; i < 20; i += 1) await repo.countRanked();
 
-    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(1); // countRanked's first ask
-    expect(times(asked, 'draft_rank IS NOT NULL')).toBe(1);
+    // The sync stored both counts, so neither one walks the table at all, and
+    // the one-row settings read behind countRanked happens once.
+    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(0);
+    expect(times(asked, 'FROM settings WHERE key')).toBe(1);
   });
 
   it('shares the answer once it has landed, never the read in flight', async () => {
@@ -116,10 +118,11 @@ describe('the counts behind the diagnostics', () => {
     // Two misses at the same instant each read: a pending read belongs to the
     // request that started it. See the note on SlowRead.
     await Promise.all([repo.count(), repo.count()]);
-    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(2);
+    expect(times(asked, 'FROM settings WHERE key')).toBe(2);
     // After that, everyone is served the settled answer.
     await Promise.all([repo.count(), repo.count(), repo.count()]);
-    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(2);
+    expect(times(asked, 'FROM settings WHERE key')).toBe(2);
+    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(0);
   });
 
   /*
@@ -219,9 +222,10 @@ describe('the counts behind the diagnostics', () => {
     expect(await repo.countRanked()).toBe(0);
     for (let i = 0; i < 10; i += 1) expect(await repo.countRanked()).toBe(0);
     expect(
-      times(asked, 'draft_rank IS NOT NULL'),
-      'zero ranked players still costs a full scan, so it is held like any other answer',
+      times(asked, 'FROM settings WHERE key'),
+      'a stored zero ranked count is held like any other answer',
     ).toBe(1);
+    expect(times(asked, 'draft_rank IS NOT NULL')).toBe(0);
   });
 
   it('starts memoising as soon as there is something to count', async () => {
@@ -235,7 +239,8 @@ describe('the counts behind the diagnostics', () => {
     const total = await repo.count();
     expect(total).toBeGreaterThan(0);
     for (let i = 0; i < 10; i += 1) expect(await repo.count()).toBe(total);
-    expect(times(asked, 'SELECT COUNT(*) AS n FROM players')).toBe(1);
+    expect(times(asked, 'FROM settings WHERE key')).toBe(1);
+    expect(times(asked, 'SELECT COUNT(*) AS n FROM players')).toBe(0);
   });
 
   it('counts a season of statistics once per season', async () => {
@@ -358,5 +363,66 @@ describe('SlowRead', () => {
     expect(await memo.get(db, 'k', async () => 'first')).toBe('first');
     memo.forget(db);
     expect(await memo.get(db, 'k', async () => 'second')).toBe('second');
+  });
+});
+
+/*
+ * The counts stored at sync, October 2026.
+ *
+ * The hour-long memo capped how often one isolate counted, but each new
+ * isolate still walked the whole table twice: 542,840 and 264,800 rows in a
+ * day, about 16% of the allowance. The sync now leaves both answers in one
+ * settings row.
+ */
+describe('the counts the sync leaves behind', () => {
+  it('stores both counts when the dictionary is written', async () => {
+    const db = await createTestDb();
+    const ranked = TEST_PLAYERS.map((p, i) => (i < 3 ? { ...p, active: true, searchRank: i + 1 } : p));
+    await new PlayerRepo(db).upsertMany(ranked);
+    const row = await db
+      .prepare('SELECT value_json FROM settings WHERE key = ?')
+      .bind(PLAYER_COUNTS_KEY)
+      .first<{ value_json: string }>();
+    const stored = JSON.parse(row!.value_json) as { total: number; ranked: number };
+    const live = await db.prepare('SELECT COUNT(*) AS n FROM players').first<{ n: number }>();
+    const liveRanked = await db
+      .prepare('SELECT COUNT(*) AS n FROM players WHERE active = 1 AND draft_rank IS NOT NULL')
+      .first<{ n: number }>();
+    expect(stored.total).toBe(Number(live!.n));
+    expect(stored.ranked).toBe(Number(liveRanked!.n));
+    expect(stored.ranked).toBeGreaterThan(0);
+  });
+
+  it('serves a fresh reader from the stored row without walking the table', async () => {
+    const real = await createTestDb();
+    await new PlayerRepo(real).upsertMany(TEST_PLAYERS);
+    // A new isolate: nothing memoised for this database object.
+    forgetPlayerReads(real);
+    const { db, asked } = counting(real);
+    const repo = new PlayerRepo(db);
+    expect(await repo.count()).toBe(TEST_PLAYERS.length);
+    await repo.countRanked();
+    expect(times(asked, 'FROM players')).toBe(0);
+  });
+
+  it('still counts the table when nothing has been stored yet', async () => {
+    const real = await createTestDb();
+    await real
+      .prepare('INSERT INTO players (id, full_name, normalized_name, created_at, updated_at) VALUES (?,?,?,?,?)')
+      .bind('x1', 'X One', 'x one', '2026-10-01', '2026-10-01')
+      .run();
+    const { db, asked } = counting(real);
+    expect(await new PlayerRepo(db).count()).toBe(1);
+    expect(times(asked, 'COUNT(*) AS n FROM players')).toBe(1);
+  });
+
+  it('refreshes the stored counts on the next sync', async () => {
+    const db = await createTestDb();
+    const repo = new PlayerRepo(db);
+    await repo.upsertMany(TEST_PLAYERS.slice(0, 2));
+    expect(await repo.count()).toBe(2);
+    await repo.upsertMany(TEST_PLAYERS);
+    forgetPlayerReads(db);
+    expect(await repo.count()).toBe(TEST_PLAYERS.length);
   });
 });
