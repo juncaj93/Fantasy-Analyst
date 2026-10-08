@@ -87,6 +87,7 @@ import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
+import { noMoveSummary, type NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 
@@ -738,7 +739,12 @@ export function TeamScreen({
                 this screen to "is a draft happening".
               */}
               {roster.live ? null : (
-                <WaiverSection board={waiverBoard} dst={waivers?.dst ?? null} onOpen={setWaiverDetail} />
+                <WaiverSection
+                  board={waiverBoard}
+                  dst={waivers?.dst ?? null}
+                  summary={waivers?.found ? noMoveSummary(waivers) : null}
+                  onOpen={setWaiverDetail}
+                />
               )}
             </>
           )}
@@ -1508,9 +1514,12 @@ function BenchSection({
 function WaiverSection({
   board,
   dst,
+  summary,
   onOpen,
 }: {
   board: WaiverBoard | null;
+  /** The empty answer, from `core/waivers/noMove.ts`, for a week with no upgrade. */
+  summary: NoMoveSummary | null;
   /**
    * The defense plan, which is a different question with the same answer shape.
    *
@@ -1538,7 +1547,13 @@ function WaiverSection({
    * draws it as a row instead, because that is the page where "which defense
    * should I add" is a list question.
    */
-  const rows = (board?.rows ?? []).filter((row) => row.dst == null);
+  /*
+   * And not an unscored row either. The heading is `Waiver upgrades`, and a
+   * player this app cannot rate is not one: on 7 October 2026 it listed two
+   * quarterbacks marked `Not scored` under it. They stay on Waivers, under a
+   * heading that says what they are.
+   */
+  const rows = (board?.rows ?? []).filter((row) => row.dst == null && row.strength.level !== 'unknown');
   const line = <DstLine plan={dst} />;
   const hasDefenseLine = dst != null && dst.surface && dst.headline.length > 0;
 
@@ -1560,7 +1575,11 @@ function WaiverSection({
     return (
       <div className="card card-tight" data-testid="waiver-card">
         <div className="faint" data-testid="waiver-verdict">
-          {board?.headline ?? 'No waiver comparison available yet.'}
+          {summary
+            ? [summary.headline === 'No move this week' ? 'No waiver move this week.' : summary.headline, summary.nearest]
+                .filter(Boolean)
+                .join(' ')
+            : (board?.headline ?? 'No waiver comparison available yet.')}
         </div>
       </div>
     );

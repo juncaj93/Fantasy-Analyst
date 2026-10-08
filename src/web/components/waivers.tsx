@@ -19,6 +19,7 @@
 import type { FaabAdvice } from '../api.ts';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
 import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
+import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 
@@ -111,6 +112,36 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
       {plan.note ? (
         <div className="faint claim-plan-note" data-testid="waiver-plan-note">
           {plan.note}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The answer when there is no claim to make, said as an answer.
+ *
+ * Before October 2026 the Waivers page drew `Recommended move` over nothing at
+ * all on a week like this. The card is the plan card's own shape (`card
+ * claim-plan`, the headline label, the quiet note lines), so the empty answer
+ * sits exactly where a plan would and reads as one: the decision, how much of
+ * the wire was compared, and who came closest. The wording is
+ * `core/waivers/noMove.ts`, shared with Team.
+ */
+export function NoMoveCard({ summary, headline }: { summary: NoMoveSummary; headline?: string }) {
+  return (
+    <div className="card claim-plan" data-testid="waivers-no-move">
+      <div className="detail-label" data-testid="waivers-no-move-headline">
+        {headline ?? summary.headline}
+      </div>
+      {summary.detail ? (
+        <div className="faint claim-plan-note" data-testid="waivers-no-move-detail">
+          {summary.detail}
+        </div>
+      ) : null}
+      {summary.nearest ? (
+        <div className="faint claim-plan-note" data-testid="waivers-no-move-nearest">
+          {summary.nearest}
         </div>
       ) : null}
     </div>

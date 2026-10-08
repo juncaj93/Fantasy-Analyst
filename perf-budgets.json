@@ -127,6 +127,7 @@
       "src/core/trades/category.ts",
       "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",
+      "src/core/waivers/noMove.ts",
       "src/core/waivers/wording.ts",
       "src/web/demo/DemoIndicator.tsx",
       "src/web/demo/session.ts"

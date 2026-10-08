@@ -47,7 +47,7 @@
 import { weekRange } from '../dst/weeks.ts';
 import type { SeasonOutlook } from './seasonOutlook.ts';
 import type { DstDecision, DstOption, DstPlan } from '../dst/planner.ts';
-import type { WaiverAddBasis } from '../startsit/waivers.ts';
+import type { WaiverAddBasis, WaiverNearMiss, WaiverUnscoredReason } from '../startsit/waivers.ts';
 import type { WaiverMoveGroup, YardstickBasis } from './yardstick.ts';
 import { basisLabel, mostAddedLine } from './wording.ts';
 import type { PickupState } from './clearWindow.ts';
@@ -215,6 +215,8 @@ export interface WaiverUnknownLike {
    * alphabet is not an order anybody asked for.
    */
   leagueRank?: number | null;
+  /** Why there was nothing to read. Absent on an older payload. See `WaiverUnscoredReason`. */
+  why?: WaiverUnscoredReason;
 }
 
 export interface WaiverAdviceLike {
@@ -226,6 +228,10 @@ export interface WaiverAdviceLike {
   headline?: string | null;
   notes?: string[];
   considered?: number;
+  /** How many of `considered` could not be compared. Absent on an older payload. */
+  skipped?: number;
+  /** The closest anybody came to a claim without making one. Absent on an older payload. */
+  nearestMiss?: WaiverNearMiss | null;
   /**
    * What each upgrade would cost. Optional, because the pass that prices them
    * is a separate one and a deployment may not have it — in which case every
@@ -338,6 +344,8 @@ export interface WaiverBoardRow {
    * when the league's window could not be read, which keeps the price showing.
    */
   pickup?: PickupState | null;
+  /** On an unscored row only: why there was nothing to read. */
+  unscored?: WaiverUnscoredReason | null;
 }
 
 export interface WaiverBoard {
@@ -877,7 +885,7 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
     reasons: [
       unknown.trending ?? 'Being added across Sleeper',
       ...(addLine ? [addLine] : []),
-      'No market, usage or news for him yet, so this app cannot rate him. Unknown, not ruled out.',
+      unscoredSentence(unknown.why),
     ],
     statusFlag: unknown.statusFlag ?? null,
     score: null,
@@ -887,7 +895,29 @@ function unknownRow(unknown: WaiverUnknownLike): WaiverBoardRow {
     notes: [],
     planExcluded: null,
     yardstick: null,
+    unscored: unknown.why ?? null,
   };
+}
+
+/**
+ * Why an unscored player has no number, as one sentence for his detail sheet.
+ *
+ * The specific reason when the payload carries one, and the old general
+ * sentence when it does not, so an older payload still reads.
+ */
+export function unscoredSentence(why: WaiverUnscoredReason | null | undefined): string {
+  switch (why) {
+    case 'no_team':
+      return 'He is not on an NFL team, so there is no game to project.';
+    case 'scoring':
+      return 'Sleeper’s projection for his position assumes different scoring from this league’s, so it is not used, and no full betting line is posted for him yet.';
+    case 'partial_market':
+      return 'Only part of his betting lines are posted, and there is no projection to fill the rest yet.';
+    case 'no_data':
+      return 'No betting line and no projection for him yet.';
+    default:
+      return 'No market, usage or news for him yet, so this app cannot rate him. Unknown, not ruled out.';
+  }
 }
 
 /**
