@@ -28,6 +28,10 @@ import { snapshotDstSources } from '../src/core/support/dstSnapshot.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 import { rehydratePlayer } from '../src/core/support/players.ts';
 import { TIER_RULES } from '../src/core/waivers/tiers.ts';
+import { evaluatePlayer } from '../src/core/startsit/engine.ts';
+import { decisionPoints } from '../src/core/startsit/decisionPoints.ts';
+import { buildPlayerRate, RATE_BASIS_LABEL } from '../src/core/tradeValue/rate.ts';
+import { byeOf } from '../src/core/tradeValue/weeks.ts';
 import type { DstPlanSources } from '../src/core/dst/assemble.ts';
 import type { ScheduleTeamWeek } from '../src/core/nfl/schedule.ts';
 
@@ -223,3 +227,56 @@ for (const r of t.audit.slice(0, 12)) console.log(`  ${pad(r.name, 22)} ${pad(r.
 
 console.log('\nRIVAL PROFILES (seed or default, blended with this season):');
 for (const r of t.profiles) console.log(`  ${pad(r.name, 16)} ${pad(r.style, 28)} ${r.source}  ${r.claimsPerRun.toFixed(2)} claims/run  bids ${r.bids.join(',') || '-'}`);
+
+/*
+ * One position, one player at a time: the single number the planner used, where
+ * it came from, and (beside it, never fed into it) what Sleeper publishes for
+ * each of the window's weeks in this league's scoring. The planner values a
+ * player with ONE points-a-game figure and multiplies it by whether he plays
+ * each week (0 on a bye or while out), so the week columns below are context
+ * for reading the ranking, not inputs to it.
+ */
+const names = (process.env.BREAKDOWN_NAMES ?? 'Aaron Rodgers,C.J. Stroud,Jordan Love,Sam Darnold,Joe Burrow').split(',').map((n) => n.trim());
+const weeks = [week, week + 1, week + 2];
+const sleeperWeek = (w: number, id: string): number | null => {
+  const path = join(sleeperDir, `proj${w}.json`);
+  if (!existsSync(path)) return null;
+  const row = readJson<{ player_id: string; stats?: Record<string, number> }[]>(path).find((r) => String(r.player_id) === id);
+  if (!row?.stats || row.stats.pts_half_ppr == null) return null;
+  return scoreWeek({ [id]: row.stats }, scoring)[id] ?? 0;
+};
+console.log(`\n=== NUMBER BREAKDOWN: the one figure the planner used, and where it came from ===`);
+console.log(`(planner window weeks ${weeks.join(', ')}; "sleeper wk" columns are Sleeper's own projection in this league's scoring, shown for comparison only)`);
+for (const name of names) {
+  const i = [...roster, ...candidates].find((x) => x.player.fullName === name);
+  if (!i) {
+    console.log(`  ${pad(name, 16)} not in the snapshot's roster or free-agent scan`);
+    continue;
+  }
+  const evaluation = evaluatePlayer(i, profile);
+  const decision = decisionPoints(evaluation, published);
+  const status = evaluation.components.find((c) => c.key === 'status');
+  const team = (i.player.team ?? '').toUpperCase();
+  const bye = byeOf(fixtures, team, { from: week, to: week + 2 });
+  const rate = buildPlayerRate({
+    evaluation,
+    published,
+    seasonLine: null,
+    recentWeek: recentPublished.get(i.player.id) ?? null,
+    weeks,
+    byeWeek: bye.byeWeek,
+    byeKnown: bye.known,
+    onReserve: false,
+  });
+  const vegas = evaluation.expectation?.points != null;
+  console.log(
+    `  ${pad(name, 16)} ${pad(team, 4)} rate ${rate.rate == null ? 'none' : rate.rate.toFixed(2)} via ${RATE_BASIS_LABEL[rate.basis]}` +
+      ` | decision basis ${decision?.basis ?? 'none'}: base ${decision?.base ?? '-'} + nudges ${rate.rateParts?.nudges ?? '-'}` +
+      ` | Vegas line ${vegas ? 'present' : 'absent'}, Sleeper this week ${published.get(i.player.id)?.toFixed(2) ?? 'absent'}` +
+      ` | availability by week ${rate.weekly.join('/')}${bye.byeWeek ? ` (bye wk ${bye.byeWeek})` : ''}` +
+      ` | earlier-week fill ${recentPublished.has(i.player.id) ? `wk ${recentPublished.get(i.player.id)!.week} ${recentPublished.get(i.player.id)!.points.toFixed(1)}` : 'none'}` +
+      ` | status charge ${status && !status.unknown ? status.value.toFixed(2) : '0'} (removed)` +
+      ` | sleeper wk ${weeks.map((w) => sleeperWeek(w, i.player.id)?.toFixed(1) ?? 'bye/none').join(' / ')}` +
+      (rate.rateNote ? ` | note: ${rate.rateNote}` : ''),
+  );
+}
