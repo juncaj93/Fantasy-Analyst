@@ -28,6 +28,7 @@ import { TIER_RULES, type TierCandidate, type TierPlayer, type TierProtection, t
 import type { PickupState } from './clearWindow.ts';
 import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
+import { weekNumbers, type AheadNumbers } from './aheadWeeks.ts';
 
 export interface TierWindow {
   /** The window's weeks. */
@@ -74,6 +75,8 @@ export interface TierInputRequest {
   /** Injured-reserve slots the league allows. */
   reserveSlots: number;
   excludedPositions: ReadonlySet<string>;
+  /** Later weeks' own numbers (Vegas, then Sleeper). Absent: this week's figure for every week, as before. */
+  ahead?: AheadNumbers | null | undefined;
 }
 
 export interface TierInputs {
@@ -114,17 +117,28 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
     return rate;
   };
 
-  const toTier = (rate: PlayerRate): TierPlayer => ({
-    playerId: rate.playerId,
-    name: rate.name,
-    position: rate.position,
-    team: rate.team,
-    rate: rate.rate,
-    weekly: rate.weekly.slice(offset, offset + window.weeks.length),
-    designation: rate.designation,
-    byeWeek: rate.byeWeek,
-    onReserve: rate.onReserve,
-  });
+  const toTier = (rate: PlayerRate): TierPlayer => {
+    const numbers = weekNumbers({
+      playerId: rate.playerId,
+      rate: rate.rate,
+      weeks: window.weeks,
+      currentWeek: input.week,
+      ahead: input.ahead,
+    });
+    return {
+      playerId: rate.playerId,
+      name: rate.name,
+      position: rate.position,
+      team: rate.team,
+      rate: rate.rate,
+      weekly: rate.weekly.slice(offset, offset + window.weeks.length),
+      weekValues: numbers.map((n) => n.points),
+      weekSources: numbers.map((n) => n.source),
+      designation: rate.designation,
+      byeWeek: rate.byeWeek,
+      onReserve: rate.onReserve,
+    };
+  };
 
   const roster = input.rosterInputs.map((i) => toTier(rateOf(i)));
   const candidateRates = input.candidateInputs.filter((i) => !input.rosteredIds.has(i.player.id)).map((i) => ({ i, rate: rateOf(i) }));

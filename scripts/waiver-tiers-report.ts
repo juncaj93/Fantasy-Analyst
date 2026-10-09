@@ -23,7 +23,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { assembleWaiverPlan, type WaiverAssembly } from '../src/core/waivers/assemble.ts';
-import { scoreWeek, lastCompletedWeek } from '../src/core/sleeper/weekPoints.ts';
+import { scoreWeek, lastCompletedWeek, scoreProjectionRows } from '../src/core/sleeper/weekPoints.ts';
+import type { AheadNumbers } from '../src/core/waivers/aheadWeeks.ts';
 import { snapshotDstSources } from '../src/core/support/dstSnapshot.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 import { rehydratePlayer } from '../src/core/support/players.ts';
@@ -115,7 +116,32 @@ const rosters = (inputs.rosters as { rosterId: number; ownerName: string | null;
   ownerName: realName.get(r.rosterId) ?? r.ownerName,
 }));
 
-const after = await assembleWaiverPlan({
+/*
+ * The later weeks' own numbers (waiver@11). A capture taken after they shipped
+ * carries them; otherwise Sleeper's public projection for each later week,
+ * scored in this league's rules, exactly as production now stores them. A
+ * later week's Vegas lines are not public, so a rebuilt set has none.
+ */
+const rebuilt: number[] = [];
+const ahead: AheadNumbers = (() => {
+  const back = (rows: [number, Record<string, number>][]) => new Map(rows.map(([w, m]) => [w, new Map(Object.entries(m))]));
+  const vegas = inputs.ahead != null ? back(inputs.ahead.vegas) : new Map<number, Map<string, number>>();
+  const sleeper = inputs.ahead != null ? back(inputs.ahead.sleeper) : new Map<number, Map<string, number>>();
+  /* A week the capture holds nothing for (the worker has not stored it yet): Sleeper's public feed, scored the same way. */
+  for (let w = week + 1; w <= week + 3; w++) {
+    if ((sleeper.get(w)?.size ?? 0) > 0) continue;
+    const path = join(sleeperDir, `proj${w}.json`);
+    if (!existsSync(path)) continue;
+    sleeper.set(w, new Map(Object.entries(scoreProjectionRows(readJson(path), scoring))));
+    rebuilt.push(w);
+  }
+  return { vegas, sleeper };
+})();
+const aheadSource =
+  (inputs.ahead != null ? 'from the capture' : 'not in the capture') +
+  (rebuilt.length > 0 ? `; Sleeper weeks ${rebuilt.join(', ')} rebuilt from its public feed (later-week Vegas is not public)` : '');
+
+const run = (withAhead: AheadNumbers | null) => assembleWaiverPlan({
   shape,
   profile,
   rosterInputs: roster,
@@ -162,12 +188,23 @@ const after = await assembleWaiverPlan({
   reserveSlots: inputs.reserveSlots ?? 2,
   now,
   generatedAt: inputs.generatedAt,
+  ahead: withAhead,
 });
+/* One number for all three weeks: the engine as it was before waiver@11. */
+const oneNumber = await run(null);
+const after = await run(ahead);
 
 const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + ' '.repeat(n - s.length));
 console.log(`captured ${snapshot.capturedAt}  week ${week}  release ${snapshot.release?.gitSha ?? '?'}`);
 console.log(`last week's points: week ${lastWeek}, ${lastWeekPoints ? `${lastWeekPoints.points.size} players` : 'not available'}`);
 console.log(`earlier-week projections used for ${recentPublished.size} players with no number this week`);
+console.log(
+  `later weeks' own numbers (${aheadSource}): ` +
+    [...new Set([...ahead.sleeper.keys(), ...ahead.vegas.keys()])]
+      .sort((a, b) => a - b)
+      .map((w) => `wk ${w} Vegas ${ahead.vegas.get(w)?.size ?? 0} / Sleeper ${ahead.sleeper.get(w)?.size ?? 0} players`)
+      .join(', '),
+);
 
 console.log('\n=== BEFORE: what the deployed screen drew ===');
 const plan = before.claimPlan;
@@ -184,7 +221,7 @@ if (before.nearestMiss) {
   console.log(`closest: ${m.name} ${m.gap.toFixed(2)} over ${m.overName}, needed ${m.bar.toFixed(1)} (${m.basis})`);
 }
 
-console.log('\n=== AFTER: the tiers ===');
+console.log('\n=== AFTER: the tiers, each later week on its own number (waiver@11) ===');
 const t = after.tiers;
 if (!t) {
   console.log('tiers: none (the planner failed)');
@@ -207,6 +244,46 @@ for (const r of t.watch) console.log(`  ${line(r)}`);
 console.log('DROP-READY:');
 for (const d of t.dropReady) console.log(`  ${pad(d.name, 22)} ${pad(d.position, 3)} cost ${d.cost.toFixed(2)}  over FA ${d.overReplacement?.toFixed(1) ?? '-'}  | ${d.reason}`);
 console.log(`claim card: ${after.claimPlan?.surface ? after.claimPlan.claims.map((c) => `${c.headline} / ${after.claimPlan!.groups[0]!.headline}`).join('; ') : 'not drawn'}`);
+
+/*
+ * What the per-week numbers changed: the same snapshot through the planner
+ * twice, once with one number for all three weeks (waiver@10) and once with
+ * each later week's own. Every move whose tier or place changes, and the
+ * named players whatever happens to them.
+ */
+const tierOf = (view: NonNullable<typeof t>, id: string): string =>
+  view.doThis?.playerId === id
+    ? 'do this'
+    : view.consider.some((r) => r.playerId === id)
+      ? 'consider'
+      : view.watch.some((r) => r.playerId === id)
+        ? 'watch'
+        : view.doThis?.alternatives.includes(view.audit.find((a) => a.playerId === id)?.name ?? '\u0000')
+          ? 'alternative'
+          : '-';
+const beforeView = oneNumber.tiers;
+console.log('\n=== WHAT THE PER-WEEK NUMBERS CHANGED (same snapshot, one number for all weeks vs each week its own) ===');
+if (!beforeView) {
+  console.log('one-number replay produced no tiers');
+} else {
+  const watched = new Set((process.env.BREAKDOWN_NAMES ?? 'Aaron Rodgers,C.J. Stroud,Jordan Love,Sam Darnold,Joe Burrow').split(',').map((n) => n.trim()));
+  const ids = new Set([...beforeView.audit, ...t.audit].map((a) => a.playerId));
+  const rows = [...ids].map((id) => {
+    const b = beforeView.audit.findIndex((a) => a.playerId === id);
+    const a = t.audit.findIndex((x) => x.playerId === id);
+    const bm = beforeView.audit[b];
+    const am = t.audit[a];
+    return { id, name: (am ?? bm)!.name, position: (am ?? bm)!.position, b, a, bm, am, bt: tierOf(beforeView, id), at: tierOf(t, id) };
+  });
+  const changed = rows.filter((r) => r.bt !== r.at || r.b !== r.a || watched.has(r.name)).sort((x, y) => (x.a < 0 ? 99 : x.a) - (y.a < 0 ? 99 : y.a));
+  console.log(`  ${pad('player', 22)} pos  before: rank tier          gain   | after: rank tier          gain   | drop after`);
+  for (const r of changed) {
+    const side = (rank: number, tier: string, gain: number | undefined) =>
+      `${String(rank < 0 ? '-' : rank + 1).padStart(4)} ${pad(tier, 12)} ${gain == null ? '     -' : gain.toFixed(2).padStart(6)}`;
+    console.log(`  ${pad(r.name, 22)} ${pad(r.position, 4)} ${side(r.b, r.bt, r.bm?.gain)}         | ${side(r.a, r.at, r.am?.gain)}         | ${r.am?.drop ?? '-'}`);
+  }
+  console.log(`  do this: ${beforeView.doThis?.name ?? 'nothing'} -> ${t.doThis?.name ?? 'nothing'}; claim card: ${oneNumber.claimPlan?.surface ? oneNumber.claimPlan.claims[0]?.headline : 'not drawn'} -> ${after.claimPlan?.surface ? after.claimPlan.claims[0]?.headline : 'not drawn'}`);
+}
 
 console.log('\n=== THE THRESHOLD AUDIT: every valued free agent near a line ===');
 console.log(`lines: do this ${TIER_RULES.doThis}, consider ${TIER_RULES.consider}, watch ${TIER_RULES.watch} (weighted lineup points)`);
@@ -279,4 +356,16 @@ for (const name of names) {
       ` | sleeper wk ${weeks.map((w) => sleeperWeek(w, i.player.id)?.toFixed(1) ?? 'bye/none').join(' / ')}` +
       (rate.rateNote ? ` | note: ${rate.rateNote}` : ''),
   );
+  for (const [label, view] of [
+    ['one number', oneNumber.tiers],
+    ['per week  ', after.tiers],
+  ] as const) {
+    const m = view?.audit.find((a) => a.playerId === i.player.id);
+    if (!m) continue;
+    console.log(
+      `      ${label}: gain ${m.gain.toFixed(2)} = lineup by week ${m.byWeek.map((x) => x.toFixed(2)).join(' / ')} (weighted ${view!.window.weights.join('/')})` +
+        `${m.prefs ? `, rules ${m.prefs.toFixed(1)}` : ''}, drop ${m.drop ?? '(open)'}` +
+        ` | numbers ${m.weekNumbers.map((n) => `wk ${n.week} ${n.points.toFixed(1)} ${n.source}`).join(' / ')}`,
+    );
+  }
 }

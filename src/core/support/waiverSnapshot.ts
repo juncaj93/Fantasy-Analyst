@@ -42,6 +42,7 @@
 
 import { assembleWaiverPlan, type WaiverAssemblyRequest } from '../waivers/assemble.ts';
 import { WAIVER_ENGINE_VERSION } from '../waivers/version.ts';
+import type { AheadNumbers } from '../waivers/aheadWeeks.ts';
 import type { DstPlanSources } from '../dst/assemble.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
@@ -293,6 +294,7 @@ export async function captureWaiverSnapshot(
             }),
         ...(input.request.recentPublished === undefined ? {} : { recentPublished: Object.fromEntries(input.request.recentPublished) }),
         ...(input.request.reserveSlots === undefined ? {} : { reserveSlots: input.request.reserveSlots }),
+        ...(input.request.ahead === undefined ? {} : { ahead: captureAhead(input.request.ahead, input.request) }),
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -434,6 +436,7 @@ export async function replayWaiverSnapshot(
         }),
     ...(inputs.recentPublished === undefined ? {} : { recentPublished: new Map(Object.entries(inputs.recentPublished)) }),
     ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
+    ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
     rosters: inputs.rosters,
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,
@@ -568,4 +571,24 @@ function summarise(
     default:
       return `The claim plan reproduced differently in ${differences.length} place${differences.length === 1 ? '' : 's'}, on the same engine version. The first is: ${describeDifference(differences[0]!)}.`;
   }
+}
+
+/** The later weeks' numbers, kept for the players the planner reads and nobody else. */
+function captureAhead(
+  ahead: AheadNumbers | null,
+  request: Pick<WaiverAssemblyRequest, 'rosterInputs' | 'candidateInputs'>,
+): NonNullable<WaiverPlanInputs['ahead']> | null {
+  if (ahead == null) return null;
+  const ids = new Set([...request.rosterInputs, ...request.candidateInputs].map((i) => i.player.id));
+  const keep = (byWeek: ReadonlyMap<number, ReadonlyMap<string, number>>): [number, Record<string, number>][] =>
+    [...byWeek]
+      .sort((a, b) => a[0] - b[0])
+      .map(([week, points]) => [week, Object.fromEntries([...points].filter(([id]) => ids.has(id)))]);
+  return { vegas: keep(ahead.vegas), sleeper: keep(ahead.sleeper) };
+}
+
+function rehydrateAhead(ahead: WaiverPlanInputs['ahead']): AheadNumbers | null {
+  if (ahead == null) return null;
+  const back = (rows: [number, Record<string, number>][]) => new Map(rows.map(([week, points]) => [week, new Map(Object.entries(points))]));
+  return { vegas: back(ahead.vegas), sleeper: back(ahead.sleeper) };
 }

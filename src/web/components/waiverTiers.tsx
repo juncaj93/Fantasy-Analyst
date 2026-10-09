@@ -11,9 +11,18 @@
  */
 
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
+import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
 import { PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 import { clearDay } from './waivers.tsx';
+
+/** Where a week's number came from, short enough for a phone row. */
+const WEEK_SOURCE_SHORT: Record<WeekSource, string> = {
+  this_week: 'this week',
+  vegas: 'Vegas',
+  sleeper: 'Sleeper',
+  current: 'this week’s number',
+};
 
 const TIER_TAG: Record<TierRow['tier'], string> = {
   do_this: 'tag-take',
@@ -201,6 +210,19 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
               <span className="faint"> · depth {row.insurance >= 0 ? '+' : '−'}{Math.abs(row.insurance).toFixed(1)}</span>
             </dd>
           </div>
+          {row.weekNumbers?.length ? (
+            <div className="weekly-line" data-testid="tier-detail-numbers">
+              <dt>His numbers</dt>
+              <dd>
+                {row.weekNumbers.map((n, k) => (
+                  <span key={n.week}>
+                    {k > 0 ? ' · ' : ''}
+                    Wk {n.week} {n.points.toFixed(1)} <span className="faint">{WEEK_SOURCE_SHORT[n.source]}</span>
+                  </span>
+                ))}
+              </dd>
+            </div>
+          ) : null}
           {row.prefs.length > 0 ? (
             <div className="weekly-line" data-testid="tier-detail-prefs">
               <dt>Your rules</dt>
