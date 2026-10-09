@@ -41,6 +41,7 @@ interface Payload {
   dst: unknown;
   headline: string | null;
   pool: { scanned: number };
+  tiers: { doThis: { playerId: string; name: string; bid: { recommended: number | null } } | null } | null;
 }
 
 describe('the waiver plan on the live endpoint', () => {
@@ -74,32 +75,26 @@ describe('the waiver plan on the live endpoint', () => {
        */
       const group = plan!.groups.find((g) => g.index === claim.group)!;
       if (claim.dropName) expect(group.headline).toContain(`Drop ${claim.dropName}`);
-      else expect(group.headline).toMatch(/open roster spot/);
+      else expect(group.headline).toMatch(/open roster spot/i);
     }
   });
 
   /**
-   * The bid on the plan is the bid on the board, and it is the same object.
+   * The claim card is the "Do this" move, and its bid is that move's bid.
    *
-   * The one arithmetic invariant the seam is responsible for. A second FAAB
-   * model would show up here first, as a claim quoting a figure the pricing pass
-   * never produced.
+   * Since October 2026 the card is written from the tiers (`waivers/tierPlan.ts`)
+   * and a bid comes from the bid model, so the one invariant the seam owns is
+   * that the card and the tier row quote the same player and the same dollars.
    */
-  it('shows the bid the pricing pass already recommended', () => {
-    const priced = new Map((body.faab?.bids ?? []).map((b) => [b.playerId, b.recommended]));
-    expect(priced.size).toBeGreaterThan(0);
-    for (const claim of body.claimPlan!.claims) {
-      if (claim.bid == null) continue;
-      expect(claim.bid, `claim for ${claim.addName} quotes a price nothing priced`).toBe(priced.get(claim.addPlayerId));
+  it('shows the "Do this" move and its own bid', () => {
+    const doThis = body.tiers?.doThis ?? null;
+    if (!doThis) {
+      expect(body.claimPlan!.claims).toHaveLength(0);
+      return;
     }
-  });
-
-  /** Every target is somebody the board actually offered. */
-  it('plans only around players the wire scan produced', () => {
-    const available = new Set(body.upgrades.flatMap((u) => u.candidates.map((c) => c.playerId)));
-    for (const claim of body.claimPlan!.claims) {
-      expect(available.has(claim.addPlayerId), `${claim.addName} is not on the board`).toBe(true);
-    }
+    const [claim] = body.claimPlan!.claims;
+    expect(claim!.addPlayerId).toBe(doThis.playerId);
+    expect(claim!.bid).toBe(doThis.bid.recommended);
   });
 
   /**
@@ -121,10 +116,10 @@ describe('the waiver plan on the live endpoint', () => {
     }
   });
 
-  it('reads the wallet the FAAB pass published', () => {
+  it('never bids more than the wallet the FAAB pass published', () => {
     const remaining = body.faab?.mine?.remaining;
     if (remaining == null) return;
-    expect(body.claimPlan!.budget).toContain(`$${remaining}`);
+    for (const claim of body.claimPlan!.claims) if (claim.bid != null) expect(claim.bid).toBeLessThanOrEqual(remaining);
   });
 
   /** The board, the defence and the prices all still arrive beside it. */

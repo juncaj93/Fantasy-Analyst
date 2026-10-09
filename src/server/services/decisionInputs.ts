@@ -62,6 +62,8 @@ import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
 import { DepthChartRepo } from '../repos/nflverse.ts';
+import { WeekPointsService } from './weekPointsService.ts';
+import { lastCompletedWeek } from '../../core/sleeper/weekPoints.ts';
 import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
 
 /** How old the betting market is, in the shape every screen already prints. */
@@ -585,6 +587,18 @@ export async function gatherWaiverInputs(
     rosterDepthRanks(db, league.season, inputs).catch(() => new Map<string, { rank: number }>()),
   );
 
+  /*
+   * Last week's points for the bid model: this week's row and last week's, one
+   * keyed settings read each, started with everything else. Which of the two is
+   * "last week" depends on whether this week's games are over, which the
+   * kickoffs below decide.
+   */
+  const weekPoints = new WeekPointsService(db, sleeper);
+  const pointsRead = Promise.all([
+    weekPoints.read(league.season, week).catch(() => null),
+    weekPoints.read(league.season, week - 1).catch(() => null),
+  ]);
+
   const [rosterInputs, candidateInputs, seasonMarkets, preseasonPoints, history, published, depth] = await Promise.all([
     rosterInputsRead,
     startSitInputsFor(db, candidateIds, { context }),
@@ -651,6 +665,37 @@ export async function gatherWaiverInputs(
     depthRead,
   ]);
 
+  /*
+   * The earlier-week projection, for the players with no number this week (a
+   * bye, nothing published): the tier planner's stand-in, the same one Check a
+   * trade uses. One keyed read over three earlier weeks, for those few players.
+   */
+  const needy = [...rosterInputs, ...candidateInputs]
+    .map((i) => i.player.id)
+    .filter((id) => (published.get(id) ?? 0) < 1);
+  const lookBack = [week - 1, week - 2, week - 3].filter((w) => w >= 1);
+  const recentPublished =
+    needy.length === 0 || lookBack.length === 0
+      ? new Map<string, { week: number; points: number }>()
+      : await new SleeperProjectionService(db, sleeper)
+          .publishedRecent({
+            season: league.season,
+            weeks: lookBack,
+            playerIds: [...new Set(needy)],
+            profile,
+            positionOf: (id) => positionOfId.get(id) ?? null,
+            floor: 1,
+          })
+          .catch(() => new Map<string, { week: number; points: number }>());
+  const [thisWeekPoints, priorWeekPoints] = await pointsRead;
+  const completed = lastCompletedWeek(
+    week,
+    [...rosterInputs, ...candidateInputs].map((i) => i.kickoff ?? null),
+    new Date(),
+  );
+  const lastWeekPoints = completed === week ? thisWeekPoints : priorWeekPoints;
+  const reserveSlots = Number(league.leagueSettings['reserve_slots']);
+
   const format = detectBestBall({ leagueSettings: league.leagueSettings, draftSettings: draft?.settings ?? null });
   const playoffs = playoffContextFor({
     leagueSettings: league.leagueSettings,
@@ -691,6 +736,9 @@ export async function gatherWaiverInputs(
        */
       waiverWindow: strategy?.waiverRules ? { rules: strategy.waiverRules, drops: strategy.leagueDrops } : null,
       published,
+      lastWeekPoints,
+      recentPublished,
+      ...(Number.isFinite(reserveSlots) ? { reserveSlots } : {}),
       /*
        * The positions this league may not read a published total for, so a
        * free agent with no number can say why. Read here because this file

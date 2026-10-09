@@ -88,10 +88,15 @@ function planFixture(over: Record<string, unknown> = {}) {
   };
 }
 
+/*
+ * An injected plan is drawn on the board an older payload had, with no tiers:
+ * these specs are about the card and the board beside it. The tiers have their
+ * own spec, `waiver-tiers.spec.ts`.
+ */
 async function withPlan(page: Page, claimPlan: Record<string, unknown> | null) {
   await page.route('**/api/leagues/*/waivers', async (route) => {
     const response = await route.fetch();
-    const original = await response.json();
+    const { tiers: _tiers, ...original } = await response.json();
     await route.fulfill({ response, body: JSON.stringify({ ...original, claimPlan }) });
   });
 }
@@ -381,7 +386,7 @@ test.describe('free agent or waiver claim, on the board', () => {
     await inSeason(page);
     await page.route('**/api/leagues/*/waivers', async (route) => {
       const response = await route.fetch();
-      const original = await response.json();
+      const { tiers: _tiers, ...original } = await response.json();
       const ids: string[] = [
         ...(original.upgrades ?? []).flatMap((u: { candidates: { playerId: string }[] }) => u.candidates.map((c) => c.playerId)),
         ...(original.valueAdds ?? []).map((a: { playerId: string }) => a.playerId),

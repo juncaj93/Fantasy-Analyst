@@ -74,6 +74,8 @@ import {
 import { injuryStatusTag } from '../../core/draft/injury.ts';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
+import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
+import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
 /*
  * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
@@ -176,6 +178,7 @@ export function TeamScreen({
   const [weekly, setWeekly] = useState<{ playerId: string; context: WeeklyContext } | null>(null);
   /** Which waiver row's detail is open. */
   const [waiverDetail, setWaiverDetail] = useState<WaiverBoardRow | null>(null);
+  const [tierDetail, setTierDetail] = useState<TierRow | null>(null);
 
   /*
    * Tapping Team while already on Team.
@@ -191,6 +194,7 @@ export function TeamScreen({
       { when: compare != null, undo: () => setCompare(null) },
       { when: weekly != null, undo: () => setWeekly(null) },
       { when: waiverDetail != null, undo: () => setWaiverDetail(null) },
+      { when: tierDetail != null, undo: () => setTierDetail(null) },
       { when: message != null, undo: () => setMessage(null) },
     ]);
   }, [resetNonce]);
@@ -743,6 +747,8 @@ export function TeamScreen({
                   board={waiverBoard}
                   dst={waivers?.dst ?? null}
                   summary={waivers?.found ? noMoveSummary(waivers) : null}
+                  tiers={waivers?.found ? (waivers.tiers ?? null) : null}
+                  onOpenTier={setTierDetail}
                   onOpen={setWaiverDetail}
                 />
               )}
@@ -772,6 +778,9 @@ export function TeamScreen({
         />
       ) : null}
 
+      {tierDetail && waivers?.tiers ? (
+        <TierDetailSheet row={tierDetail} tiers={waivers.tiers} onClose={() => setTierDetail(null)} />
+      ) : null}
       {waiverDetail ? (
         <WaiverDetailSheet
           row={waiverDetail}
@@ -1515,9 +1524,17 @@ function WaiverSection({
   board,
   dst,
   summary,
+  tiers,
+  onOpenTier,
   onOpen,
 }: {
   board: WaiverBoard | null;
+  /**
+   * The tiers, when the response carries them: Team shows the "Do this" move
+   * and the first worth considering, the same rows Waivers draws.
+   */
+  tiers?: WaiverTiersView | null;
+  onOpenTier?: (row: TierRow) => void;
   /** The empty answer, from `core/waivers/noMove.ts`, for a week with no upgrade. */
   summary: NoMoveSummary | null;
   /**
@@ -1556,6 +1573,36 @@ function WaiverSection({
   const rows = (board?.rows ?? []).filter((row) => row.dst == null && row.strength.level !== 'unknown');
   const line = <DstLine plan={dst} />;
   const hasDefenseLine = dst != null && dst.surface && dst.headline.length > 0;
+
+  /*
+   * The tiers, when present: the same rows the Waivers screen draws, at most
+   * two, "Do this" first. A week with neither says so in one line.
+   */
+  if (tiers) {
+    const top = [...(tiers.doThis ? [tiers.doThis] : []), ...tiers.consider].slice(0, TEAM_WAIVER_ROWS);
+    if (top.length === 0) {
+      return (
+        <div className="card card-tight" data-testid="waiver-card">
+          {hasDefenseLine ? line : null}
+          <div className="faint" data-testid="waiver-verdict">
+            No waiver move this week.
+            {tiers.dropReady.length > 0 ? ` ${tiers.dropReady.map((d) => d.name).join(', ')} ${tiers.dropReady.length === 1 ? 'is' : 'are'} drop-ready.` : ''}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div data-testid="waiver-card">
+        <div className="section-title" data-testid="waiver-title">
+          Waiver moves
+        </div>
+        {line}
+        {top.map((row) => (
+          <TierRowButton key={row.playerId} row={row} onOpen={() => onOpenTier?.(row)} />
+        ))}
+      </div>
+    );
+  }
 
   if (rows.length === 0) {
     /*

@@ -17,6 +17,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { withoutTiers } from './helpers.ts';
 
 /**
  * The app, told the regular season is under way.
@@ -43,7 +44,9 @@ async function inSeason(page: Page) {
   });
 }
 
-async function openWaivers(page: Page) {
+async function openWaivers(page: Page, opts: { tiers?: boolean } = {}) {
+  /* The board these specs describe is the fallback for a payload with no tiers. */
+  if (opts.tiers !== true) await withoutTiers(page);
   await inSeason(page);
   await page.goto('/');
   await page.getByTestId('tab-waivers').click();
@@ -111,7 +114,7 @@ test.describe('the seasonal slot in the toolbar', () => {
   });
 });
 
-test.describe('the waivers page', () => {
+test.describe('the waivers page, as an older payload draws it', () => {
   test.beforeEach(async ({ page }) => openWaivers(page));
 
   test('lists who is available as one decision per player', async ({ page }) => {

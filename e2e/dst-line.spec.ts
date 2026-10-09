@@ -196,19 +196,28 @@ test.describe('the defence on the Waivers board', () => {
   });
 
   /*
-   * A defence the planner named is a recommendation, so it sits under
-   * `Recommended move` with the plan — not among the other options, and not
-   * behind a position chip that only narrows those options.
+   * A defence the planner named is a recommendation. A stream is worth
+   * considering, so it sits in that tier; a defence that fills an empty or
+   * bye-week slot is a hole, so it sits with "Do this". Never on the watch list
+   * and never behind a position chip.
    */
-  test('sits under the recommended move, not among the other options', async ({ page }) => {
+  test('a stream sits under "Worth considering", not on the watch list', async ({ page }) => {
     await inSeason(page);
     await withPlan(page, plan());
     await openWaivers(page);
 
+    await expect(page.locator('[data-testid="tier-consider"] [data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="tier-watch"] [data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
+    await expect(page.getByTestId('waiver-filter-def')).toHaveCount(0);
+  });
+
+  test('a defence for an empty slot sits with "Do this"', async ({ page }) => {
+    await inSeason(page);
+    await withPlan(page, plan({ decision: 'add' }));
+    await openWaivers(page);
+
     const recommended = page.getByTestId('waivers-recommended');
     await expect(recommended.locator('[data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="waivers-others"] [data-testid="waiver-row"][data-position="DEF"]')).toHaveCount(0);
-    await expect(page.getByTestId('waiver-filter-def')).toHaveCount(0);
   });
 
   test('is said once — the row, or the line, never both', async ({ page }) => {

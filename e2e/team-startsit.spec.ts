@@ -14,7 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { inSeason } from './helpers.ts';
+import { inSeason, withoutTiers } from './helpers.ts';
 
 /**
  * Team, once the draft is over — which is the only state this file is about.
@@ -421,15 +421,19 @@ test.describe('a weekly command centre, on one screen', () => {
   });
 });
 
-test.describe('waiver upgrades', () => {
+test.describe('waiver upgrades, as an older payload draws them', () => {
   /*
    * A post-draft section, like the mode chips and Compare above it.
    *
    * Offering free agents to a manager whose next transaction is a draft pick is
    * a question nobody has yet, so Team stops drawing this — and `Changes to
    * consider` with it — until the draft is over. See `inSeason`.
+   *
+   * These rows are the board an older cached response draws, with no tiers.
+   * Team's tier rows are held by `e2e/waiver-tiers.spec.ts`.
    */
   test.beforeEach(async ({ page }) => {
+    await withoutTiers(page);
     await openTeam(page);
   });
 

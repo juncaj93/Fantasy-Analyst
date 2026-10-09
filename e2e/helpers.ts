@@ -481,3 +481,20 @@ export async function clearMyGuys(page: Page): Promise<void> {
     }
   }
 }
+
+/**
+ * The Waivers response as an older payload had it: no `tiers`.
+ *
+ * A phone can hold a cached response from before the tiers shipped, and the
+ * screen then draws the board it always drew. The board's own specs run
+ * against that fallback through this, so it stays covered while the tiers are
+ * the default. See `e2e/waiver-tiers.spec.ts` for the tiers.
+ */
+export async function withoutTiers(page: Page, over: Record<string, unknown> = {}): Promise<void> {
+  await page.route('**/api/leagues/*/waivers', async (route) => {
+    const response = await route.fetch();
+    const original = await response.json();
+    const { tiers: _tiers, ...rest } = original as Record<string, unknown>;
+    await route.fulfill({ response, body: JSON.stringify({ ...rest, ...over }) });
+  });
+}

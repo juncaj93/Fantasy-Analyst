@@ -61,11 +61,17 @@ import { waiverMultiWeekFor } from '../contracts/integration.ts';
 import { waiverLeagueIntel, withCompetition, type WaiverIntelRoster } from './intel.ts';
 import { trendingHeadline, type TrendingVelocity } from '../market/trending.ts';
 import { priceWaiverUpgrades, type PricedBid, type WaiverPricingContext } from './pricing.ts';
-import { buildWaiverClaimPlan, type WaiverClaimPlan } from './claimPlan.ts';
+import type { WaiverClaimPlan } from './claimPlan.ts';
 import { marketHoldFor } from './marketHold.ts';
 import { findHandcuffs } from './yardstick.ts';
 import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindow.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
+import { buildTierInputs } from './tierInputs.ts';
+import { planWaiverTiers } from './tiers.ts';
+import { buildTiersView, tierClaimPlan, type WaiverTiersView } from './tierPlan.ts';
+import { lastCompletedWeek } from '../sleeper/weekPoints.ts';
+import type { ClaimRecord } from './bidModel.ts';
+import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
 import type { BidObservation, PriceSummary } from '../faab/bids.ts';
@@ -180,6 +186,21 @@ export interface WaiverAssemblyRequest {
    * before.
    */
   waiverWindow?: { rules: WaiverRules; drops: ReadonlyMap<string, string> } | null | undefined;
+  /**
+   * What every player scored in the last finished week, in this league's
+   * scoring, from the settings row `sleeper.weekPoints.<season>.<week>`. The
+   * bid model's main pull. Absent or null: the model says it has no points on
+   * record and reads every player as a middling pull.
+   */
+  lastWeekPoints?: { week: number; points: ReadonlyMap<string, number> } | null | undefined;
+  /**
+   * Each player with no number this week (a bye, nothing published), with his
+   * latest earlier week of Sleeper's projection, for the tier planner's rate.
+   * The same stand-in Check a trade uses. Absent: such a player is unvalued.
+   */
+  recentPublished?: ReadonlyMap<string, { week: number; points: number }> | undefined;
+  /** Injured-reserve slots this league allows (`reserve_slots`). Absent: the roster shape's. */
+  reserveSlots?: number | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -220,8 +241,17 @@ export interface WaiverAssembly extends WaiverAdvice {
   dst: DstPlan | null;
   /** What each recommended add should cost. Empty in a league that does not bid. */
   bids: PricedBid[];
-  /** The claims to enter, in order. Advisory — nothing here transacts. */
+  /**
+   * The claim card: the "Do this" move from {@link tiers}, as an instruction.
+   * Advisory — nothing here transacts.
+   */
   claimPlan: WaiverClaimPlan | null;
+  /**
+   * The moves in three tiers, scored by what each adds to the best lineup over
+   * the next three weeks, with a bid each and the drop-ready bench. What the
+   * Waivers screen and Team's waiver line draw. See `waivers/tiers.ts`.
+   */
+  tiers: WaiverTiersView | null;
   /**
    * Each scanned free agent's state: still on waivers, or free to add now.
    * A record rather than a map so it survives the trip to the phone. Empty
@@ -615,22 +645,90 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     .sort((a, b) => a.leagueRank - b.leagueRank);
 
   /*
-   * And the claims themselves, from what this function is already holding.
-   *
-   * A failure is swallowed to an unsurfaced plan, on the same principle as the
-   * defence above.
+   * The tiers: every scanned free agent scored by what he adds to the best
+   * lineup over the next three weeks, paired with his best drop, and a bid
+   * from the league's own bidding behaviour. A failure is swallowed to null,
+   * like the defence above: the board underneath still stands.
    */
-  const claimPlan = (() => {
+  const tiers = await (async (): Promise<WaiverTiersView | null> => {
     try {
-      return buildWaiverClaimPlan({
-        advice: { ...advice, upgrades, valueAdds, unknowns, dst, faab: { bids }, pickup },
-        budget: request.budgets,
-        ...(request.generatedAt === undefined ? {} : { generatedAt: request.generatedAt }),
+      const clubs = [
+        ...new Set([...rosterInputs, ...candidateInputs].map((i) => (i.player.team ?? '').toUpperCase()).filter((t) => t.length > 0)),
+      ].sort();
+      const fixtures: ScheduleTeamWeek[] =
+        request.dstSources && clubs.length > 0
+          ? await request.dstSources
+              .scheduleForTeams(request.season, clubs, { from: request.week, to: request.week + 3 })
+              .catch(() => [] as ScheduleTeamWeek[])
+          : [];
+      const inputs = buildTierInputs({
+        shape,
+        profile,
+        week: request.week,
+        now: request.now,
+        rosterInputs,
+        candidateInputs,
+        rosteredIds,
+        reserveIds: request.reserveIds,
+        published: request.published,
+        recentPublished: request.recentPublished,
+        fixtures,
+        pickup,
+        held: heldIds,
+        depth: request.depth,
+        trendingDrops: new Map([...(request.trendingDrops ?? new Map<string, TrendingVelocity>())].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
+        reserveSlots: request.reserveSlots ?? shape.irSlots,
+        excludedPositions: new Set([DEFENCE_POSITION]),
+      });
+      const plan = planWaiverTiers(inputs.request);
+      const claims: ClaimRecord[] = request.observations
+        .filter((o) => o.playerId != null)
+        .map((o) => ({
+          rosterId: o.rosterId,
+          playerId: o.playerId!,
+          amount: o.amount,
+          won: o.outcome === 'won',
+          voided: o.voided === true,
+          run: `week ${o.week}`,
+        }));
+      const lastWeek = request.lastWeekPoints ?? null;
+      return buildTiersView({
+        plan,
+        pickup,
+        rules: request.waiverWindow?.rules ?? null,
+        budgets: request.budgets,
+        prices: request.prices,
+        claims,
+        seats: request.rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine })),
+        lastWeek: lastWeek
+          ? { week: lastWeek.week, points: lastWeek.points }
+          : {
+              week: lastCompletedWeek(request.week, [...rosterInputs, ...candidateInputs].map((i) => i.kickoff ?? null), request.now),
+              points: null,
+            },
+        trending: new Map([...trending].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
+        held: heldIds,
+        paidFor: new Set(claims.filter((c) => c.won && c.amount >= 3).map((c) => c.playerId)),
+        evaluations: inputs.evaluations,
+        week: request.week,
+        finalWeek: request.history?.finalWeek ?? request.strategy?.finalWeek ?? 14,
       });
     } catch {
       return null;
     }
   })();
 
-  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, lineup, pickup };
+  /*
+   * And the claim card, from the tiers: the "Do this" move as the instruction
+   * to type into Sleeper. A failure is swallowed to an unsurfaced plan.
+   */
+  const claimPlan = (() => {
+    try {
+      return tiers ? tierClaimPlan(tiers, request.generatedAt ?? new Date().toISOString()) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, tiers, lineup, pickup };
 }

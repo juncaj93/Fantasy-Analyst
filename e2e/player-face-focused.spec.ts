@@ -238,12 +238,13 @@ test.describe('Team reaches a face, and its lists do not', () => {
       And the waiver detail, which is the second focused player on this screen
       and the second sheet reaching the same shared header.
     */
-    const waiver = page.getByTestId('waiver-row').first();
-    await expect(waiver, 'the Team screen is drawing no waiver upgrades, so this proves nothing').toBeVisible();
+    /* Team draws the waiver tiers, and a tier row opens its own sheet. */
+    const waiver = page.getByTestId('waiver-tier-row').first();
+    await expect(waiver, 'the Team screen is drawing no waiver moves, so this proves nothing').toBeVisible();
     const waiverId = (await waiver.getAttribute('data-player-id'))!;
     await waiver.click();
-    await expect(page.getByTestId('waiver-detail')).toBeVisible();
-    await assertFocusedFace(page, 'waiver-detail', waiverId);
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
+    await assertFocusedFace(page, 'tier-detail', waiverId);
     expect(asked, 'the waiver detail did not ask for its own player').toHaveLength(2);
 
     assertBareIds(asked);
@@ -294,22 +295,22 @@ test.describe('Waivers reaches a face, and the board does not', () => {
     await page.goto('/');
     await page.getByTestId('tab-waivers').click();
     await expect(page.getByTestId('waivers-nav')).toBeVisible();
-    await expect(page.getByTestId('waiver-row').first()).toBeVisible();
+    await expect(page.getByTestId('waiver-tier-row').first()).toBeVisible();
     await page.waitForTimeout(400);
     expect(asked, 'the waivers board requested portraits').toHaveLength(0);
 
-    const row = page.getByTestId('waiver-row').first();
+    const row = page.getByTestId('waiver-tier-row').first();
     const playerId = (await row.getAttribute('data-player-id'))!;
     await row.click();
-    await expect(page.getByTestId('waiver-detail')).toBeVisible();
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
 
     const face = page.getByTestId('sheet-player-face');
     await expect(face, 'a refused portrait did not fall back').toHaveAttribute('data-fallback', 'yes');
     await expect(face, 'the fallback is not the player’s initials').toHaveText(/^[A-Z]{1,2}$/);
-    await assertFocusedFace(page, 'waiver-detail', playerId);
+    await assertFocusedFace(page, 'tier-detail', playerId);
 
     // Nothing about the card said anything went wrong, and nothing retried.
-    const sheet = await page.getByTestId('waiver-detail').innerText();
+    const sheet = await page.getByTestId('tier-detail').innerText();
     for (const word of ['error', 'failed', 'unavailable', 'could not load', 'retry']) {
       expect(sheet.toLowerCase(), `the waiver detail complained about a missing portrait ("${word}")`).not.toContain(
         word,

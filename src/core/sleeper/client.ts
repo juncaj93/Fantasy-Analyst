@@ -210,6 +210,20 @@ export class SleeperClient {
   }
 
   /**
+   * Every player's stat line for one week of the regular season, in one request.
+   *
+   * About half a megabyte. Scored with a league's own settings in
+   * `core/sleeper/weekPoints.ts`, for the waiver bid model.
+   */
+  async getWeekStats(season: string, week: number): Promise<Record<string, Record<string, number | null>>> {
+    return (
+      (await this.get<Record<string, Record<string, number | null>>>(
+        `/stats/nfl/regular/${encodeURIComponent(season)}/${encodeURIComponent(String(week))}`,
+      )) ?? {}
+    );
+  }
+
+  /**
    * One week of published projections — Rotowire's model, distributed by Sleeper.
    *
    * The only endpoint here that does **not** live under `/v1`, so it is built

@@ -1,9 +1,100 @@
 # The waiver claim planner
 
-> **Status: built, tested and wired.** The Waivers screen opens on the plan.
-> The seam is `core/waivers/claimPlan.ts` — two functions, one call from the
-> endpoint — and it is described in [Integration contract](#integration-contract)
-> and [What the reader sees](#what-the-reader-sees).
+> **Status (October 2026): tiers.** The Waivers screen and Team's waiver line
+> draw three tiers scored by what each move adds to the lineup, with a bid from
+> the league's own bidding behaviour. The fixed bars described further down
+> (2.5 / 3.0 over a starter, 0.5 / 1.0 over a bench player) still build the
+> board that an older cached response draws, and nothing else.
+
+## Tiers (`core/waivers/tiers.ts`)
+
+Every scanned free agent with a number is scored by the change in the best
+legal lineup over three weeks, solved exactly by the trade-value solver
+(`tradeValue/lineup.ts`), with each player's points a game taken from the
+trade-value rate (the Start/Sit decision number, injury counted as missing
+weeks, byes from the fixture list):
+
+    gain = Σ week weight × (lineup after − lineup before)
+         + change in the insurance credit (Check a trade's depth credit)
+         + Alex's preferences (labelled)
+
+Weights: while this week's games are still ahead, this week and next count in
+full and the third week at half (`openWeights` 1, 1, 0.5); after the main slate
+kicks off the window moves on a week (1, 0.5, 0.5). The drop is inside the
+subtraction, so cutting a player who starts in week 3 costs his week-3 points.
+
+| tier | rule (weighted lineup points) |
+| --- | --- |
+| Do this (≤1) | fills a hole in the first week(s): a starter on bye, Out, or nobody to start; or an upgrade of 4.0+ |
+| Worth considering (≤4) | 1.5+: depth before a bye, a backup for a hurt starter, a moderate upgrade; plus one IR stash |
+| Watch list (≤6) | 0.4+: better on paper, no move needed now |
+
+Thresholds came from the live board of 8 October 2026 (week 5): the only moves
+over 4 were five quarterbacks answering Joe Burrow's week-6 bye (Rodgers 22.3,
+Stroud 13.6, Love 11.1, Darnold 11.0, Herbert 10.7); 1.5 to 3 held four
+upgrades (Hunter Henry 3.0, Khalil Shakir 2.4, Darren Waller 1.8, Dalton
+Schultz 1.7); 1 to 1.5 two (Baker Mayfield, Pat Freiermuth). The reproducible
+audit is `probe-waiver-tiers.mjs`, which prints every band.
+
+**One need, one row.** Moves answering the same need (one bye, one injury) are
+one row: the best is listed and the rest ride on it as `alternatives`.
+
+**One roster spot is used once.** Each move takes its best drop; a later move
+whose best drop is taken uses its next best and both say they compete for the
+spot. A drop is never a player worth more over replacement than the add (no
+cutting a better player for a short-term bye or injury), and handcuffs and the
+market hold are cut only when nothing else can be.
+
+**Dead roster spots.** A bench player is drop-ready when cutting him costs under
+0.25 weighted points, he starts in none of the three weeks, and he is no more
+than 0.5 a game above a free agent. Unvalued and protected players never are.
+
+**Preferences**, labelled on the move: a QB or TE who would sit next week is
+charged 1.5 ("you don't carry a spare QB or TE unless he is clearly better");
+backs get a 0.25 lean on the order only; defences belong to the DST planner and
+are never added or dropped here. A free agent with no usable number (most
+often a QB this league's scoring refuses) stays unvalued.
+
+## Bids (`core/waivers/bidModel.ts`, `core/waivers/managerSeeds.ts`)
+
+For each other manager, the chance he bids is his claims per run (this
+season's record blended with Alex's seed profile, the seed counting as three
+runs) over the targets in a typical run, scaled by how much the player draws
+him: last week's fantasy points in this league's scoring (the main pull for a
+chaser), Sleeper's trending adds (minor, except for the savvy manager), a
+rising role, and a fresh drop of a player the room drafted early or paid for.
+His likely bid is his own bids blended with his style's typical bid, read
+higher for a player who draws him more. The recommended bid is the smallest
+dollar that wins three times in four; the range runs from even odds to nine in
+ten (19 in 20 with fewer than 30 claims on record). It is capped at what the
+pricing pass says he is worth to this roster, and says so. A free agent outside
+the waiver window carries no bid.
+
+Decided by Alex on 8 October 2026: the chaser's points weight stays as it is
+and is revisited after two or three more weeks of claims (the backtest found
+last week's points barely predict competition here); an IR stash stays paired
+with a drop, because Sleeper needs a free roster spot at claim time.
+
+Seeds: RonJonathan (roster 6) savvy; MattyB2317 (roster 10, not MattLee04)
+slightly savvy; cheeseking (roster 8) rarely adds; everyone else a last-week
+chaser until his own claims say otherwise.
+
+Last week's points come from Sleeper's weekly stats, scored with the league's
+settings (checked: 322 of 322 rostered players matched Sleeper's own matchup
+points for weeks 3 and 4), stored as one settings row per week
+(`sleeper.weekPoints.<season>.<week>`), refreshed by the Waivers refresh and
+the three-hourly league read.
+
+**Backtest** (`scripts/waiver-bid-backtest.ts`, run by `probe-waiver-tiers.mjs`):
+on this season's 38 awarded claims, using only what was known before each run,
+the model's bid would have won 33; it predicted 25 rival bids against 21 real
+ones, and its bids total $136 against $134 the winners paid ($76 of it more
+than needed). The misses were two $1–2 defence ties, Adonai Mitchell ($3
+against $4), and two news-driven backs (Ollie Gordon, Braelon Allen) that only
+Sleeper's live trending list would have flagged; it is not historical, so the
+backtest runs without it.
+
+---
 
 The question this answers, in one sentence:
 

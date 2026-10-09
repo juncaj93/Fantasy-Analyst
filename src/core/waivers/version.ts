@@ -72,4 +72,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * `waiver@9`: a rival whose flex starter projects under 8 points needs every
  * position that flex takes. More rivals count as needy, so bids move.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@9', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@10`: the tiers. Every scanned free agent is scored by what he adds to
+ * the best lineup over three weeks (the trade-value solver), paired with his
+ * best drop; "Do this", "Worth considering" and the watch list replace the fixed
+ * bars; the claim card is the "Do this" move; bids come from the league's own
+ * bidding behaviour. See `core/waivers/tiers.ts` and `core/waivers/bidModel.ts`.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@10', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

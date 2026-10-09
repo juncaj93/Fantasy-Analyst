@@ -23,6 +23,7 @@ import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { assembleComparison, assembleLineup } from '../core/startsit/assemble.ts';
 import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
+import { WeekPointsService } from './services/weekPointsService.ts';
 import { SnapshotLossyError } from '../core/support/lossless.ts';
 import { SnapshotUnavailable } from '../core/support/emit.ts';
 import {
@@ -1073,10 +1074,15 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * read when the stored week is young and whole.
      */
     const projections = await refreshPublishedWeek(db, ctx.env.sleeper, league.season);
+    /* Last week's points, for the bid model. Sleeper only, behind a six-hour gate. */
+    const weekPoints = await new WeekPointsService(db, ctx.env.sleeper)
+      .refreshRecent({ season: league.season, week: state?.week ?? 1, scoring: league.scoringSettings })
+      .catch(() => null);
     return jsonResponse({
       transactions,
       trending,
       projections,
+      weekPoints,
       refreshedAt: new Date().toISOString(),
     });
   });

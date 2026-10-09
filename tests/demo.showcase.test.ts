@@ -84,100 +84,84 @@ interface WaiverBody {
   faab: { mine: { remaining: number | null } | null; bids: { playerId: string; recommended: number | null }[] } | null;
 }
 
-describe('the waiver showcase runs the real claim planner', () => {
-  it('groups the claims by the drop they spend, in the order to enter them', async () => {
-    const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
+describe('the waiver showcase runs the real tier planner', () => {
+  interface TierRowLike {
+    playerId: string;
+    name: string;
+    tier: string;
+    reason: string;
+    gain: number;
+    drop: { playerId: string; name: string } | null;
+    alternatives: string[];
+    bid: { kind: string; recommended: number | null; low: number | null; high: number | null; reason: string };
+  }
+  type TierBody = WaiverBody & {
+    tiers: { doThis: TierRowLike | null; consider: TierRowLike[]; watch: TierRowLike[]; dropReady: { playerId: string }[] } | null;
+  };
+
+  it('opens on one "Do this" move, and the claim card says the same move', async () => {
+    const body = await get<TierBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
+    const tiers = body.tiers!;
+    expect(tiers.doThis, 'the showcase has a move to make').toBeTruthy();
     const plan = body.claimPlan!;
-
     expect(plan.surface).toBe(true);
-    expect(plan.state).toBe('plan');
-    expect(plan.claims.length).toBeGreaterThanOrEqual(2);
-    expect(plan.groups.length).toBeGreaterThanOrEqual(1);
+    expect(plan.claims).toHaveLength(1);
+    const [claim] = plan.claims;
+    expect(claim!.addPlayerId).toBe(tiers.doThis!.playerId);
+    expect(claim!.dropPlayerId).toBe(tiers.doThis!.drop?.playerId ?? null);
+    expect(plan.groups[0]!.headline).toContain(tiers.doThis!.drop!.name);
+    expect(tiers.consider.length).toBeLessThanOrEqual(4);
+  });
 
-    const [first, second] = plan.claims;
-    expect(first!.rank).toBe(1);
-    expect(first!.qualifier, 'the preferred claim carries no qualifier').toBeNull();
-
-    /*
-     * Every later claim under the same drop is a fallback: it can only run if
-     * the claims above it under that drop lost, and its qualifier says so.
-     */
-    for (const claim of plan.claims.slice(1)) {
-      const sameDrop = plan.claims.filter((c) => c.group === claim.group && c.rank < claim.rank);
-      if (sameDrop.length === 0) continue;
-      expect(claim.dropPlayerId).toBe(sameDrop[0]!.dropPlayerId);
-      expect(claim.qualifier).toMatch(/^Only if /);
-      expect(claim.relation).toBe('fallback');
+  it('is internally consistent: one row per player, drops from the roster, bids inside the wallet', async () => {
+    const body = await get<TierBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
+    const tiers = body.tiers!;
+    const roster = await get<{ starters: { playerId: string }[]; bench: { playerId: string }[] }>(
+      'waivers-tuesday-active',
+      `${LEAGUE}/roster`,
+    );
+    const mine = new Set([...roster.starters, ...roster.bench].map((p) => p.playerId));
+    const rows = [tiers.doThis, ...tiers.consider, ...tiers.watch].filter((r): r is TierRowLike => r != null);
+    expect(new Set(rows.map((r) => r.playerId)).size).toBe(rows.length);
+    const remaining = body.faab!.mine!.remaining!;
+    for (const row of rows) {
+      expect(mine.has(row.playerId), `${row.name} is already yours`).toBe(false);
+      if (row.drop) expect(mine.has(row.drop.playerId), `${row.drop.name} is on your roster`).toBe(true);
+      if (row.bid.kind === 'claim') {
+        expect(row.bid.recommended!).toBeGreaterThanOrEqual(1);
+        expect(row.bid.recommended!).toBeLessThanOrEqual(remaining);
+        expect(row.bid.low!).toBeLessThanOrEqual(row.bid.recommended!);
+        expect(row.bid.high!).toBeGreaterThanOrEqual(row.bid.recommended!);
+      } else {
+        expect(row.bid.recommended).toBeNull();
+      }
     }
-    expect(second!.qualifier ?? 'first of a second drop').toBeTruthy();
+    for (const dead of tiers.dropReady) expect(mine.has(dead.playerId)).toBe(true);
+  });
 
-    const group = plan.groups[0]!;
-    expect(group.headline).toContain(group.drop!.name);
-
-    /* And the order is the instruction, with the mechanic one tap away. */
-    expect(plan.instruction).toBe('Enter in this order');
-    expect(plan.mechanics).toBeTruthy();
+  it('says why in plain words, on the move and on its bid', async () => {
+    const body = await get<TierBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
+    const tiers = body.tiers!;
+    for (const row of [tiers.doThis!, ...tiers.consider]) {
+      expect(row.reason.length).toBeGreaterThan(10);
+      expect(row.bid.reason.length).toBeGreaterThan(10);
+      expect(row.reason).not.toMatch(/undefined|NaN|null/);
+    }
+    const claim = body.claimPlan!.claims[0]!;
+    expect(claim.why.join(' ')).toContain(tiers.doThis!.reason);
+    expect(claim.headline).toContain(tiers.doThis!.name);
   });
 
   /*
-   * The 30 September 2026 bug, as an invariant on the demo board.
-   *
-   * Every card said `Better than Jaylen Wright` while the plan cut Emmett
-   * Johnson. The card's cut and the plan's drop now come from one object.
+   * The 30 September 2026 bug, as an invariant on the demo board: the cut a
+   * card names and the cut the plan names come from one object.
    */
   it('names the same cut on every card as on the plan', async () => {
     const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
-    const cards = new Map((body.valueAdds ?? []).map((v) => [v.playerId, v]));
+    const hints = new Map((body.claimPlan as unknown as { dropHints: { addPlayerId: string; dropName: string }[] }).dropHints.map((h) => [h.addPlayerId, h.dropName]));
     for (const claim of body.claimPlan!.claims) {
-      const card = cards.get(claim.addPlayerId);
-      if (!card) continue;
-      expect(card.overName, `${claim.addName}'s card`).toBe(claim.dropName);
+      expect(hints.get(claim.addPlayerId), `${claim.addName}'s sheet`).toBe(claim.dropName);
     }
-  });
-
-  it('is internally consistent: every add, bid and drop agrees with the rest of the response', async () => {
-    const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
-    const plan = body.claimPlan!;
-    const board = new Map([
-      ...body.upgrades.flatMap((u) => u.candidates).map((c) => [c.playerId, c.name] as const),
-      ...(body.valueAdds ?? []).map((v) => [v.playerId, v.name] as const),
-    ]);
-    const bids = new Map((body.faab?.bids ?? []).map((b) => [b.playerId, b]));
-    const remaining = body.faab!.mine!.remaining!;
-
-    for (const claim of plan.claims) {
-      /* Every add is a player the waiver engine actually put on the board. */
-      expect(board.get(claim.addPlayerId), `${claim.addName} is on the board`).toBe(claim.addName);
-      /* Every bid is the pricing pass's own number, not the plan's. */
-      expect(claim.bid).toBe(bids.get(claim.addPlayerId)?.recommended ?? null);
-      expect(claim.bid!).toBeLessThanOrEqual(remaining);
-      /* A drop is a name, the headline names the add and a price range. */
-      expect(claim.dropName).toBeTruthy();
-      expect(claim.headline).toContain(claim.addName);
-      expect(claim.bidRange).toMatch(/^\$\d+(–\d+)?$/);
-      expect(claim.headline).toContain(claim.bidRange!);
-    }
-
-    /* One claim per drop can land together, and the wallet covers the dearest of each. */
-    const worst = plan.groups.map((g) => Math.max(...plan.claims.filter((c) => c.group === g.index).map((c) => c.bid ?? 0)));
-    const total = worst.reduce((a, b) => a + b, 0);
-    expect(total).toBeLessThanOrEqual(remaining);
-    expect(plan.budget).toContain(`$${total}`);
-  });
-
-  it('See why goes deeper than the line it explains', async () => {
-    const body = await get<WaiverBody>('waivers-tuesday-active', `${LEAGUE}/waivers`);
-    for (const claim of body.claimPlan!.claims) {
-      /* Several sentences, none of them the headline repeated. */
-      expect(claim.why.length).toBeGreaterThan(3);
-      expect(claim.why).not.toContain(claim.headline);
-      /* Including the two projections and what the room will pay. */
-      expect(claim.why.join(' ')).toMatch(/pts/);
-      expect(claim.why.join(' ')).toMatch(/\$\d+/);
-    }
-    /* And the whole plan carries the outcomes, ending with the one that is always reachable. */
-    expect(body.claimPlan!.outcomes.length).toBeGreaterThanOrEqual(2);
-    expect(body.claimPlan!.outcomes.at(-1)).toMatch(/nothing on your roster changes/i);
   });
 });
 

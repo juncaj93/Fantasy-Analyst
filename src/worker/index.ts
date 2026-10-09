@@ -40,6 +40,7 @@ import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
 import { nflverseFeedDue } from '../core/nflverse/cadence.ts';
 import { waiverReadDue } from '../core/league/waiverReadCadence.ts';
+import { WeekPointsService } from '../server/services/weekPointsService.ts';
 import { managerIntelWindow } from '../core/league/managerIntelCadence.ts';
 import { scheduleFlexCheckDue } from '../core/nfl/flexCheck.ts';
 import { VegasKickoffClock } from '../server/services/vegasKickoffClock.ts';
@@ -399,6 +400,13 @@ export default {
               season: selected.season,
               week: state?.week ?? 1,
               maxWeeks: 2,
+              now: new Date(event.scheduledTime ?? Date.now()),
+            });
+            /* Last week's points for the waiver bid model: at most two Sleeper calls, each gated. */
+            await new WeekPointsService(env.DB, metered.sleeper).refreshRecent({
+              season: selected.season,
+              week: state?.week ?? 1,
+              scoring: selected.scoringSettings,
               now: new Date(event.scheduledTime ?? Date.now()),
             });
           }
