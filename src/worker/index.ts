@@ -403,12 +403,16 @@ export default {
               now: new Date(event.scheduledTime ?? Date.now()),
             });
             /* Last week's points for the waiver bid model: at most two Sleeper calls, each gated. */
-            await new WeekPointsService(env.DB, metered.sleeper).refreshRecent({
+            const weekPoints = new WeekPointsService(env.DB, metered.sleeper);
+            const weekOpts = {
               season: selected.season,
               week: state?.week ?? 1,
               scoring: selected.scoringSettings,
               now: new Date(event.scheduledTime ?? Date.now()),
-            });
+            };
+            await weekPoints.refreshRecent(weekOpts);
+            /* The waiver planner's later weeks: at most three Sleeper calls, each behind a twelve-hour gate. */
+            await weekPoints.refreshAheadWeeks(weekOpts);
           }
         } catch (err) {
           console.error('league read failed', err);

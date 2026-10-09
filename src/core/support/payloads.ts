@@ -260,6 +260,11 @@ export interface WaiverPlanInputs {
   recentPublished?: Record<string, { week: number; points: number }>;
   /** Injured-reserve slots the league allows. */
   reserveSlots?: number;
+  /**
+   * Later weeks' own numbers for the tier planner, week by week, for the
+   * roster and the scanned wire only. Absent on a capture before waiver@11.
+   */
+  ahead?: { vegas: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.

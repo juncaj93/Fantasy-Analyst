@@ -75,6 +75,10 @@ for (let w = 1; w <= state.week; w++) {
   await save(`stats${w}.json`, `${SLEEPER}/v1/stats/nfl/regular/${season}/${w}`);
   await save(`proj${w}.json`, `${SLEEPER}/projections/nfl/${season}/${w}?season_type=regular&${positions}&order_by=ppr`);
 }
+/* The three weeks ahead: the later-week numbers when the capture has none yet, and the breakdown. Sleeper public API, no D1 rows. */
+for (let w = state.week + 1; w <= state.week + 3; w++) {
+  await save(`proj${w}.json`, `${SLEEPER}/projections/nfl/${season}/${w}?season_type=regular&${positions}&order_by=ppr`).catch(() => {});
+}
 
 const run = (script, args) =>
   execFileSync('node', ['--experimental-transform-types', '--no-warnings', script, ...args], {

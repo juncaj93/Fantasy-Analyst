@@ -58,6 +58,7 @@
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import { TRADE_VALUE } from '../tradeValue/evaluate.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
+import type { WeekSource } from './aheadWeeks.ts';
 
 /**
  * The thresholds, in weighted lineup points over the three-week window.
@@ -131,6 +132,13 @@ export interface TierPlayer {
   rate: number | null;
   /** Availability for each window week, 0 to 1 (bye 0, Out 0, Questionable 0.8). */
   weekly: number[];
+  /**
+   * Points for each window week's game before availability, when a later week
+   * has its own number (`aheadWeeks.ts`). Absent: `rate` for every week.
+   */
+  weekValues?: (number | null)[];
+  /** Where each `weekValues` entry came from, for the row's sheet. */
+  weekSources?: WeekSource[];
   /** `out`, `questionable`, `ir`... from the injury layer. */
   designation: string;
   byeWeek: number | null;
@@ -198,6 +206,8 @@ export interface TierMove {
   byWeek: { week: number; change: number }[];
   /** Points a game, healthy. */
   rate: number;
+  /** His number for each window week and where it came from. */
+  weekNumbers: { week: number; points: number; source: WeekSource }[];
   prefs: TierPreference[];
   /** Who he would replace on the roster. Null: an open spot. */
   drop: { playerId: string; name: string; position: string } | null;
@@ -374,6 +384,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       insurance: option.insurance,
       byWeek,
       rate: c.rate ?? 0,
+      weekNumbers: weeks.map((week, k) => ({ week, points: round2(pointsIn(c, k)), source: c.weekSources?.[k] ?? 'this_week' })),
       prefs,
       drop: option.drop ? { playerId: option.drop.playerId, name: option.drop.name, position: option.drop.position } : null,
       dropCost: option.drop ? (dropCost.get(option.drop.playerId) ?? null) : null,
@@ -531,6 +542,11 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   };
 }
 
+/** A player's points for window week `k` before availability: that week's own number, else his rate. */
+function pointsIn(p: TierPlayer, k: number): number {
+  return p.weekValues?.[k] ?? p.rate ?? 0;
+}
+
 /** The ordering number: the gain, with the RB lean. Never printed as points. */
 function sortKey(m: TierMove): number {
   return m.gain + (m.position === 'RB' ? TIER_PREFS.rbLean : 0);
@@ -552,7 +568,7 @@ function valueRoster(
     const pool: LineupCandidate[] = players.map((p) => ({
       id: p.playerId,
       position: p.position,
-      value: (p.rate ?? 0) * (p.weekly[k] ?? 1),
+      value: pointsIn(p, k) * (p.weekly[k] ?? 1),
     }));
     const result = bestLineup(slots, pool);
     /* A zero-point pick (a bye, Out) fills nothing: he is not "starting" that week. */

@@ -67,6 +67,7 @@ import { findHandcuffs } from './yardstick.ts';
 import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindow.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import { buildTierInputs } from './tierInputs.ts';
+import type { AheadNumbers } from './aheadWeeks.ts';
 import { planWaiverTiers } from './tiers.ts';
 import { buildTiersView, tierClaimPlan, type WaiverTiersView } from './tierPlan.ts';
 import { lastCompletedWeek } from '../sleeper/weekPoints.ts';
@@ -201,6 +202,13 @@ export interface WaiverAssemblyRequest {
   recentPublished?: ReadonlyMap<string, { week: number; points: number }> | undefined;
   /** Injured-reserve slots this league allows (`reserve_slots`). Absent: the roster shape's. */
   reserveSlots?: number | undefined;
+  /**
+   * Later weeks' own numbers for the tier planner: a complete Vegas week where
+   * one is posted, else Sleeper's projection for that week in this league's
+   * scoring (`core/waivers/aheadWeeks.ts`). Absent: every window week is valued
+   * on this week's figure, as before.
+   */
+  ahead?: AheadNumbers | null | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -679,6 +687,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         trendingDrops: new Map([...(request.trendingDrops ?? new Map<string, TrendingVelocity>())].map(([id, v]) => [id, { heat: v.heat, rank: v.rank }])),
         reserveSlots: request.reserveSlots ?? shape.irSlots,
         excludedPositions: new Set([DEFENCE_POSITION]),
+        ahead: request.ahead ?? null,
       });
       const plan = planWaiverTiers(inputs.request);
       const claims: ClaimRecord[] = request.observations
