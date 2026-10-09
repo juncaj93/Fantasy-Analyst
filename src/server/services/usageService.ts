@@ -710,48 +710,7 @@ export class UsageService {
       .catch(() => [] as StoredUsageWeek[]);
     if (rows.length === 0) return new Map();
 
-    // Each player's own rows, so his role and his baseline come from the same
-    // window the defences are measured over.
-    const byPlayer = new Map<string, StoredUsageWeek[]>();
-    for (const row of rows) {
-      const list = byPlayer.get(row.playerId);
-      if (list) list.push(row);
-      else byPlayer.set(row.playerId, [row]);
-    }
-
-    const games: DefenseGame[] = [];
-    for (const [, weeks] of byPlayer) {
-      const position = weeks.find((w) => w.position)?.position ?? '';
-      if (!position) continue;
-      const bucket = classifyRole(position, weeks).bucket;
-      const scored = weeks.map((w) => ({ week: w, points: neutralFantasyPoints(w) })).filter((g) => g.points != null);
-      if (scored.length === 0) continue;
-      const baseline = scored.reduce((a, g) => a + (g.points ?? 0), 0) / scored.length;
-
-      for (const game of scored) {
-        if (!game.week.opponent) continue;
-        games.push({
-          defense: game.week.opponent.toUpperCase(),
-          week: game.week.week,
-          position: position.toUpperCase(),
-          bucket,
-          points: game.points!,
-          /*
-           * The baseline includes this game.
-           *
-           * Leaving it out would make every residual partly a measure of the
-           * player's own variance around a mean he is not in, and with five to
-           * eight games in the window the correction is a fraction of a point.
-           * Including it is the conservative choice: it shrinks residuals
-           * slightly, so the matchup component understates rather than
-           * overstates.
-           */
-          baseline,
-        });
-      }
-    }
-
-    return buildDefenseTendencies(games, latest);
+    return defenseTendenciesFromRows(rows, latest);
   }
 
   /**
@@ -814,6 +773,58 @@ export class UsageService {
       writeCeiling: DAILY_WRITE_CEILING,
     };
   }
+}
+
+/**
+ * The opponent-by-role table from a window of stored weeks.
+ *
+ * Pure, and split out of `computeDefenseTendencies` so the start/sit backtest
+ * can build the table each past week would have seen (`throughWeek` = the week
+ * before) from the same rows, with no look-ahead.
+ */
+export function defenseTendenciesFromRows(rows: readonly StoredUsageWeek[], throughWeek: number): DefenseTendencyIndex {
+  // Each player's own rows, so his role and his baseline come from the same
+  // window the defences are measured over.
+  const byPlayer = new Map<string, StoredUsageWeek[]>();
+  for (const row of rows) {
+    const list = byPlayer.get(row.playerId);
+    if (list) list.push(row);
+    else byPlayer.set(row.playerId, [row]);
+  }
+
+  const games: DefenseGame[] = [];
+  for (const [, weeks] of byPlayer) {
+    const position = weeks.find((w) => w.position)?.position ?? '';
+    if (!position) continue;
+    const bucket = classifyRole(position, weeks).bucket;
+    const scored = weeks.map((w) => ({ week: w, points: neutralFantasyPoints(w) })).filter((g) => g.points != null);
+    if (scored.length === 0) continue;
+    const baseline = scored.reduce((a, g) => a + (g.points ?? 0), 0) / scored.length;
+
+    for (const game of scored) {
+      if (!game.week.opponent) continue;
+      games.push({
+        defense: game.week.opponent.toUpperCase(),
+        week: game.week.week,
+        position: position.toUpperCase(),
+        bucket,
+        points: game.points!,
+        /*
+         * The baseline includes this game.
+         *
+         * Leaving it out would make every residual partly a measure of the
+         * player's own variance around a mean he is not in, and with five to
+         * eight games in the window the correction is a fraction of a point.
+         * Including it is the conservative choice: it shrinks residuals
+         * slightly, so the matchup component understates rather than
+         * overstates.
+         */
+        baseline,
+      });
+    }
+  }
+
+  return buildDefenseTendencies(games, throughWeek);
 }
 
 /**

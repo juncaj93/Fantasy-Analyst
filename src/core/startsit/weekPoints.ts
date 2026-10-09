@@ -13,7 +13,7 @@
  * `points: null` and is drawn as a dash, last.
  */
 
-import { decisionPoints, type DecisionBasis, type DecisionEvaluation } from './decisionPoints.ts';
+import { decisionPoints, type DecisionBasis, type DecisionEvaluation, type DecisionPoints } from './decisionPoints.ts';
 
 export interface WeekPoints {
   /** The decision number, rounded to the cent, or null when there is none. */
@@ -32,7 +32,15 @@ export function weekPoints(
   evaluation: DecisionEvaluation,
   published?: ReadonlyMap<string, number>,
 ): WeekPoints {
-  const decision = decisionPoints(evaluation, published);
+  return weekPointsFrom(decisionPoints(evaluation, published));
+}
+
+/**
+ * The same reading from a decision the server already made. What a screen
+ * calls: the evaluation it was handed carries `decision`, and recomputing it
+ * without the published week would answer a different question.
+ */
+export function weekPointsFrom(decision: DecisionPoints | null | undefined): WeekPoints {
   if (decision == null || decision.basis === 'unpriced') return { points: null, basis: 'none', lowerConfidence: true };
   return { points: decision.points, basis: decision.basis, lowerConfidence: decision.basis !== 'market' };
 }

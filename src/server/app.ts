@@ -161,6 +161,7 @@ import { DataHealthService } from './services/dataHealthService.ts';
 import { toSnapshotHealth } from '../core/health/snapshot.ts';
 import type { SnapshotDataHealth } from '../core/support/schema.ts';
 import { postureFrom } from '../core/startsit/tiebreak.ts';
+import { comparePool, parsePoolTab } from './services/comparePool.ts';
 
 export interface AppEnv extends AuthEnv {
   db: Database;
@@ -3335,7 +3336,30 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await service.refresh());
   });
 
-  const MAX_COMPARE = 4;
+  /* Three, so the columns stay readable on a phone (October 2026). */
+  const MAX_COMPARE = 3;
+  /**
+   * The Compare picker's lists: My roster, Waivers, All players.
+   *
+   * Each row carries this week's number from `weekPoints`, computed exactly as
+   * the comparison below computes it, so the list and the comparison cannot
+   * disagree. See `services/comparePool.ts` for how the long lists are cut.
+   */
+  router.get('/api/leagues/:id/compare-pool', async (ctx) => {
+    const league = await new LeagueRepo(ctx.env.db).getLeague(ctx.params['id']!);
+    if (!league) return errorResponse('league not found', 404);
+    const params = ctx.url.searchParams;
+    return jsonResponse(
+      await comparePool(ctx.env.db, ctx.env.sleeper, {
+        league,
+        tab: parsePoolTab(params.get('tab')),
+        position: params.get('position'),
+        query: params.get('q') ?? '',
+        mode: normalizeMode(params.get('mode')),
+      }),
+    );
+  });
+
   router.post('/api/startsit/compare', async (ctx) => {
     const body = await ctx.json<{
       leagueId?: string;
