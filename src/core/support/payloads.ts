@@ -137,6 +137,12 @@ export interface LineupInputs {
   rules: SnapshotLeagueRules;
   currentStarterIds: string[];
   mode: StartSitMode;
+  /**
+   * Underdog or favourite in the week's matchup, for the pill tie-break.
+   * Optional: snapshots captured before October 2026 do not carry it, and a
+   * replay without it applies no tie-break.
+   */
+  posture?: 'underdog' | 'favourite' | null;
   startSit: SnapshotStartSitBundle;
   /**
    * Rotowire's published weekly figures, by player id.

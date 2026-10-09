@@ -165,6 +165,12 @@ export interface PlayerProp {
   books: string[];
   /** De-vigged probability for binary markets (anytime TD). */
   impliedProbability: number | null;
+  /**
+   * The snapshot this quote came from: when it was read, and the game line
+   * stored with it. Set by the weekly read only; the stale-prop check compares
+   * it with the latest line. Absent everywhere else.
+   */
+  snapshot?: { fetchedAt: string; total: number | null; spread: number | null; spreadTeam: string | null };
 }
 
 /**

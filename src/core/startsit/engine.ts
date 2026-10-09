@@ -44,6 +44,7 @@ import { decisionPoints, settleOnPublishedWeek, type DecisionPoints } from './de
 import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
+import { tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -315,6 +316,11 @@ export interface StartSitComparison {
   mode: StartSitMode;
   /** Whether the betting market would make the same choice. */
   market: MarketAgreement;
+  /**
+   * Set when the pill tie-break picked the recommendation over a player a few
+   * tenths ahead: the pill, the posture and the one-line reason.
+   */
+  tiebreak?: TiebreakNote;
   /**
    * Whether the top two were priced on the same markets at all.
    *
@@ -1062,6 +1068,8 @@ export function compareStartSit(
      * Without it, the ranking is `score`, as it always was.
      */
     published?: ReadonlyMap<string, number>;
+    /** Underdog or favourite this week, for the pill tie-break. See `tiebreak.ts`. */
+    posture?: Posture | null;
   } = {},
 ): StartSitComparison {
   const minMargin = opts.minMargin ?? 0.75;
@@ -1115,9 +1123,25 @@ export function compareStartSit(
   }
 
   const sorted = [...scored].sort((a, b) => pointsOf(b) - pointsOf(a) || a.name.localeCompare(b.name));
+  /*
+   * The pill tie-break, the same rule the lineup applies: inside the close-call
+   * band, the player whose week has the shape this matchup wants goes first.
+   * Only between fully priced players, because a pill is read off the lines.
+   */
+  const priced = (e: StartSitEvaluation) => e.decision?.basis === 'market';
+  const tiebreak =
+    sorted[1] && priced(sorted[0]!) && priced(sorted[1])
+      ? tiebreakFavours(
+          { points: pointsOf(sorted[0]!), pill: sorted[0]!.pill ?? null },
+          { points: pointsOf(sorted[1]), pill: sorted[1].pill ?? null },
+          opts.posture ?? null,
+        )
+      : null;
+  if (tiebreak) sorted.splice(0, 2, sorted[1]!, sorted[0]!);
   const best = sorted[0]!;
   const runnerUp = sorted[1];
   const margin = runnerUp ? round2(pointsOf(best) - pointsOf(runnerUp)) : null;
+  if (tiebreak) reasons.push(tiebreak.sentence);
 
   const missingVegas = evaluations.filter((e) => e.expectation.points == null);
   if (missingVegas.length > 0) {
@@ -1158,7 +1182,7 @@ export function compareStartSit(
   }
   if (margin != null && margin < minMargin) {
     confidence = confidence === 'high' ? 'medium' : 'low';
-    reasons.push(`close call: only ${margin} pts separates the top two`);
+    if (!tiebreak) reasons.push(`close call: only ${margin} pts separates the top two`);
   }
   if (missingVegas.length > 0 && confidence === 'high') confidence = 'medium';
 
@@ -1277,6 +1301,7 @@ export function compareStartSit(
     mode,
     market,
     comparability,
+    ...(tiebreak ? { tiebreak } : {}),
   };
 }
 
