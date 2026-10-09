@@ -41,6 +41,9 @@ import { assessWeather, type GameWeather, type WeatherAssessment } from './weath
 import { projectDst, type DstProjection } from './dstProjection.ts';
 import { applyAdjustmentBudget } from './adjustmentBudget.ts';
 import { decisionPoints, settleOnPublishedWeek, type DecisionPoints } from './decisionPoints.ts';
+import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
+import { staleScale, type TeamLines } from './staleLine.ts';
+import { pillFor, type PillReading } from './pills.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -119,6 +122,18 @@ export interface StartSitInput {
    * absent removes the term entirely.
    */
   home?: boolean | null;
+  /**
+   * The game line stored with the snapshot his props came from, from his
+   * team's side, with the time that snapshot was read.
+   *
+   * Compared with {@link currentLinesAt} and {@link game}: a prop older than the
+   * latest total or spread is scaled by how far his team's implied total has
+   * moved since (`staleLine.ts`). Absent is the ordinary state and changes
+   * nothing.
+   */
+  propLines?: TeamLines | null;
+  /** When the total and spread in {@link game} were last seen. */
+  currentLinesAt?: string | null;
   /** The forecast for his game, when one is available. */
   weather?: GameWeather | null;
   /** Opponent tendencies by role, built once for the whole board. */
@@ -186,6 +201,11 @@ export interface StartSitComponent {
    * stay as the engine made them. See `settleOnPublishedWeek`.
    */
   shownValue?: number;
+  /**
+   * True when the component is computed and shown but adds no points: the
+   * market already prices it (see `scoringRules.ts`). `value` is then 0.
+   */
+  textOnly?: true;
 }
 
 export interface StartSitEvaluation {
@@ -273,6 +293,12 @@ export interface StartSitEvaluation {
    * See `decisionPoints.ts`.
    */
   decision?: DecisionPoints | null;
+  /**
+   * Explosive, Steady or Wide range: what shape his week has, read off the
+   * same prop lines. Never part of the score; see `pills.ts`. Absent on a
+   * player with no pill, which is most of them.
+   */
+  pill?: PillReading;
 }
 
 export interface StartSitComparison {
@@ -321,7 +347,11 @@ export const NEWS_RAW_CAP = 1.2;
  */
 export const DEFENCE_POSITION = 'DEF';
 
-export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): StartSitEvaluation {
+export function evaluatePlayer(
+  input: StartSitInput,
+  profile: ScoringProfile,
+  rules: ScoringRules = SCORING_RULES,
+): StartSitEvaluation {
   /*
    * A defence is scored by a different model, and the branch is the first line
    * for a reason.
@@ -340,10 +370,14 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
    */
   if (input.player.position === DEFENCE_POSITION) return evaluateDefence(input, profile);
 
-  const expectation = buildExpectation(input.player.position, input.props, profile);
+  const expectation = withStaleScale(
+    buildExpectation(input.player.position, input.props, profile, rules.conversion),
+    rules.staleScaling ? staleScale(input.propLines, currentLinesOf(input)) : null,
+  );
   const mode = input.mode ?? 'balanced';
   const components: StartSitComponent[] = [];
   const confidenceReasons: string[] = [];
+  const textOnly = new Set(rules.textOnly);
 
   /**
    * Add a component, with the mode multiplier applied once and recorded.
@@ -354,6 +388,14 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
    * Ceiling weight can be applied, and it cannot change a component's sign.
    */
   const push = (component: Omit<StartSitComponent, 'baseValue' | 'modeWeight' | 'value'> & { value: number }) => {
+    /*
+     * A text-only component keeps its sentence and loses its points. Zero,
+     * not unknown: the reading exists, it is simply not allowed to count.
+     */
+    if (textOnly.has(component.key) && !component.unknown) {
+      components.push({ ...component, value: 0, baseValue: 0, modeWeight: 1, textOnly: true });
+      return components[components.length - 1]!;
+    }
     const weight = component.unknown ? 1 : modeWeightFor(component.key, mode, component.value);
     components.push({
       ...component,
@@ -367,7 +409,10 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
   push({
     key: 'vegas',
     label: 'Vegas market expectation',
-    display: expectation.points == null ? 'unavailable' : `${expectation.points.toFixed(1)} pts`,
+    display:
+      expectation.points == null
+        ? 'unavailable'
+        : `${expectation.points.toFixed(1)} pts${expectation.staleScale ? ` · props older than the game line, x${expectation.staleScale.factor.toFixed(2)}` : ''}`,
     value: expectation.points ?? 0,
     unknown: expectation.points == null,
   });
@@ -623,6 +668,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     availability: availabilityView,
   });
   const conflicts = findConflicts(components);
+  const pill = pillFor(input.player.position, input.props, expectation);
 
   return {
     playerId: input.player.id,
@@ -632,6 +678,7 @@ export function evaluatePlayer(input: StartSitInput, profile: ScoringProfile): S
     expectation,
     components,
     score,
+    ...(pill ? { pill } : {}),
     confidence,
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
@@ -825,6 +872,19 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
   };
 }
 
+/** The latest game line, from his team's side, for the stale-prop check. */
+function currentLinesOf(input: StartSitInput): TeamLines | null {
+  if (!input.game) return null;
+  return { total: input.game.total, spread: input.game.spread, at: input.currentLinesAt ?? null };
+}
+
+/** The expectation with a stale-prop scale folded into its total. */
+function withStaleScale(expectation: VegasExpectation, scale: ReturnType<typeof staleScale>): VegasExpectation {
+  if (scale == null || expectation.points == null) return expectation;
+  const notes = [...expectation.notes, scale.detail];
+  return { ...expectation, points: round2(expectation.points * scale.factor), notes, staleScale: scale };
+}
+
 /**
  * How much a pair of components may contribute between them.
  *
@@ -903,6 +963,8 @@ function topDrivers(
   const add = (key: string, text: string | null, boost = 0) => {
     if (!text) return;
     if (byKey.get(key)?.unknown) return;
+    // A driver is something that decided this. A text-only reading did not.
+    if (byKey.get(key)?.textOnly) return;
     candidates.push({ text, weight: size(key) + boost });
   };
 

@@ -14,6 +14,15 @@ import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import type { StartSitInput } from '../src/core/startsit/engine.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
 import { player } from './helpers/players.ts';
+import { lineForMean } from '../src/core/startsit/propConversion.ts';
+import { SCORING_RULES } from '../src/core/startsit/scoringRules.ts';
+/** A line whose converted average is exactly `points` (see `lineForMean`). */
+function fixtureLine(position: string, points: number): number {
+  return position === 'QB'
+    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
+    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
+}
+
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -32,7 +41,7 @@ function candidate(
   if (points != null) {
     // Receiving yards convert at 0.1 pts/yd, so yards = points * 10.
     const market = position === 'QB' ? 'pass_yards' : 'receiving_yards';
-    const line = position === 'QB' ? points / 0.04 : points * 10;
+    const line = fixtureLine(position, points);
     props.push({
       playerId: id,
       sourcePlayerName: name,

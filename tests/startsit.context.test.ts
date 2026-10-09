@@ -131,16 +131,29 @@ describe('weather', () => {
     expect(back).toBeLessThanOrEqual(WEATHER.maxRushBonusPoints);
   });
 
-  it('ignores a drizzle and notices a downpour', () => {
+  /*
+   * Since October 2026 only strong wind or snow move a score, and only for
+   * the passing game. Rain is described and never scored.
+   */
+  it('describes rain and never scores it, drizzle or downpour', () => {
     const drizzle = assessWeather('WR', 'deep_receiver', { indoor: false, precipitationMmPerHour: 0.6 });
     expect(drizzle.points).toBe(0);
-    expect(assessWeather('WR', 'deep_receiver', downpour).points).toBeLessThan(0);
+    const pour = assessWeather('WR', 'deep_receiver', { ...downpour, windMph: 0, gustMph: null });
+    expect(pour.points).toBe(0);
+    expect(pour.display).toMatch(/rain/);
   });
 
-  it('does not downgrade an offence for snow on its own', () => {
-    const result = assessWeather('WR', 'intermediate_receiver', snowing);
-    expect(result.points).toBe(0);
-    expect(result.display).toContain('snow');
+  it('takes a little off the passing game in snow, and nothing off a back', () => {
+    const receiver = assessWeather('WR', 'intermediate_receiver', snowing);
+    expect(receiver.points).toBeLessThan(0);
+    expect(receiver.points).toBeGreaterThanOrEqual(-WEATHER.maxPenaltyPoints);
+    expect(receiver.display).toContain('snow');
+    expect(assessWeather('RB', 'rushing_back', snowing).points).toBe(0);
+  });
+
+  it('labels the two states that score nothing so a reader can tell them apart', () => {
+    expect(assessWeather('WR', 'deep_receiver', null).display).toBe('no forecast yet');
+    expect(assessWeather('WR', 'deep_receiver', { indoor: true }).display).toMatch(/dome or closed roof/);
   });
 
   it('does not penalise extreme cold, and still reports it', () => {
