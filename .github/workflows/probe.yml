@@ -59,15 +59,43 @@ jobs:
             probe-*.mjs) ;;
             *) echo "::error::only probe-*.mjs scripts may be run here"; exit 1 ;;
           esac
+          # Probes that only read Cloudflare's own numbers (free), and the cheap
+          # release-SHA check, never touch the database and are never held back.
+          case "$SCRIPT" in
+            probe-deployed-sha.mjs|probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-d1-top-readers.mjs|probe-d1-usage-hours.mjs)
+              GUARDED=no ;;
+            *) GUARDED=yes ;;
+          esac
+          # The budget guard. Production probes read the same 5,000,000 rows a
+          # day as Alex's own use, so before any real read this asks Cloudflare
+          # (free) how much of today is gone. Over PROBE_CEILING_PERCENT the
+          # probe stands down and says so; it does not fail the run.
+          if [ "$GUARDED" = yes ]; then
+            GUARD_OUT=$(mktemp)
+            if CLOUDFLARE_API_TOKEN="$CF_TOKEN" ACCOUNT_ID="$CF_ACCOUNT" GITHUB_OUTPUT="$GUARD_OUT" \
+                 node scripts/d1-budget-guard.mjs --ceiling "${PROBE_CEILING_PERCENT:-50}" --what "production probe"; then
+              if grep -q '^proceed=no' "$GUARD_OUT"; then
+                echo "Standing down: $SCRIPT was not run, because today's D1 reads are past ${PROBE_CEILING_PERCENT:-50}% of the daily allowance."
+                echo "Nothing was read from production. Run it again after 00:00 UTC, or when the percentage above has dropped."
+                exit 0
+              fi
+            else
+              echo "::error::Could not read today's D1 usage, so $SCRIPT was not run (a wrong 'go' can cost the rest of the day)."
+              exit 1
+            fi
+          fi
           # Probes that need to know which draft to ask about get it from the
           # live app rather than a hardcoded id.
-          DRAFT_ID=$(curl -s https://fantasy-analyst.juncaj93.workers.dev/api/setup/status | node -e "
-            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-              try { console.log(JSON.parse(s).league?.draftId ?? ''); } catch { console.log(''); }
-            })")
+          DRAFT_ID=""
+          if [ "$GUARDED" = yes ]; then
+            DRAFT_ID=$(curl -s https://fantasy-analyst.juncaj93.workers.dev/api/setup/status | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                try { console.log(JSON.parse(s).league?.draftId ?? ''); } catch { console.log(''); }
+              })")
+          fi
           export DRAFT_ID
           case "$SCRIPT" in
-            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-waiver-reads.mjs|probe-waiver-tiers.mjs|probe-d1-top-readers.mjs)
+            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-waiver-reads.mjs|probe-waiver-tiers.mjs|probe-d1-top-readers.mjs|probe-cleanup-d1.mjs)
               export CLOUDFLARE_API_TOKEN="$CF_TOKEN" ACCOUNT_ID="$CF_ACCOUNT" ;;
           esac
           unset CF_TOKEN CF_ACCOUNT

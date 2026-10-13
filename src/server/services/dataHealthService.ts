@@ -408,7 +408,7 @@ export class DataHealthService {
      * already quietly fallen back to ranking on nudges by the time a reader
      * gets here.
      */
-    const pricedPlayers = await props.pricedPlayerCount();
+    const pricedPlayers = await props.pricedPlayerCount(`${freshness.fetchedAt ?? ''}|${freshness.events}`);
     if (pricedPlayers === 0) {
       return {
         id: 'vegas',

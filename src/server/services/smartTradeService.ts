@@ -119,6 +119,21 @@ export class SmartTradeService {
   }
 
   /**
+   * The board, and the player inputs it was built from.
+   *
+   * For the Trades route, which holds each idea to Check a trade's verdict: the
+   * check needs the same rostered players' inputs and used to read them a
+   * second time. The board is exactly what {@link build} returns.
+   */
+  async buildWithInputs(
+    opts: { leagueId?: string; limit?: number } = {},
+  ): Promise<{ board: SmartTradeBoard; inputs: StartSitInput[] }> {
+    const gathered = await this.gather(opts);
+    const { rejections: _dropped, ...board } = this.present(gathered);
+    return { board, inputs: gathered.request.inputs };
+  }
+
+  /**
    * The same board, with every rejection kept. For the read-only probe.
    *
    * One assembly, two views of it. The rejection list is long, developer-facing

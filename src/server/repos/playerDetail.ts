@@ -11,6 +11,7 @@
 import type { SeasonStatLine } from '../../core/sleeper/seasonStats.ts';
 import type { PlayerOutlook } from '../../core/sleeper/outlook.ts';
 import { chunk, MAX_BOUND_PARAMS, type Database } from '../db.ts';
+import { forgetStoredCount, storedCount } from './storedCounts.ts';
 import { SlowRead } from './slowRead.ts';
 
 export interface StoredSeasonStats {
@@ -128,6 +129,7 @@ export class PlayerDetailRepo {
     }
     // The count this season reports has just changed; do not serve the old one.
     forgetSeasonStatCounts(this.db);
+    await forgetStoredCount(this.db, `stats.${season}`);
   }
 
   async recordStatsRun(run: StatsRun): Promise<void> {
@@ -229,11 +231,21 @@ export class PlayerDetailRepo {
    */
   async countSeasonStats(season: string): Promise<number> {
     return SEASON_STAT_COUNTS.get(this.db, season, async () => {
-      const row = await this.db
-        .prepare(`SELECT COUNT(*) AS n FROM player_season_stats WHERE season = ?`)
-        .bind(season)
-        .first<{ n: number }>();
-      return Number(row?.n ?? 0);
+      /*
+       * Kept in the settings table, not only in this isolate's memory. A cold
+       * isolate used to pay the full pass again: 453,333 rows over 137 calls
+       * in the first eleven hours of 13 October 2026, the largest reader on
+       * the account that day. `saveSeasonStats` is the only writer and forgets
+       * the stored value, so the next read counts once and then stands.
+       */
+      const counted = await storedCount(this.db, `stats.${season}`, 'v1', async () => {
+        const row = await this.db
+          .prepare(`SELECT COUNT(*) AS n FROM player_season_stats WHERE season = ?`)
+          .bind(season)
+          .first<{ n: number }>();
+        return Number(row?.n ?? 0);
+      });
+      return counted.value;
     });
   }
 

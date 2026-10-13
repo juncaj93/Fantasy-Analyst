@@ -42,6 +42,8 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : args[i + 1];
 };
 const ceiling = Number(argOf('--ceiling', process.env.CEILING_PERCENT ?? '30'));
+/** What is being held back, for the run summary: the sweep, or a production probe. */
+const what = argOf('--what', process.env.GUARD_WHAT ?? 'full production sweep');
 
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const ACCOUNT = process.env.ACCOUNT_ID;
@@ -123,7 +125,7 @@ const percent = Math.round((1000 * rows) / DAILY_ROWS) / 10;
 const proceed = percent < ceiling;
 
 console.log(`${rows.toLocaleString('en-GB')} of ${DAILY_ROWS.toLocaleString('en-GB')} rows read today (${percent}%).`);
-console.log(`Ceiling for an expensive run is ${ceiling}%. ${proceed ? 'Proceeding.' : 'Declining.'}`);
+console.log(`Ceiling for this run is ${ceiling}%. ${proceed ? 'Proceeding.' : 'Declining.'}`);
 emit({ proceed: proceed ? 'yes' : 'no', percent: String(percent), rows: String(rows) });
 
 const summary = process.env.GITHUB_STEP_SUMMARY;
@@ -132,8 +134,8 @@ if (summary) {
     summary,
     `### D1 budget\n\n${rows.toLocaleString('en-GB')} rows read today, **${percent}%** of the daily allowance.\n\n` +
       (proceed
-        ? `Under the ${ceiling}% ceiling, so the full production sweep ran.\n`
-        : `Over the ${ceiling}% ceiling, so the full production sweep was **skipped**. ` +
-          `It is a screenshot crawl and a content check; the deploy gate is unaffected and still runs on every release.\n`),
+        ? `Under the ${ceiling}% ceiling, so the ${what} ran.\n`
+        : `Over the ${ceiling}% ceiling, so the ${what} was **skipped**. ` +
+          `The deploy gate is unaffected and still runs on every release.\n`),
   );
 }

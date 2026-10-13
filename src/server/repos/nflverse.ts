@@ -350,12 +350,28 @@ export class DepthChartRepo {
 
   /** The capture times held for a season, newest first. */
   async captures(season: string): Promise<string[]> {
+    /*
+     * One seek per capture, not a pass over every row.
+     *
+     * `SELECT DISTINCT captured_at ... ORDER BY captured_at DESC` walked every
+     * entry the season holds (about 1,170 rows a call, 168,480 rows over 144
+     * calls on 13 October 2026) to list two timestamps. The index on
+     * `(season, captured_at DESC)` can answer "the newest capture before this
+     * one" with a single seek, so the recursion below reads one index row per
+     * capture and one more to learn there are no more. Same timestamps, same
+     * order.
+     */
     const { results } = await this.db
       .prepare(
-        `SELECT DISTINCT captured_at FROM depth_chart_entries
-          WHERE season = ? ORDER BY captured_at DESC`,
+        `WITH RECURSIVE c(t) AS (
+           SELECT MAX(captured_at) FROM depth_chart_entries WHERE season = ?
+           UNION ALL
+           SELECT (SELECT MAX(captured_at) FROM depth_chart_entries WHERE season = ? AND captured_at < c.t)
+             FROM c WHERE c.t IS NOT NULL
+         )
+         SELECT t AS captured_at FROM c WHERE t IS NOT NULL ORDER BY t DESC`,
       )
-      .bind(season)
+      .bind(season, season)
       .all<{ captured_at: string }>();
     return (results ?? []).map((r) => String(r.captured_at));
   }

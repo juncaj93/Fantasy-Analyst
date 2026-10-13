@@ -10,6 +10,7 @@
 import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
 import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { storedCount } from './storedCounts.ts';
 import type { SlateWindow } from '../../core/nfl/slateWindow.ts';
 
 export class PropsRepo implements SnapshotStore {
@@ -188,6 +189,31 @@ export class PropsRepo implements SnapshotStore {
   }
 
   /**
+   * Which of these players carry at least one stored line, anywhere.
+   *
+   * The odds job's staleness check only needs a yes or no per player, and it
+   * used to get it by reading every line every one of them had ever carried
+   * ({@link latestForPlayers} with no window: 4,172 rows a call, 275,352 rows
+   * over 66 calls on 12 October 2026). The answer is the same here: the
+   * slate's lines are read first with the window every screen read uses, so the
+   * index from migration 0044 applies, and only a player with nothing in the
+   * slate is asked again without one. A player seen in the window is a player
+   * with a line, and a player not seen there gets the original question, so no
+   * player's answer can differ from the unwindowed read.
+   */
+  async playersWithAnyLine(playerIds: string[], window: SlateWindow): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (playerIds.length === 0) return out;
+    const inSlate = await this.latestForPlayers(playerIds, window);
+    for (const [id, props] of inSlate) if (props.length > 0) out.add(id);
+    const rest = playerIds.filter((id) => !out.has(id));
+    if (rest.length === 0) return out;
+    const anywhere = await this.latestForPlayers(rest);
+    for (const [id, props] of anywhere) if (props.length > 0) out.add(id);
+    return out;
+  }
+
+  /**
    * Kickoff per player, from the games in a window.
    *
    * The secondary source, behind the fixture list. `nfl_schedule` is
@@ -359,7 +385,28 @@ export class PropsRepo implements SnapshotStore {
    * Its own method, and read on the health screen alone. This walks
    * `player_props`, which the recommendation paths have no reason to pay for.
    */
-  async pricedPlayerCount(): Promise<number> {
+  async pricedPlayerCount(anchor?: string): Promise<number> {
+    if (anchor == null) return this.pricedPlayerCountLive();
+    return (await this.pricedPlayerCountAsOf(anchor)).value;
+  }
+
+  /**
+   * The same count, kept in the settings table and re-counted only when the
+   * stored weekly market has changed.
+   *
+   * The live count walks about 5,500 rows (the newest snapshot of every game,
+   * joined to its quotes) and was the largest reader on the account: 665,520
+   * rows over 120 calls on 12 October 2026, 13% of the daily allowance, to
+   * produce one integer that moves only when a snapshot is written. The
+   * `anchor` is the newest fetch time and game count, which the health screen
+   * has already read from {@link freshness}; a new snapshot changes it, so the
+   * count is exact for the data on file, never a day-old guess.
+   */
+  async pricedPlayerCountAsOf(anchor: string): Promise<{ value: number; asOf: string }> {
+    return storedCount(this.db, 'props.priced', anchor, () => this.pricedPlayerCountLive());
+  }
+
+  private async pricedPlayerCountLive(): Promise<number> {
     const row = await this.db
       .prepare(
         `SELECT COUNT(DISTINCT pp.player_id) AS priced
