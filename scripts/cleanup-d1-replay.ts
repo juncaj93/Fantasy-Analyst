@@ -21,6 +21,8 @@ import { MOCK_GAMES } from '../src/devserver/seed.ts';
 import { SleeperClient } from '../src/core/sleeper/client.ts';
 import { applySeasonChecks } from '../src/core/trades/seasonCheck.ts';
 import { DepthChartRepo } from '../src/server/repos/nflverse.ts';
+import { LeagueRepo } from '../src/server/repos/league.ts';
+import { TradeValueService } from '../src/server/services/tradeValueService.ts';
 import { PropsRepo } from '../src/server/repos/props.ts';
 import { SmartTradeService } from '../src/server/services/smartTradeService.ts';
 import { seasonChecksFor } from '../src/server/services/tradeIdeaCheck.ts';
@@ -84,6 +86,9 @@ async function vegasReplay(): Promise<void> {
     const ra = ageRead(after.log).reduce((s, l) => s + l.rowsRead, 0);
     const callsB = ageRead(before.log).length;
     const callsA = ageRead(after.log).length;
+    for (const l of after.log.filter((l) => /EXISTS \(SELECT 1 FROM player_props/.test(l.sql))) {
+      console.log(`    players with no line in the slate checked for any quote: ${l.rowsReturned} of them have one on file (${n(l.rowsRead)} rows read)`);
+    }
     console.log(
       `  ${byEvent ? 'kickoff-clock pass' : 'ordinary pass     '}: ${a.length} planned players, plans ${same ? 'IDENTICAL' : 'DIFFERENT'} ` +
         `(sha ${hash(a)} / ${hash(b)}); staleness read ${n(rb)} rows in ${callsB} statements before, ${n(ra)} in ${callsA} after`,
@@ -157,11 +162,61 @@ async function tradesReplay(): Promise<void> {
   console.log(`                 after  ${checkBMs} ms, ${checkBCost.statements} statements, ${n(checkBCost.rowsRead)} rows read`);
   const same = JSON.stringify(finalA) === JSON.stringify(finalB) && JSON.stringify([...checksA]) === JSON.stringify([...checksB]);
   console.log(`  ideas and verdicts: ${same ? 'IDENTICAL' : 'DIFFERENT'} (sha ${hash([finalA, [...checksA]])} / ${hash([finalB, [...checksB]])}), ${checksA.size} verdicts`);
+  console.log('  where the board build spent its time (top statements by time):');
+  for (const line of topStatements(a.log.slice(0, mA))) console.log('    ' + line);
   console.log('  where the check spent its time before (top statements by time):');
   for (const line of topStatements(a.log.slice(mA))) console.log('    ' + line);
   console.log('  and after:');
   for (const line of topStatements(b.log.slice(mB))) console.log('    ' + line);
   if (!same) console.log('  RESULT: OUTPUT DIFFERS, DO NOT SHIP');
+
+  // The board is empty on some days (nothing passes the gates), so the check
+  // has nothing to do. Replay it on deals built from the real rosters instead.
+  const leagueId = boardA.league?.id;
+  if (leagueId) {
+    const rosters = await new LeagueRepo(a.db).listRosters(leagueId);
+    const mine = rosters.find((r) => r.isMine);
+    const ideas = mine
+      ? rosters
+          .filter((r) => !r.isMine && r.playerIds.length > 0)
+          .flatMap((partner) =>
+            mine.playerIds.slice(0, 3).flatMap((give, i) =>
+              partner.playerIds.slice(0, 2).map((get, j) => ({
+                id: `${partner.rosterId}-${i}-${j}`,
+                partnerRosterId: partner.rosterId,
+                give: [give],
+                get: [get],
+              })),
+            ),
+          )
+          .slice(0, 12)
+      : [];
+    if (ideas.length > 0) {
+      console.log(`\n  the check on ${ideas.length} deals built from the real rosters (the board had ${boardA.offers.length} ideas today):`);
+      const c = await openRestD1(token!, process.env.ACCOUNT_ID);
+      const { inputs: boardInputs } = await new SmartTradeService(c.db).buildWithInputs({ limit: 5 });
+      const mC = c.mark();
+      t = Date.now();
+      const before = await new TradeValueService(c.db, sleeper).checkIdeas(leagueId, ideas);
+      const beforeMs = Date.now() - t;
+      const beforeCost = c.since(mC);
+      const d = await openRestD1(token!, process.env.ACCOUNT_ID);
+      const { inputs: boardInputs2 } = await new SmartTradeService(d.db).buildWithInputs({ limit: 5 });
+      const mD = d.mark();
+      t = Date.now();
+      const after = await new TradeValueService(d.db, sleeper).checkIdeas(leagueId, ideas, boardInputs2);
+      const afterMs = Date.now() - t;
+      const afterCost = d.since(mD);
+      const sameChecks = JSON.stringify([...before]) === JSON.stringify([...after]);
+      console.log(`    before: ${beforeMs} ms, ${beforeCost.statements} statements, ${n(beforeCost.rowsRead)} rows read, ${before.size} verdicts`);
+      console.log(`    after:  ${afterMs} ms, ${afterCost.statements} statements, ${n(afterCost.rowsRead)} rows read, ${after.size} verdicts`);
+      console.log(`    verdicts: ${sameChecks ? 'IDENTICAL' : 'DIFFERENT, DO NOT SHIP'} (sha ${hash([...before])} / ${hash([...after])}); board inputs held ${boardInputs.length} players`);
+      console.log('    before, top statements by time:');
+      for (const line of topStatements(c.log.slice(mC))) console.log('      ' + line);
+      console.log('    after:');
+      for (const line of topStatements(d.log.slice(mD))) console.log('      ' + line);
+    }
+  }
 }
 
 const only = process.argv[2];

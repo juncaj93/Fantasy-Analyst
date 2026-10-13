@@ -208,7 +208,29 @@ export class PropsRepo implements SnapshotStore {
     for (const [id, props] of inSlate) if (props.length > 0) out.add(id);
     const rest = playerIds.filter((id) => !out.has(id));
     if (rest.length === 0) return out;
-    const anywhere = await this.latestForPlayers(rest);
+    /*
+     * A player with no stored quote at all (a defence, a kicker) cannot have a
+     * line in any snapshot, so asking the unwindowed question about him would
+     * only make the database walk every weekly snapshot to find nothing. One
+     * seek per player on `idx_player_props_player` settles that, whatever scope
+     * or week a quote belongs to, and only players with some quote on file are
+     * asked the full question.
+     */
+    const quoted: string[] = [];
+    for (const batch of chunk(rest, MAX_BOUND_PARAMS)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(
+          `SELECT p.id AS id FROM players p
+            WHERE p.id IN (${placeholders})
+              AND EXISTS (SELECT 1 FROM player_props pp WHERE pp.player_id = p.id)`,
+        )
+        .bind(...batch)
+        .all<{ id: string }>();
+      for (const r of results) quoted.push(String(r.id));
+    }
+    if (quoted.length === 0) return out;
+    const anywhere = await this.latestForPlayers(quoted);
     for (const [id, props] of anywhere) if (props.length > 0) out.add(id);
     return out;
   }
