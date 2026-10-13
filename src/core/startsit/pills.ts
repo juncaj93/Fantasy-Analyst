@@ -78,7 +78,9 @@ export const PILL_RULES = {
   wideMinTdShare: 0.4,
 } as const;
 
-export type PillRules = typeof PILL_RULES;
+type Widen<T> = { [K in keyof T]: T[K] extends number ? number : Widen<T[K]> };
+/** The thresholds' shape, so the audit can try a looser or stricter set. */
+export type PillRules = Widen<typeof PILL_RULES>;
 
 /** One player's pill, or null. Pure; reads only what is passed. */
 export function pillFor(
