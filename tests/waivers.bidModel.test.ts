@@ -143,3 +143,22 @@ describe('last week’s points', () => {
     expect(weekPointsKey('2026', 4)).toBe('sleeper.weekPoints.2026.4');
   });
 });
+
+describe('a seeded style survives an alias', () => {
+  it('reads a seat named Manager 6 as savvy when the capture carried the style past the alias', () => {
+    const seats = [
+      { rosterId: 1, name: 'BigJuncer', isMine: true },
+      { rosterId: 6, name: 'Manager 6', isMine: false, style: 'savvy' as const },
+      { rosterId: 7, name: 'Manager 7', isMine: false },
+    ];
+    const { profiles } = buildRivalProfiles({ seats, claims: [] });
+    expect(profiles.find((p) => p.rosterId === 6)).toMatchObject({ style: 'savvy', styleSource: 'seed' });
+    /* No carried style and no seed by that name: the default, as before. */
+    expect(profiles.find((p) => p.rosterId === 7)).toMatchObject({ style: 'chaser', styleSource: 'default' });
+  });
+
+  it('still finds the seed by the real name when nothing is carried', () => {
+    const { profiles } = buildRivalProfiles({ seats: [{ rosterId: 5, name: 'RonJonathan', isMine: false }], claims: [] });
+    expect(profiles[0]).toMatchObject({ style: 'savvy', styleSource: 'seed' });
+  });
+});

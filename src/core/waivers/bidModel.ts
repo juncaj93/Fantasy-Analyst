@@ -86,6 +86,8 @@ export interface RivalSeat {
   rosterId: number;
   name: string;
   isMine: boolean;
+  /** A seeded style carried past an alias; wins over the lookup by `name`. */
+  style?: BidderStyle | null;
 }
 
 export interface RivalProfile {
@@ -154,7 +156,7 @@ export function buildRivalProfiles(opts: { seats: readonly RivalSeat[]; claims: 
   const profiles = opts.seats
     .filter((s) => !s.isMine)
     .map((seat): RivalProfile => {
-      const seed = seedFor(seat.name);
+      const seed = seat.style ? { style: seat.style, note: seedFor(seat.name)?.note ?? null } : seedFor(seat.name);
       const style: BidderStyle = seed?.style ?? 'chaser';
       const prior = STYLE_PRIORS[style];
       const mine = valid.filter((c) => c.rosterId === seat.rosterId);

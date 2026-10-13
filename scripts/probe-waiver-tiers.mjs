@@ -9,7 +9,11 @@
  *    and `scripts/waiver-bid-backtest.ts` (this season's claims, predicted vs
  *    actual).
  *
- * 4. When Cloudflare's token is present, reads D1's own per-statement counts
+ * 4. Runs the odds-spend checks (`probe-vegas-count-gap.mjs`,
+ *    `probe-vegas-clock.mjs`): the provider's usage endpoint (not a lookup),
+ *    the app's ledger and the job's plan. Their D1 reads are a few hundred rows.
+ *
+ * 5. When Cloudflare's token is present, reads D1's own per-statement counts
  *    (`probe-waiver-reads.mjs`), so one run answers the deployed SHA, the
  *    replay and the rows-read question together.
  *
@@ -89,6 +93,28 @@ const run = (script, args) =>
 console.log(run('scripts/waiver-tiers-report.ts', [snapshotFile, dir]));
 console.log('\n=== BID BACKTEST: this season\'s claims, predicted vs actual ===');
 console.log(run('scripts/waiver-bid-backtest.ts', [dir]));
+
+/*
+ * Alex's Monday odds-spend check, in the same run: the provider's own count
+ * (its usage endpoint, which does not count as a lookup), the ledger beside it,
+ * and the job's plan for the week. Neither script buys anything.
+ */
+const sub = (script, env = {}) => {
+  try {
+    return execFileSync('node', ['--experimental-transform-types', '--no-warnings', script], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (err) {
+    /* A check that fails loudly (the reset test) still has its say. */
+    return `${err.stdout ?? ''}${err.stderr ?? ''}\n(${script} exited ${err.status})`;
+  }
+};
+console.log('\n=== ODDS SPEND: probe-vegas-count-gap.mjs ===');
+console.log(sub('scripts/probe-vegas-count-gap.mjs'));
+console.log('\n=== ODDS SPEND: probe-vegas-clock.mjs ===');
+console.log(sub('scripts/probe-vegas-clock.mjs', { EXPECT_SHA: health?.release?.gitSha ?? '' }));
 
 if (process.env.CLOUDFLARE_API_TOKEN) {
   console.log('\n=== D1 ROWS READ (Cloudflare analytics; costs no D1 rows) ===');

@@ -19,7 +19,6 @@ import { clearDay } from './waivers.tsx';
 /** Where a week's number came from, short enough for a phone row. */
 const WEEK_SOURCE_SHORT: Record<WeekSource, string> = {
   this_week: 'this week',
-  vegas: 'Vegas',
   sleeper: 'Sleeper',
   current: 'this week’s number',
 };

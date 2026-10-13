@@ -708,7 +708,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         budgets: request.budgets,
         prices: request.prices,
         claims,
-        seats: request.rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine })),
+        seats: request.rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine, style: r.bidStyle ?? null })),
         lastWeek: lastWeek
           ? { week: lastWeek.week, points: lastWeek.points }
           : {

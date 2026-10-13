@@ -43,6 +43,7 @@
 import { assembleWaiverPlan, type WaiverAssemblyRequest } from '../waivers/assemble.ts';
 import { WAIVER_ENGINE_VERSION } from '../waivers/version.ts';
 import type { AheadNumbers } from '../waivers/aheadWeeks.ts';
+import { seedFor, type BidderStyle } from '../waivers/managerSeeds.ts';
 import type { DstPlanSources } from '../dst/assemble.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
@@ -117,6 +118,18 @@ export async function captureWaiverSnapshot(
   const league = captureLeague(input.league, aliases);
   const rosters = captureRosters(input.rosters, aliases, league.id);
   const capturedAt = input.now.toISOString();
+  /*
+   * The bid model's seeds are keyed by the real name, which is about to become
+   * `Manager N`. The style is read here, from the real name, and carried by
+   * roster id: a style is not an identity, and without it the capture's own
+   * bids would treat every seat as a default chaser (13 October 2026: $11 in
+   * the capture against $8 on the screen).
+   */
+  const bidStyles: Record<string, BidderStyle> = {};
+  for (const roster of input.rosters) {
+    const seed = seedFor(roster.ownerName);
+    if (seed) bidStyles[String(roster.rosterId)] = seed.style;
+  }
 
   /*
    * The wallet, with its owner names aliased.
@@ -194,6 +207,7 @@ export async function captureWaiverSnapshot(
       ownerName: roster.ownerName,
       isMine: roster.isMine,
       playerIds: roster.playerIds,
+      bidStyle: bidStyles[String(roster.rosterId)] ?? null,
     })),
     strategy,
     budgets,
@@ -295,6 +309,7 @@ export async function captureWaiverSnapshot(
         ...(input.request.recentPublished === undefined ? {} : { recentPublished: Object.fromEntries(input.request.recentPublished) }),
         ...(input.request.reserveSlots === undefined ? {} : { reserveSlots: input.request.reserveSlots }),
         ...(input.request.ahead === undefined ? {} : { ahead: captureAhead(input.request.ahead, input.request) }),
+        bidStyles,
         rosters,
         players: players.kept.map(capturePlayer),
         playerCensus: players.census,
@@ -437,7 +452,10 @@ export async function replayWaiverSnapshot(
     ...(inputs.recentPublished === undefined ? {} : { recentPublished: new Map(Object.entries(inputs.recentPublished)) }),
     ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
     ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
-    rosters: inputs.rosters,
+    rosters: inputs.rosters.map((roster) => ({
+      ...roster,
+      bidStyle: (inputs.bidStyles?.[String(roster.rosterId)] as BidderStyle | undefined) ?? null,
+    })),
     players: inputs.players.map(rehydratePlayer),
     week: inputs.week,
     season: inputs.season,
@@ -584,11 +602,11 @@ function captureAhead(
     [...byWeek]
       .sort((a, b) => a[0] - b[0])
       .map(([week, points]) => [week, Object.fromEntries([...points].filter(([id]) => ids.has(id)))]);
-  return { vegas: keep(ahead.vegas), sleeper: keep(ahead.sleeper) };
+  return { sleeper: keep(ahead.sleeper) };
 }
 
 function rehydrateAhead(ahead: WaiverPlanInputs['ahead']): AheadNumbers | null {
   if (ahead == null) return null;
   const back = (rows: [number, Record<string, number>][]) => new Map(rows.map(([week, points]) => [week, new Map(Object.entries(points))]));
-  return { vegas: back(ahead.vegas), sleeper: back(ahead.sleeper) };
+  return { sleeper: back(ahead.sleeper) };
 }

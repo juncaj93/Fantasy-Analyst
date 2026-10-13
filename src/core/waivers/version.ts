@@ -83,5 +83,10 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * Vegas week for that game, else Sleeper's projection for that week in this
  * league's scoring, else this week's figure. This week's number is unchanged.
  * See `core/waivers/aheadWeeks.ts`.
+ *
+ * `waiver@12`: a later week's Vegas rung is gone; later weeks are Sleeper's
+ * projection or this week's figure. Each bid carries its own trace (the
+ * signals, the rivals, the advice before the value ceiling) for the support
+ * snapshot; nothing drawn changes.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@11', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@12', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

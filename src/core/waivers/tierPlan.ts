@@ -40,6 +40,25 @@ export interface TierBid {
   thin: string | null;
   /** When a claim clears, ISO. */
   until: string | null;
+  /**
+   * Everything the bid was made from, for the support snapshot and the Probe's
+   * bid trace. Not drawn. Absent on a free agent and on older responses.
+   */
+  trace?: BidTrace;
+}
+
+export interface BidTrace {
+  signals: BidSignals;
+  /** The advice before the value ceiling. */
+  advised: { recommended: number; low: number; high: number };
+  /** FAAB left, the cap on any bid. */
+  remaining: number | null;
+  /** The league's claims this season that are not voided, and its targets a run. */
+  validClaims: number;
+  targetsPerRun: number;
+  expectedBidders: number;
+  /** The five most likely other bidders, with their chance and likely bid. */
+  bidders: { name: string; style: string; chance: number; likelyBid: number }[];
 }
 
 export interface TierRow extends TierMove {
@@ -149,6 +168,15 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
           .map((r) => ({ name: r.name, chance: r.chance, style: STYLE_PRIORS[r.style].label })),
         thin: advice.thin,
         until: pickup?.until ?? null,
+        trace: {
+          signals,
+          advised: { recommended: advice.recommended, low: advice.low, high: advice.high },
+          remaining,
+          validClaims,
+          targetsPerRun,
+          expectedBidders: advice.expectedRivals,
+          bidders: advice.rivals.slice(0, 5).map((r) => ({ name: r.name, style: r.style, chance: r.chance, likelyBid: r.likelyBid })),
+        },
       },
     };
   };
