@@ -552,7 +552,14 @@ export class TradeValueService {
      * when one is in the trade: a defence nobody moves cancels out of both
      * lineups, and reading all thirty-two to prove it would be a waste.
      */
-    const players = await new PlayerRepo(this.db).listAll();
+    /*
+     * The week's context does not depend on the dictionary, so the two are
+     * read together instead of one after the other. Same reads, same results.
+     */
+    const [players, context] = await Promise.all([
+      new PlayerRepo(this.db).listAll(),
+      buildStartSitContext(this.db, undefined, this.now()),
+    ]);
     const startable = startablePositions(shape);
     const positionById = new Map(players.map((p) => [p.id, p.position] as const));
     const wantDef = startable.has('DEF') && opts.movedIds.some((id) => positionById.get(id) === 'DEF');
@@ -565,7 +572,6 @@ export class TradeValueService {
     });
 
     const allIds = [...new Set([...opts.playerIds, ...freeAgentIds])];
-    const context = await buildStartSitContext(this.db, undefined, this.now());
     /*
      * Read only what the caller has not already read.
      *

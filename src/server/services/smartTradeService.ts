@@ -207,12 +207,18 @@ export class SmartTradeService {
      * says nothing in exactly the situations somebody is investigating. Four
      * indexed reads.
      */
-    const history = await this.history(league.id).catch((err) => {
-      warnings.push(`manager history could not be read: ${String(err)}`);
-      return { ...NO_TRADE_HISTORY, measured: true };
-    });
-
-    const rosters = await this.leagues.listRosters(league.id);
+    /*
+     * The ledger and the rosters are independent reads, asked together: each
+     * is a round trip to the database and the board waited for them one after
+     * the other. Neither feeds the other, so the board is the same.
+     */
+    const [history, rosters] = await Promise.all([
+      this.history(league.id).catch((err) => {
+        warnings.push(`manager history could not be read: ${String(err)}`);
+        return { ...NO_TRADE_HISTORY, measured: true };
+      }),
+      this.leagues.listRosters(league.id),
+    ]);
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
     const shape = buildRosterShape(league.rosterPositions);
 
