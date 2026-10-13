@@ -207,6 +207,7 @@ export async function captureWaiverSnapshot(
       ownerName: roster.ownerName,
       isMine: roster.isMine,
       playerIds: roster.playerIds,
+      reserveIds: roster.reserveIds,
       bidStyle: bidStyles[String(roster.rosterId)] ?? null,
     })),
     strategy,
@@ -309,6 +310,8 @@ export async function captureWaiverSnapshot(
         ...(input.request.recentPublished === undefined ? {} : { recentPublished: Object.fromEntries(input.request.recentPublished) }),
         ...(input.request.reserveSlots === undefined ? {} : { reserveSlots: input.request.reserveSlots }),
         ...(input.request.ahead === undefined ? {} : { ahead: captureAhead(input.request.ahead, input.request) }),
+        /* Already keyed by roster id and free of names: carried as it is. */
+        ...(input.request.round2 === undefined ? {} : { round2: input.request.round2 }),
         bidStyles,
         rosters,
         players: players.kept.map(capturePlayer),
@@ -368,12 +371,14 @@ function withoutWaiverMaps<T extends object>(strategy: T): T {
     recentlyDropped: _recent,
     leagueDrops: _league,
     waiverRules: _rules,
+    seasonMoves: _moves,
     ...rest
   } = strategy as T & {
     trendingDrops?: unknown;
     recentlyDropped?: unknown;
     leagueDrops?: unknown;
     waiverRules?: unknown;
+    seasonMoves?: unknown;
   };
   return rest as T;
 }
@@ -452,6 +457,7 @@ export async function replayWaiverSnapshot(
     ...(inputs.recentPublished === undefined ? {} : { recentPublished: new Map(Object.entries(inputs.recentPublished)) }),
     ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
     ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
+    ...(inputs.round2 === undefined ? {} : { round2: inputs.round2 }),
     rosters: inputs.rosters.map((roster) => ({
       ...roster,
       bidStyle: (inputs.bidStyles?.[String(roster.rosterId)] as BidderStyle | undefined) ?? null,

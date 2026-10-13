@@ -64,6 +64,7 @@ import type { Database } from '../db.ts';
 import { DepthChartRepo } from '../repos/nflverse.ts';
 import { WeekPointsService } from './weekPointsService.ts';
 import { readWaiverAhead } from './waiverAhead.ts';
+import { readWaiverRound2 } from './waiverRound2.ts';
 import { lastCompletedWeek } from '../../core/sleeper/weekPoints.ts';
 import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
 
@@ -697,6 +698,15 @@ export async function gatherWaiverInputs(
           .catch(() => new Map<string, { week: number; points: number }>());
   const [thisWeekPoints, priorWeekPoints] = await pointsRead;
   const ahead = await aheadRead;
+  /* Waivers round 2: one batched settings read; this season's record from the claims in hand. */
+  const round2 = await readWaiverRound2(db, {
+    leagueId: league.id,
+    season: league.season,
+    rosters,
+    mine,
+    strategy,
+    positionOf: (id) => positionOfId.get(id) ?? null,
+  }).catch(() => null);
   const completed = lastCompletedWeek(
     week,
     [...rosterInputs, ...candidateInputs].map((i) => i.kickoff ?? null),
@@ -778,6 +788,7 @@ export async function gatherWaiverInputs(
        */
       observations: strategy?.bidHistory.observations ?? [],
       history,
+      round2,
       /*
        * A league that starts no defence does not have its schedule read to be
        * told so — see `WaiverAssemblyRequest.dstSources`.

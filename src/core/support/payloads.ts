@@ -41,7 +41,7 @@
 import type { SeasonCheck } from '../trades/seasonCheck.ts';
 import type { LineupAssembly } from '../startsit/assemble.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
-import type { WaiverAssembly } from '../waivers/assemble.ts';
+import type { WaiverAssembly, WaiverRound2Inputs } from '../waivers/assemble.ts';
 import type { TradeAssembly } from '../trades/assemble.ts';
 import type { MatchupResponse } from '../matchup/build.ts';
 import type { DstPlan } from '../dst/planner.ts';
@@ -272,6 +272,12 @@ export interface WaiverPlanInputs {
    * `vegas` only on a waiver@11 capture, and never read back.
    */
   ahead?: { vegas?: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
+  /**
+   * Waivers round 2's inputs, exactly as the assembly took them: rival season
+   * rows keyed by roster id (no Sleeper user id), season points, weeks held,
+   * Sleeper's depth order and injury notes. Absent on older files.
+   */
+  round2?: WaiverRound2Inputs | null;
   /**
    * Each seeded manager's bidding style, by roster id, taken from the real
    * name before it became `Manager N`. Without it the capture's own bids treat

@@ -99,3 +99,40 @@ export function scoreProjectionRows(rows: unknown, scoring: Readonly<Record<stri
   }
   return scoreWeek(stats, scoring);
 }
+
+/**
+ * This season's points, week by week, for every player: the drop score's
+ * season and recent totals and the elite-back read (`waivers/dropScore.ts`).
+ * Built from the weekly rows above into one settings row,
+ * `sleeper.seasonPoints.<season>`, so the Waivers screen reads one row
+ * instead of up to seventeen.
+ */
+export interface StoredSeasonPoints {
+  season: string;
+  /** Weeks covered: 1 to this. */
+  through: number;
+  fetchedAt: string;
+  /** Player id to points by week (index 0 is week 1), one decimal. */
+  points: Record<string, number[]>;
+}
+
+export function seasonPointsKey(season: string): string {
+  return `sleeper.seasonPoints.${season}`;
+}
+
+/** Combine finished weeks into the season row. A week with no row reads as zeros. */
+export function buildSeasonPoints(
+  season: string,
+  through: number,
+  weeks: ReadonlyMap<number, Readonly<Record<string, number>>>,
+  now: Date,
+): StoredSeasonPoints {
+  const points: Record<string, number[]> = {};
+  for (let w = 1; w <= through; w++) {
+    for (const [id, value] of Object.entries(weeks.get(w) ?? {})) {
+      const row = (points[id] ??= Array.from({ length: through }, () => 0));
+      row[w - 1] = Math.round(value * 10) / 10;
+    }
+  }
+  return { season, through, fetchedAt: now.toISOString(), points };
+}

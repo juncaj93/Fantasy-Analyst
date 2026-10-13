@@ -82,6 +82,10 @@ import { PlayerRepo } from '../repos/players.ts';
 import { ManagerProfileRepo } from '../repos/managerProfiles.ts';
 import { readFinalWeek } from './leagueStrategyService.ts';
 import type { Database } from '../db.ts';
+import { SettingsRepo } from '../repos/settings.ts';
+import { buildRivalSeasonAggregates, historyFromTransactions, rivalHistoryKey } from '../../core/waivers/rivalHistory.ts';
+import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
+import type { SleeperTransaction } from '../../core/sleeper/types.ts';
 
 /** The derivation contract. Bumping it re-derives without re-fetching. */
 export const INTEL_PROFILE_VERSION = 1;
@@ -185,6 +189,7 @@ export class ManagerIntelService {
   private readonly leagues: LeagueRepo;
   private readonly players: PlayerRepo;
   private readonly profiles: ManagerProfileRepo;
+  private readonly settings: SettingsRepo;
 
   constructor(
     db: Database,
@@ -195,6 +200,7 @@ export class ManagerIntelService {
     this.leagues = new LeagueRepo(db);
     this.players = new PlayerRepo(db);
     this.profiles = new ManagerProfileRepo(db);
+    this.settings = new SettingsRepo(db);
   }
 
   private get sleeper(): SleeperClient {
@@ -777,6 +783,16 @@ export class ManagerIntelService {
       }
     }
 
+    /*
+     * Waivers round 2: each manager's season on waivers, one settings row per
+     * manager per season (`core/waivers/rivalHistory.ts`). This season's
+     * points (one row) say who chased last week's scorers; earlier seasons
+     * have no points stored and say nothing about it.
+     */
+    await this.writeRivalHistory({ leagueId, storedTransactions, identityBySeason, seasonsByUser, positionOf, budgetTotal: budgetState.rule.total, latestSeason }).catch(
+      (err: unknown) => console.error('rival history failed', err),
+    );
+
     const tradeInput = {
       transactions: ledgerTransactions,
       seasonsByUser,
@@ -832,6 +848,37 @@ export class ManagerIntelService {
       seasons,
       rosters: rosters.length,
     };
+  }
+
+  private async writeRivalHistory(args: {
+    leagueId: string;
+    storedTransactions: readonly { season: string; transaction: SleeperTransaction }[];
+    identityBySeason: ReadonlyMap<string, ReadonlyMap<number, string>>;
+    seasonsByUser: ReadonlyMap<string, string[]>;
+    positionOf: (id: string) => string | null;
+    budgetTotal: number | null;
+    latestSeason: string;
+  }): Promise<number> {
+    const { claims, adds } = historyFromTransactions(
+      args.storedTransactions,
+      (season, rosterId) => args.identityBySeason.get(season)?.get(rosterId) ?? null,
+      args.positionOf,
+    );
+    const season = await this.settings.get<StoredSeasonPoints | null>(seasonPointsKey(args.latestSeason), null).catch(() => null);
+    const aggregates = buildRivalSeasonAggregates({
+      claims,
+      adds,
+      seasonsByUser: args.seasonsByUser,
+      points: (s, week) => {
+        if (s !== args.latestSeason || !season || week < 1 || week > season.through) return null;
+        const out = new Map<string, number>();
+        for (const [id, weeks] of Object.entries(season.points)) if (weeks[week - 1]) out.set(id, weeks[week - 1]!);
+        return out;
+      },
+      budgetTotal: args.budgetTotal,
+    });
+    for (const a of aggregates) await this.settings.set(rivalHistoryKey(args.leagueId, a.season, a.userId), a);
+    return aggregates.length;
   }
 
   private async writeProfiles(args: {

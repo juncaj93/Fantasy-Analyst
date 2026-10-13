@@ -83,6 +83,12 @@ export interface SleeperPlayer {
   fantasy_positions?: string[] | null;
   status?: string | null;
   injury_status?: string | null;
+  /** `Knee - ACL`, `Foot`. Read only into `sleeper.playerNotes`. */
+  injury_body_part?: string | null;
+  /** `Surgery`, `Sprain`. Read only into `sleeper.playerNotes`. */
+  injury_notes?: string | null;
+  /** Sleeper's depth-chart order at his position, 1 = starter. */
+  depth_chart_order?: number | null;
   active?: boolean | null;
   search_full_name?: string | null;
   /**

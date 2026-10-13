@@ -14,6 +14,24 @@ export class SettingsRepo {
     return parseJson<T>(row.value_json, fallback);
   }
 
+  /** Several keys in one read; a key with no row is absent from the result. */
+  async getMany<T>(keys: readonly string[]): Promise<Map<string, T>> {
+    const out = new Map<string, T>();
+    for (let i = 0; i < keys.length; i += 50) {
+      const chunk = keys.slice(i, i + 50);
+      if (chunk.length === 0) continue;
+      const rows = await this.db
+        .prepare(`SELECT key, value_json FROM settings WHERE key IN (${chunk.map(() => '?').join(',')})`)
+        .bind(...chunk)
+        .all<{ key: string; value_json: string }>();
+      for (const r of rows.results) {
+        const value = parseJson<T | null>(r.value_json, null);
+        if (value != null) out.set(r.key, value);
+      }
+    }
+    return out;
+  }
+
   async set(key: string, value: unknown): Promise<void> {
     await this.db
       .prepare(

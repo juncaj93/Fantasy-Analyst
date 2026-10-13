@@ -88,5 +88,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * projection or this week's figure. Each bid carries its own trace (the
  * signals, the rivals, the advice before the value ceiling) for the support
  * snapshot; nothing drawn changes.
+ *
+ * `waiver@13`: round 2. Rival bids read each manager's roster need, FAAB left
+ * and bidding history across seasons; the bid tries by tier (a hole, an
+ * upgrade, a stash); drops follow a drop score and protect the Sleeper lineup
+ * and elite backs' handcuffs; a season-ending or late stash is never offered;
+ * every starting hole gets its own "Do this" and every move its own drop.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@12', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@13', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

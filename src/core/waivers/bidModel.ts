@@ -40,6 +40,8 @@
  */
 
 import { seedFor, STYLE_PRIORS, type BidderStyle } from './managerSeeds.ts';
+import type { PositionNeed } from './rivalNeed.ts';
+import type { RivalTendency } from './rivalHistory.ts';
 
 export const BID_MODEL = {
   /** The seed counts as this many runs of a manager's history. */
@@ -122,7 +124,41 @@ export interface RivalOdds {
   chance: number;
   /** His likely bid if he does bid. */
   likelyBid: number;
+  /** Why, in a few words: `QB on bye in week 6, no backup`, `has 3 QBs, unlikely`. Need-aware model only. */
+  why?: string | null;
+  /** The pieces of the chance, for the trace. Need-aware model only. */
+  parts?: { rate: number; interest: number; need: number; pull: number; chase: number; remaining: number | null };
 }
+
+/**
+ * What the need-aware model knows about one rival: his record, his roster's
+ * need at this player's position, and his FAAB left. Absent for a rival: the
+ * old model reads him.
+ */
+export interface RivalContext {
+  tendency: RivalTendency;
+  need: PositionNeed | null;
+  /** FAAB left. Null: unknown, no cap. */
+  remaining: number | null;
+}
+
+/**
+ * How much to bid, by tier (Alex, 13 October 2026).
+ *
+ * - `do_this`: a real starting hole this week. Win about three times in four,
+ *   with a range from even odds to nine in ten.
+ * - `consider`: a real upgrade. Balanced: win about one time in two, and
+ *   protect FAAB, with a range from about one in three to three in four.
+ * - `stash`: an injured-reserve or bench stash, and the Watch list. $0 to $1,
+ *   never more.
+ */
+export type BidPosture = 'do_this' | 'consider' | 'stash';
+
+export const BID_POSTURE: Readonly<Record<BidPosture, { target: number; low: number; high: number; cap: number | null; words: string }>> = {
+  do_this: { target: 0.75, low: 0.5, high: 0.9, cap: null, words: 'to win about 3 times in 4' },
+  consider: { target: 0.5, low: 0.35, high: 0.75, cap: null, words: 'to win about 1 time in 2' },
+  stash: { target: 0.5, low: 0, high: 0.5, cap: 1, words: 'a stash, so $0 to $1' },
+};
 
 export interface BidAdvice {
   recommended: number;
@@ -214,11 +250,28 @@ export function adviseBid(opts: {
   validClaims: number;
   /** Money left; nothing above it is recommended. */
   remaining: number | null;
+  /**
+   * The need-aware read, by roster id: each rival's record, need and FAAB.
+   * A rival missing here is read by the old model, so a partial league still
+   * prices.
+   */
+  rivals?: ReadonlyMap<number, RivalContext> | undefined;
+  /** The player's position, for need and interest. */
+  position?: string | null | undefined;
+  /** How hard to try. Absent: three times in four, as before. */
+  posture?: BidPosture | undefined;
 }): BidAdvice {
   const rivals: RivalOdds[] = [];
   const dists: { chance: number; bids: number[] }[] = [];
   for (const profile of opts.profiles) {
     const pull = pullFor(profile.style, opts.signals);
+    const context = opts.rivals?.get(profile.rosterId);
+    if (context) {
+      const read = needAwareOdds(profile, context, pull, opts.signals, opts.position ?? null);
+      dists.push({ chance: read.chance, bids: read.bids });
+      rivals.push(read.odds);
+      continue;
+    }
     const chance = Math.min(
       BID_MODEL.maxChance,
       (profile.claimsPerRun / Math.max(1, opts.targetsPerRun)) * (pull / BID_MODEL.typicalPull),
@@ -247,13 +300,23 @@ export function adviseBid(opts: {
       ? `Only ${opts.validClaims} claims on record this season, so the range is wide.`
       : null;
   /* A thin record widens the range rather than raising the bid: the advice is "just above the competition". */
-  const recommended = smallest(BID_MODEL.target);
-  const low = Math.min(recommended, smallest(BID_MODEL.low));
-  const high = Math.max(recommended, smallest(thin ? BID_MODEL.thinHigh : BID_MODEL.high));
+  const posture = opts.posture ? BID_POSTURE[opts.posture] : null;
+  const atLeast = (target: number) => (target <= 0 ? 0 : smallest(target));
+  let recommended = smallest(posture?.target ?? BID_MODEL.target);
+  let low = Math.min(recommended, posture ? atLeast(posture.low) : smallest(BID_MODEL.low));
+  let high = Math.max(recommended, smallest(posture ? posture.high : thin ? BID_MODEL.thinHigh : BID_MODEL.high));
+  if (posture?.cap != null) {
+    /* A stash: $0 when nobody is likely to want him, else $1. Never more. */
+    const anyone = dists.reduce((s, d) => s + d.chance, 0) >= 0.3;
+    recommended = anyone ? posture.cap : 0;
+    low = 0;
+    high = posture.cap;
+  }
   const expectedRivals = round2(dists.reduce((s, d) => s + d.chance, 0));
   const noRival = round2(dists.reduce((p, d) => p * (1 - d.chance), 1));
   rivals.sort((a, b) => b.chance - a.chance || a.name.localeCompare(b.name));
 
+  const needAware = rivals.some((r) => r.why !== undefined);
   return {
     recommended,
     low,
@@ -261,10 +324,98 @@ export function adviseBid(opts: {
     expectedRivals,
     noRival,
     rivals,
-    reason: reasonFor(recommended, opts.signals, rivals, expectedRivals),
-    why: whyFor(opts.signals, rivals, expectedRivals),
+    reason: needAware ? postureReason(recommended, rivals, expectedRivals, opts.posture ?? 'do_this') : reasonFor(recommended, opts.signals, rivals, expectedRivals),
+    why: needAware ? postureWhy(rivals, expectedRivals) : whyFor(opts.signals, rivals, expectedRivals),
     thin,
   };
+}
+
+/**
+ * One rival's chance and likely bid, from his record, his need and his money.
+ *
+ *     chance = his bid rate on contested players
+ *            × his interest in the position
+ *            × his roster's need there over the next two weeks
+ *            × how much this player draws him (last week's points and
+ *              Sleeper's trend, a small signal: 0.85 to 1.45)
+ *            × his taste for last week's scorers, when the player was one
+ *
+ * His likely bid is his own bids as shares of the FAAB he had left, applied to
+ * what he has left now, and never above it.
+ */
+export function needAwareOdds(
+  profile: RivalProfile,
+  context: RivalContext,
+  pull: number,
+  signals: BidSignals,
+  position: string | null,
+): { chance: number; bids: number[]; odds: RivalOdds } {
+  const pos = (position ?? '').toUpperCase();
+  const t = context.tendency;
+  const interest = t.interest[pos] ?? 1;
+  const need = context.need?.factor ?? 1;
+  const pullFactor = NEED_MODEL.pullFloor + NEED_MODEL.pullSpan * pull;
+  const hot = signals.lastWeekPoints != null && signals.lastWeekPoints >= NEED_MODEL.hotPoints;
+  const chase = hot ? t.chase : 1;
+  const broke = context.remaining != null && context.remaining < 1;
+  const chance = Math.min(BID_MODEL.maxChance, t.rate * interest * need * pullFactor * chase);
+
+  const left = context.remaining ?? 100;
+  const q = 0.35 + 0.6 * pull;
+  const bids = broke
+    ? [0, 0, 0]
+    : [q - 0.2, q, q + 0.2].map((p) => Math.min(left, Math.round(quantile(t.shares, clamp01(p)) * left)));
+  const why = rivalWhy(context, interest, pos, t);
+  return {
+    chance,
+    bids,
+    odds: {
+      rosterId: profile.rosterId,
+      name: profile.name,
+      style: profile.style,
+      chance: round2(chance),
+      likelyBid: bids[1]!,
+      why,
+      parts: { rate: t.rate, interest, need, pull: round2(pullFactor), chase, remaining: context.remaining },
+    },
+  };
+}
+
+export const NEED_MODEL = {
+  /**
+   * The player's pull is a small signal: it moves a chance between 0.85 and
+   * 1.45. Set so the average multiplier on this league's contested players is
+   * about 1 (the backtest's calibration line).
+   */
+  pullFloor: 0.85,
+  pullSpan: 0.6,
+  /** Last week's points that count as "a scorer" for the chase reading. */
+  hotPoints: 12,
+} as const;
+
+/** The few words beside a rival's percent. Need first, then money, then record. */
+function rivalWhy(context: RivalContext, interest: number, pos: string, t: RivalTendency): string {
+  const need = context.need;
+  if (need && (need.state === 'hole' || need.state === 'surplus')) return need.reason;
+  if (context.remaining != null && context.remaining < 1) return 'no FAAB left, $0 bids only';
+  if (context.remaining != null && context.remaining <= 5) return `only $${context.remaining} left`;
+  if (interest <= 0.5 && pos) return `rarely bids on ${pos === 'DEF' ? 'defences' : `${pos}s`}`;
+  if (interest >= 1.6 && pos) return `often bids on ${pos === 'DEF' ? 'defences' : `${pos}s`}`;
+  if (need) return need.reason;
+  return t.rate >= 0.2 ? 'bids often' : t.rate <= 0.06 ? 'rarely bids' : 'bids now and then';
+}
+
+function postureReason(bid: number, rivals: readonly RivalOdds[], expected: number, posture: BidPosture): string {
+  const words = BID_POSTURE[posture].words;
+  if (posture === 'stash') return expected < 0.3 ? 'A stash, and nobody is likely to want him: $0 should do.' : `A stash, so $0 to $1, never more.`;
+  return `${postureWhy(rivals, expected)}, so $${bid} ${words}.`;
+}
+
+function postureWhy(rivals: readonly RivalOdds[], expected: number): string {
+  if (expected < 0.3) return 'Nobody is likely chasing him';
+  const top = rivals.filter((r) => r.chance >= 0.15).slice(0, 2);
+  if (top.length === 0) return expected < 1.5 ? 'One other manager may bid' : 'Two or more other managers may bid';
+  return capitalise(top.map((r) => `${r.name} ${Math.round(r.chance * 100)}% (${r.why ?? r.style})`).join(', '));
 }
 
 function reasonFor(bid: number, signals: BidSignals, rivals: readonly RivalOdds[], expected: number): string {

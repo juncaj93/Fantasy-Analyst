@@ -52,6 +52,8 @@ export interface WaiverIntelRoster {
   ownerName?: string | null;
   isMine: boolean;
   playerIds: string[];
+  /** Players in his injured-reserve slots, when known: not counted as startable. */
+  reserveIds?: string[];
   /**
    * The manager's seeded bidding style, when the name was replaced before the
    * assembly ran (a support snapshot names every seat `Manager N`, and the

@@ -14,7 +14,16 @@
  */
 
 import type { SleeperClient } from '../../core/sleeper/client.ts';
-import { aheadPointsKey, scoreProjectionRows, scoreWeek, weekPointsKey, type StoredWeekPoints } from '../../core/sleeper/weekPoints.ts';
+import {
+  aheadPointsKey,
+  buildSeasonPoints,
+  scoreProjectionRows,
+  scoreWeek,
+  seasonPointsKey,
+  weekPointsKey,
+  type StoredSeasonPoints,
+  type StoredWeekPoints,
+} from '../../core/sleeper/weekPoints.ts';
 import type { Database } from '../db.ts';
 import { SettingsRepo } from '../repos/settings.ts';
 
@@ -26,6 +35,12 @@ const REFRESH_HOURS = 6;
  * hours, the same gate the shared projection feed keeps.
  */
 const AHEAD_REFRESH_HOURS = 12;
+
+/** The season row is rebuilt at least this often, for stat corrections. */
+const SEASON_REFRESH_HOURS = 12;
+
+/** Missing finished weeks fetched per run while the season row fills. */
+export const SEASON_BACKFILL_PER_RUN = 2;
 
 /** How many weeks past the current one are kept: the waiver window's reach. */
 export const AHEAD_WEEKS = 3;
@@ -110,6 +125,59 @@ export class WeekPointsService {
     const row: StoredWeekPoints = { season: opts.season, week: opts.week, fetchedAt: now.toISOString(), points };
     await this.settings.set(key, row);
     return { week: opts.week, stored: Object.keys(points).length, skipped: null };
+  }
+
+  /**
+   * The season row for Waivers round 2: every finished week (1 to the week
+   * before Sleeper's current one), week by week. Rebuilt when it is missing,
+   * behind, or twelve hours old (stat corrections). A finished week with no
+   * stored row is fetched, at most {@link SEASON_BACKFILL_PER_RUN} per run, so
+   * the first runs after a deploy fill the early weeks a couple at a time.
+   * From the three-hourly league read only. Never throws.
+   */
+  async refreshSeasonPoints(opts: {
+    season: string;
+    week: number;
+    scoring: Readonly<Record<string, number>>;
+    now?: Date;
+  }): Promise<{ through: number; weeks: number; fetched: number; skipped: string | null }> {
+    const now = opts.now ?? new Date();
+    const through = Math.min(17, opts.week - 1);
+    if (through < 1) return { through: 0, weeks: 0, fetched: 0, skipped: 'no finished week yet' };
+    const key = seasonPointsKey(opts.season);
+    const held = await this.settings.get<StoredSeasonPoints | null>(key, null).catch(() => null);
+    if (held && held.through >= through && now.getTime() - Date.parse(held.fetchedAt) < SEASON_REFRESH_HOURS * 3_600_000) {
+      return { through: held.through, weeks: held.through, fetched: 0, skipped: 'stored copy is recent' };
+    }
+    const keys = Array.from({ length: through }, (_, i) => weekPointsKey(opts.season, i + 1));
+    const stored = await this.settings.getMany<StoredWeekPoints>(keys).catch(() => new Map<string, StoredWeekPoints>());
+    const weeks = new Map<number, Record<string, number>>();
+    let fetched = 0;
+    for (let w = 1; w <= through; w++) {
+      const row = stored.get(weekPointsKey(opts.season, w));
+      if (row?.points) {
+        weeks.set(w, row.points);
+        continue;
+      }
+      if (fetched >= SEASON_BACKFILL_PER_RUN) continue;
+      const result = await this.refresh({ season: opts.season, week: w, currentWeek: opts.week, scoring: opts.scoring, now }).catch(() => null);
+      fetched += 1;
+      if (result && result.stored > 0) {
+        const again = await this.settings.get<StoredWeekPoints | null>(weekPointsKey(opts.season, w), null).catch(() => null);
+        if (again?.points) weeks.set(w, again.points);
+      }
+    }
+    /* Only as far as the weeks run unbroken: a gap would read as a zero week. */
+    let covered = 0;
+    while (covered < through && weeks.has(covered + 1)) covered += 1;
+    if (covered === 0) return { through: 0, weeks: 0, fetched, skipped: 'no finished week stored yet' };
+    await this.settings.set(key, buildSeasonPoints(opts.season, covered, weeks, now));
+    return { through: covered, weeks: weeks.size, fetched, skipped: null };
+  }
+
+  /** The season row, or null. One row read. */
+  async readSeason(season: string): Promise<StoredSeasonPoints | null> {
+    return this.settings.get<StoredSeasonPoints | null>(seasonPointsKey(season), null).catch(() => null);
   }
 
   /** The stored week, as a map, or null when nothing is stored. One row read. */
