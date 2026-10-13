@@ -262,9 +262,10 @@ export interface WaiverPlanInputs {
   reserveSlots?: number;
   /**
    * Later weeks' own numbers for the tier planner, week by week, for the
-   * roster and the scanned wire only. Absent on a capture before waiver@11.
+   * roster and the scanned wire only. Absent on a capture before waiver@11;
+   * `vegas` only on a waiver@11 capture, and never read back.
    */
-  ahead?: { vegas: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
+  ahead?: { vegas?: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.

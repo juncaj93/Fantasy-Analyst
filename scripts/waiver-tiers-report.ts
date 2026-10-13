@@ -33,6 +33,8 @@ import { evaluatePlayer } from '../src/core/startsit/engine.ts';
 import { decisionPoints } from '../src/core/startsit/decisionPoints.ts';
 import { buildPlayerRate, RATE_BASIS_LABEL } from '../src/core/tradeValue/rate.ts';
 import { byeOf } from '../src/core/tradeValue/weeks.ts';
+import { myBudget } from '../src/core/faab/budget.ts';
+import { adviseBid, buildRivalProfiles, type BidSignals, type ClaimRecord } from '../src/core/waivers/bidModel.ts';
 import type { DstPlanSources } from '../src/core/dst/assemble.ts';
 import type { ScheduleTeamWeek } from '../src/core/nfl/schedule.ts';
 
@@ -125,7 +127,6 @@ const rosters = (inputs.rosters as { rosterId: number; ownerName: string | null;
 const rebuilt: number[] = [];
 const ahead: AheadNumbers = (() => {
   const back = (rows: [number, Record<string, number>][]) => new Map(rows.map(([w, m]) => [w, new Map(Object.entries(m))]));
-  const vegas = inputs.ahead != null ? back(inputs.ahead.vegas) : new Map<number, Map<string, number>>();
   const sleeper = inputs.ahead != null ? back(inputs.ahead.sleeper) : new Map<number, Map<string, number>>();
   /* A week the capture holds nothing for (the worker has not stored it yet): Sleeper's public feed, scored the same way. */
   for (let w = week + 1; w <= week + 3; w++) {
@@ -135,11 +136,11 @@ const ahead: AheadNumbers = (() => {
     sleeper.set(w, new Map(Object.entries(scoreProjectionRows(readJson(path), scoring))));
     rebuilt.push(w);
   }
-  return { vegas, sleeper };
+  return { sleeper };
 })();
 const aheadSource =
   (inputs.ahead != null ? 'from the capture' : 'not in the capture') +
-  (rebuilt.length > 0 ? `; Sleeper weeks ${rebuilt.join(', ')} rebuilt from its public feed (later-week Vegas is not public)` : '');
+  (rebuilt.length > 0 ? `; Sleeper weeks ${rebuilt.join(', ')} rebuilt from its public feed` : '');
 
 const run = (withAhead: AheadNumbers | null) => assembleWaiverPlan({
   shape,
@@ -200,9 +201,9 @@ console.log(`last week's points: week ${lastWeek}, ${lastWeekPoints ? `${lastWee
 console.log(`earlier-week projections used for ${recentPublished.size} players with no number this week`);
 console.log(
   `later weeks' own numbers (${aheadSource}): ` +
-    [...new Set([...ahead.sleeper.keys(), ...ahead.vegas.keys()])]
+    [...ahead.sleeper.keys()]
       .sort((a, b) => a - b)
-      .map((w) => `wk ${w} Vegas ${ahead.vegas.get(w)?.size ?? 0} / Sleeper ${ahead.sleeper.get(w)?.size ?? 0} players`)
+      .map((w) => `wk ${w} Sleeper ${ahead.sleeper.get(w)?.size ?? 0} players`)
       .join(', '),
 );
 
@@ -367,5 +368,92 @@ for (const name of names) {
         `${m.prefs ? `, rules ${m.prefs.toFixed(1)}` : ''}, drop ${m.drop ?? '(open)'}` +
         ` | numbers ${m.weekNumbers.map((n) => `wk ${n.week} ${n.points.toFixed(1)} ${n.source}`).join(' / ')}`,
     );
+  }
+}
+
+/*
+ * The bid trace (waiver@12): for each named player on waivers, the bid the live
+ * screen drew and everything it was made from, beside the same for this replay,
+ * every input that differs, and how far the bid moves when each time-varying
+ * input moves alone. A capture before waiver@12 carries no trace of its own;
+ * then the live side shows only the bid, and the inputs come from the capture.
+ */
+const bidNames = (process.env.BID_NAMES ?? 'Jordan Love').split(',').map((n) => n.trim());
+type Row = NonNullable<NonNullable<WaiverAssembly['tiers']>['doThis']>;
+const rowsOf = (v: WaiverAssembly['tiers'] | undefined): Row[] => (v ? [v.doThis, ...v.consider, ...v.watch].filter((r): r is Row => r != null) : []);
+const fmtBid = (r: Row | undefined) =>
+  !r
+    ? 'not a row'
+    : r.bid.kind !== 'claim'
+      ? r.bid.reason
+      : `$${r.bid.recommended} ($${r.bid.low}-${r.bid.high})${r.bid.overCeiling ? ` capped at his value $${r.bid.ceiling}` : ''}, ceiling ${r.bid.ceiling == null ? '-' : '$' + r.bid.ceiling} | ${r.bid.reason}`;
+const fmtTrace = (r: Row | undefined) => {
+  const t = r?.bid.trace;
+  if (!t) return '    (no trace on this side)';
+  const g = t.signals;
+  return [
+    `    signals: last week ${g.lastWeekPoints ?? '-'} pts, trend heat ${g.trendHeat ?? '-'} rank ${g.trendRank ?? '-'}, role rising ${g.roleRising}, fresh drop ${g.freshDrop}`,
+    `    advised before the ceiling $${t.advised.recommended} ($${t.advised.low}-${t.advised.high}); FAAB left ${t.remaining ?? '-'}; claims on record ${t.validClaims}, targets a run ${t.targetsPerRun}; other bidders expected ${t.expectedBidders}`,
+    `    likely bidders: ${t.bidders.map((x) => `${x.name} (${x.style}) ${Math.round(x.chance * 100)}% ~$${x.likelyBid}`).join(', ')}`,
+  ].join('\n');
+};
+const claimsOf = (obs: { rosterId: number; playerId: string | null; amount: number; outcome: string; voided?: boolean; week: number }[]): ClaimRecord[] =>
+  obs
+    .filter((o) => o.playerId != null)
+    .map((o) => ({ rosterId: o.rosterId, playerId: o.playerId!, amount: o.amount, won: o.outcome === 'won', voided: o.voided === true, run: `week ${o.week}` }));
+const claims = claimsOf(inputs.observations ?? []);
+const seats = rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine }));
+const { profiles, targetsPerRun, validClaims } = buildRivalProfiles({ seats, claims });
+
+console.log(`\n=== BID TRACE (capture ${snapshot.capturedAt}, ${new Date(snapshot.capturedAt).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET) ===`);
+console.log(`claims on record ${validClaims} (latest run: week ${Math.max(0, ...(inputs.observations ?? []).map((o: { week: number }) => o.week))}), targets a run ${targetsPerRun}`);
+for (const name of bidNames) {
+  const live = rowsOf(before.tiers).find((r) => r.name === name);
+  const replay = rowsOf(after.tiers).find((r) => r.name === name);
+  console.log(`${name}:`);
+  console.log(`  live screen: ${fmtBid(live)}`);
+  console.log(fmtTrace(live));
+  console.log(`  this replay: ${fmtBid(replay)}`);
+  console.log(fmtTrace(replay));
+  const a = live?.bid.trace;
+  const b = replay?.bid.trace;
+  if (a && b) {
+    const diffs: string[] = [];
+    for (const k of Object.keys(a.signals) as (keyof BidSignals)[]) if (a.signals[k] !== b.signals[k]) diffs.push(`${k} ${a.signals[k]} vs ${b.signals[k]}`);
+    for (const k of ['remaining', 'validClaims', 'targetsPerRun'] as const) if (a[k] !== b[k]) diffs.push(`${k} ${a[k]} vs ${b[k]}`);
+    for (const x of a.bidders) {
+      const y = b.bidders.find((r) => r.name === x.name);
+      if (!y || y.chance !== x.chance || y.likelyBid !== x.likelyBid || y.style !== x.style)
+        diffs.push(`${x.name}: ${x.style} ${x.chance}/$${x.likelyBid} vs ${y ? `${y.style} ${y.chance}/$${y.likelyBid}` : 'absent'}`);
+    }
+    if ((live!.bid.ceiling ?? null) !== (replay!.bid.ceiling ?? null)) diffs.push(`ceiling ${live!.bid.ceiling} vs ${replay!.bid.ceiling}`);
+    console.log(`  live vs replay: ${diffs.length === 0 ? 'every input the same' : diffs.join('; ')}`);
+  }
+  /* The raw inputs, as captured. */
+  const id = replay?.playerId ?? live?.playerId ?? [...roster, ...candidates].find((i) => i.player.fullName === name)?.player.id;
+  if (!id) continue;
+  const trend = (inputs.strategy?.trending ?? []).find(([pid]: [string]) => pid === id)?.[1] ?? null;
+  console.log(
+    `  captured: trending ${trend ? `heat ${trend.heat} rank ${trend.rank}` : 'none'}; last week (wk ${lastWeekPoints?.week ?? '-'}) ${lastWeekPoints?.points.get(id) ?? '-'} pts; ` +
+      `dropped ${inputs.waiverWindow?.drops?.[id] ?? '-'}; FAAB left ${inputs.budgets ? (myBudget(inputs.budgets)?.remaining ?? '-') : '-'}`,
+  );
+  /* How far the bid moves when each time-varying input moves alone. */
+  const base = (b ?? a)?.signals;
+  if (!base) continue;
+  const statsNow = join(sleeperDir, `stats${week}.json`);
+  const thisWeekPts = existsSync(statsNow) ? (scoreWeek(readJson(statsNow), scoring)[id] ?? 0) : null;
+  const remaining = (b ?? a)!.remaining;
+  const variants: [string, BidSignals][] = [
+    ['as replayed', base],
+    ['no trend heat', { ...base, trendHeat: 0, trendRank: null }],
+    ['trend heat 0.5', { ...base, trendHeat: 0.5 }],
+    ['trend heat 1.0', { ...base, trendHeat: 1 }],
+    ...(thisWeekPts != null ? ([[`last week = week ${week} (${thisWeekPts.toFixed(1)} pts)`, { ...base, lastWeekPoints: thisWeekPts }]] as [string, BidSignals][]) : []),
+    ['fresh drop on', { ...base, freshDrop: true }],
+    ['fresh drop off', { ...base, freshDrop: false }],
+  ];
+  for (const [label, signals] of variants) {
+    const adv = adviseBid({ signals, profiles, targetsPerRun, validClaims, remaining });
+    console.log(`    ${pad(label, 34)} $${adv.recommended} ($${adv.low}-${adv.high}), rivals expected ${adv.expectedRivals}`);
   }
 }

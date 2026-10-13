@@ -584,11 +584,11 @@ function captureAhead(
     [...byWeek]
       .sort((a, b) => a[0] - b[0])
       .map(([week, points]) => [week, Object.fromEntries([...points].filter(([id]) => ids.has(id)))]);
-  return { vegas: keep(ahead.vegas), sleeper: keep(ahead.sleeper) };
+  return { sleeper: keep(ahead.sleeper) };
 }
 
 function rehydrateAhead(ahead: WaiverPlanInputs['ahead']): AheadNumbers | null {
   if (ahead == null) return null;
   const back = (rows: [number, Record<string, number>][]) => new Map(rows.map(([week, points]) => [week, new Map(Object.entries(points))]));
-  return { vegas: back(ahead.vegas), sleeper: back(ahead.sleeper) };
+  return { sleeper: back(ahead.sleeper) };
 }
