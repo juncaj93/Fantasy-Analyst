@@ -26,6 +26,7 @@
  * and the model then ranks them by its own number.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../../core/startsit/engine.ts';
 import { boundedFreeAgentIds } from '../../core/roster/freeAgents.ts';
 import { buildRosterShape, buildScoringProfile, startablePositions } from '../../core/sleeper/scoring.ts';
@@ -118,10 +119,8 @@ function viewOf(horizon: TradeHorizon): TradeHorizonView {
  * so the model says so instead of valuing weeks that cannot be played.
  */
 export function currentWeekOf(state: NflState | null): number {
-  if (!state) return 1;
-  if (state.seasonType === 'post' || state.seasonType === 'off') return 19;
-  if (state.seasonType === 'pre') return 1;
-  return state.week != null && state.week > 0 ? state.week : 1;
+  if (state?.seasonType === 'post' || state?.seasonType === 'off') return 19;
+  return currentWeek(state);
 }
 
 /**

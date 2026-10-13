@@ -10,6 +10,7 @@
  *   - every mutation of evidence records a `user_reviews` history row
  */
 
+import { currentWeek as sleeperWeek } from '../core/sleeper/currentWeek.ts';
 import { importAdpSnapshot } from '../core/adp/import.ts';
 import { draftPickLabel, draftProvenanceLine } from '../core/draft/provenance.ts';
 import { nflTeam } from '../core/nfl/teams.ts';
@@ -560,7 +561,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!league) return errorResponse('no league selected', 404);
     const weekParam = Number(ctx.url.searchParams.get('week'));
     const state = await new SettingsRepo(ctx.env.db).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const week = Number.isFinite(weekParam) && weekParam > 0 ? weekParam : (state?.week ?? null);
+    const week = Number.isFinite(weekParam) && weekParam > 0 ? weekParam : state ? sleeperWeek(state) : null;
     const report = await new ProjectionV2Service(ctx.env.db).sideBySide({ leagueId: league.id, week });
     return jsonResponse({
       league: { id: league.id, name: league.name },
@@ -1062,7 +1063,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         leagueId: league.id,
         sleeperLeagueId: league.sleeperLeagueId,
         season: league.season,
-        week: state?.week ?? 1,
+        week: sleeperWeek(state),
         maxWeeks: 2,
       })
       .catch(() => null);
@@ -1079,7 +1080,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const projections = await refreshPublishedWeek(db, ctx.env.sleeper, league.season);
     /* Last week's points, for the bid model. Sleeper only, behind a six-hour gate. */
     const weekPoints = await new WeekPointsService(db, ctx.env.sleeper)
-      .refreshRecent({ season: league.season, week: state?.week ?? 1, scoring: league.scoringSettings })
+      .refreshRecent({ season: league.season, week: sleeperWeek(state), scoring: league.scoringSettings })
       .catch(() => null);
     return jsonResponse({
       transactions,
@@ -1111,7 +1112,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       leagueId: league.id,
       sleeperLeagueId: league.sleeperLeagueId,
       season: league.season,
-      week: state?.week ?? 1,
+      week: sleeperWeek(state),
     });
     const trending = await service.captureTrending();
     return jsonResponse({ transactions, trending });
@@ -1143,7 +1144,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       leagueId: league.id,
       sleeperLeagueId: league.sleeperLeagueId,
       season: league.season,
-      week: state?.week ?? 1,
+      week: sleeperWeek(state),
     });
 
     /*
@@ -1189,7 +1190,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const coverage = await new ManagerIntelService(db).coverage({
       leagueId: league.id,
       season: league.season,
-      week: state?.week ?? 1,
+      week: sleeperWeek(state),
     });
     return jsonResponse({ league: { id: league.id, name: league.name, season: league.season }, ...coverage });
   });
@@ -1535,7 +1536,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const mine = rosters.find((r) => r.isMine) ?? null;
     const shape = buildRosterShape(league.rosterPositions);
     const state = await new SleeperSyncService(db, ctx.env.sleeper).getNflState();
-    const currentWeek = state?.week ?? 1;
+    const currentWeek = sleeperWeek(state);
 
     const players = mine ? await new PlayerRepo(db).listByIds(mine.playerIds) : new Map();
     const starters = new Set(mine?.starterIds ?? []);

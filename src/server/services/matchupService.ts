@@ -27,6 +27,7 @@
  * documented where it is implemented, in `core/matchup/build.ts`.
  */
 
+import { currentWeek as sleeperWeek } from '../../core/sleeper/currentWeek.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { SleeperMatchup, LeagueRecord } from '../../core/sleeper/types.ts';
 import {
@@ -306,7 +307,7 @@ export class MatchupService {
     if (!league) return { settled: [], pending: 0 };
 
     const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const currentWeek = state?.week ?? null;
+    const currentWeek = state ? sleeperWeek(state) : null;
     const seasonType = state?.seasonType ?? null;
 
     /*

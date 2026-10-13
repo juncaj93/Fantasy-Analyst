@@ -43,6 +43,7 @@
  * something that resembles it.
  */
 
+import { currentWeek } from '../sleeper/currentWeek.ts';
 import type { SleeperMatchup, LeagueRecord, RosterRecord } from '../sleeper/types.ts';
 import { buildRosterShape, buildScoringProfile, FLEX_ELIGIBILITY, type ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
@@ -911,22 +912,7 @@ function numeric(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/**
- * Season types in which `/state/nfl`'s week is not a fantasy week at all.
- *
- * **Sleeper's `week` counts within the season type, and only `regular` counts
- * the weeks a fantasy schedule is made of.** Through August it is the
- * *preseason* week — `season_type: "pre", week: 2` on 22 August 2026 — and
- * that number is not week two of anything a league plays. Reading it as one is
- * the mistake both functions below used to make, and it is a category error
- * rather than an off-by-one: the two counters happen to share a range, so the
- * result is a plausible wrong week rather than a visible failure.
- *
- * `post` is deliberately absent. Sleeper keeps counting fantasy weeks through
- * the NFL postseason and this app has no production evidence that it does
- * otherwise, so that case is left exactly as it was.
- */
-const NO_REGULAR_WEEK = new Set(['pre', 'off']);
+/* `NO_REGULAR_WEEK` and the rule itself live in `core/sleeper/currentWeek.ts`. */
 
 /**
  * Which week to show.
@@ -946,9 +932,7 @@ const NO_REGULAR_WEEK = new Set(['pre', 'off']);
 export function resolveWeek(requested: number | null, current: number | null, seasonType: string | null): number {
   const asked = requested != null && Number.isFinite(requested) ? Math.floor(requested) : null;
   if (asked != null && asked >= 1 && asked <= 22) return asked;
-  if (NO_REGULAR_WEEK.has(String(seasonType ?? '').trim().toLowerCase())) return 1;
-  const now = current != null && Number.isFinite(current) ? Math.floor(current) : 1;
-  return Math.min(22, Math.max(1, now));
+  return currentWeek({ week: current, seasonType });
 }
 
 /**

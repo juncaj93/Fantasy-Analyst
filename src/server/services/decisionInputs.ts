@@ -17,6 +17,7 @@
  * which reads stored rows and never triggers ingestion.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
@@ -524,7 +525,7 @@ export async function gatherWaiverInputs(
   for (const roster of rosters) for (const id of roster.playerIds) rosteredIds.add(id);
 
   const startable = startablePositions(shape);
-  const week = base.nflState?.week ?? 1;
+  const week = currentWeek(base.nflState);
 
   /*
    * Everything that needs only the league, started together.

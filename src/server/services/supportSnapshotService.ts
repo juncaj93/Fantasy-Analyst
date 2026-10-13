@@ -22,6 +22,7 @@
  * no ingestion, nothing stored. See `core/support/matchupSnapshot.ts`.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
@@ -224,7 +225,7 @@ export async function captureSupportSnapshot(
         },
         nflState: nflState as never,
         props: await freshness(db),
-        week: nflState?.week ?? 0,
+        week: nflState ? currentWeek(nflState) : 0,
         now,
       });
     }

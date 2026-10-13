@@ -29,6 +29,7 @@
  *     scheduler, or start background jobs. It runs, it returns, it is done.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import type { Database } from '../db.ts';
 import { SleeperClient } from '../../core/sleeper/client.ts';
 import type { VegasProvider } from '../../core/vegas/types.ts';
@@ -38,7 +39,6 @@ import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { InjuryService } from './injuryService.ts';
 import { SleeperSyncService } from './sleeperSync.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
-import { resolveWeek } from '../../core/matchup/build.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
 import { UsageService } from './usageService.ts';
 import { VegasRefreshService } from './vegasRefresh.ts';
@@ -114,7 +114,7 @@ const recent = new WeakMap<Database, { at: number; report: StartSitRefreshReport
 export async function refreshPublishedWeek(db: Database, sleeper: SleeperClient, season: string): Promise<number> {
   try {
     const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+    const week = currentWeek(state);
     const report = await new SleeperProjectionService(db, sleeper).refresh(season, week);
     return report.outcome === 'fetched' ? report.rows : 0;
   } catch {

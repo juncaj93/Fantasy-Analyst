@@ -9,6 +9,7 @@
  * place for it the moment anything other than a route needed it.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
@@ -367,7 +368,7 @@ export async function buildStartSitContext(
    */
   const fixtures =
     state?.season && state.week != null && state.week > 0
-      ? await new NflScheduleRepo(db).forWeek(String(state.season), state.week).catch(() => [])
+      ? await new NflScheduleRepo(db).forWeek(String(state.season), currentWeek(state)).catch(() => [])
       : [];
   const home = homeByTeam(fixtures);
   const indoor = indoorByTeam(fixtures);

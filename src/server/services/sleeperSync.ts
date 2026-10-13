@@ -5,6 +5,9 @@
  * picks. Everything here is idempotent so a sync can be re-run safely.
  */
 
+import type { SleeperState } from '../../core/sleeper/types.ts';
+import { currentWeek, NO_REGULAR_WEEK } from '../../core/sleeper/currentWeek.ts';
+import { withWeekLineup } from '../../core/sleeper/weekLineup.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import { draftStateFingerprint } from '../../core/sleeper/draftFingerprint.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
@@ -98,9 +101,9 @@ export class SleeperSyncService {
    * consequence of not knowing is that the Draft tab stays visible, which is
    * the safe direction to be wrong in.
    */
-  async syncNflState(): Promise<NflState | null> {
+  async syncNflState(prefetched?: SleeperState | null): Promise<NflState | null> {
     try {
-      const state = await this.client.getState();
+      const state = prefetched !== undefined ? prefetched : await this.client.getState();
       if (!state) return null;
       const record: NflState = {
         season: state.season ?? null,
@@ -134,13 +137,28 @@ export class SleeperSyncService {
   async syncLeague(leagueId: string): Promise<{ rosters: number; drafts: number }> {
     const user = await this.getUser();
     const startedAt = nowIso();
-    const [league, rosters, users, drafts] = await Promise.all([
+    const [league, rawRosters, users, drafts, state] = await Promise.all([
       this.client.getLeague(leagueId),
       this.client.getRosters(leagueId),
       this.client.getLeagueUsers(leagueId),
       this.client.getLeagueDrafts(leagueId),
+      this.client.getState().catch(() => null),
     ]);
     if (!league) throw new Error(`Sleeper league ${leagueId} not found`);
+
+    /*
+     * Each team's lineup for the week Sleeper is on, not last week's.
+     *
+     * `/rosters` can still hold the previous week's starters after the week has
+     * rolled over (13 October 2026: Sleeper on week 6, Team showing Week 5).
+     * The week's matchup row holds the lineup the manager set, so it wins where
+     * it has one; see `core/sleeper/weekLineup.ts`. One more Sleeper request,
+     * no D1 read. Skipped out of season, when there is no week to read.
+     */
+    const week = currentWeek({ week: state?.week ?? null, seasonType: state?.season_type ?? null });
+    const inSeason = state != null && !NO_REGULAR_WEEK.has(String(state.season_type ?? '').toLowerCase());
+    const matchups = inSeason ? await this.client.getMatchups(leagueId, week).catch(() => []) : [];
+    const rosters = withWeekLineup(rawRosters, matchups);
 
     const now = nowIso();
     await this.leagues.upsertLeague(toLeagueRecord(league, now));
@@ -149,7 +167,7 @@ export class SleeperSyncService {
       await this.leagues.upsertDraft(toDraftRecord(draft, now));
     }
     // Refreshing a league is also the moment to notice the season moved on.
-    await this.syncNflState();
+    await this.syncNflState(state);
     await this.settings.logSync('league', 'ok', `${leagueId}: ${rosters.length} rosters`, startedAt);
     return { rosters: rosters.length, drafts: drafts.length };
   }

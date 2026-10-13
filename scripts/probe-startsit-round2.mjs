@@ -35,6 +35,79 @@ const BEFORE_SHA = process.env.BEFORE_SHA ?? '76d8464fc49611090074223b6acbcd61f7
 const dir = mkdtempSync(join(tmpdir(), 'startsit-r2-'));
 
 /*
+ * WEEK AND LINEUP (STEPS=week-lineup, 13 October 2026): the one production
+ * check for the stale-lineup fix. Reads the app's own answers once each (the
+ * week it thinks it is, Team's slots, Best move) and Sleeper's public state,
+ * rosters and this week's matchup row, and says whether Team now shows the
+ * lineup Sleeper shows. D1 cost is every row the account read during the run,
+ * from Cloudflare's analytics, so it includes anything else that ran then.
+ */
+if (process.env.STEPS === 'week-lineup') {
+  const started = new Date();
+  const get = (path) => fetch(`${APP}${path}`).then((r) => r.json()).catch(() => null);
+  const sleeper = (path) => fetch(`${SLEEPER}/v1${path}`).then((r) => r.json()).catch(() => null);
+  const health = await get('/api/health');
+  console.log(`production sha: ${health?.release?.gitSha ?? '?'}`);
+  const leagues = await get('/api/leagues');
+  const selected = leagues?.leagues?.find((l) => l.isSelected) ?? null;
+  const leagueId = process.env.LEAGUE_ID || selected?.id;
+  if (!leagueId) throw new Error('no selected league');
+  console.log(`league: ${selected?.name ?? leagueId}, last synced ${selected?.lastSyncedAt ?? '?'}`);
+
+  const state = await sleeper('/state/nfl');
+  console.log(`Sleeper state: week ${state?.week}, leg ${state?.leg}, display_week ${state?.display_week}, ${state?.season_type}`);
+
+  const roster = await get(`/api/leagues/${leagueId}/roster`);
+  const matchup = await get(`/api/leagues/${leagueId}/matchup`);
+  const lineup = await get(`/api/leagues/${leagueId}/lineup`);
+  console.log(`week the app shows on Matchup: ${matchup?.week ?? '?'}`);
+  const names = new Map([...(roster?.starters ?? []), ...(roster?.bench ?? [])].map((p) => [p.playerId, `${p.name} (${p.position})`]));
+  const slots = roster?.rosterPositions ?? [];
+  const appSlots = roster?.starterSlotIds ?? (roster?.starters ?? []).map((p) => p.playerId);
+  console.log('\nTeam lineup as the app reads it:');
+  appSlots.forEach((id, i) => console.log(`  ${(slots[i] ?? '?').padEnd(5)} ${id ? (names.get(id) ?? id) : 'empty'}`));
+  const best = lineup?.swaps?.[0] ?? lineup?.fills?.[0] ?? null;
+  console.log(`Best move: ${best ? (best.outName ? `start ${best.inName} over ${best.outName} (${best.slot})` : `start ${best.inName} at ${best.slot}`) : 'no swap clears the bar'}`);
+
+  const users = (await sleeper(`/league/${SLEEPER_LEAGUE}/users`)) ?? [];
+  const rosters = (await sleeper(`/league/${SLEEPER_LEAGUE}/rosters`)) ?? [];
+  const week = Number(state?.week ?? 0);
+  const rows = week > 0 ? ((await sleeper(`/league/${SLEEPER_LEAGUE}/matchups/${week}`)) ?? []) : [];
+  const me = users.find((u) => /junc/i.test(`${u.display_name} ${u.username}`));
+  const mine = rosters.find((r) => r.owner_id === me?.user_id);
+  const row = rows.find((r) => r.roster_id === mine?.roster_id);
+  const clean = (list) => (list ?? []).map((id) => (id && id !== '0' ? id : null));
+  const sleeperWeek = row?.starters?.some((id) => id && id !== '0') ? clean(row.starters) : clean(mine?.starters);
+  console.log(`\nSleeper /rosters starters:      ${JSON.stringify(clean(mine?.starters))}`);
+  console.log(`Sleeper /matchups/${week} starters: ${JSON.stringify(clean(row?.starters))}`);
+  const same = JSON.stringify(sleeperWeek) === JSON.stringify(appSlots.map((id) => id ?? null));
+  console.log(same ? `Team matches Sleeper's Week ${week} lineup.` : `Team does NOT match Sleeper's Week ${week} lineup yet (the next league read or a refresh stores it).`);
+
+  const CF = process.env.CLOUDFLARE_API_TOKEN;
+  if (CF) {
+    await new Promise((r) => setTimeout(r, 90_000)); // analytics lag
+    const account =
+      process.env.ACCOUNT_ID ||
+      (await fetch('https://api.cloudflare.com/client/v4/accounts', { headers: { authorization: `Bearer ${CF}` } }).then((r) => r.json()))?.result?.[0]?.id;
+    const body = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${CF}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        query: `query Q($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+          d1QueriesAdaptiveGroups(limit: 10000, filter: { datetime_geq: $from, datetime_lt: $to }) { sum { rowsRead } count } } } }`,
+        variables: { a: account, from: started.toISOString(), to: new Date().toISOString() },
+      }),
+    }).then((r) => r.json());
+    const groups = body?.data?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? [];
+    const read = groups.reduce((a, g) => a + Number(g.sum?.rowsRead ?? 0), 0);
+    const calls = groups.reduce((a, g) => a + Number(g.count ?? 0), 0);
+    console.log(`\nD1 during this run (account-wide, includes any cron that ran): ${read} rows read over ${calls} statements`);
+  }
+  console.log('production endpoints read once each: /api/health, /api/leagues, /roster, /matchup, /lineup');
+  process.exit(0);
+}
+
+/*
  * FOLLOW-UP (the default since 13 October 2026): the round's second and last
  * production check. Pills under the tightened thresholds, the tie-break on the
  * real matchup, and the Best move card against the lineup rows. The full

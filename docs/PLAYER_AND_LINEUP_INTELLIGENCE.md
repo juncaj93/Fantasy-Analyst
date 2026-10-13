@@ -393,3 +393,21 @@ fails if two of them disagree.
   week; tapping it lists each priced line and its points in words.
 - **Lists** sort strictly by the number, priced and published mixed, with
   nobody's number and Out last.
+
+### 13 October 2026: the week and the lineup come from Sleeper, once
+
+- **Cause of Team showing last week's slots.** Team's lineup came only from
+  Sleeper's `/league/:id/rosters` `starters`. On Tuesday after Monday night
+  Sleeper was on week 6 (`week 6, leg 6, display_week 5`) and Alex had set his
+  Week 6 lineup, but `/rosters` still held Week 5's starters, identical to the
+  Week 5 matchup row. The Week 6 lineup lived only on `/matchups/6`. A refresh
+  re-read `/rosters` and so changed nothing.
+- **Fix.** `SleeperSyncService.syncLeague` now reads `/matchups/{currentWeek}`
+  and stores each team's lineup from it where the row has one, `/rosters`
+  otherwise (`core/sleeper/weekLineup.ts`, the rule the Matchup screen already
+  used). One more Sleeper request per sync; D1 reads unchanged.
+- **One week.** `currentWeek(state)` in `core/sleeper/currentWeek.ts` is
+  Sleeper's own `week` (never `display_week`), week 1 out of season. Matchup,
+  lineup, Compare, Waivers, Trades, plan, projections refresh, crons and
+  snapshots call it. `tests/currentWeek.clock.test.ts` drives the refresh and
+  the screens at five moments of the week.

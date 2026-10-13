@@ -13,6 +13,7 @@
  * environment and are never sent to the browser.
  */
 
+import { currentWeek } from '../core/sleeper/currentWeek.ts';
 import { SleeperClient, type FetchLike } from '../core/sleeper/client.ts';
 import {
   budgetedFetch,
@@ -54,7 +55,6 @@ import { ManagerIntelService } from '../server/services/managerIntelService.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
 import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
 import { MatchupService } from '../server/services/matchupService.ts';
-import { resolveWeek } from '../core/matchup/build.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
 
 /**
@@ -398,7 +398,7 @@ export default {
               leagueId: selected.id,
               sleeperLeagueId: selected.sleeperLeagueId,
               season: selected.season,
-              week: state?.week ?? 1,
+              week: currentWeek(state),
               maxWeeks: 2,
               now: new Date(event.scheduledTime ?? Date.now()),
             });
@@ -406,7 +406,7 @@ export default {
             const weekPoints = new WeekPointsService(env.DB, metered.sleeper);
             const weekOpts = {
               season: selected.season,
-              week: state?.week ?? 1,
+              week: currentWeek(state),
               scoring: selected.scoringSettings,
               now: new Date(event.scheduledTime ?? Date.now()),
             };
@@ -1026,7 +1026,7 @@ async function refreshManagerTendencies(env: WorkerEnv, window: string): Promise
     leagueId: selected.id,
     sleeperLeagueId: selected.sleeperLeagueId,
     season: selected.season,
-    week: state?.week ?? 1,
+    week: currentWeek(state),
     /* A cap on the shared pool, not a second charge against it; see `RequestBudget.allowance`. */
     budget: budget.allowance(allowance),
   });
@@ -1142,7 +1142,7 @@ async function refreshPublishedProjections(env: WorkerEnv, appEnv: AppEnv): Prom
   const league = await new LeagueRepo(env.DB).getSelectedLeague();
   if (!league) return { outcome: 'skipped', note: 'no league selected' };
   const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
-  const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+  const week = currentWeek(state);
   const report = await new SleeperProjectionService(env.DB, appEnv.sleeper).refresh(league.season, week);
   if (report.outcome === 'unavailable') {
     console.log(`published projections ${report.season} week ${report.week}: ${report.detail ?? 'unavailable'}`);

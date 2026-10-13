@@ -32,6 +32,7 @@
  * scheduled run.
  */
 
+import { currentWeek } from '../../core/sleeper/currentWeek.ts';
 import {
   boundedNote,
   describeRun,
@@ -58,7 +59,6 @@ import {
 import { FRESHNESS_HOURS } from '../../core/injury/model.ts';
 import { STATE_STALE_AFTER_DAYS } from '../../core/season/context.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
-import { resolveWeek } from '../../core/matchup/build.ts';
 import type { VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
 import { CronRunRepo, type CronRunRecord } from '../repos/cronRuns.ts';
@@ -467,7 +467,7 @@ export class DataHealthService {
     const league = await new LeagueRepo(this.db).getSelectedLeague();
     if (!league) return { id: 'published-projections', lastSuccessAt: null, lastAttemptAt: null, state: 'unknown' };
     const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
-    const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+    const week = currentWeek(state);
     const held = await new SleeperProjectionsRepo(this.db).freshness(league.season, week);
     /*
      * A newest fetch that wrote a sliver of the week (October 2026: 30 of 406
