@@ -200,40 +200,18 @@ test.describe('the real matchup', () => {
   test('explains the odds one tap away, and says it never edits a lineup', async ({ page }) => {
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('odds-sheet')).toContainText('never edits one');
+    await expect(page.getByTestId('odds-sheet')).toContainText('never edits a lineup');
   });
 
   /**
-   * One fact, one primary home.
-   *
-   * The recommendation lives above the starters and is explained in the sheet
-   * behind that row. It used to be printed a third time near the bottom of
-   * `Behind the odds`, under a heading about something else, where a reader who
-   * had already acted on it met it again out of order. Asserted against the
-   * real endpoint rather than a fixture because the duplication was of a real
-   * decision, and either branch of it is a pass: a screen with a move to offer
-   * must not restate it here, and a screen with none must still say which of
-   * the three empty cases it is in.
+   * Behind the odds explains a number and recommends nothing (October 2026):
+   * no lineup-impact paragraph and no recommended mode.
    */
-  test('does not restate the recommendation inside Behind the odds', async ({ page }) => {
-    /*
-     * Read before the sheet opens, because it is what decides which branch is
-     * under test. `silent` is the fourth state — a finished afternoon draws no
-     * row at all — and it is grouped with the empty cases here: what matters is
-     * only whether a move is on offer.
-     */
-    const row = page.getByTestId('matchup-best-move');
-    const hasMove = (await row.count()) > 0 && (await row.getAttribute('data-state')) === 'move';
-
+  test('recommends nothing inside Behind the odds', async ({ page }) => {
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-
-    if (hasMove) {
-      await expect(page.getByTestId('lineup-impact')).toHaveCount(0);
-      await expect(page.getByTestId('odds-sheet')).not.toContainText('Lineup impact');
-    } else {
-      await expect(page.getByTestId('lineup-impact')).toBeVisible();
-    }
+    await expect(page.getByTestId('lineup-impact')).toHaveCount(0);
+    await expect(page.getByTestId('odds-sheet')).not.toContainText(/Recommended mode|Lineup impact|Hold your lineup/);
   });
 
   /**
@@ -886,25 +864,17 @@ function teamsAt(mine: number, over: Record<string, unknown> = {}) {
 }
 
 /**
- * The best move, above the fold.
+ * No advice on Matchup (October 2026).
  *
- * The screen's first job is answering *is there a lineup change I should make
- * right now?* before a reader taps anything, and the states below are the whole
- * of what it is allowed to answer. Everything here goes through the intercepted
- * endpoint for the same reason the states of an afternoon do: a recommendation
- * and its expiry are facts about a Sunday clock, and reaching them from the
- * seed would mean inventing one.
- *
- * What is **not** tested here is whether the recommendation is right — the
- * engine's answer arrives already chosen, and `tests/matchup.decision.test.ts`
- * is where it is held to being the right one. These are about the page keeping
- * faith with it: showing it when it stands, taking it away when it does not,
- * and never inventing one.
+ * The Team screen's Best move card is the only place the app says who to
+ * start, so the two screens cannot disagree. These serve a forecast whose
+ * model *did* find a better lineup and check that the page still draws none of
+ * it: no best-move row, no hold row, no sheet, no "Start X over Y", and the
+ * starters directly under the score with no gap where the row used to be.
  */
-test.describe('the best move', () => {
-  /** A recommendation shaped like the ones the engine produces. */
-  function move(over: Record<string, unknown> = {}) {
-    return {
+test.describe('no advice on Matchup', () => {
+  function morning() {
+    const best = {
       slot: 'FLEX',
       outPlayerId: 'm2',
       outName: 'Brandony Hall',
@@ -915,23 +885,7 @@ test.describe('the best move', () => {
       gain: 0.0383,
       pointsDelta: 2.8,
       reason: 'C. Olave projects higher and wins the matchup more often.',
-      ...over,
     };
-  }
-
-  /** The decision the model returns when one change is worth making. */
-  function decides(best: Record<string, unknown> | null, options: Record<string, unknown>[] = [], note: string | null = null) {
-    return { best, options: best ? [best, ...options] : options, considered: 3, note };
-  }
-
-  /**
-   * A Sunday morning: both lineups set, nothing kicked off, one swap on offer.
-   *
-   * `phase: 'pregame'` with every player unstarted, because that is the state a
-   * lineup decision actually exists in — the shared fixture is a live afternoon,
-   * where most of these moves would already be illegal.
-   */
-  function morning(forecastOver: Record<string, unknown> = {}, bench: Record<string, unknown> = {}) {
     return response(
       {},
       {
@@ -939,519 +893,34 @@ test.describe('the best move', () => {
         teams: teamsAt(0.44, { actual: 0 }),
         slots: [
           { slot: 'QB', mine: player('m1', 'J. Allen', 'QB', 'mine'), theirs: player('t1', 'D. Maye', 'QB', 'theirs') },
-          {
-            slot: 'FLEX',
-            mine: player('m2', 'B. Hall', 'RB', 'mine', { slot: 'FLEX#6', projectedFinal: 11.5 }),
-            theirs: null,
-          },
+          { slot: 'FLEX', mine: player('m2', 'B. Hall', 'RB', 'mine', { slot: 'FLEX#6', projectedFinal: 11.5 }), theirs: null },
         ],
         bench: {
-          mine: [player('m9', 'C. Olave', 'WR', 'mine', { starting: false, slot: null, projectedFinal: 14.3, ...bench })],
+          mine: [player('m9', 'C. Olave', 'WR', 'mine', { starting: false, slot: null, projectedFinal: 14.3 })],
           theirs: [],
         },
         insights: [],
-        decision: decides(move()),
-        ...forecastOver,
+        decision: { best, options: [best], considered: 3, note: null, onProjection: best },
       },
     );
   }
 
-  test('sits between the score and the lineup, and says what to do', async ({ page }) => {
+  test('renders no recommendation element, even when the model has one', async ({ page }) => {
     await serve(page, morning());
-
-    const row = page.getByTestId('matchup-best-move');
-    await expect(row).toHaveAttribute('data-state', 'move');
-    await expect(row).toContainText('Best move');
-    await expect(row).toContainText('Start C. Olave over B. Hall');
-    await expect(page.getByTestId('best-move-slot')).toHaveText('FLEX');
-    await expect(page.getByTestId('best-move-metrics')).toHaveText('+2.8 projected pts · 44% → 48%');
-
-    // Under the score, over the starters: the order the questions are asked in.
-    const score = (await page.getByTestId('matchup-score').boundingBox())!;
-    const box = (await row.boundingBox())!;
-    const starters = (await page.getByTestId('starters-title').boundingBox())!;
-    expect(box.y, 'the recommendation is above the scoreboard').toBeGreaterThanOrEqual(score.y + score.height - 1);
-    expect(starters.y, 'the recommendation is below the starters').toBeGreaterThanOrEqual(box.y + box.height - 1);
-  });
-
-  /**
-   * A grouped row, not a card — and one control rather than several.
-   *
-   * §8's whole warning is about this element becoming a dashboard tile: a
-   * heading, a metric grid, a second action. The height is the cheapest place
-   * to catch that, and the nested-control count is the other: §6 of the design
-   * system is that a row which leads somewhere is *one* button, so a reader
-   * cannot land on half of it.
-   */
-  test('is one tappable row at the grouped-row height, not a hero card', async ({ page }) => {
-    await serve(page, morning());
-    const row = page.getByTestId('matchup-best-move');
-
-    await expect(row).toHaveRole('button');
-    await expect(row.locator('button')).toHaveCount(0);
-
-    const box = (await row.boundingBox())!;
-    expect(box.height, `the best move has grown to ${Math.round(box.height)}px`).toBeLessThanOrEqual(80);
-    expect(box.height, 'the best move has collapsed').toBeGreaterThanOrEqual(44);
-
-    // Full width, and it fits: the page still does not scroll sideways.
-    const page_ = await page.evaluate(() => ({
-      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      width: document.documentElement.clientWidth,
-    }));
-    expect(page_.overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
-    expect(box.width).toBeGreaterThan(page_.width * 0.8);
-  });
-
-  /**
-   * The tab order the brief asks for, read off the document.
-   *
-   * Nothing on this screen sets a positive `tabindex`, so document order *is*
-   * focus order — which makes this the honest way to assert it and keeps it
-   * true of a keyboard, a switch and VoiceOver alike.
-   */
-  test('takes focus between the scoreboard and the lineup', async ({ page }) => {
-    await serve(page, morning());
-    // The geometry below is read in one pass, so the page has to have drawn.
-    await expect(page.getByTestId('matchup-best-move')).toBeVisible();
-    const order = await page.evaluate(() => {
-      const at = (sel: string) => document.querySelector(sel);
-      const nodes = [at('[data-testid="matchup-win"]'), at('[data-testid="matchup-best-move"]'), at('[data-testid="matchup-player"]')];
-      if (nodes.some((n) => n == null)) return null;
-      return [
-        nodes[0]!.compareDocumentPosition(nodes[1]!) & Node.DOCUMENT_POSITION_FOLLOWING,
-        nodes[1]!.compareDocumentPosition(nodes[2]!) & Node.DOCUMENT_POSITION_FOLLOWING,
-        document.querySelectorAll('[tabindex]:not([tabindex="-1"]):not([tabindex="0"])').length,
-      ];
-    });
-    expect(order, 'one of the three elements is missing').not.toBeNull();
-    expect(order![0], 'the best move does not follow the scoreboard').toBeGreaterThan(0);
-    expect(order![1], 'the lineup does not follow the best move').toBeGreaterThan(0);
-    expect(order![2], 'something sets a positive tabindex').toBe(0);
-  });
-
-  /**
-   * Nothing worth changing, said as a decision and not as an absence.
-   *
-   * This used to be a grey footnote beside the `Starters` heading reading `No
-   * lineup change recommended`, on the argument that an absence taking seventy
-   * pixels of a phone is an absence charging rent. The argument mistook what
-   * the state is. Holding is what the engine is recommending — most weeks it is
-   * the right call — and a reader who opens the screen before kickoff, finds
-   * nothing where the answer lives and a faint line next to a heading, reads
-   * "the app has nothing to say" rather than "hold", and goes and changes
-   * something nobody recommended.
-   *
-   * So it is the same control in the same slot as a swap, saying the thing out
-   * loud — and it still does not claim the lineup is optimal, because the
-   * engine suppresses everything under two points of win probability and the
-   * reason is one tap in rather than asserted on the face of the row.
-   */
-  test('recommends holding when no change clears the bar', async ({ page }) => {
-    await serve(page, morning({ decision: decides(null, [], 'No legal change improves your chance of winning this matchup.') }));
-
-    const row = page.getByTestId('matchup-best-move');
-    await expect(row).toHaveAttribute('data-state', 'hold');
-    await expect(row).toContainText('Best move');
-    await expect(row).toContainText('Hold your lineup');
-    await expect(page.getByText(/optimal lineup/i)).toHaveCount(0);
-
-    /*
-     * A control, in the same slot and above the same list as a swap: the two
-     * moods of one recommendation, not two designs.
-     */
-    await expect(page.locator('button[data-testid="matchup-best-move"]')).toHaveCount(1);
-    await expect(row).toHaveAttribute('aria-label', /Best move: hold your lineup/);
-    const starters = (await page.getByTestId('starters-title').boundingBox())!;
-    expect((await row.boundingBox())!.y).toBeLessThan(starters.y);
-
-    // And why, in the model's own sentence, one tap in.
-    await row.click();
-    await expect(page.getByTestId('best-move-sheet')).toBeVisible();
-    await expect(page.getByTestId('best-move-lead')).toHaveText('Hold your lineup');
-    await expect(page.getByTestId('best-move-reason')).toHaveText(
-      'No legal change improves your chance of winning this matchup.',
-    );
-    await expect(page.getByTestId('best-move-footer')).toContainText('does not edit it');
-  });
-
-  /**
-   * The three reasons to hold stay three reasons.
-   *
-   * §6 of the cleanup brief is explicit that the causes must not be flattened
-   * in the evidence layer: the row says `Hold your lineup` in all three cases,
-   * and what is behind it has to keep telling them apart. `Every remaining
-   * lineup decision is already locked` at one on a Sunday and `Nobody on your
-   * bench could legally take a starting slot` on the Thursday before are
-   * different facts about a reader's week.
-   */
-  test('keeps the three reasons to hold apart behind the row', async ({ page }) => {
-    for (const note of [
-      'Every remaining lineup decision is already locked.',
-      'Nobody on your bench could legally take a starting slot.',
-      'No legal change improves your chance of winning this matchup.',
-    ]) {
-      await serve(page, morning({ decision: decides(null, [], note) }));
-      await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
-      await page.getByTestId('matchup-best-move').click();
-      await expect(page.getByTestId('best-move-reason')).toHaveText(note);
-      await page.keyboard.press('Escape');
-      await expect(page.getByTestId('best-move-sheet')).toHaveCount(0);
-    }
-  });
-
-  /**
-   * The recommendation has one primary home, and `Behind the odds` is not it.
-   *
-   * `Lineup impact` used to print the swap, the odds it moves and the reason
-   * for it — every word of which the `Best move` row above the starters and the
-   * sheet behind it now say first. Both fixtures are driven here because the
-   * removal was conditional: the duplicated half is gone and the half that was
-   * only ever in this sheet is not.
-   */
-  test('drops Lineup impact once the best move has a home of its own', async ({ page }) => {
-    await serve(page, morning());
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'move');
-
-    await page.getByTestId('matchup-win').click();
-    const sheet = page.getByTestId('odds-sheet');
-    await expect(sheet).toBeVisible();
-    await expect(page.getByTestId('lineup-impact')).toHaveCount(0);
-    await expect(sheet).not.toContainText('Lineup impact');
-    await expect(sheet).not.toContainText('Start C. Olave over B. Hall');
-    await expect(sheet).not.toContainText('C. Olave projects higher');
-
-    // Everything this sheet is actually for is still in it. (No leverage rows in
-    // this fixture — the swings list is covered where the fixture carries some.)
-    await expect(page.getByTestId('mode-why')).toBeVisible();
-    await expect(sheet).toContainText('Projected final');
-    await expect(sheet).toContainText('Recommended mode');
-    await expect(sheet).toContainText('never edits one');
-  });
-
-  /**
-   * The half that was only ever here.
-   *
-   * The row above the starters says `Hold your lineup` for all three empty
-   * cases. Which one it is — locked, nobody legal, nothing better — is
-   * `decision.note`, and this sheet still prints it for a reader who arrived by
-   * tapping a win probability rather than the recommendation.
-   */
-  test('keeps the reason there is no move, which the screen cannot say', async ({ page }) => {
-    await serve(page, morning({ decision: decides(null, [], 'Nobody on your bench could legally take a starting slot.') }));
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
-
-    await page.getByTestId('matchup-win').click();
-    await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('lineup-impact')).toHaveText(
-      'Nobody on your bench could legally take a starting slot.',
-    );
-  });
-
-  /**
-   * "Hold" and "we cannot say" are different answers.
-   *
-   * Both leave `decision.best` null, and a screen that keyed off that alone
-   * would recommend holding on the morning the forecast had failed. §5 asks for
-   * the two to be distinguishable, and they are — by the words, by the state
-   * the row publishes, and by whether it is a control at all.
-   */
-  test('refuses to recommend anything when there is no forecast to recommend from', async ({ page }) => {
-    await serve(
-      page,
-      morning({
-        degraded: true,
-        teams: teamsAt(0.5, { actual: 0, projectedFinal: null, winProbability: null }),
-        decision: decides(null, [], 'No forecast is available, so no lineup comparison can be made.'),
-      }),
-    );
-
-    const note = page.getByTestId('matchup-best-move');
-    await expect(note).toHaveAttribute('data-state', 'unavailable');
-    await expect(note).toHaveText('No lineup recommendation without a forecast');
-    /*
-     * And emphatically not `Hold your lineup`, which would be advice invented
-     * out of a failure — the one thing the hold state must never be. It is also
-     * not a control: there is nothing to explain.
-     */
-    await expect(page.getByText(/hold your lineup/i)).toHaveCount(0);
-    await expect(page.locator('button[data-testid="matchup-best-move"]')).toHaveCount(0);
-    await expect(page.getByTestId('matchup-degraded')).toBeVisible();
-  });
-
-  /**
-   * A degraded forecast carrying a recommendation is still a degraded forecast.
-   *
-   * The model cannot produce this state — it nulls the decision when it gives
-   * up — and that is exactly why it is worth asserting: the screen must not be
-   * the thing standing between a stale `best` and confident copy on the page.
-   */
-  test('never prints a recommendation over a degraded forecast', async ({ page }) => {
-    await serve(page, morning({ degraded: true, decision: decides(move()) }));
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'unavailable');
-    await expect(page.getByText(/Start C\. Olave over B\. Hall/)).toHaveCount(0);
-  });
-
-  /** A settled afternoon carries no lineup advice at all, restrained or not. */
-  test('says nothing whatever once the matchup is final', async ({ page }) => {
-    await serve(page, morning({ phase: 'final', decision: decides(null, [], 'Every remaining lineup decision is already locked.') }));
-    await expect(page.getByTestId('matchup-result')).toBeVisible();
+    await expect(page.getByTestId('matchup-row')).toHaveCount(2);
     await expect(page.getByTestId('matchup-best-move')).toHaveCount(0);
-  });
-
-  /**
-   * The status mark survives the trip onto the recommendation.
-   *
-   * The engine has already priced the chance he does not play, so a Q is not a
-   * reason to suppress the advice — it is a reason the advice has to carry it.
-   * The letter is what the lineup rows below show, and the word is what
-   * anything reading the row aloud says, which is §7's rule about expanding Q,
-   * D and OUT without turning the visual mark into a sentence.
-   */
-  test('keeps the status mark on a player it recommends, and spells it out', async ({ page }) => {
-    await serve(page, morning({}, { statusFlag: 'Q', availabilityRisky: true }));
-
-    await expect(page.getByTestId('best-move-status')).toHaveText('Q');
-    const row = page.getByTestId('matchup-best-move');
-    // Spelled out, and around his *full* name: `C. Olave` reads aloud as
-    // "cee dot olave", and the abbreviation is a decision about a 42px column.
-    await expect(row).toHaveAttribute('aria-label', /start Cony Olave, questionable, over Bony Hall/);
-    await expect(row).toHaveAttribute('aria-label', /Show why/);
-    await expect(row).not.toHaveAttribute('aria-label', /C\. Olave/);
-  });
-
-  /**
-   * The one case the whole variance model exists for, printed honestly.
-   *
-   * A swap that costs projected points and still wins more afternoons is not an
-   * edge case — it is the answer a median cannot reach, and the reason this
-   * engine simulates at all. A row that quietly dropped the minus sign would be
-   * the single recommendation in this app a reader is right not to trust.
-   */
-  test('prints a projection given up with its minus sign', async ({ page }) => {
-    await serve(page, morning({ decision: decides(move({ pointsDelta: -1.4, winNow: 0.38, winAfter: 0.43, gain: 0.05 })) }));
-    await expect(page.getByTestId('best-move-metrics')).toHaveText('-1.4 projected pts · 38% → 43%');
-  });
-
-  /**
-   * `gain` is `winAfter − winNow` and printing it as well is one fact twice.
-   *
-   * Asserted as an exact string rather than an absence, because an absence
-   * assertion passes for the wrong reason the moment the element is renamed.
-   */
-  test('never prints the gain beside the odds it is the difference of', async ({ page }) => {
-    await serve(page, morning());
-    await expect(page.getByTestId('best-move-metrics')).toHaveText('+2.8 projected pts · 44% → 48%');
-
-    await page.getByTestId('matchup-best-move').click();
-    const sheet = page.getByTestId('best-move-sheet');
-    await expect(sheet).toBeVisible();
-    await expect(sheet).not.toContainText('+4%');
-    await expect(sheet).not.toContainText('4 points of win');
-  });
-
-  /**
-   * The explanation, in its own sheet rather than in the one behind the odds.
-   *
-   * A reader who taps a win probability is asking what is behind a number; a
-   * reader who taps `Best move` has been told what to do and is asking whether
-   * to believe it. Sending the second into `Behind the odds` answers him four
-   * sections later under a heading about something else.
-   */
-  test('opens a focused sheet, not the generic odds sheet', async ({ page }) => {
-    await serve(page, morning());
-    await page.getByTestId('matchup-best-move').click();
-
-    const sheet = page.getByTestId('best-move-sheet');
-    await expect(sheet).toBeVisible();
-    await expect(page.getByTestId('odds-sheet')).toHaveCount(0);
-    await expect(sheet).toHaveAttribute('aria-label', 'Best move');
-
-    await expect(page.getByTestId('best-move-lead')).toContainText('Start C. Olave over B. Hall');
-    await expect(page.getByTestId('best-move-lead')).toContainText('FLEX');
-    await expect(sheet).toContainText('Projected points');
-    await expect(sheet).toContainText('+2.8');
-    await expect(sheet).toContainText('44% → 48%');
-    await expect(page.getByTestId('best-move-reason')).toContainText('projects higher');
-    await expect(page.getByTestId('best-move-footer')).toHaveText(
-      'Change your lineup in Sleeper. Fantasy Analyst does not edit it.',
-    );
-  });
-
-  /**
-   * Only the best one is on the page, and the rest are behind it in order.
-   *
-   * The engine ranks by win-probability gain, and the sheet is not allowed to
-   * re-rank: a second ordering is a second opinion with no tests behind it.
-   */
-  test('keeps every other worthwhile move off the page and inside the sheet', async ({ page }) => {
-    const second = move({ inPlayerId: 'm9', outPlayerId: 'm1', outName: 'Jony Allen', slot: 'QB', winAfter: 0.4611, gain: 0.0199, pointsDelta: -0.6 });
-    const third = move({ inPlayerId: 'm9', outPlayerId: 't1', outName: 'Dony Maye', slot: 'QB', winAfter: 0.4552, gain: 0.014, pointsDelta: -1.2 });
-    await serve(page, morning({ decision: decides(move(), [second, third]) }));
-
-    // One recommendation on the page, whatever the engine offered.
-    await expect(page.getByTestId('matchup-best-move')).toHaveCount(1);
-    await expect(page.getByTestId('matchup-best-move')).toContainText('Start C. Olave over B. Hall');
-
-    await page.getByTestId('matchup-best-move').click();
-    await expect(page.getByTestId('best-move-others-title')).toContainText('Other worthwhile moves (2)');
-    const rows = page.getByTestId('best-move-other');
-    await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0)).toContainText('over J. Allen');
-    await expect(rows.nth(0)).toContainText('44% → 46%');
-    await expect(rows.nth(1)).toContainText('over D. Maye');
-  });
-
-  test('says nothing about other moves when the engine offered only one', async ({ page }) => {
-    await serve(page, morning());
-    await page.getByTestId('matchup-best-move').click();
-    await expect(page.getByTestId('best-move-sheet')).toBeVisible();
-    await expect(page.getByTestId('best-move-others-title')).toHaveCount(0);
-  });
-
-  /**
-   * Evidence is one tap further, and it swaps the sheet rather than stacking it.
-   *
-   * Two modals over each other is two focus traps, two Escapes and two
-   * dismissal gestures fighting over one screen — the arrangement the insight
-   * rows in the odds sheet were already built to avoid, and this follows them.
-   */
-  test('opens a player from the sheet without stacking a second sheet', async ({ page }) => {
-    const body = morning();
-    (body as { cards: Record<string, unknown> }).cards = {
-      m9: {
-        playerId: 'm9',
-        name: 'C. Olave',
-        position: 'WR',
-        team: 'NO',
-        headline: { verdict: 'start', label: 'Start', detail: null, tone: 'take' },
-        confidence: 'high',
-        score: 14.3,
-        opponent: 'TB',
-        lines: [],
-        props: [],
-        drivers: [],
-        conflicts: [],
-        changes: [],
-        pending: [],
-      },
-    };
-    await serve(page, body);
-
-    await page.getByTestId('matchup-best-move').click();
-    // Only the man with a card behind him is a control. The other is not drawn.
-    const players = page.getByTestId('best-move-player');
-    await expect(players).toHaveCount(1);
-    await players.first().click();
-
     await expect(page.getByTestId('best-move-sheet')).toHaveCount(0);
-    await expect(page.getByTestId('weekly-sheet')).toBeVisible();
-    await expect(page.locator('[role="dialog"]')).toHaveCount(1);
+    await expect(page.locator('body')).not.toContainText(/Best move|Hold your lineup|Higher projection|Start \S+.* over /);
   });
 
-  /**
-   * The rule §5 is absolute about: a recommendation may not outlive its legality.
-   *
-   * The screen polls while a move is on it — which is the change this feature
-   * needed, because the old condition only polled a *live* matchup and a swap
-   * expires at a kickoff, when nothing is live yet. Here the endpoint starts
-   * answering with the state the engine produces once those games are running,
-   * and the row has to go on the next read rather than at the next reload.
-   *
-   * Driven through the visibility path rather than through the thirty-second
-   * timer, because the two share one code path and one of them does not take
-   * thirty seconds to assert.
-   */
-  test('takes the recommendation away once a kickoff makes it illegal', async ({ page }) => {
-    let body: unknown = morning();
-    await allowMatchup(page);
-    await page.route('**/api/leagues/*/matchup*', async (route) => route.fulfill({ json: body }));
-    await page.goto('/');
-    await page.getByTestId('tab-matchup').click();
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'move');
-
-    // The early games start. The engine stops offering a swap nobody can make.
-    body = morning({
-      phase: 'live',
-      decision: decides(null, [], 'Every remaining lineup decision is already locked.'),
-    });
-    await returnToScreen(page);
-
-    /*
-     * `hold`, not silence: the swap is gone and what replaces it is the honest
-     * remaining advice, with the model's own `already locked` behind it. The
-     * one thing that must not survive is the swap itself.
-     */
-    await expect(page.getByTestId('matchup-best-move')).toHaveAttribute('data-state', 'hold');
-    await expect(page.getByText(/Start C\. Olave over B\. Hall/)).toHaveCount(0);
-  });
-
-  /** …and a sheet opened from it cannot outlive it either. */
-  test('closes the explanation when the move it explains expires', async ({ page }) => {
-    let body: unknown = morning();
-    await allowMatchup(page);
-    await page.route('**/api/leagues/*/matchup*', async (route) => route.fulfill({ json: body }));
-    await page.goto('/');
-    await page.getByTestId('tab-matchup').click();
-
-    await page.getByTestId('matchup-best-move').click();
-    await expect(page.getByTestId('best-move-sheet')).toBeVisible();
-
-    body = morning({ phase: 'live', decision: decides(null, [], 'Every remaining lineup decision is already locked.') });
-    await returnToScreen(page);
-
-    await expect(page.getByTestId('best-move-sheet')).toHaveCount(0);
-    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
-  });
-
-  /**
-   * Two themes, one row — asserted against the tokens rather than by eye.
-   *
-   * The failure a screenshot review misses is a colour written as a colour: a
-   * surface that happens to look right in Light and is a pale card on a
-   * near-black page in Dark. So the claim is structural. The row is painted in
-   * the *same* material as the starters below it, in both themes, which is the
-   * design decision this element rests on — and its three registers stay three
-   * registers rather than collapsing into one.
-   */
-  test('takes its material from the same tokens as the lineup, in both themes', async ({ page }) => {
+  test('puts the starters straight under the score, with no gap where advice was', async ({ page }) => {
     await serve(page, morning());
-    await expect(page.getByTestId('matchup-best-move')).toBeVisible();
-
-    for (const theme of ['light', 'dark'] as const) {
-      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
-      const paint = await page.evaluate(() => {
-        const row = document.querySelector('[data-testid="matchup-best-move"]')!;
-        const colour = (el: Element, prop: 'color' | 'background-color') => getComputedStyle(el).getPropertyValue(prop);
-        return {
-          surface: colour(row, 'background-color'),
-          lineup: colour(document.querySelector('.matchup-rows')!, 'background-color'),
-          page: colour(document.body, 'background-color'),
-          swap: colour(row.querySelector('.matchup-best-move-names')!, 'color'),
-          label: colour(row.querySelector('.matchup-best-move-label')!, 'color'),
-          metrics: colour(row.querySelector('.matchup-best-move-metrics')!, 'color'),
-        };
-      });
-
-      expect(paint.surface, `the best move is not on the lineup's surface in ${theme}`).toBe(paint.lineup);
-      expect(paint.surface, `the best move is unpainted in ${theme}`).not.toBe('rgba(0, 0, 0, 0)');
-      expect(paint.surface, `the best move is the page colour in ${theme}`).not.toBe(paint.page);
-
-      // Three registers: the swap loudest, the label and the numbers quieter.
-      expect(paint.swap, `the swap is invisible in ${theme}`).not.toBe(paint.surface);
-      expect(paint.label, `the label is the swap's weight in ${theme}`).not.toBe(paint.swap);
-      expect(paint.metrics, `the numbers are the swap's weight in ${theme}`).not.toBe(paint.swap);
-      expect(paint.metrics, `the numbers are invisible in ${theme}`).not.toBe(paint.surface);
-    }
-    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+    const score = await page.getByTestId('matchup-score').boundingBox();
+    const starters = await page.getByTestId('starters-title').boundingBox();
+    expect(score && starters).toBeTruthy();
+    expect(starters!.y - (score!.y + score!.height)).toBeLessThanOrEqual(32);
   });
 
-  /**
-   * Everything that was already on this screen, still on it.
-   *
-   * The one thing a new element above the lineup can do that no assertion about
-   * the element itself would catch: quietly break the screen it was added to.
-   */
   test('leaves the bench folded, the odds sheet working and the lineup drawn', async ({ page }) => {
     await serve(page, morning());
 
@@ -1460,7 +929,7 @@ test.describe('the best move', () => {
 
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('odds-sheet')).toContainText('never edits one');
+    await expect(page.getByTestId('odds-sheet')).toContainText('never edits a lineup');
     await page.getByTestId('sheet-close').click();
 
     await page.getByTestId('bench-toggle').click();
