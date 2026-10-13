@@ -3,6 +3,7 @@ import { emptySignal } from '../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../src/core/evidence/types.ts';
 import { buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildExpectation } from '../src/core/startsit/expectation.ts';
+import { LINE_AS_MEDIAN } from '../src/core/startsit/propConversion.ts';
 import { compareStartSit, evaluatePlayer } from '../src/core/startsit/engine.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
 import { TEST_PLAYERS } from './helpers/players.ts';
@@ -38,15 +39,17 @@ function signal(net: number, items = 3): PlayerSignal {
 }
 
 describe('buildExpectation', () => {
+  // The scoring arithmetic, on the bare line. The conversion from line to
+  // average has its own tests in `propConversion.test.ts`.
   it('converts WR markets with league scoring', () => {
-    const exp = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], HALF_PPR);
+    const exp = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], HALF_PPR, LINE_AS_MEDIAN);
     // 70 * 0.1 + 5 * 0.5 = 9.5
     expect(exp.points).toBeCloseTo(9.5, 2);
   });
 
   it('reflects the league PPR setting', () => {
-    const half = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], HALF_PPR);
-    const full = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], FULL_PPR);
+    const half = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], HALF_PPR, LINE_AS_MEDIAN);
+    const full = buildExpectation('WR', [prop('receiving_yards', 70), prop('receptions', 5)], FULL_PPR, LINE_AS_MEDIAN);
     expect(full.points! - half.points!).toBeCloseTo(2.5, 2);
   });
 
@@ -58,7 +61,7 @@ describe('buildExpectation', () => {
   });
 
   it('converts an anytime TD price into expected points', () => {
-    const exp = buildExpectation('WR', [prop('anytime_td', null, { impliedProbability: 0.4 })], HALF_PPR);
+    const exp = buildExpectation('WR', [prop('anytime_td', null, { impliedProbability: 0.4 })], HALF_PPR, LINE_AS_MEDIAN);
     expect(exp.points).toBeCloseTo(2.4, 2); // 0.4 * 6
   });
 
@@ -67,6 +70,7 @@ describe('buildExpectation', () => {
       'QB',
       [prop('pass_yards', 250), prop('pass_tds', 1.5), prop('anytime_td', null, { impliedProbability: 0.5 })],
       HALF_PPR,
+      LINE_AS_MEDIAN,
     );
     // 250*0.04 + 1.5*4 = 16; the anytime TD market is intentionally excluded.
     expect(exp.points).toBeCloseTo(16, 2);

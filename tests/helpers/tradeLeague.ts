@@ -18,6 +18,15 @@ import { SettingsRepo, SETTING_KEYS } from '../../src/server/repos/settings.ts';
 import { EXPECTED_MARKETS } from '../../src/core/startsit/expectation.ts';
 import type { PlayerProp } from '../../src/core/vegas/types.ts';
 import { player } from './players.ts';
+import { lineForMean } from '../../src/core/startsit/propConversion.ts';
+import { SCORING_RULES } from '../../src/core/startsit/scoringRules.ts';
+/** A line whose converted average is exactly `points` (see `lineForMean`). */
+function fixtureLine(position: string, points: number): number {
+  return position === 'QB'
+    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
+    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
+}
+
 
 /** Tony's Pizza Fantasy, as Sleeper publishes it. */
 export const POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'];
@@ -95,7 +104,7 @@ function boardFor(id: string, position: string, points: number): PlayerProp[] {
     impliedProbability: p,
   });
   const main = position === 'QB' ? 'pass_yards' : position === 'RB' ? 'rush_yards' : 'receiving_yards';
-  const lineFor = position === 'QB' ? points / 0.04 : points * 10;
+  const lineFor = fixtureLine(position, points);
   const props: PlayerProp[] = [make(main, lineFor)];
   for (const other of EXPECTED_MARKETS[position] ?? []) {
     if (other === main) continue;

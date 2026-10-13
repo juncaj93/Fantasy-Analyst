@@ -4,7 +4,7 @@
  *  - `Changes to consider` opens the Compare sheet on its own two players, and
  *    the sheet agrees with it (item 1's fix is unit-tested in
  *    `startsit.suggestionAgreesWithCompare.test.ts`; this is the tap).
- *  - The Compare picker narrows to the reader's own roster.
+ *  - The Compare picker opens on the reader's own roster.
  *  - A player who is out shows no forecast; a doubtful or questionable one
  *    shows the discounted figure over the struck one.
  */
@@ -42,61 +42,70 @@ test.describe('the Team round of 30 September', () => {
     await change.click();
 
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
-    await expect(page.getByTestId('compare-sheet')).toContainText('Compare for FLEX');
+    await expect(page.getByTestId('compare-sheet')).toContainText('FLEX slot');
     const columns = page.getByTestId('compare-column');
     await expect(columns).toHaveCount(2);
     const ids = await columns.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
     expect(new Set(ids)).toEqual(new Set(['1001', '1004']));
   });
 
-  test('My roster narrows the picker to the reader’s own players', async ({ page }) => {
+  test('My roster lists only the reader’s own players, and All players says whose', async ({ page }) => {
     await page.getByTestId('compare-open').click();
-    const chip = page.getByTestId('compare-mine-filter');
-    await expect(chip).toHaveAttribute('aria-pressed', 'false');
-    await chip.click();
-    await expect(chip).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('compare-tab-mine')).toHaveAttribute('aria-pressed', 'true');
     const rows = page.getByTestId('compare-candidate');
     await expect(rows.first()).toBeVisible();
-    /* Asked of the live list, so a page still arriving cannot pass or fail it early. */
-    await expect(rows.filter({ hasNotText: 'Your roster' })).toHaveCount(0);
-    await chip.click();
-    await expect(page.getByTestId('compare-candidate').filter({ hasText: 'Your roster' }).first()).toBeVisible();
+    await expect(page.getByTestId('compare-owner')).toHaveCount(0);
+    await page.getByTestId('compare-tab-all').click();
+    await expect(page.getByTestId('compare-tab-all')).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.first()).toBeVisible();
   });
 
   /*
-   * The picker's header gives its room to the list (owner's phone check, 30
-   * September 2026): no `Any lineup spot`, no paragraph of instructions, and
-   * `My roster` beside the Compare button rather than on a row of its own.
+   * The picker gives its room to the list: no instructions, just the tabs,
+   * search and the position filter under the pinned strip.
    */
-  test('the picker header is one row of controls, with no instructions above it', async ({ page }) => {
+  test('the picker carries no instructions above its list', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     const sheet = page.getByTestId('compare-sheet');
     await expect(sheet).toBeVisible();
     await expect(sheet).not.toContainText('Any lineup spot');
     await expect(sheet).not.toContainText('fair game');
     await expect(page.getByTestId('compare-hint')).toHaveCount(0);
+    await expect(page.getByTestId('compare-tabs')).toBeVisible();
+  });
 
-    /*
-     * Both boxes read in one frame, and polled: the sheet is still sliding up
-     * for its first few hundred milliseconds, and two separate reads taken
-     * mid-slide disagree by however far it moved in between.
-     */
-    const boxes = () =>
-      page.evaluate(() => {
-        const r = (id: string) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect();
-        const run = r('compare-run');
-        const chip = r('compare-mine-filter');
-        return { runRight: run.right, runMid: run.y + run.height / 2, chipLeft: chip.x, chipMid: chip.y + chip.height / 2 };
-      });
-    // Same row: their vertical centres agree, and the chip sits to the right.
-    await expect
-      .poll(async () => {
-        const b = await boxes();
-        return Math.abs(b.runMid - b.chipMid);
-      })
-      .toBeLessThan(2);
-    const b = await boxes();
-    expect(b.chipLeft).toBeGreaterThanOrEqual(b.runRight);
+  /*
+   * Best move (October 2026): the Matchup row's grammar on Team. Label in gray,
+   * names in the text colour, numbers in gray, the priced count kept, and the
+   * close-call line when the week's posture settled it.
+   */
+  test('Best move reads like the Matchup row, and says why on a close call', async ({ page }) => {
+    await page.route('**/api/leagues/*/lineup', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const swap = {
+        slot: 'FLEX', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1001', outName: 'Marcus Vance', gain: -0.3, reason: 'x',
+        tiebreak: { pill: 'explosive', posture: 'underdog', sentence: "Close call. You're the underdog, so the higher ceiling gets the nod." },
+      };
+      await route.fulfill({ response, body: JSON.stringify({ ...body, swaps: [swap], fills: [] }) });
+    });
+    await page.reload();
+    await page.getByTestId('tab-team').click();
+    const card = page.getByTestId('lineup-card');
+    await expect(card).toContainText('Best move');
+    await expect(card).not.toContainText('Changes to consider');
+    await expect(page.getByTestId('lineup-sourcing')).toHaveText(/^\d+\/\d+ priced$/);
+    await expect(page.getByTestId('best-move-points')).toContainText('projected');
+    await expect(page.getByTestId('best-move-tiebreak')).toHaveText("Close call. You're the underdog, so the higher ceiling gets the nod.");
+    const colours = await card.evaluate((el) => ({
+      label: getComputedStyle(el.querySelector('.matchup-best-move-label')!).color,
+      names: getComputedStyle(el.querySelector('.matchup-best-move-names')!).color,
+      numbers: getComputedStyle(el.querySelector('.matchup-best-move-metrics')!).color,
+    }));
+    expect(colours.label).not.toBe(colours.names);
+    expect(colours.numbers).not.toBe(colours.names);
+    const box = (await card.boundingBox())!;
+    expect(box.height / page.viewportSize()!.height).toBeLessThan(0.2);
   });
 
   test('never prints a plain forecast for a player who may not play', async ({ page }) => {

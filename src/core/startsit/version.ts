@@ -46,7 +46,7 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * to the any-touchdown chance it implies (`touchdownLine.ts`) instead of being
  * read as one. Market numbers rise for unchanged inputs, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@3';
+export const STARTSIT_ENGINE_VERSION = 'startsit@4';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
@@ -61,4 +61,4 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@3';
  * `decisionPoints`, which the Compare sheet now ranks on too. `score` itself
  * is unchanged, so `startsit@1` still is.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@3', STARTSIT_ENGINE_VERSION);
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@4', STARTSIT_ENGINE_VERSION);

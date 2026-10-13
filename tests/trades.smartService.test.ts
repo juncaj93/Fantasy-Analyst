@@ -35,6 +35,15 @@ import type { PlayerProp } from '../src/core/vegas/types.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { player } from './helpers/players.ts';
 import { createTestDb } from './helpers/db.ts';
+import { lineForMean } from '../src/core/startsit/propConversion.ts';
+import { SCORING_RULES } from '../src/core/startsit/scoringRules.ts';
+/** A line whose converted average is exactly `points` (see `lineForMean`). */
+function fixtureLine(position: string, points: number): number {
+  return position === 'QB'
+    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
+    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
+}
+
 
 /**
  * A Sleeper client that records every request and refuses to answer one.
@@ -134,7 +143,7 @@ async function seedTradingLeague(db: NodeSqliteDatabase): Promise<string> {
     playerId: id,
     sourcePlayerName: id.toUpperCase(),
     market: position === 'QB' ? 'pass_yards' : 'receiving_yards',
-    line: position === 'QB' ? points / 0.04 : points * 10,
+    line: fixtureLine(position, points),
     overPrice: -110,
     underPrice: -110,
     bookCount: 3,

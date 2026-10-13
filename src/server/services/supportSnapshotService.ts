@@ -49,6 +49,7 @@ import type { InSeasonKind } from '../../core/support/contexts.ts';
 import type { DecisionPayload, SnapshotDataHealth, SupportSnapshot } from '../../core/support/schema.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { Database } from '../db.ts';
+import { postureFrom } from '../../core/startsit/tiebreak.ts';
 
 export interface SupportCaptureOptions {
   db: Database;
@@ -102,6 +103,7 @@ export async function captureSupportSnapshot(
         profile: gathered.profile,
         inputs: gathered.inputs,
         mode: gathered.mode,
+        posture: postureFrom(gathered.modeSuggestion.margin),
         published: gathered.published,
         nflState: gathered.nflState,
         props: gathered.props,

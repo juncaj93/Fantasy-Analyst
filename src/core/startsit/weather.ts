@@ -29,6 +29,17 @@
  * A dome is not a mild day, it is the absence of the question. Indoor games
  * return `unknown: false` with zero points and say so, which is different from
  * having no forecast at all.
+ *
+ * ## Three states, since October 2026
+ *
+ * 1. **A real forecast.** Points move only for strong wind or snow, only for
+ *    the passing game (quarterbacks, receivers, tight ends) and kickers, and by
+ *    at most {@link WEATHER.maxPenaltyPoints}. Rain alone no longer moves
+ *    anybody, and a back is no longer paid for his passing game's bad day: the
+ *    market prices the run-heavy script into his line already.
+ * 2. **Dome or closed roof.** Known, unaffected, and said so.
+ * 3. **No forecast yet.** Neutral, and labelled "no forecast yet". This app has
+ *    no forecast feed today, so every outdoor game is in this state.
  */
 
 import type { RoleBucket } from './roleProfile.ts';
@@ -41,7 +52,7 @@ export const WEATHER = {
    * Below 12 the effect is not distinguishable from noise. Above about 25 the
    * passing game is already as compromised as this model is willing to claim.
    */
-  windOnset: 12,
+  windOnset: 15,
   windFull: 25,
   /**
    * Precipitation, in millimetres per hour, at which the ball is genuinely
@@ -50,7 +61,9 @@ export const WEATHER = {
   rainOnset: 2.5,
   rainFull: 8,
   /** The most weather can take off a player, in fantasy points. */
-  maxPenaltyPoints: 1.4,
+  maxPenaltyPoints: 1,
+  /** How much of a full-strength wind effect snow on its own is worth. */
+  snowSeverity: 0.4,
   /**
    * The most a running back can *gain* from a passing game being suppressed.
    *
@@ -91,9 +104,9 @@ const WIND_SENSITIVITY: Record<string, number> = {
   deep_receiver: 1,
   intermediate_receiver: 0.6,
   underneath_receiver: 0.3,
-  receiving_back: 0.2,
-  dual_threat_back: -0.15,
-  rushing_back: -0.35,
+  receiving_back: 0,
+  dual_threat_back: 0,
+  rushing_back: 0,
   pocket_quarterback: 0.8,
   rushing_quarterback: 0.5,
 };
@@ -102,7 +115,8 @@ const POSITION_WIND_SENSITIVITY: Record<string, number> = {
   QB: 0.7,
   WR: 0.6,
   TE: 0.4,
-  RB: -0.2,
+  RB: 0,
+  K: 1,
 };
 
 export interface WeatherAssessment {
@@ -118,7 +132,7 @@ export const NO_WEATHER: WeatherAssessment = {
   points: 0,
   unknown: true,
   indoor: false,
-  display: 'no forecast for this game',
+  display: 'no forecast yet',
   driver: null,
 };
 
@@ -129,7 +143,13 @@ export function assessWeather(
 ): WeatherAssessment {
   if (!weather) return NO_WEATHER;
   if (weather.indoor) {
-    return { points: 0, unknown: false, indoor: true, display: 'indoors', driver: null };
+    return {
+      points: 0,
+      unknown: false,
+      indoor: true,
+      display: 'dome or closed roof, weather does not apply',
+      driver: null,
+    };
   }
 
   const wind = effectiveWind(weather);
@@ -140,60 +160,27 @@ export function assessWeather(
   const sensitivity =
     WIND_SENSITIVITY[bucket] ?? POSITION_WIND_SENSITIVITY[position.toUpperCase()] ?? 0;
 
-  const windSeverity =
-    wind == null ? 0 : ramp(wind, WEATHER.windOnset, WEATHER.windFull);
   /*
-   * Heavy rain, and only heavy rain.
-   *
-   * Applied at half the weight of wind and to the same roles, because a wet
-   * ball is a handling problem rather than a ballistics problem: it costs a
-   * deep passing game something and it costs a running game nothing. Snow is
-   * *not* treated as rain — see below.
+   * Strong wind or snow, and nothing else. Rain is described but never
+   * scored: the market reads a wet forecast at least as well as this could.
    */
-  const rainSeverity =
-    rain == null || weather.snow ? 0 : ramp(rain, WEATHER.rainOnset, WEATHER.rainFull) * 0.5;
-
-  const severity = Math.min(1, windSeverity + rainSeverity);
-  if (severity <= 0) {
-    return {
-      points: 0,
-      unknown: false,
-      indoor: false,
-      display: describeConditions(wind, rain, temperature, weather.snow ?? false) || 'nothing that affects play',
-      driver: null,
-    };
+  const windSeverity = wind == null ? 0 : ramp(wind, WEATHER.windOnset, WEATHER.windFull);
+  const severity = Math.min(1, windSeverity + (weather.snow ? WEATHER.snowSeverity : 0));
+  const description = describeConditions(wind, rain, temperature, weather.snow ?? false) || 'nothing that affects play';
+  if (severity <= 0 || sensitivity <= 0) {
+    return { points: 0, unknown: false, indoor: false, display: description, driver: null };
   }
 
-  /*
-   * Sensitivity decides the sign as well as the size.
-   *
-   * A negative sensitivity is a running back in weather that pushes an offence
-   * toward the ground, and his bonus is capped far below the penalty a deep
-   * receiver takes in the same game.
-   */
-  const raw = -severity * sensitivity;
-  const points = round2(
-    raw >= 0
-      ? Math.min(raw * WEATHER.maxPenaltyPoints, WEATHER.maxRushBonusPoints)
-      : Math.max(raw * WEATHER.maxPenaltyPoints, -WEATHER.maxPenaltyPoints),
-  );
-
+  const points = round2(-Math.min(severity * sensitivity, 1) * WEATHER.maxPenaltyPoints);
   return {
     points,
     unknown: false,
     indoor: false,
-    display: describeConditions(wind, rain, temperature, weather.snow ?? false),
+    display: description,
     driver: driverOf(points, wind, rain, weather.snow ?? false),
   };
 }
 
-/**
- * The wind speed to model with.
- *
- * Sustained speed, unless the gusts are much stronger — a 12mph day gusting to
- * 30 is not a 12mph day for a quarterback. Blended rather than switched, so a
- * single gust figure cannot swing the model on its own.
- */
 function effectiveWind(weather: GameWeather): number | null {
   const sustained = weather.windMph ?? null;
   const gust = weather.gustMph ?? null;

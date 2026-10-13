@@ -17,6 +17,9 @@ import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { slateWindow } from '../../core/nfl/slateWindow.ts';
 import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
 import { homeByTeam, indoorByTeam, isOnBye, playingTeams } from '../../core/nfl/schedule.ts';
+import { tableRoofFor } from '../../core/nfl/roofs.ts';
+import type { TeamLines } from '../../core/startsit/staleLine.ts';
+import type { PlayerProp } from '../../core/vegas/types.ts';
 import { seasonStartIso } from '../../core/dst/assemble.ts';
 import { InjuryService } from './injuryService.ts';
 import { UsageService, roleMetricsFrom } from './usageService.ts';
@@ -221,7 +224,15 @@ export async function startSitInputsFor(
        */
       ...(context.indoor.get((player.team ?? '').toUpperCase())
         ? { weather: { indoor: true, source: 'fixture list' } }
-        : {}),
+        : indoorFromTable(player.team, game?.opponent ?? null, context)
+          ? { weather: { indoor: true, source: 'stadium table' } }
+          : {}),
+      /*
+       * The line his props were read under, and when the latest line was seen,
+       * for the stale-prop check. Both from rows already in hand.
+       */
+      ...propLinesFor(player.team, game?.opponent ?? null, propsByPlayer.get(id) ?? []),
+      ...(game?.linesSeenAt ? { currentLinesAt: game.linesSeenAt } : {}),
       /*
        * The opposing offence's market form, for the defence lane's fallback.
        *
@@ -267,7 +278,17 @@ export async function startSitInputsFor(
  */
 export interface StartSitContext {
   /** Team abbreviation -> the game they are in, from the paid-for schedule. */
-  schedule: Map<string, { opponent: string | null; spread: number | null; total: number | null; kickoff: string | null }>;
+  schedule: Map<
+    string,
+    {
+      opponent: string | null;
+      spread: number | null;
+      total: number | null;
+      kickoff: string | null;
+      /** When the total and spread were last seen. Absent when unpriced. */
+      linesSeenAt?: string | null;
+    }
+  >;
   defense: DefenseTendencyIndex;
   /**
    * Which teams are at home this week, from the stored fixture list.
@@ -289,6 +310,12 @@ export interface StartSitContext {
    * than claiming a forecast nobody has.
    */
   indoor: Map<string, boolean>;
+  /**
+   * Teams whose fixture row states a roof at all (open, outdoors, dome...).
+   * The stadium table only answers for the rest. Optional for hand-built
+   * contexts in tests.
+   */
+  roofKnown?: ReadonlySet<string>;
   /**
    * What the market has paid each offence, over the games it actually priced.
    *
@@ -410,6 +437,7 @@ export async function buildStartSitContext(
         // by the league rather than by a book, and it exists for games nobody
         // has priced.
         kickoff: fixture?.kickoff ?? event.kickoff,
+        linesSeenAt: event.linesSeenAt ?? null,
       });
     }
   }
@@ -430,6 +458,47 @@ export async function buildStartSitContext(
           .catch(() => new Map<string, { impliedTotal: number; games: number }>())
       : new Map<string, { impliedTotal: number; games: number }>();
 
-  return { schedule, defense, home, indoor, opponentForm, playing: playingTeams(fixtures) };
+  const roofKnown = new Set(
+    fixtures.filter((f) => (f.roof ?? '').trim() !== '').map((f) => f.team.toUpperCase()),
+  );
+  return { schedule, defense, home, indoor, roofKnown, opponentForm, playing: playingTeams(fixtures) };
 }
 
+
+/**
+ * A dome from the stadium table, for a fixture row with no roof on it.
+ *
+ * Only when the fixture list has not already answered: a team it lists as
+ * outdoors stays outdoors. Retractable roofs are never treated as domes.
+ */
+function indoorFromTable(team: string | null | undefined, opponent: string | null, context: StartSitContext): boolean {
+  const key = (team ?? '').toUpperCase();
+  if (!key || context.indoor.has(key) || context.roofKnown?.has(key)) return false;
+  return tableRoofFor(key, opponent, context.home.get(key) ?? null) === 'dome';
+}
+
+/**
+ * The game line stored with the snapshot these props came from, turned to the
+ * player's team's side, as the stale-prop check wants it. Nothing when the
+ * snapshot carried no line or its spread cannot be pinned to a side.
+ */
+function propLinesFor(
+  team: string | null | undefined,
+  opponent: string | null,
+  props: readonly PlayerProp[],
+): { propLines?: TeamLines } {
+  const snapshot = props.find((p) => p.snapshot)?.snapshot;
+  if (!snapshot) return {};
+  const key = (team ?? '').toUpperCase();
+  const spreadTeam = (snapshot.spreadTeam ?? '').toUpperCase();
+  // Pinned to a named side or dropped, never inferred: see `buildStartSitContext`.
+  const spread =
+    snapshot.spread == null || !spreadTeam || !key
+      ? null
+      : spreadTeam === key
+        ? snapshot.spread
+        : spreadTeam === (opponent ?? '').toUpperCase()
+          ? -snapshot.spread
+          : null;
+  return { propLines: { total: snapshot.total, spread, at: snapshot.fetchedAt } };
+}

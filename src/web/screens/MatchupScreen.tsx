@@ -19,25 +19,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type LeagueSummary, type LineupImpact, type MatchupResponse, type MatchupPlayerView } from '../api.ts';
+import { api, type LeagueSummary, type MatchupResponse, type MatchupPlayerView } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, Sheet, SkeletonRows } from '../components/native.tsx';
 import {
   BenchSection,
-  BestMoveHoldRow,
-  BestMoveNote,
-  BestMoveRow,
-  bestMoveState,
   DetailRow,
   InsightList,
   MatchupStatus,
   ScoreCard,
   SlotRow,
-  signedPoints,
-  winShift,
 } from '../components/matchup.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
-import { MODE_LABEL } from '../../core/startsit/mode.ts';
 import { unwindOne } from '../tabReset.ts';
 
 /**
@@ -60,12 +53,11 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [error, setError] = useState<string | null>(null);
   const [openPlayer, setOpenPlayer] = useState<string | null>(null);
   const [oddsOpen, setOddsOpen] = useState(false);
-  const [bestMoveOpen, setBestMoveOpen] = useState(false);
   /*
    * Tapping Matchup while already on Matchup.
    *
-   * All three of the things this screen opens over itself — a player's card,
-   * the best-move sheet and the sheet behind the odds — close, and the board
+   * Both of the things this screen opens over itself (a player's card and the
+   * sheet behind the odds) close, and the board
    * comes back to the top. The matchup itself is not reloaded: what is on
    * screen is the live state, and a tab tap is a request to see it, not to
    * refetch it.
@@ -78,7 +70,6 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     if (resetNonce === 0) return;
     unwindOne([
       { when: openPlayer != null, undo: () => setOpenPlayer(null) },
-      { when: bestMoveOpen, undo: () => setBestMoveOpen(false) },
       { when: oddsOpen, undo: () => setOddsOpen(false) },
     ]);
   }, [resetNonce]);
@@ -104,35 +95,19 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   }, [load]);
 
   /*
-   * The poll, what turns it on, and the three things that switch it off.
+   * The poll, and what switches it off.
    *
-   * It stops while the tab is in the background and resumes on the way back —
-   * which is what stops the "refresh storm" §35 warns about, where a focus, a
-   * pageshow and a visibility change all fire on the same return and each
-   * starts its own request. There is exactly one timer and one visibility
-   * listener in this screen, and this is still it.
-   *
-   * What changed is what it watches. A live matchup was the only thing on this
-   * screen that went out of date on its own, until the best move came up from
-   * the odds sheet and onto the page — and *that* goes out of date at a
-   * kickoff, which is precisely when nothing is live yet and the old condition
-   * was false. A reader holding the screen open at 12:55 on a Sunday would have
-   * been looking at `Start J. Doe over A. Smith` at 1:05, with both games
-   * running and the swap no longer legal for anybody. §5 of the brief is
-   * absolute about that: a recommendation must never remain visibly actionable
-   * after it has stopped being actionable.
-   *
-   * So the poll runs while there is a recommendation on screen as well, and
-   * that condition turns itself off: `decision.best` only exists while both of
-   * the players it names are still unstarted, so the first poll after either
-   * kickoff removes the move *and* the reason to keep polling. The cost is the
-   * same bounded thing the live poll already costs — the forecast's fingerprint
-   * covers every game's clock, so a poll that finds nothing changed recomputes
-   * nothing and returns the cached forecast.
+   * It stops while the tab is in the background and resumes on the way back,
+   * which is what stops the "refresh storm" where a focus, a pageshow and a
+   * visibility change all fire on the same return. One timer and one
+   * visibility listener, running only while a game is live.
    */
-  const live = data?.forecast?.phase === 'live';
-  const actionable = Boolean(data?.forecast && !data.forecast.degraded && data.forecast.decision.best);
-  const watching = live || actionable;
+  /*
+   * Since October 2026 this screen recommends nothing (Team's Best move card
+   * is the only start/sit advice in the app), so the only thing here that goes
+   * out of date on its own is a live game.
+   */
+  const watching = data?.forecast?.phase === 'live';
   useEffect(() => {
     if (!watching) return;
     let handle = 0;
@@ -170,33 +145,6 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     for (const player of [...forecast.bench.mine, ...forecast.bench.theirs]) map.set(player.playerId, player);
     return map;
   }, [forecast]);
-
-  /** What the slot between the score and the lineup is currently saying. */
-  const moveState = forecast ? bestMoveState(forecast) : null;
-  /*
-   * Both moods of "there is a change" draw the same row.
-   *
-   * `on_projection` is the Team screen's answer shown here because this screen
-   * had none of its own; it is a change either way, so it is the same control
-   * with the same target and the same sheet, marked so the row can say which
-   * question it is answering.
-   */
-  const move =
-    moveState?.kind === 'move' || moveState?.kind === 'on_projection' ? moveState.move : null;
-
-  /*
-   * A sheet cannot outlive the recommendation it explains.
-   *
-   * The poll above removes a move the moment a kickoff makes it illegal, which
-   * takes the row off the page — and would have left the sheet the reader had
-   * opened from it standing over an empty page, explaining a swap nobody can
-   * make any more. Keyed on the swap rather than on the object so a poll that
-   * returns the same advice does not close a sheet somebody is reading.
-   */
-  const moveKey = move ? `${move.inPlayerId}>${move.outPlayerId}@${move.slot}` : null;
-  useEffect(() => {
-    if (moveKey === null) setBestMoveOpen(false);
-  }, [moveKey]);
 
   const card = openPlayer ? (data?.cards[openPlayer] ?? null) : null;
   /*
@@ -236,35 +184,12 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           */}
 
           {/*
-            The answer, directly under the score and directly above the lineup
-            it is about — which is the whole of this pass. Everything that
-            explains it is still one tap away and nothing that explains it came
-            up here with it.
-
-            Two moods, one slot. A swap when there is one worth making, and
-            `Hold your lineup` when there is not: the second is a decision as
-            much as the first, and it used to be a grey footnote next to the
-            `Starters` heading, which reads as the screen having nothing to say
-            rather than as it having said something. Both open the same sheet
-            for the same reason — a reader who is told what to do is owed why.
-
-            The third state, a forecast that failed, is neither and stays a
-            footnote — see `BestMoveNote`.
+            No advice on this screen, since October 2026. The Team screen's Best
+            move card is the one place the app says who to start, so the two
+            screens cannot disagree; the starters sit directly under the score.
           */}
-          {move ? (
-            <BestMoveRow
-              move={move}
-              players={players}
-              onProjection={moveState?.kind === 'on_projection'}
-              onOpen={() => setBestMoveOpen(true)}
-            />
-          ) : moveState?.kind === 'hold' ? (
-            <BestMoveHoldRow onOpen={() => setBestMoveOpen(true)} />
-          ) : null}
-
           <div className="section-title section-title-row" data-testid="starters-title">
             <span className="matchup-starters-label">Starters</span>
-            {moveState ? <BestMoveNote state={moveState} /> : null}
           </div>
           <div className="matchup-rows">
             {forecast.slots.map((row, i) => (
@@ -301,44 +226,6 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         />
       ) : null}
 
-      {/*
-        Why holding is the answer, in the model's own words.
-
-        The same sheet grammar and the same entry point as a swap's, because it
-        is the same question asked of the opposite advice: the row says what to
-        do and this says why to believe it. What it prints is `decision.note`,
-        which is written in `core/matchup/decision.ts` beside the arithmetic —
-        and which tells the three empty cases apart. That distinction is the
-        whole reason this sheet exists rather than a longer row: `Every
-        remaining lineup decision is already locked` at one on a Sunday and
-        `Nobody on your bench could legally take a starting slot` at ten in the
-        morning are different facts about a reader's afternoon, and flattening
-        them into one line on the face of the row would lose it.
-      */}
-      {bestMoveOpen && !move && moveState?.kind === 'hold' ? (
-        <HoldSheet note={forecast?.decision.note ?? null} onClose={() => setBestMoveOpen(false)} />
-      ) : null}
-
-      {bestMoveOpen && move ? (
-        <BestMoveSheet
-          move={move}
-          options={forecast?.decision.options ?? []}
-          players={players}
-          onClose={() => setBestMoveOpen(false)}
-          /*
-           * Swapped, never stacked. The best-move sheet closes in the same beat
-           * the player's card opens, so there is one modal on screen at a time
-           * and one Escape, one backdrop tap and one downward swipe to get out
-           * of it — exactly what the insight rows in the odds sheet already do.
-           */
-          onOpenPlayer={(playerId) => {
-            setBestMoveOpen(false);
-            setOpenPlayer(playerId);
-          }}
-          openable={openable}
-        />
-      ) : null}
-
       {oddsOpen && forecast ? (
         <OddsSheet
           forecast={forecast}
@@ -353,157 +240,6 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 }
 
 /**
- * Why this is the move, and what else was close.
- *
- * A sheet of its own rather than the odds sheet, and the difference is the
- * question being asked. A reader who taps a win probability is asking what is
- * behind a number; a reader who taps `Best move` has already been told what to
- * do and is asking whether to believe it. Sending the second one into `Behind
- * the odds` would answer him four sections later, under a heading about
- * something else.
- *
- * The order is the order the question unfolds in: the swap, what it costs or
- * gains, what it moves the odds to, why — and only then the moves that did not
- * win, which are the answer to "was this close?" and belong nowhere near the
- * page. `gain` is deliberately absent everywhere: `44% → 48%` already contains
- * it, and printing `+4 points of win probability` beside it is the same fact
- * twice in two units.
- */
-function BestMoveSheet({
-  move,
-  options,
-  players,
-  onClose,
-  onOpenPlayer,
-  openable,
-}: {
-  move: LineupImpact;
-  /** Every legal change above the threshold, best first. */
-  options: LineupImpact[];
-  players: Map<string, MatchupPlayerView>;
-  onClose: () => void;
-  onOpenPlayer: (playerId: string) => void;
-  /** Whether tapping through to this player would show anything. */
-  openable: (playerId: string) => boolean;
-}) {
-  const name = (playerId: string, fallback: string) => players.get(playerId)?.name ?? fallback;
-  /*
-   * `best` and `options[0]` are the same recommendation and not the same
-   * object: they are one object in the model and two after a round trip
-   * through JSON, so identity says they differ and the swap they name says
-   * they do not. Compared on what a swap *is* — who comes in, who goes out and
-   * where — which is true on both sides of the wire.
-   */
-  const swap = (impact: LineupImpact) => `${impact.inPlayerId}>${impact.outPlayerId}@${impact.slot}`;
-  const others = options.filter((option) => swap(option) !== swap(move));
-
-  return (
-    <Sheet title="Best move" onClose={onClose} testId="best-move-sheet">
-      <div className="matchup-best-move-lead" data-testid="best-move-lead">
-        Start {name(move.inPlayerId, move.inName)} over {name(move.outPlayerId, move.outName)}{' '}
-        <span className="faint">({move.slot})</span>
-      </div>
-
-      {/*
-        The two men it names, as the way through to their evidence.
-
-        Only for a player the engine could score, on the same rule every other
-        row in this app follows: a control that opens nothing teaches a reader
-        that taps here are unreliable. Each closes this sheet before opening
-        his card, so there is never a sheet over a sheet.
-      */}
-      <div data-testid="best-move-players">
-        {[
-          { playerId: move.inPlayerId, fallback: move.inName, role: 'in' },
-          { playerId: move.outPlayerId, fallback: move.outName, role: 'out' },
-        ].map((player) =>
-          openable(player.playerId) ? (
-            <button
-              key={player.playerId}
-              type="button"
-              className="matchup-best-move-player"
-              data-testid="best-move-player"
-              data-role={player.role}
-              onClick={() => onOpenPlayer(player.playerId)}
-              aria-label={`Open ${players.get(player.playerId)?.fullName ?? player.fallback}`}
-            >
-              <span className="matchup-best-move-player-name">{name(player.playerId, player.fallback)}</span>
-              <span className="faint">{player.role === 'in' ? 'coming in' : 'going out'}</span>
-            </button>
-          ) : null,
-        )}
-      </div>
-
-      <DetailRow label="Projected points">{signedPoints(move.pointsDelta)}</DetailRow>
-      <DetailRow label="Win probability">{winShift(move)}</DetailRow>
-
-      {/*
-        The engine's own sentence, on its own line and in the register this app
-        keeps for reasons. Not restated, not summarised, not rewritten here —
-        it is written where the comparison is made, which is the only place
-        that knows why one lineup beat another.
-      */}
-      <div className="faint" style={{ margin: '8px 2px 0' }} data-testid="best-move-reason">
-        {move.reason}
-      </div>
-
-      {others.length > 0 ? (
-        <>
-          <div className="detail-label" style={{ marginTop: 12 }} data-testid="best-move-others-title">
-            Other worthwhile moves ({others.length})
-          </div>
-          <div data-testid="best-move-others">
-            {others.map((option) => (
-              <div key={swap(option)} className="matchup-best-move-other" data-testid="best-move-other">
-                <span className="matchup-best-move-other-swap">
-                  Start {name(option.inPlayerId, option.inName)} over {name(option.outPlayerId, option.outName)}
-                  <span className="faint"> · {option.slot}</span>
-                </span>
-                <span className="matchup-best-move-other-odds">{winShift(option)}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      <div className="faint" style={{ margin: '10px 2px 0' }} data-testid="best-move-footer">
-        Change your lineup in Sleeper. Fantasy Analyst does not edit it.
-      </div>
-    </Sheet>
-  );
-}
-
-/**
- * Why there is nothing to change.
- *
- * Deliberately short. There is one thing to say — the model's own sentence
- * about which of the three empty cases this is — and then the standing promise
- * that this app does not touch a lineup, which is the same sentence the swap's
- * sheet closes with. Anything more would be the screen arguing for inaction,
- * and the evidence for that is already the whole page underneath it.
- *
- * The note is read from the forecast rather than composed here: no sentence
- * about a lineup decision is written on this side of the wire.
- */
-function HoldSheet({ note, onClose }: { note: string | null; onClose: () => void }) {
-  return (
-    <Sheet title="Best move" onClose={onClose} testId="best-move-sheet">
-      <div className="matchup-best-move-lead" data-testid="best-move-lead">
-        Hold your lineup
-      </div>
-      {note ? (
-        <div className="faint" style={{ margin: '8px 2px 0' }} data-testid="best-move-reason">
-          {note}
-        </div>
-      ) : null}
-      <div className="faint" style={{ margin: '10px 2px 0' }} data-testid="best-move-footer">
-        Change your lineup in Sleeper. Fantasy Analyst does not edit it.
-      </div>
-    </Sheet>
-  );
-}
-
-/**
  * What is behind the odds.
  *
  * Everything the brief asks the engine to be able to answer, kept off the main
@@ -513,12 +249,9 @@ function HoldSheet({ note, onClose }: { note: string | null; onClose: () => void
  * "not on the screen" is not the same as "not available", and a reader who taps
  * a win probability is asking exactly this question.
  *
- * What is deliberately *not* here is the recommendation itself. It has its own
- * home now — the `Best move` row above the starters, and the sheet behind it —
- * and a fact with two primary homes is a fact the reader has to reconcile. The
- * only thing this sheet still says about the lineup is the one thing that home
- * cannot: which of the three empty cases is the reason there is no move to
- * make. See the note above that branch.
+ * What is deliberately *not* here is any recommendation. Since October 2026
+ * the Team screen's Best move card is the only place the app says who to
+ * start, so this sheet explains the number and nothing else.
  */
 function OddsSheet({
   forecast,
@@ -534,7 +267,6 @@ function OddsSheet({
   /** Whether tapping through to this player would show anything. */
   openable: (playerId: string) => boolean;
 }) {
-  const decision = forecast.decision;
   const name = (id: string) => players.get(id)?.name ?? id;
 
   return (
@@ -546,17 +278,6 @@ function OddsSheet({
         {Math.round((forecast.teams.mine.winProbability ?? 0) * 100)}% · {forecast.draws.toLocaleString()} simulated
         afternoons
       </DetailRow>
-      <DetailRow label="Recommended mode">{MODE_LABEL[forecast.suggestedMode.mode]}</DetailRow>
-      {/*
-        Why, on its own line.
-
-        The sentence is a sentence and putting it in the value column turns a
-        two-word answer into four ragged right-aligned lines. The reason belongs
-        under the row it explains, in the register the app uses for reasons.
-      */}
-      <div className="faint" style={{ margin: '4px 2px 0' }} data-testid="mode-why">
-        {forecast.suggestedMode.detail}
-      </div>
       {forecast.freshness.detail ? (
         <DetailRow label="Confidence">
           {forecast.freshness.level} · {forecast.freshness.detail}
@@ -607,48 +328,8 @@ function OddsSheet({
         </>
       ) : null}
 
-      {/*
-        Why there is nothing to change, and only that.
-
-        This section used to restate the recommendation — the swap, the odds it
-        moves and the reason for it — under a heading called `Lineup impact`.
-        Every one of those facts is now on the Matchup screen itself, in the
-        `Best move` row above the starters, and spelled out again in the sheet
-        behind it. One fact, one primary home: the sheet that explains a *number*
-        has no business printing the app's headline recommendation a third time,
-        four sections below where the reader already read it.
-
-        What was **only** ever here is the other branch. `decision.note` tells
-        the three empty cases apart — the decisions are locked, the bench cannot
-        legally fill a slot, or no change wins more often — and the row above
-        the starters says `Hold your lineup` for all three. So the unique half
-        stays, and the duplicated half is gone.
-
-        The hold state's own sheet now prints the same sentence, which is not a
-        third home for it: it is this fact answering the question it was written
-        for, one tap from the advice it qualifies. This block is the same fact
-        answering a different one — *why are the odds what they are* — and a
-        reader who tapped a win probability should not have to go back out and
-        tap something else to be told the lineup is settled.
-
-        Keyed on the note rather than on the absence of a move, which is the same
-        condition said in the terms this block is actually about: the model
-        writes a note exactly when it has no change to offer, and a heading over
-        an empty paragraph is not an improvement on the duplication it replaced.
-      */}
-      {decision.note ? (
-        <>
-          <div className="detail-label" style={{ marginTop: 12 }}>
-            Lineup impact
-          </div>
-          <div className="faint" data-testid="lineup-impact">
-            {decision.note}
-          </div>
-        </>
-      ) : null}
-
       <div className="faint" style={{ margin: '10px 2px 0' }}>
-        Advisory only. Change a lineup in Sleeper — this app never edits one. Model {forecast.modelVersion}.
+        Model {forecast.modelVersion}. This app never edits a lineup.
       </div>
     </Sheet>
   );

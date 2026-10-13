@@ -184,7 +184,9 @@ describe('from stored weeks to an answer on the card', () => {
     expect(evaluation.role.trend).toBe('rising_high');
     const component = evaluation.components.find((c) => c.key === 'role_trend')!;
     expect(component.unknown).toBe(false);
-    expect(component.value).toBeGreaterThan(0);
+    // Read and shown, and worth no points since October 2026: the line prices it.
+    expect(component.textOnly).toBe(true);
+    expect(component.value).toBe(0);
   });
 
   it('still says "not enough" at five weeks', async () => {

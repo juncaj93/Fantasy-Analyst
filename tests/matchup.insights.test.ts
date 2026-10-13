@@ -105,16 +105,15 @@ describe('priority', () => {
     if (swing >= 0) expect(injury).toBeLessThan(swing);
   });
 
-  it('puts an actionable lineup change above anything informational', () => {
+  /*
+   * Since October 2026 a better bench player is not an insight here: "start X
+   * over Y" is a recommendation, and only the Team screen makes those.
+   */
+  it('never turns a better bench player into a start/sit insight', () => {
     const players = withBench(lineups(), [{ projection: 22, position: 'WR' }]);
     const result = forecast(players, BEFORE);
-    const lineup = result.insights.find((i) => i.kind === 'lineup_leverage');
-    expect(lineup).toBeDefined();
-    expect(result.insights[0]!.urgency).toBe('act_now');
-    for (const insight of result.insights) {
-      if (insight.kind === 'lineup_leverage') continue;
-      expect(insight.priority).toBeLessThanOrEqual(lineup!.priority);
-    }
+    expect(result.insights.find((i) => i.kind === 'lineup_leverage')).toBeUndefined();
+    for (const insight of result.insights) expect(insight.headline).not.toMatch(/^Start(ing)? /);
   });
 
   /**
@@ -388,7 +387,7 @@ describe('postgame', () => {
     const swing = result.insights.find((i) => i.kind === 'bench_swing');
     expect(swing).toBeDefined();
     expect(swing!.headline).toMatch(/Bench swing/);
-    expect(swing!.detail).toMatch(/swung against the pregame recommendation/);
+    expect(swing!.detail).toMatch(/pregame projections had the starter ahead/);
     expect(swing!.detail).not.toMatch(/should have/i);
   });
 });

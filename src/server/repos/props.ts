@@ -164,7 +164,16 @@ export class PropsRepo implements SnapshotStore {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(
-          `SELECT pp.* FROM player_props pp
+          /*
+           * The snapshot's own time and game line ride along on each quote:
+           * the same joined row, so no extra rows are read. They are what the
+           * stale-prop check compares with the latest line (`staleLine.ts`).
+           */
+          `SELECT pp.*, ps.fetched_at AS snapshot_fetched_at,
+                  json_extract(ps.raw_json, '$.gameLines.total') AS snapshot_total,
+                  json_extract(ps.raw_json, '$.gameLines.spread') AS snapshot_spread,
+                  json_extract(ps.raw_json, '$.gameLines.spreadTeam') AS snapshot_spread_team
+             FROM player_props pp
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
               AND ps.scope = 'week'
@@ -301,7 +310,16 @@ export class PropsRepo implements SnapshotStore {
       const placeholders = batch.map(() => '?').join(',');
       const rows = await this.db
         .prepare(
-          `SELECT pp.* FROM player_props pp
+          /*
+           * The snapshot's own time and game line ride along on each quote:
+           * the same joined row, so no extra rows are read. They are what the
+           * stale-prop check compares with the latest line (`staleLine.ts`).
+           */
+          `SELECT pp.*, ps.fetched_at AS snapshot_fetched_at,
+                  json_extract(ps.raw_json, '$.gameLines.total') AS snapshot_total,
+                  json_extract(ps.raw_json, '$.gameLines.spread') AS snapshot_spread,
+                  json_extract(ps.raw_json, '$.gameLines.spreadTeam') AS snapshot_spread_team
+             FROM player_props pp
              JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
             WHERE pp.player_id IN (${placeholders})
               AND ps.scope = 'week'
@@ -460,5 +478,15 @@ function toProp(playerId: string, r: Record<string, unknown>): PlayerProp {
     consensusMethod: String(r['consensus_method'] ?? 'none') as PlayerProp['consensusMethod'],
     books: parseJson<string[]>(r['books_json'], []),
     impliedProbability: r['implied_probability'] == null ? null : Number(r['implied_probability']),
+    ...(r['snapshot_fetched_at'] == null
+      ? {}
+      : {
+          snapshot: {
+            fetchedAt: String(r['snapshot_fetched_at']),
+            total: r['snapshot_total'] == null ? null : Number(r['snapshot_total']),
+            spread: r['snapshot_spread'] == null ? null : Number(r['snapshot_spread']),
+            spreadTeam: r['snapshot_spread_team'] == null ? null : String(r['snapshot_spread_team']),
+          },
+        }),
   };
 }

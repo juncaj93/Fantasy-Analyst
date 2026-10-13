@@ -34,6 +34,15 @@ import { PlayerRepo } from '../src/server/repos/players.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
+import { lineForMean } from '../src/core/startsit/propConversion.ts';
+import { SCORING_RULES } from '../src/core/startsit/scoringRules.ts';
+/** A line whose converted average is exactly `points` (see `lineForMean`). */
+function fixtureLine(position: string, points: number): number {
+  return position === 'QB'
+    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
+    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
+}
+
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 
@@ -181,7 +190,7 @@ function priced(id: string, name: string, position: string, points: number): Sta
   return {
     player: player({ id, fullName: name, position, team: 'NE' }),
     props: [{ playerId: id, sourcePlayerName: name, market: position === 'QB' ? 'pass_yards' : 'receiving_yards',
-      line: position === 'QB' ? points / 0.04 : points * 10, overPrice: -110, underPrice: -110,
+      line: fixtureLine(position, points), overPrice: -110, underPrice: -110,
       bookCount: 3, consensusMethod: 'median', books: ['a','b','c'], impliedProbability: null }],
     signal: null, injuryStatus: null, propsStale: false,
   };
