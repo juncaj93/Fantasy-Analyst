@@ -36,6 +36,7 @@ import {
 import { bidLikelihoodByRoster, type RivalBidLikelihood } from './bidLikelihood.ts';
 import type { LeagueTransactionBaseline, ManagerTransactionProfile } from '../managers/transactionProfile.ts';
 import type { CanonicalPlayer } from '../identity/types.ts';
+import type { BidderStyle } from './managerSeeds.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { WaiverAdvice, WaiverCandidate } from '../startsit/waivers.ts';
 
@@ -51,6 +52,12 @@ export interface WaiverIntelRoster {
   ownerName?: string | null;
   isMine: boolean;
   playerIds: string[];
+  /**
+   * The manager's seeded bidding style, when the name was replaced before the
+   * assembly ran (a support snapshot names every seat `Manager N`, and the
+   * seeds are keyed by the real name). Absent: looked up by `ownerName`.
+   */
+  bidStyle?: BidderStyle | null;
 }
 
 export function waiverLeagueIntel(opts: {
