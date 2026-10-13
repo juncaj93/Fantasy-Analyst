@@ -18,6 +18,24 @@ weeks, byes from the fixture list):
          + change in the insurance credit (Check a trade's depth credit)
          + Alex's preferences (labelled)
 
+**Each week its own number (waiver@11, `core/waivers/aheadWeeks.ts`).** This
+week is valued on the Start/Sit number exactly as before. Each later week of the
+window has its own: a complete Vegas week for that game where the odds refresh
+has priced it (it reaches nine days ahead, so at most next week's earliest
+games), else Sleeper's projection for that week scored in this league's rules
+(six-point passing touchdown, minus two for an interception), else this week's
+figure. The sheet says which, week by week. Availability still multiplies it.
+Before this, a week-6 bye fill was ranked on week-5 matchups: on 9 October
+Jordan Love was valued on his week-5 Vegas read, 18.9, for all three weeks,
+while Sleeper had him at 23.0 and 23.6 for weeks 6 and 7.
+
+Sleeper's later weeks are kept as one settings row a week,
+`sleeper.aheadPoints.<season>.<week>`, written by the three-hourly league read
+behind a twelve-hour gate (at most three Sleeper calls; never the shared
+projection table, so the Start/Sit number, Check a trade and trade values read
+exactly what they read before). The Waivers screen reads three rows and, when a
+later game is already priced, one windowed props read.
+
 Weights: while this week's games are still ahead, this week and next count in
 full and the third week at half (`openWeights` 1, 1, 0.5); after the main slate
 kicks off the window moves on a week (1, 0.5, 0.5). The drop is inside the

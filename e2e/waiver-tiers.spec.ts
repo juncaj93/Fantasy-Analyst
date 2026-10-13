@@ -47,6 +47,12 @@ function move(over: Record<string, unknown>) {
       { week: 8, change: 0 },
     ],
     rate: 11,
+    /* The longest source label on the widest numbers, so the sheet is tested at its fullest. */
+    weekNumbers: [
+      { week: 6, points: 11, source: 'this_week' },
+      { week: 7, points: 23.6, source: 'sleeper' },
+      { week: 8, points: 11, source: 'current' },
+    ],
     prefs: [],
     drop: { playerId: 'd1', name: 'Kendre Miller', position: 'RB' },
     dropCost: 0.05,
@@ -209,6 +215,18 @@ test.describe('the tiers the deployment computes', () => {
     await expect(sheet.getByTestId('tier-detail-weeks')).toContainText('Wk ');
     await expect(sheet.getByTestId('tier-detail-bid')).toBeVisible();
     await expect(sheet).toContainText('this app never makes a transaction');
+  });
+
+  test('says each week’s number and where it came from, inside the phone', async ({ page }) => {
+    await page.getByTestId('waiver-tier-row').first().click();
+    const numbers = page.getByTestId('tier-detail').getByTestId('tier-detail-numbers');
+    /* Three weeks, each with its number and its source. */
+    const source = '(this week|Vegas|Sleeper|this week’s number)';
+    await expect(numbers).toHaveText(new RegExp(`^His numbersWk \\d+ \\d+\\.\\d ${source}( · Wk \\d+ \\d+\\.\\d ${source}){2}$`));
+    const box = (await numbers.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await noSidewaysScroll(page);
   });
 
   test('draws the plan card with no control on it when there is a "Do this"', async ({ page }) => {

@@ -63,6 +63,7 @@ import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
 import { DepthChartRepo } from '../repos/nflverse.ts';
 import { WeekPointsService } from './weekPointsService.ts';
+import { readWaiverAhead } from './waiverAhead.ts';
 import { lastCompletedWeek } from '../../core/sleeper/weekPoints.ts';
 import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
 
@@ -666,6 +667,18 @@ export async function gatherWaiverInputs(
   ]);
 
   /*
+   * The weeks after this one, for the tier planner: Sleeper's projection for
+   * each (one settings row a week) and any later-week Vegas lines already
+   * priced. Started beside the earlier-week read below; waiver-only.
+   */
+  const aheadRead = readWaiverAhead(db, sleeper, {
+    season: league.season,
+    week,
+    profile,
+    players: [...rosterInputs, ...candidateInputs].map((i) => ({ id: i.player.id, position: i.player.position, kickoff: i.kickoff ?? null })),
+  }).catch(() => null);
+
+  /*
    * The earlier-week projection, for the players with no number this week (a
    * bye, nothing published): the tier planner's stand-in, the same one Check a
    * trade uses. One keyed read over three earlier weeks, for those few players.
@@ -688,6 +701,7 @@ export async function gatherWaiverInputs(
           })
           .catch(() => new Map<string, { week: number; points: number }>());
   const [thisWeekPoints, priorWeekPoints] = await pointsRead;
+  const ahead = await aheadRead;
   const completed = lastCompletedWeek(
     week,
     [...rosterInputs, ...candidateInputs].map((i) => i.kickoff ?? null),
@@ -738,6 +752,7 @@ export async function gatherWaiverInputs(
       published,
       lastWeekPoints,
       recentPublished,
+      ahead,
       ...(Number.isFinite(reserveSlots) ? { reserveSlots } : {}),
       /*
        * The positions this league may not read a published total for, so a

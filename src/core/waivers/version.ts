@@ -78,5 +78,10 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * best drop; "Do this", "Worth considering" and the watch list replace the fixed
  * bars; the claim card is the "Do this" move; bids come from the league's own
  * bidding behaviour. See `core/waivers/tiers.ts` and `core/waivers/bidModel.ts`.
+ *
+ * `waiver@11`: each later week of the window has its own number: a complete
+ * Vegas week for that game, else Sleeper's projection for that week in this
+ * league's scoring, else this week's figure. This week's number is unchanged.
+ * See `core/waivers/aheadWeeks.ts`.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@10', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@11', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

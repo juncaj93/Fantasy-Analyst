@@ -62,3 +62,40 @@ export function lastCompletedWeek(week: number, kickoffs: readonly (string | nul
   const last = Math.max(...times);
   return now.getTime() > last + 5 * 3_600_000 ? week : week - 1;
 }
+
+/**
+ * Sleeper's projection for a week still to come, in this league's scoring.
+ *
+ * The waiver planner's number for a later week when no Vegas line is posted
+ * for it (`core/waivers/aheadWeeks.ts`). Stored as one settings row per week,
+ * `sleeper.aheadPoints.<season>.<week>`, beside last week's points: no schema
+ * change, and never written into the shared projection table, so the
+ * Start/Sit number for the current week reads exactly what it read before.
+ */
+export function aheadPointsKey(season: string, week: number): string {
+  return `sleeper.aheadPoints.${season}.${week}`;
+}
+
+/** Positions the planner values from a later week's projection. A defence stays with the defence planner. */
+const AHEAD_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
+
+/**
+ * Sleeper's projections feed, scored the same way `scoreWeek` scores a
+ * finished week: each projected stat times the league's own value for it
+ * (six for a passing touchdown and minus two for an interception in this
+ * league). Rows outside the four valued positions are left out.
+ */
+export function scoreProjectionRows(rows: unknown, scoring: Readonly<Record<string, number>>): Record<string, number> {
+  if (!Array.isArray(rows)) return {};
+  const stats: Record<string, Record<string, unknown>> = {};
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as { player_id?: unknown; stats?: unknown; player?: { position?: unknown } | null };
+    const id = r.player_id == null ? '' : String(r.player_id);
+    if (!id || !r.stats || typeof r.stats !== 'object') continue;
+    const position = r.player?.position == null ? null : String(r.player.position).toUpperCase();
+    if (position != null && !AHEAD_POSITIONS.has(position)) continue;
+    stats[id] = r.stats as Record<string, unknown>;
+  }
+  return scoreWeek(stats, scoring);
+}

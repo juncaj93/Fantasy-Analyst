@@ -61,7 +61,20 @@ export interface WaiverTiersView {
   /** This league's rule for a player outside the waiver window, in words. */
   freeAgentRule: string | null;
   /** Every valued free agent's best move, top 20 by gain: the audit behind the thresholds. Not drawn. */
-  audit: { playerId: string; name: string; position: string; gain: number; reason: string; drop: string | null }[];
+  audit: {
+    playerId: string;
+    name: string;
+    position: string;
+    gain: number;
+    reason: string;
+    drop: string | null;
+    /** His number for each window week and its source. */
+    weekNumbers: TierMove['weekNumbers'];
+    /** The lineup change week by week, unweighted. */
+    byWeek: number[];
+    /** Preferences applied, in points. */
+    prefs: number;
+  }[];
   /** Each other manager's bidding profile behind the bids. */
   profiles: { name: string; style: string; source: 'seed' | 'default'; note: string | null; claimsPerRun: number; bids: number[] }[];
 }
@@ -157,6 +170,9 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       gain: m.gain,
       reason: m.reason,
       drop: m.drop?.name ?? null,
+      weekNumbers: m.weekNumbers,
+      byWeek: m.byWeek.map((w) => w.change),
+      prefs: m.prefs.reduce((s, p) => s + p.points, 0),
     })),
     freeAgentRule: input.rules ? freeAgentRule(input.rules) : null,
     profiles: profiles.map((p) => ({
