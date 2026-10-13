@@ -29,9 +29,9 @@ const TIER_TAG: Record<TierRow['tier'], string> = {
   watch: '',
 };
 
-/** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window. */
-export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'>): string {
-  if (row.reasonCode === 'ir_stash') return 'IR stash';
+/** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window (`Return unknown` when nobody knows when). */
+export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
+  if (row.reasonCode === 'ir_stash') return row.stashLabel === 'return unknown' ? 'Return unknown' : 'IR stash';
   return `+${Math.max(0, row.gain).toFixed(1)} pts`;
 }
 
@@ -56,7 +56,15 @@ function PickupLine({ row }: { row: TierRow }) {
             </>
           ) : null}
           <span data-testid="tier-bid" style={{ whiteSpace: 'nowrap' }}>
-            <strong>${bid.recommended}</strong> to win
+            {bid.posture === 'stash' ? (
+              <>
+                <strong>${bid.recommended}</strong> to stash
+              </>
+            ) : (
+              <>
+                <strong>${bid.recommended}</strong> to win
+              </>
+            )}
           </span>
         </>
       ) : null}
@@ -174,6 +182,24 @@ export function TierSections({
   );
 }
 
+/**
+ * Who the plan is not cutting and why, in one line: an elite back's handcuff,
+ * or a player in your Sleeper lineup whose drop score is lower than the
+ * drop's. Empty when nobody like that was passed over.
+ */
+function keptLine(row: TierRow, tiers: WaiverTiersView): string | null {
+  const scores = tiers.dropScores ?? [];
+  if (scores.length === 0 || !row.drop) return null;
+  const cut = row.drop.score ?? null;
+  const kept = scores.filter(
+    (d) =>
+      d.playerId !== row.drop!.playerId &&
+      ((d.protectedAs === 'handcuff') || (d.protectedAs === 'in your lineup' && cut != null && d.score < cut)),
+  );
+  if (kept.length === 0) return null;
+  return kept.map((d) => `${d.name} (${d.protectedAs})`).join(', ');
+}
+
 function weekLine(row: TierRow, weights: number[]): string {
   return row.byWeek
     .map((w, i) => `Wk ${w.week} ${w.change >= 0 ? '+' : '−'}${Math.abs(w.change).toFixed(1)}${weights[i] != null && weights[i] !== 1 ? ` (×${weights[i]})` : ''}`)
@@ -232,9 +258,21 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
             <dt>Your spot</dt>
             <dd>
               {row.drop ? `Drop ${row.drop.name}` : 'An open roster spot; no drop needed'}
+              {row.drop?.reason ? (
+                <span className="faint" data-testid="tier-detail-drop-why">
+                  {' '}
+                  · {row.drop.reason}
+                </span>
+              ) : null}
               {row.competesWith.length > 0 ? <span className="faint"> · {row.competesWith.join(', ')} want{row.competesWith.length === 1 ? 's' : ''} the same spot</span> : null}
             </dd>
           </div>
+          {keptLine(row, tiers) ? (
+            <div className="weekly-line" data-testid="tier-detail-kept">
+              <dt>Not cutting</dt>
+              <dd>{keptLine(row, tiers)}</dd>
+            </div>
+          ) : null}
           {row.alternatives.length > 0 ? (
             <div className="weekly-line">
               <dt>Also fits</dt>
@@ -258,9 +296,16 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
               </div>
               <div className="faint">{bid.reason}</div>
               {bid.likely.length > 0 ? (
-                <div className="faint" data-testid="tier-detail-rivals">
-                  Likely rivals: {bid.likely.map((r) => `${r.name} ${Math.round(r.chance * 100)}%`).join(', ')}
-                </div>
+                <ul className="faint tier-rivals" data-testid="tier-detail-rivals">
+                  {bid.likely.map((r) => (
+                    <li key={r.name} data-testid="tier-detail-rival">
+                      <span style={{ whiteSpace: 'nowrap' }}>
+                        {r.name} {Math.round(r.chance * 100)}%
+                      </span>
+                      {r.why ? <span style={{ overflowWrap: 'anywhere' }}> · {r.why}</span> : null}
+                    </li>
+                  ))}
+                </ul>
               ) : null}
               {bid.thin ? <div className="faint">{bid.thin}</div> : null}
             </>

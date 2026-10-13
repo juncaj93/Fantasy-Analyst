@@ -9946,6 +9946,17 @@ div.matchup-result {
   color: var(--text-dim);
 }
 
+/* Likely rivals on the waiver detail sheet: one per line, name and percent kept together. */
+.tier-rivals {
+  list-style: none;
+  padding-inline-start: 0;
+  margin: 2px 0 0;
+}
+
+.tier-rivals li {
+  margin: 1px 0;
+}
+
 .waiver-notes-warn {
   color: var(--warn);
   font-weight: 600;

@@ -246,8 +246,11 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               </div>
               <section data-testid="waivers-recommended">
                 <WaiverPlanCard plan={advice.claimPlan} />
-                {tiers.doThis ? (
-                  <TierRowButton row={tiers.doThis} onOpen={() => setOpenTier(tiers.doThis)} />
+                {/* One row per "Do this" move: a QB bye and a TE bye are two, each with its own drop. */}
+                {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).length > 0 ? (
+                  (tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).map((row) => (
+                    <TierRowButton key={row.playerId} row={row} onOpen={() => setOpenTier(row)} />
+                  ))
                 ) : (
                   <NoMoveCard summary={tierNoMove(tiers)} />
                 )}

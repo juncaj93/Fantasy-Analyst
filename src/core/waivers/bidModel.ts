@@ -411,11 +411,12 @@ function postureReason(bid: number, rivals: readonly RivalOdds[], expected: numb
   return `${postureWhy(rivals, expected)}, so $${bid} ${words}.`;
 }
 
+/** How much competition, in words. The names, percents and reasons are on their own lines. */
 function postureWhy(rivals: readonly RivalOdds[], expected: number): string {
   if (expected < 0.3) return 'Nobody is likely chasing him';
-  const top = rivals.filter((r) => r.chance >= 0.15).slice(0, 2);
-  if (top.length === 0) return expected < 1.5 ? 'One other manager may bid' : 'Two or more other managers may bid';
-  return capitalise(top.map((r) => `${r.name} ${Math.round(r.chance * 100)}% (${r.why ?? r.style})`).join(', '));
+  const top = rivals[0];
+  if (expected < 0.8 && top) return `${top.name} is the one likely rival`;
+  return expected < 1.5 ? 'About one other manager is likely to bid' : 'Two or more other managers are likely to bid';
 }
 
 function reasonFor(bid: number, signals: BidSignals, rivals: readonly RivalOdds[], expected: number): string {
