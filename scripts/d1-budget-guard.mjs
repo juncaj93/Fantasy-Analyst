@@ -46,7 +46,7 @@ const ceiling = Number(argOf('--ceiling', process.env.CEILING_PERCENT ?? '30'));
 const what = argOf('--what', process.env.GUARD_WHAT ?? 'full production sweep');
 
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const ACCOUNT = process.env.ACCOUNT_ID;
+let ACCOUNT = process.env.ACCOUNT_ID;
 
 function emit(fields) {
   const out = process.env.GITHUB_OUTPUT;
@@ -62,7 +62,21 @@ function refuse(why) {
 }
 
 if (!TOKEN) refuse('CLOUDFLARE_API_TOKEN is not set.');
-if (!ACCOUNT) refuse('ACCOUNT_ID is not set.');
+/*
+ * No ACCOUNT_ID is not an error when the token can name its own account, which
+ * is how the other probes find it. The Probe workflow's account secret is
+ * empty, so asking the token is what lets the probe guard run at all.
+ */
+if (!ACCOUNT && TOKEN) {
+  try {
+    const res = await fetch('https://api.cloudflare.com/client/v4/accounts', { headers: { authorization: `Bearer ${TOKEN}` } });
+    const body = await res.json();
+    ACCOUNT = body?.result?.[0]?.id;
+  } catch {
+    // Falls through to the refusal below.
+  }
+}
+if (!ACCOUNT) refuse('ACCOUNT_ID is not set and the token could not name its account.');
 
 async function graphql(query, variables = {}) {
   const res = await fetch(ENDPOINT, {
