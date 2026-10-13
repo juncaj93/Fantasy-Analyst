@@ -221,7 +221,7 @@ test.describe('the tiers the deployment computes', () => {
     await page.getByTestId('waiver-tier-row').first().click();
     const numbers = page.getByTestId('tier-detail').getByTestId('tier-detail-numbers');
     /* Three weeks, each with its number and its source. */
-    const source = '(this week|Vegas|Sleeper|this week’s number)';
+    const source = '(this week|Sleeper|this week’s number)';
     await expect(numbers).toHaveText(new RegExp(`^His numbersWk \\d+ \\d+\\.\\d ${source}( · Wk \\d+ \\d+\\.\\d ${source}){2}$`));
     const box = (await numbers.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);

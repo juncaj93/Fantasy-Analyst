@@ -137,4 +137,14 @@ for (const hours of WINDOWS_HOURS) {
   for (const r of rows.filter((r) => WAIVERS.test(r.q) && /^SELECT/i.test(r.q)).sort((a, b) => b.read - a.read).slice(0, 45)) {
     console.log(`${String(r.calls).padStart(8)} ${n(r.read).padStart(12)} ${n(r.read / Math.max(1, r.calls)).padStart(10)}   ${r.q.slice(0, 150)}`);
   }
+  /*
+   * The heavy betting-line reads in full, placeholders folded, so the window
+   * clause and the subquery say which repository method each one is.
+   */
+  const heavy = rows.filter((r) => /player_props/.test(r.q) && /^SELECT/i.test(r.q) && r.read / Math.max(1, r.calls) >= 2000);
+  if (heavy.length > 0) console.log('\nbetting-line reads over 2,000 rows a call, in full');
+  for (const r of heavy.sort((a, b) => b.read - a.read)) {
+    const folded = r.q.replace(/\((\?\s*,\s*)+\?\)/g, (m) => `(?×${(m.match(/\?/g) ?? []).length})`);
+    console.log(`  ${r.calls} calls, ${n(r.read / Math.max(1, r.calls))} rows a call, ${n(r.read)} rows: ${folded}`);
+  }
 }

@@ -668,15 +668,10 @@ export async function gatherWaiverInputs(
 
   /*
    * The weeks after this one, for the tier planner: Sleeper's projection for
-   * each (one settings row a week) and any later-week Vegas lines already
-   * priced. Started beside the earlier-week read below; waiver-only.
+   * each, one settings row a week. Started beside the earlier-week read below;
+   * waiver-only.
    */
-  const aheadRead = readWaiverAhead(db, sleeper, {
-    season: league.season,
-    week,
-    profile,
-    players: [...rosterInputs, ...candidateInputs].map((i) => ({ id: i.player.id, position: i.player.position, kickoff: i.kickoff ?? null })),
-  }).catch(() => null);
+  const aheadRead = readWaiverAhead(db, sleeper, { season: league.season, week }).catch(() => null);
 
   /*
    * The earlier-week projection, for the players with no number this week (a

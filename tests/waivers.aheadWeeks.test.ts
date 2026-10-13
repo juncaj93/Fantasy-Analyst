@@ -10,18 +10,15 @@
 
 import { describe, expect, it } from 'vitest';
 import { planWaiverTiers, TIER_RULES, type TierCandidate, type TierPlayer, type TierRequest } from '../src/core/waivers/tiers.ts';
-import { weekNumbers, vegasAheadPoints, type AheadNumbers } from '../src/core/waivers/aheadWeeks.ts';
+import { weekNumbers, type AheadNumbers } from '../src/core/waivers/aheadWeeks.ts';
 import { scoreProjectionRows } from '../src/core/sleeper/weekPoints.ts';
 import { buildRosterShape } from '../src/core/sleeper/rosterShape.ts';
-import type { PlayerProp } from '../src/core/vegas/types.ts';
-import type { ScoringProfile } from '../src/core/sleeper/scoring.ts';
 
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN']);
 const WEEKS = [5, 6, 7];
 
-const ahead = (sleeper: Record<number, Record<string, number>>, vegas: Record<number, Record<string, number>> = {}): AheadNumbers => ({
+const ahead = (sleeper: Record<number, Record<string, number>>): AheadNumbers => ({
   sleeper: new Map(Object.entries(sleeper).map(([w, m]) => [Number(w), new Map(Object.entries(m))])),
-  vegas: new Map(Object.entries(vegas).map(([w, m]) => [Number(w), new Map(Object.entries(m))])),
 });
 
 function p(id: string, position: string, rate: number | null, numbers: AheadNumbers | null, over: Partial<TierPlayer> = {}): TierPlayer {
@@ -93,11 +90,11 @@ describe('the ladder for one week', () => {
     ]);
   });
 
-  it('takes a complete Vegas week over Sleeper, and falls back to this week’s figure when neither is posted', () => {
-    const n = weekNumbers({ playerId: 'Love', rate: 18.87, weeks: [5, 6, 7, 8], currentWeek: 5, ahead: ahead(SLEEPER, { 6: { Love: 21.4 } }) });
+  it('falls back to this week’s figure for a later week Sleeper has not published', () => {
+    const n = weekNumbers({ playerId: 'Love', rate: 18.87, weeks: [5, 6, 7, 8], currentWeek: 5, ahead: ahead(SLEEPER) });
     expect(n.map((x) => [x.points, x.source])).toEqual([
       [18.87, 'this_week'],
-      [21.4, 'vegas'],
+      [23, 'sleeper'],
       [23.6, 'sleeper'],
       [18.87, 'current'],
     ]);
@@ -139,37 +136,6 @@ describe('the bye fill ranks on the bye week’s own numbers', () => {
     expect(plan.doThis?.byWeek.map((w) => w.change)).toEqual([0, 23, 3.5]);
     const rodgers = plan.all.find((m) => m.name === 'Rodgers');
     expect(rodgers!.gain).toBeLessThan(plan.doThis!.gain);
-  });
-});
-
-describe('a later week’s Vegas lines', () => {
-  const profile = { pointsPerPassYard: 0.04, passTd: 6, pointsPerRushYard: 0.1, pointsPerRecYard: 0.1, ppr: 0.5, teBonus: 0 } as unknown as ScoringProfile;
-  const prop = (market: PlayerProp['market'], line: number): PlayerProp => ({
-    playerId: 'Love',
-    sourcePlayerName: 'Jordan Love',
-    market,
-    line,
-    overPrice: -110,
-    underPrice: -110,
-    bookCount: 3,
-    consensusMethod: 'median',
-    books: [],
-    impliedProbability: null,
-  });
-
-  it('converts a complete QB market with this league’s values', () => {
-    const points = vegasAheadPoints(
-      new Map([['Love', [prop('pass_yards', 250), prop('pass_tds', 1.5), prop('rush_yards', 10)]]]),
-      () => 'QB',
-      profile,
-    );
-    /* 250 × 0.04 + 1.5 × 6 + 10 × 0.1 */
-    expect(points.get('Love')).toBeCloseTo(20, 1);
-  });
-
-  it('leaves out a partial market: one line of three is not a week', () => {
-    const points = vegasAheadPoints(new Map([['Love', [prop('pass_tds', 1.5)]]]), () => 'QB', profile);
-    expect(points.has('Love')).toBe(false);
   });
 });
 
