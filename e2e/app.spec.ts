@@ -1655,16 +1655,16 @@ test.describe('team, ADP import and start/sit', () => {
     await choose(page, '1004');
     await showComparison(page);
 
-    // The availability row moved a score, so it is a row; its sentence is one tap in.
-    await page.locator('[data-testid="compare-factor"][data-factor="status"]').click();
-    const detail = page.getByTestId('compare-factor-detail');
-    await expect(detail).toContainText(/hamstring/i);
-    await expect(detail).toContainText(/full|limited/i);
+    // Availability is a chip on his card, not a row; Questionable is a warning.
+    await expect(page.locator('[data-testid="compare-factor"][data-factor="status"]')).toHaveCount(0);
+    const chip = page.locator('[data-testid="compare-column"][data-player-id="1004"]').getByTestId('availability-chip');
+    await expect(chip).toHaveText('Questionable');
+    await expect(chip).toHaveAttribute('data-tone', 'warn');
+    // The injury and the practice week are on the chip's title, word for word.
+    await expect(chip).toHaveAttribute('title', /hamstring/i);
+    await expect(chip).toHaveAttribute('title', /full|limited/i);
 
-    /*
-     * And the penalty it produced is contextual rather than the flat 1.5 the
-     * word used to cost: a full participant keeps most of his score.
-     */
+    /* And it costs him nothing: shown, not scored (13 October 2026). */
     const comparison = await (
       await page.request.post('/api/startsit/compare', { data: { playerIds: ['1001', '1004'] } })
     ).json();
@@ -1672,8 +1672,7 @@ test.describe('team, ADP import and start/sit', () => {
       (e) => e.playerId === '1004',
     )!;
     const availability = sotelo.components.find((c) => c.key === 'status')!;
-    expect(availability.value).toBeLessThan(0);
-    expect(availability.value, 'a full participant keeps most of his score').toBeGreaterThan(-1.5);
+    expect(availability.value, 'Questionable is shown, not scored').toBe(0);
     expect(sotelo.ruledOut, 'Questionable is a question, not a gate').toBe(false);
   });
 

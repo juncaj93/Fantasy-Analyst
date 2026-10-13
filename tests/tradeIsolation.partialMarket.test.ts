@@ -97,7 +97,12 @@ describe('a partial market in a trade', () => {
     const view = views.get('mine')!;
     expect(view.valueOf.get('stevenson')).toBe(evaluation.score);
     expect(view.unpriced.has('stevenson')).toBe(false);
-    expect(view.unpriced.has('nobody')).toBe(true);
+    /*
+     * No market and, since 13 October 2026, no Questionable charge either: the
+     * engine has nothing to score him on, exactly like a healthy unquoted back.
+     */
+    expect(view.unscored.has('nobody')).toBe(true);
+    expect(view.unpriced.has('nobody')).toBe(false);
     expect(view.valueOf.has('nobody')).toBe(false);
   });
 });

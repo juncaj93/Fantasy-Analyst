@@ -140,6 +140,7 @@
   --paper-teal: #0f6b5c;
   --paper-teal-tint: #eaf3ef;
   --paper-warn: #b4552f;
+  --paper-warn-tint: #fbeee6;
   --paper-control: #e9e5d9;
   /*
    * The flat sheet (30 September 2026, `reference-mockup-v2.html`). The
@@ -805,6 +806,7 @@
   --paper-teal: #6fd0b5;
   --paper-teal-tint: #14302a;
   --paper-warn: #f0a27f;
+  --paper-warn-tint: #3a2418;
   --paper-control: #262d37;
   --paper-bg: #151a21;
   --paper-hair: #262d37;
@@ -917,6 +919,7 @@
   --paper-teal: #6fd0b5;
   --paper-teal-tint: #14302a;
   --paper-warn: #f0a27f;
+  --paper-warn-tint: #3a2418;
   --paper-control: #262d37;
   --paper-bg: #151a21;
   --paper-hair: #262d37;
@@ -10593,36 +10596,51 @@ div.matchup-result {
   font-size: 0.76rem;
   color: var(--text-dim);
 }
+.best-move-warn {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--warn);
+}
 .best-move-hold { grid-template-columns: minmax(0, 1fr); }
 
-/* Compare: the pinned strip. */
+/*
+ * Compare: the pinned strip. One line that never wraps: the chips scroll
+ * sideways under a fade, and `+ Add` stays put at the right (13 October 2026).
+ */
 .cmp2-strip {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   margin: 0 calc(-1 * var(--sp-4));
-  padding: var(--sp-2) var(--sp-4);
+  padding: 6px var(--sp-4);
   background: var(--paper-bg);
   border-bottom: 1px solid var(--paper-line);
 }
 .cmp2-chips {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
 }
+.cmp2-chips::-webkit-scrollbar { display: none; }
 .cmp2-chip {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  height: 30px;
   padding-left: 10px;
   border-radius: var(--radius-pill);
   background: var(--paper-card);
@@ -10631,20 +10649,41 @@ div.matchup-result {
   color: var(--paper-ink);
   white-space: nowrap;
 }
-.cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 3em; max-width: 7.5em; }
+.cmp2-chip:last-child { margin-right: 14px; }
+.cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 7.5em; }
 .cmp2-chip-pts { color: var(--paper-dim); font-variant-numeric: tabular-nums; }
 .cmp2-chip-x,
 .cmp2-add {
-  min-width: var(--tap);
-  min-height: var(--tap);
   border: 0;
   background: none;
   font: inherit;
   color: var(--paper-blue);
   cursor: pointer;
 }
-.cmp2-chip-x { color: var(--paper-dim); font-size: 0.8rem; }
-.cmp2-add { flex: 0 0 auto; padding: 0 var(--sp-2); font-weight: 600; font-size: 0.85rem; }
+/*
+ * A full thumb-sized target on a 30px chip: the button is 44px tall and gives
+ * the extra 14px back with negative margins, so the strip stays one slim line.
+ */
+.cmp2-chip-x,
+.cmp2-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: var(--tap);
+  margin-block: calc((30px - var(--tap)) / 2);
+  padding: 0;
+}
+.cmp2-chip-x { min-width: 28px; margin-left: -2px; color: var(--paper-dim); font-size: 0.75rem; }
+.cmp2-add {
+  flex: 0 0 auto;
+  min-width: var(--tap);
+  padding: 0 var(--sp-2);
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.cmp2-chips { padding-block: 7px; margin-block: -7px; }
 .cmp2-chip-x:focus-visible,
 .cmp2-add:focus-visible,
 .cmp2-row:focus-visible,
@@ -10729,21 +10768,49 @@ div.matchup-result {
 .cmp2-soft { font-size: 0.62rem; color: var(--paper-faint); white-space: nowrap; }
 
 /* Compare: the verdict. */
-.cmp2-verdict { padding-top: var(--sp-3); }
-.cmp2-cols { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.cmp2-verdict { padding-top: var(--sp-2); }
+.cmp2-cols { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* Four cards scroll sideways rather than squeeze a chip below its word. */
+.cmp2-cols-wide { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.cmp2-cols-wide::-webkit-scrollbar { display: none; }
 .cmp2-col {
   display: grid;
   justify-items: start;
   align-content: start;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  padding: var(--sp-2);
+  padding: 6px 8px;
   border-radius: var(--radius);
   background: var(--paper-card);
   border: 1px solid var(--paper-line);
 }
 .cmp2-col-lead { border-color: var(--paper-teal); box-shadow: inset 0 0 0 1px var(--paper-teal); }
 .cmp2-col .pill-chip { margin-left: 0; }
+/* The two reserved chip slots: one line each, drawn empty when there is nothing to say. */
+.cmp2-col-slot {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  height: 18px;
+  overflow: hidden;
+}
+.avail-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Words on both, so colour is never the only cue. */
+.avail-chip-warn { color: var(--paper-ink); background: var(--paper-warn-tint); border: 1px solid var(--paper-warn); }
+.avail-chip-out { color: var(--paper-card); background: var(--paper-red); border: 1px solid var(--paper-red); }
 .cmp2-col-name {
   max-width: 100%;
   font-size: 0.86rem;
@@ -10770,17 +10837,34 @@ div.matchup-result {
   font-weight: 700;
   color: var(--paper-teal);
 }
-.cmp2-why { margin: var(--sp-2) 2px 0; font-size: 0.84rem; line-height: 1.35; color: var(--paper-ink); }
+.cmp2-why { margin: 6px 2px 0; font-size: 0.84rem; line-height: 1.35; color: var(--paper-ink); }
 
-/* Compare: one table for how the score is built. */
-.cmp2-table { padding-top: var(--sp-3); }
+/* Compare: one table for how the score is built, straight under the verdict. */
+.cmp2-table { padding-top: var(--sp-2); }
 .cmp2-rows {
-  margin-top: 6px;
   border-radius: var(--radius);
   background: var(--paper-card);
   border: 1px solid var(--paper-line);
   overflow: hidden;
 }
+.cmp2-th > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp2-factor-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Four columns: the table scrolls sideways, the labels stay pinned. */
+.cmp2-table-wide .cmp2-rows { overflow-x: auto; overscroll-behavior-x: contain; }
+.cmp2-table-wide .cmp2-tr { width: max-content; min-width: 100%; }
+.cmp2-table-wide .cmp2-pin {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  margin-left: calc(-1 * var(--sp-3));
+  padding-left: var(--sp-3);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  background: var(--paper-card);
+  box-shadow: 1px 0 0 var(--paper-line-soft);
+}
+.cmp2-table-wide .cmp2-factor[aria-expanded='true'] .cmp2-pin { background: var(--paper-head); }
 .cmp2-tr {
   display: grid;
   align-items: center;
@@ -10803,7 +10887,6 @@ div.matchup-result {
 .cmp2-total { border-top: 1px solid var(--paper-line); font-weight: 700; }
 .cmp2-detail { padding: 4px var(--sp-3) 8px; background: var(--paper-head); font-size: 0.75rem; color: var(--paper-dim); }
 .cmp2-detail p { margin: 2px 0; }
-.cmp2-noeffect { margin: 6px 2px 0; font-size: 0.72rem; line-height: 1.4; color: var(--paper-faint); }
 .cmp-busy {
   opacity: 0.6;
   transition: opacity var(--dur-fast) var(--ease);

@@ -5,8 +5,9 @@
  *    the sheet agrees with it (item 1's fix is unit-tested in
  *    `startsit.suggestionAgreesWithCompare.test.ts`; this is the tap).
  *  - The Compare picker opens on the reader's own roster.
- *  - A player who is out shows no forecast; a doubtful or questionable one
- *    shows the discounted figure over the struck one.
+ *  - A player who is out shows no forecast; a doubtful one shows the
+ *    discounted figure over the struck one. A questionable one keeps his
+ *    number (13 October 2026) and carries a warning instead.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { inSeason } from './helpers.ts';
@@ -39,6 +40,8 @@ test.describe('the Team round of 30 September', () => {
 
     const change = page.getByTestId('lineup-swap');
     await expect(change).toHaveAttribute('data-seed', '1001,1004');
+    // Sotelo is Questionable: it costs nothing, so Best move says it in one line.
+    await expect(change.getByTestId('best-move-availability')).toHaveText('Sotelo is questionable and may not play');
     await change.click();
 
     await expect(page.getByTestId('compare-sheet')).toBeVisible();

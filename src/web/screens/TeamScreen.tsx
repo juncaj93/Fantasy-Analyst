@@ -63,6 +63,7 @@ import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../c
 import { noMoveSummary, type NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
+import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsFrom } from '../../core/startsit/weekPoints.ts';
 import { postureFrom } from '../../core/startsit/tiebreak.ts';
@@ -561,6 +562,7 @@ export function TeamScreen({
                   lineup={lineup}
                   pointsOf={(id) => weekPointsFrom(evaluations.get(id)?.decision).points}
                   pillOf={(id) => evaluations.get(id)?.pill}
+                  evaluationOf={(id) => evaluations.get(id) ?? null}
                   onOpen={(slot, seed) => setCompare({ slot, seed })}
                 />
               ) : null}
@@ -1698,12 +1700,15 @@ function LineupCard({
   lineup,
   pointsOf,
   pillOf,
+  evaluationOf,
   onOpen,
 }: {
   lineup: LineupRecommendation;
   /** This week's number for a player, from `weekPointsFrom`: the one Compare prints. */
   pointsOf: (playerId: string) => number | null;
   pillOf: (playerId: string) => StartSitEvaluation['pill'] | undefined;
+  /** For the one-line warning when the player to start may not play. */
+  evaluationOf: (playerId: string) => StartSitEvaluation | null;
   /** Open the Compare sheet on this change's players, in its slot. */
   onOpen: (slot: string, seed: string[]) => void;
 }) {
@@ -1719,6 +1724,17 @@ function LineupCard({
   const [fill = null] = lineup.fills ?? [];
   const useFill = fill != null && (best == null || fill.gain >= best.gain);
   const risks = (lineup.lateSwapRisks ?? []).filter((r) => r.starting);
+  /* Questionable costs nothing in the score, so it is said here instead. */
+  const warning = useFill
+    ? availabilityWarning(fill.inName, evaluationOf(fill.inPlayerId))
+    : best
+      ? availabilityWarning(best.inName, evaluationOf(best.inPlayerId))
+      : null;
+  const warningLine = warning ? (
+    <span className="best-move-warn" data-testid="best-move-availability">
+      {warning}
+    </span>
+  ) : null;
 
   const head = (
     <span className="best-move-head">
@@ -1735,7 +1751,7 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-fill"
           data-seed={fill.inPlayerId}
-          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${fmt(pointsOf(fill.inPlayerId))} projected. Compare.`}
+          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${fmt(pointsOf(fill.inPlayerId))} projected.${warning ? ` ${warning}.` : ''} Compare.`}
           onClick={() => onOpen(fill.slot, [fill.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1747,6 +1763,7 @@ function LineupCard({
             <span className="matchup-best-move-metrics">
               {fmt(pointsOf(fill.inPlayerId))} projected · {fill.slot} is empty in Sleeper
             </span>
+            {warningLine}
           </span>
           <span className="dense-chevron" aria-hidden="true">›</span>
         </button>
@@ -1757,7 +1774,7 @@ function LineupCard({
           data-testid="lineup-swap"
           data-seed={`${best.outPlayerId},${best.inPlayerId}`}
           data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
-          aria-label={`Best move: start ${best.inName} over ${best.outName} at ${best.slot}, ${fmt(pointsOf(best.inPlayerId))} against ${fmt(pointsOf(best.outPlayerId))} projected.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''} Compare them.`}
+          aria-label={`Best move: start ${best.inName} over ${best.outName} at ${best.slot}, ${fmt(pointsOf(best.inPlayerId))} against ${fmt(pointsOf(best.outPlayerId))} projected.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
           onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1777,6 +1794,7 @@ function LineupCard({
                 {best.tiebreak.sentence}
               </span>
             ) : null}
+            {warningLine}
           </span>
           <span className="dense-chevron" aria-hidden="true">›</span>
         </button>

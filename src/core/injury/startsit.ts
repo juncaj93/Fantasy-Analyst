@@ -7,17 +7,13 @@
  * who is out is out — and the wrong shape for Questionable, which is the only
  * designation that is genuinely a question.
  *
- * So the table survives for the designations that are facts, and Questionable
- * becomes contextual: the same word costs a player who practised fully on
- * Friday much less than one who has not practised at all.
+ * So the table survives for the designations that are facts. Questionable
+ * was contextual for a while (practice moved its cost); since 13 October 2026
+ * it costs nothing and is shown instead, as a warning chip.
  *
- * ## Bounded on purpose
- *
- * The context can halve the penalty or nearly double it, and it can do no more
- * than that. A practice report is a real signal and it is not a medical
- * clearance; a player who practised fully and is still listed Questionable is
- * still listed Questionable, and this must not talk itself into forgetting
- * that.
+ * A practice report is a real signal and it is not a medical clearance; a
+ * player who practised fully and is still listed Questionable is still listed
+ * Questionable, and the chip says so whatever the practice week looked like.
  */
 
 import {
@@ -36,12 +32,13 @@ import {
 export const AVAILABILITY = {
   ruledOut: -99,
   doubtful: -6,
-  questionable: -1.5,
+  /** Shown, not scored, since 13 October 2026. */
+  questionable: 0,
 } as const;
 
 /**
- * How much the week's practice moves a Questionable player, as a multiplier on
- * the base penalty.
+ * How much the week's practice says about a Questionable player. It no longer
+ * moves the score; it decides whether the note mentions the practice week.
  *
  * Full participation is the strongest evidence available here that the
  * designation is precautionary, and it still leaves a third of the penalty
@@ -119,15 +116,19 @@ export function availabilityPenalty(state: InjuryState): AvailabilityAssessment 
     };
   }
 
-  // Questionable: the only one where the rest of the week is worth reading.
+  /*
+   * Questionable: a warning, not a number (owner's call, 13 October 2026).
+   *
+   * The score is the Vegas line plus the small news and opponent nudges. A
+   * Questionable tag shows as a chip on the card and a line on Best move, and
+   * the reader decides. The practice week still shapes the sentence.
+   */
   const practice = PRACTICE_WEIGHT[state.practice.trend];
   const trust = CONFIDENCE_WEIGHT[state.confidence];
-  // Blend the practice multiplier toward 1 by how much the sources are trusted.
   const weight = 1 + (practice - 1) * trust;
-  const points = round2(AVAILABILITY.questionable * weight);
 
   return {
-    points,
+    points: 0,
     gate: false,
     display: describe(state),
     note: questionableNote(state, weight),
@@ -165,6 +166,3 @@ function questionableNote(state: InjuryState, weight: number): string | null {
   return null;
 }
 
-function round2(v: number): number {
-  return Math.round(v * 100) / 100;
-}

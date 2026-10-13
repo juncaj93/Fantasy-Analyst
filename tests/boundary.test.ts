@@ -93,25 +93,19 @@ describe('market line boundary', () => {
 });
 
 describe('practice-report boundary', () => {
-  it('offers the leader getting worse', () => {
+  /*
+   * Questionable is shown, not scored, since 13 October 2026, so a change in
+   * the practice week no longer moves anybody's number. A boundary must be
+   * true, so none is offered.
+   */
+  it('offers no practice change now that Questionable costs nothing', () => {
     const leader = questionable(candidate('a', 'A Starter', 'WR', 12.5), 'full_participant');
     const challenger = candidate('b', 'B Challenger', 'WR', 11.9);
-    const report = findBoundaries([leader, challenger], HALF_PPR);
-    const practice = report.conditions.find((c) => c.kind === 'practice_report');
-    expect(practice).toBeDefined();
-    expect(practice!.playerName).toBe('A Starter');
-    expect(practice!.switchToName).toBe('B Challenger');
-    expect(practice!.detail).toMatch(/limited again|held out of practice/);
-  });
+    expect(findBoundaries([leader, challenger], HALF_PPR).conditions.some((c) => c.kind === 'practice_report')).toBe(false);
 
-  it('offers the challenger getting better', () => {
-    const leader = candidate('a', 'A Starter', 'WR', 12);
-    const challenger = questionable(candidate('b', 'B Challenger', 'WR', 13.2), 'stable_limited');
-    const report = findBoundaries([leader, challenger], HALF_PPR);
-    const practice = report.conditions.find((c) => c.kind === 'practice_report' && c.playerName === 'B Challenger');
-    expect(practice).toBeDefined();
-    expect(practice!.switchToName).toBe('B Challenger');
-    expect(practice!.detail).toMatch(/full participant|upgraded in practice/);
+    const leader2 = candidate('a', 'A Starter', 'WR', 12);
+    const challenger2 = questionable(candidate('b', 'B Challenger', 'WR', 13.2), 'stable_limited');
+    expect(findBoundaries([leader2, challenger2], HALF_PPR).conditions.some((c) => c.kind === 'practice_report')).toBe(false);
   });
 
   it('never proposes a change that is already true', () => {

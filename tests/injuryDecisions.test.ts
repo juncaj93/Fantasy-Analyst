@@ -58,48 +58,31 @@ describe('availability, for a lineup', () => {
     expect(assessment.points).toBe(AVAILABILITY.doubtful);
     expect(assessment.gate).toBe(false);
     expect(assessment.points).toBeLessThan(AVAILABILITY.questionable);
+    expect(AVAILABILITY.questionable).toBe(0);
   });
 
   /**
-   * The whole reason this module exists. "Questionable" is the only designation
-   * that is genuinely a question, and the week's practice is the best free
-   * answer to it — so it must not cost every player the same 1.5 points.
+   * Questionable is shown, not scored (owner's call, 13 October 2026). It used
+   * to cost 0.5 to 2.7 points by practice week; now it costs nothing, and the
+   * Compare card and Best move carry it as a warning. The practice week still
+   * decides what the note says.
    */
-  describe('Questionable, which is contextual', () => {
-    it('costs much less when he practised fully all week', () => {
-      const full = availabilityPenalty(state('questionable', {}, { practice: ['full', 'full'] }));
-      const plain = availabilityPenalty(state('questionable'));
-      expect(full.points).toBeGreaterThan(plain.points); // less negative
-      expect(Math.abs(full.points)).toBeLessThan(Math.abs(plain.points) * 0.8);
-      expect(full.note).toContain('practised fully');
+  describe('Questionable, which is a warning', () => {
+    it('costs nothing, whatever the practice week', () => {
+      for (const practice of [[], ['full', 'full'], ['dnp', 'dnp'], ['dnp', 'limited'], ['limited', 'dnp']] as const) {
+        const assessment = availabilityPenalty(state('questionable', {}, { practice: [...practice] }));
+        expect(assessment.points, practice.join(',')).toBe(0);
+        expect(assessment.gate).toBe(false);
+        expect(assessment.display).toMatch(/^Questionable/);
+      }
     });
 
-    it('costs more when he has not practised', () => {
-      const none = availabilityPenalty(state('questionable', {}, { practice: ['dnp', 'dnp'] }));
-      const plain = availabilityPenalty(state('questionable'));
-      expect(none.points).toBeLessThan(plain.points);
-      expect(none.note).toContain('has not practised');
+    it('still says what the practice week said', () => {
+      expect(availabilityPenalty(state('questionable', {}, { practice: ['full', 'full'] })).note).toContain('practised fully');
+      expect(availabilityPenalty(state('questionable', {}, { practice: ['dnp', 'dnp'] })).note).toContain('has not practised');
     });
 
-    it('reads the direction, not only the latest day', () => {
-      const improving = availabilityPenalty(state('questionable', {}, { practice: ['dnp', 'limited'] }));
-      const worsening = availabilityPenalty(state('questionable', {}, { practice: ['limited', 'dnp'] }));
-      expect(improving.points).toBeGreaterThan(worsening.points);
-    });
-
-    /** Never a clearance. The designation still stands and still costs. */
-    it('never removes the penalty entirely, however good the week looked', () => {
-      const best = availabilityPenalty(state('questionable', {}, { practice: ['full', 'full'] }));
-      expect(best.points).toBeLessThan(0);
-      expect(best.gate).toBe(false);
-    });
-
-    /**
-     * Bad data should make the app less sure, not more cautious — "less sure"
-     * is what is actually true. So a stale or contradicted report gets less of
-     * a say and the answer moves back toward the plain designation.
-     */
-    it('trusts a stale practice report less, in both directions', () => {
+    it('says when the report is out of date', () => {
       const stale = resolveInjury(
         [
           { source: 'sleeper', designation: 'questionable', raw: 'Questionable', observedAt: longAgo },
@@ -107,9 +90,7 @@ describe('availability, for a lineup', () => {
         ],
         NOW,
       );
-      const fresh = state('questionable', {}, { practice: ['full', 'full'] });
-      // The fresh full-participation report earns more relief than the stale one.
-      expect(availabilityPenalty(stale).points).toBeLessThan(availabilityPenalty(fresh).points);
+      expect(availabilityPenalty(stale).points).toBe(0);
       expect(availabilityPenalty(stale).note).toContain('out of date');
     });
 
@@ -195,9 +176,9 @@ describe('availability, for a trade', () => {
    * The two answers, side by side. The same player is a hard problem for one
    * screen and barely a footnote on the other, and that is correct.
    */
-  it('answers the same Questionable differently from Start/Sit', () => {
+  it('treats a Questionable as a footnote on both screens', () => {
     const questionable = state('questionable', {}, { practice: ['dnp'] });
-    expect(availabilityPenalty(questionable).points).toBeLessThan(-1);
+    expect(availabilityPenalty(questionable).points).toBe(0);
     expect(Math.abs(tradeInjuryContext(questionable).urgencyDelta)).toBeLessThanOrEqual(0.25);
   });
 });

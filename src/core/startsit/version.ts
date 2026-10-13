@@ -45,8 +45,14 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * `startsit@3`, 8 October 2026: a touchdown over/under above 0.5 is converted
  * to the any-touchdown chance it implies (`touchdownLine.ts`) instead of being
  * read as one. Market numbers rise for unchanged inputs, hence the bump.
+ *
+ * `startsit@4`, 13 October 2026: double-counted factors became text only.
+ *
+ * `startsit@5`, 13 October 2026: Questionable, and any status that is not
+ * Out, Doubtful or a bye, costs nothing and is shown as a warning instead.
+ * Weights are unchanged; a Questionable player's score rises, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@4';
+export const STARTSIT_ENGINE_VERSION = 'startsit@5';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.

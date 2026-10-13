@@ -1850,8 +1850,12 @@ test.describe('the season features', () => {
 
     await page.getByTestId('compare-open').click();
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
-    // Nothing chosen yet is not a comparison.
-    await expect(page.getByTestId('compare-run')).toBeDisabled();
+    // Nothing chosen yet is not a comparison: the picker is open and no verdict is drawn.
+    await expect(page.getByTestId('compare-picker')).toBeVisible();
+    await expect(page.getByTestId('comparison')).toHaveCount(0);
+    // The picker opens on My roster; All players is the league.
+    await page.getByTestId('compare-tab-all').click();
+    await expect(page.getByTestId('compare-tab-all')).toHaveAttribute('aria-pressed', 'true');
 
     /*
      * Waited for directly rather than through `settled`.
@@ -1873,7 +1877,8 @@ test.describe('the season features', () => {
     const labels = await page
       .getByTestId('compare-candidate')
       .evaluateAll((rows) => rows.map((r) => r.textContent ?? ''));
-    expect(labels.some((l) => l.includes('Free agent') || l.includes('Rostered elsewhere'))).toBe(true);
+    const ownedElsewhere = await page.getByTestId('compare-owner').count();
+    expect(labels.some((l) => l.includes('Free agent')) || ownedElsewhere > 0).toBe(true);
 
     await page.getByTestId('sheet-close').click();
   });
