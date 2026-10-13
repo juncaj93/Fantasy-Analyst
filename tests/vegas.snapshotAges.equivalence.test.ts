@@ -102,7 +102,7 @@ describe('snapshotAges: same decisions, fewer rows', () => {
     const current = new VegasRefreshService(newCounting.db, provider) as unknown as Internals;
     await legacy.rosterPlayers(now, true);
     await current.rosterPlayers(now, true);
-    const pp = 'SELECT pp.* FROM player_props pp';
+    const pp = 'FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id';
     expect(legacyCounting.callsMatching(pp)).toBeGreaterThan(0);
     expect(newCounting.callsMatching(pp)).toBe(0);
   });
