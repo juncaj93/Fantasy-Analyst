@@ -189,11 +189,12 @@ describe('locked games', () => {
 
 describe('late swap in a head-to-head comparison', () => {
   it('warns when the preferred player is questionable and locks much later', () => {
-    // The brief's own numbers: after the Questionable penalty the night player
-    // still projects ~0.7 points ahead of the healthy 1pm alternative.
+    // The brief's own gap: the night player projects ~0.7 points ahead of the
+    // healthy 1pm alternative. Questionable costs nothing since 13 October
+    // 2026, so the risk is carried by this warning alone.
     const comparison = compareStartSit(
       [
-        candidate('night', 'Night WR', 'WR', 13.3, { kickoff: SUNDAY_NIGHT, status: 'Questionable' }),
+        candidate('night', 'Night WR', 'WR', 11.76, { kickoff: SUNDAY_NIGHT, status: 'Questionable' }),
         candidate('early', 'Early WR', 'WR', 11.1, { kickoff: SUNDAY_1PM }),
       ],
       HALF_PPR,

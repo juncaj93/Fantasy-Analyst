@@ -15,9 +15,14 @@ describe('rowFigure', () => {
     expect(f).toEqual({ kind: 'out', was: 9.94, label: 'Out' });
   });
 
-  it('applies the same charge the score applies to a questionable player', () => {
-    const f = rowFigure(9.53, { ruledOut: false, statusFlag: 'Questionable · practised fully', components: status(-1.01) });
-    expect(f).toMatchObject({ kind: 'risk', points: 8.52, was: 9.53, charge: -1.01, label: 'Questionable' });
+  it('applies the same charge the score applies to a doubtful player', () => {
+    const f = rowFigure(9.53, { ruledOut: false, statusFlag: 'Doubtful · has not practised', components: status(-1.01) });
+    expect(f).toMatchObject({ kind: 'risk', points: 8.52, was: 9.53, charge: -1.01, label: 'Doubtful' });
+  });
+
+  /* Questionable costs nothing since 13 October 2026, so its row is a plain number. */
+  it('leaves a questionable player on his plain number', () => {
+    expect(rowFigure(9.53, { ruledOut: false, statusFlag: 'Questionable · practised fully', components: status(0) })).toEqual({ kind: 'plain', points: 9.53 });
   });
 
   it('never goes below zero', () => {

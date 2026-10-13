@@ -318,12 +318,17 @@ cannot print one under the other's label.
 **Principle (settled with Alex):** do not try to be smarter than Vegas. The
 market number is the score; everything else is a small capped nudge or text.
 
-**Scoring** (`core/startsit/scoringRules.ts`, engine `startsit@4`):
+**Scoring** (`core/startsit/scoringRules.ts`, engine `startsit@4`, `startsit@5` for the Questionable change):
 
 - Lifetime news, role trend, touchdown dependency, game script, explosive role
   and opportunity are computed and shown as text and add zero points.
   Recent news (30d), opponent by role and the uncertainty penalty stay as
-  nudges inside the existing 10% budget. Availability stays a gate outside it.
+  nudges inside the existing 10% budget. Availability stays a gate outside it:
+  Out (and IR, PUP, suspended), a bye and Doubtful move the score as before.
+  Since 13 October, Questionable and any other reported status cost nothing
+  (`core/injury/startsit.ts`); they show as a warning chip on the Compare card
+  and one line on Best move ("McConkey is questionable and may not play"),
+  from `core/startsit/availabilityChip.ts`.
 - Weather has three states: a real forecast moves only the passing game and
   kickers, only for strong wind or snow; a dome or closed roof is "known,
   unaffected" (fixture list first, `core/nfl/roofs.ts` for a blank roof);
@@ -356,8 +361,12 @@ Steady (`tiebreak.ts`), in the lineup and in Compare.
 
 **Screens:** Team's card is "Best move" in the Matchup row's style and is the
 only start/sit advice in the app. Matchup shows no recommendation. Compare is
-one screen: a pinned strip of up to three players, a picker with My roster,
-Waivers and All players sorted by this week's number, a side-by-side verdict
-and one table. The picker, Compare, Best move and the waiver tiers all print
+one screen: a pinned one-line strip of up to four players (it scrolls
+sideways, `+ Add` stays at the right), a picker with My roster, Waivers and All
+players sorted by this week's number, a side-by-side verdict whose cards keep
+two fixed chip slots (pill, availability), and one table straight under it:
+Vegas lines, Recent news, Opponent and Score, a dash for a missing value, no
+heading and no "no effect" line. Two or three players fit one screen; with four
+the cards and the table scroll sideways and the table's labels stay pinned. The picker, Compare, Best move and the waiver tiers all print
 `weekPoints()` (`core/startsit/weekPoints.ts`); `tests/startsit.oneNumber.test.ts`
 fails if two of them disagree.

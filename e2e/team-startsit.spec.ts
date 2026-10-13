@@ -757,7 +757,7 @@ test.describe('the comparison tool', () => {
     for (const r of roles) expect(r).toMatch(/Starter|Bench/i);
   });
 
-  for (const count of [2, 3] as const) {
+  for (const count of [2, 3, 4] as const) {
     test(`ranks ${count} players as soon as they are chosen`, async ({ page }) => {
       await page.getByTestId('compare-open').click();
       await allPlayers(page);
@@ -772,16 +772,38 @@ test.describe('the comparison tool', () => {
     });
   }
 
-  test('refuses a fourth player out loud, and keeps the three already chosen', async ({ page }) => {
+  test('refuses a fifth player in three words, and keeps the four already chosen', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await allPlayers(page);
+    const ids = await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(0, 5).map((e) => e.getAttribute('data-player-id')!));
+    for (const id of ids.slice(0, 4)) await choose(page, id);
+    const fifth = page.locator(`[data-testid="compare-candidate"][data-player-id="${ids[4]}"]`);
+    await fifth.click();
+    await expect(fifth).toHaveAttribute('data-chosen', 'false');
+    await expect(page.getByTestId('compare-notice')).toHaveText('Up to 4 players.');
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
+  });
+
+  test('keeps the chosen players on one slim line, with + Add pinned at the right', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await allPlayers(page);
     const ids = await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(0, 4).map((e) => e.getAttribute('data-player-id')!));
-    for (const id of ids.slice(0, 3)) await choose(page, id);
-    const fourth = page.locator(`[data-testid="compare-candidate"][data-player-id="${ids[3]}"]`);
-    await fourth.click();
-    await expect(fourth).toHaveAttribute('data-chosen', 'false');
-    await expect(page.getByTestId('compare-notice')).toContainText('Up to 3 players at once');
-    await expect(page.getByTestId('compare-chosen')).toHaveCount(3);
+    for (const id of ids) await choose(page, id);
+    const chips = page.getByTestId('compare-chosen');
+    await expect(chips).toHaveCount(4);
+    const tops = await chips.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size, 'every chip on the same line').toBe(1);
+    const strip = (await page.getByTestId('compare-strip').boundingBox())!;
+    expect(strip.height, 'one slim line, not a block of chips').toBeLessThanOrEqual(46);
+    // The chips scroll sideways under + Add, which never moves.
+    const add = (await page.getByTestId('compare-add').boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(add.x + add.width).toBeLessThanOrEqual(viewport.width);
+    const row = page.getByTestId('compare-chips');
+    const box = (await row.boundingBox())!;
+    expect(box.x + box.width, 'the chips end before + Add').toBeLessThanOrEqual(add.x + 1);
+    // Every chip keeps its X.
+    await expect(page.getByTestId('compare-remove')).toHaveCount(4);
   });
 
   test('a second tap removes, and so does the X on the pinned chip', async ({ page }) => {
@@ -858,10 +880,35 @@ test.describe('the comparison tool', () => {
     await vegas.click();
     await expect(vegas).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByTestId('compare-factor-detail')).toBeVisible();
-    await expect(page.getByTestId('compare-untracked')).toContainText('No effect:');
+    // No heading, no footer, no availability row: the card's chip says that.
+    const grid = page.getByTestId('compare-grid');
+    await expect(grid).not.toContainText('How the score is built');
+    await expect(grid).not.toContainText('No effect');
+    await expect(page.locator('[data-testid="compare-factor"][data-factor="status"]')).toHaveCount(0);
+    // Short labels, one line each.
+    await expect(vegas.locator('.cmp2-factor-label')).toHaveText('Vegas lines');
+    await expect(grid.locator('.cmp2-total .cmp2-pin')).toHaveText('Score');
+    for (const label of await grid.locator('.cmp2-factor-label').allInnerTexts()) {
+      expect(label, 'a short label').toMatch(/^(Vegas lines|Recent news|Opponent|Uncertainty|Weather)$/);
+    }
   });
 
-  for (const count of [2, 3] as const) {
+  test('reserves the pill and availability slots on every card, filled or not', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await choose(page, '1004');
+    await showComparison(page);
+    const columns = page.getByTestId('compare-column');
+    await expect(columns).toHaveCount(2);
+    for (const col of await columns.all()) {
+      await expect(col.getByTestId('compare-slot-pill')).toHaveCount(1);
+      await expect(col.getByTestId('compare-slot-availability')).toHaveCount(1);
+    }
+    const heights = await columns.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    expect(new Set(heights).size, 'every card the same height').toBe(1);
+  });
+
+  for (const count of [2, 3, 4] as const) {
     test(`fits the whole comparison on one screen with ${count} players`, async ({ page }) => {
       await page.getByTestId('compare-open').click();
       await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
@@ -874,6 +921,17 @@ test.describe('the comparison tool', () => {
       expect(lastRow.y + lastRow.height, 'the score row is on screen without scrolling').toBeLessThanOrEqual(viewport.height);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(0);
+      if (count === 4) {
+        // Four scroll sideways inside the table, and the row labels stay put.
+        const table = page.getByTestId('compare-table-scroll');
+        const label = page.locator('[data-testid="compare-factor"][data-factor="vegas"] .cmp2-pin');
+        const before = (await label.boundingBox())!;
+        await table.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+        await page.waitForTimeout(150);
+        const after = (await label.boundingBox())!;
+        expect(Math.abs(after.x - before.x), 'the label column is pinned').toBeLessThanOrEqual(1);
+        await expect(label).toBeInViewport();
+      }
     });
   }
 

@@ -127,6 +127,7 @@
       "src/core/search/players.ts",
       "src/core/sleeper/eligibility.ts",
       "src/core/sleeper/rosterShape.ts",
+      "src/core/startsit/availabilityChip.ts",
       "src/core/startsit/projection.ts",
       "src/core/startsit/sleeperLineup.ts",
       "src/core/startsit/tiebreak.ts",

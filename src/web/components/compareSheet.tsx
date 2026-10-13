@@ -7,14 +7,17 @@
  *
  * Now, top to bottom:
  *
- *  1. **A pinned strip** of the chosen players (at most three), each with an X,
- *     and `+ Add`. It never scrolls away.
- *  2. **The verdict**: the players side by side with their score, their pill
- *     and the winner, and one line saying why.
- *  3. **One table** for how the score is built: a row per factor that moved
- *     anybody, a column per player. A tap on a row shows the engine's own
- *     sentence for each player. Factors that moved nobody collapse into one
- *     "No effect" line.
+ *  1. **A pinned strip** of the chosen players (at most four) on one line
+ *     that scrolls sideways, each with an X, and `+ Add` pinned at the right.
+ *     It never scrolls away.
+ *  2. **The verdict**: the players side by side with their score and the
+ *     winner, and one line saying why. Each card keeps two fixed chip slots,
+ *     the pill and availability, so a chip never moves the layout.
+ *  3. **One table**, straight under the verdict: a row per factor that moved
+ *     anybody, a column per player, short labels and no sub-lines. A tap on a
+ *     row shows the engine's own sentence for each player. Factors that moved
+ *     nobody are not shown, and availability is the card's chip, not a row.
+ *     With four players the table scrolls sideways and its labels stay put.
  *  4. **The picker**, when open: My roster, Waivers or All players, sorted by
  *     this week's number, highest first. A tap adds, a second tap removes, and
  *     the list stays open for quick swaps.
@@ -33,9 +36,10 @@ import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterS
 import { orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsFrom } from '../../core/startsit/weekPoints.ts';
+import { availabilityChip } from '../../core/startsit/availabilityChip.ts';
 
-/** Three columns is what a 360px phone can read. Matched by the server. */
-export const MAX_COMPARE = 3;
+/** Two or three fit a 360px phone; four scroll sideways. Matched by the server. */
+export const MAX_COMPARE = 4;
 
 type PoolTab = 'mine' | 'waivers' | 'all';
 
@@ -174,7 +178,7 @@ export function CompareSheet({
       return;
     }
     if (ids.length >= MAX_COMPARE) {
-      setNotice(`Up to ${MAX_COMPARE} players at once. Remove one to add another.`);
+      setNotice(`Up to ${MAX_COMPARE} players.`);
       return;
     }
     setNames((n) => ({ ...n, [row.id]: row.name }));
@@ -213,7 +217,7 @@ export function CompareSheet({
     >
       {/* 1. The strip: pinned to the top of the sheet's scroll. */}
       <div className="cmp2-strip" data-testid="compare-strip">
-        <ul className="cmp2-chips" aria-label="Players being compared">
+        <ul className="cmp2-chips" aria-label="Players being compared" data-testid="compare-chips">
           {ids.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
               <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>
@@ -225,7 +229,7 @@ export function CompareSheet({
                 data-testid="compare-remove"
                 onClick={() => remove(id)}
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </button>
             </li>
           ))}
@@ -437,7 +441,10 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
   const pick = comparable ? comparison.recommendedPlayerId : null;
   return (
     <section className="cmp2-verdict" aria-label="Verdict" data-testid="comparison" data-columns={columns.length}>
-      <ul className="cmp2-cols" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+      <ul
+        className={columns.length > 3 ? 'cmp2-cols cmp2-cols-wide' : 'cmp2-cols'}
+        style={{ gridTemplateColumns: `repeat(${columns.length}, ${columns.length > 3 ? 'minmax(88px, 1fr)' : 'minmax(0, 1fr)'})` }}
+      >
         {columns.map((e) => {
           const week = weekPointsFrom(e.decision);
           const lead = e.playerId === pick;
@@ -452,13 +459,21 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               <span className="cmp2-col-name">{shortName(e.name)}</span>
               <span className="cmp2-col-meta">
                 {e.position} · {e.team}
-                {e.statusFlag ? ` · ${statusCode(e.statusFlag)}` : ''}
               </span>
               <span className="cmp2-col-score" data-testid="compare-score">
                 {pts(week.points)}
               </span>
-              {week.lowerConfidence && week.points != null ? <span className="cmp2-soft">lower confidence</span> : null}
-              <PillChip pill={e.pill} />
+              {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
+              <span className="cmp2-col-slot" data-testid="compare-slot-pill">
+                {week.lowerConfidence && week.points != null ? (
+                  <span className="cmp2-soft">lower confidence</span>
+                ) : (
+                  <PillChip pill={e.pill} />
+                )}
+              </span>
+              <span className="cmp2-col-slot" data-testid="compare-slot-availability">
+                <AvailabilityChipView evaluation={e} />
+              </span>
               {lead ? (
                 <span className="cmp2-start">
                   <CheckIcon size={12} /> Start
@@ -483,14 +498,31 @@ interface FactorRow {
   cells: { value: number | null; display: string }[];
 }
 
-/** One row per factor that moved anybody; the rest named once. */
-export function scoreRows(columns: StartSitEvaluation[]): { rows: FactorRow[]; noEffect: string[] } {
+/** One line each. A factor not named here keeps the engine's own label. */
+const SHORT_LABEL: Record<string, string> = {
+  vegas: 'Vegas lines',
+  news_recent: 'Recent news',
+  matchup_role: 'Opponent',
+  uncertainty: 'Uncertainty',
+  weather: 'Weather',
+};
+
+/** Availability is the card's chip, never a row (13 October 2026). */
+const NOT_A_ROW = new Set(['status']);
+
+/**
+ * One row per factor that moved anybody, Vegas always first. A factor that
+ * moved nobody is not shown at all.
+ */
+export function scoreRows(columns: StartSitEvaluation[]): FactorRow[] {
   const keys: { key: string; label: string }[] = [];
   for (const e of columns) {
-    for (const c of e.components) if (!keys.some((k) => k.key === c.key)) keys.push({ key: c.key, label: c.label });
+    for (const c of e.components) {
+      if (NOT_A_ROW.has(c.key) || keys.some((k) => k.key === c.key)) continue;
+      keys.push({ key: c.key, label: c.label });
+    }
   }
   const rows: FactorRow[] = [];
-  const noEffect: string[] = [];
   for (const { key, label } of keys) {
     const cells = columns.map((e) => {
       const c = e.components.find((x) => x.key === key);
@@ -498,28 +530,37 @@ export function scoreRows(columns: StartSitEvaluation[]): { rows: FactorRow[]; n
       return { value, display: c?.display ?? 'not read' };
     });
     const moved = cells.some((cell) => cell.value != null && Math.abs(cell.value) >= 0.005);
-    if (moved || key === 'vegas') rows.push({ key, label: key === 'vegas' ? 'Vegas lines' : label, cells });
-    else noEffect.push(label.toLowerCase());
+    if (moved || key === 'vegas') rows.push({ key, label: SHORT_LABEL[key] ?? label, cells });
   }
-  return { rows, noEffect };
+  return rows;
 }
 
 function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
-  const { rows, noEffect } = scoreRows(columns);
+  const rows = scoreRows(columns);
   const [open, setOpen] = useState<string | null>(null);
-  const grid = { gridTemplateColumns: `minmax(0, 1.25fr) repeat(${columns.length}, minmax(0, 1fr))` };
+  const wide = columns.length > 3;
+  /* Four columns get a fixed width each and the table scrolls; the labels stay pinned. */
+  const grid = {
+    gridTemplateColumns: wide
+      ? `84px repeat(${columns.length}, 64px)`
+      : `minmax(0, 1.1fr) repeat(${columns.length}, minmax(0, 1fr))`,
+  };
   return (
-    <section className="cmp2-table" aria-label="How the score is built" data-testid="compare-grid" data-columns={columns.length}>
-      <div className="cmp-eyebrow">How the score is built</div>
-      <div className="cmp2-rows" role="table">
+    <section
+      className={wide ? 'cmp2-table cmp2-table-wide' : 'cmp2-table'}
+      aria-label="How the score is built"
+      data-testid="compare-grid"
+      data-columns={columns.length}
+    >
+      <div className="cmp2-rows" role="table" data-testid="compare-table-scroll">
         <div className="cmp2-tr cmp2-th" role="row" style={grid}>
-          <span role="columnheader" className="sr-only">
-            Factor
+          <span role="columnheader" className="cmp2-pin">
+            <span className="sr-only">Factor</span>
           </span>
           {columns.map((e) => (
             <span role="columnheader" key={e.playerId}>
-              {shortName(e.name)}
+              {lastName(e.name)}
             </span>
           ))}
         </div>
@@ -535,7 +576,7 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
               aria-expanded={open === row.key}
               onClick={() => setOpen((k) => (k === row.key ? null : row.key))}
             >
-              <span role="rowheader" className="cmp2-factor-label">
+              <span role="rowheader" className="cmp2-factor-label cmp2-pin">
                 {row.label}
               </span>
               {row.cells.map((cell, i) => (
@@ -556,7 +597,9 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
           </div>
         ))}
         <div className="cmp2-tr cmp2-total" role="row" style={grid}>
-          <span role="rowheader">Score</span>
+          <span role="rowheader" className="cmp2-pin">
+            Score
+          </span>
           {columns.map((e) => (
             <span role="cell" key={e.playerId} className="cmp2-num">
               {pts(weekPointsFrom(e.decision).points)}
@@ -564,12 +607,23 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
           ))}
         </div>
       </div>
-      {noEffect.length > 0 ? (
-        <p className="cmp2-noeffect" data-testid="compare-untracked">
-          No effect: {noEffect.join(', ')}.
-        </p>
-      ) : null}
     </section>
+  );
+}
+
+/** The card's availability chip: a warning for Questionable, stronger for Out and Doubtful. */
+function AvailabilityChipView({ evaluation }: { evaluation: StartSitEvaluation }) {
+  const chip = availabilityChip(evaluation);
+  if (!chip) return null;
+  return (
+    <span
+      className={`avail-chip avail-chip-${chip.tone}`}
+      data-testid="availability-chip"
+      data-tone={chip.tone}
+      title={evaluation.statusFlag ?? chip.label}
+    >
+      {chip.label}
+    </span>
   );
 }
 
@@ -580,7 +634,7 @@ function signed(v: number): string {
   return `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
 }
 
-/** The surname alone, for a chip with three others beside it on a phone. */
+/** The surname alone, for a chip or a column head with three others beside it on a phone. */
 function lastName(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length < 2) return name;

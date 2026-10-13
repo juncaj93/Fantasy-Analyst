@@ -78,10 +78,10 @@ describe('the Andrews and Harvey board', () => {
     const harvey = sheet.evaluations.find((e) => e.playerId === 'harvey')!;
     expect(harvey.decision?.basis).toBe('published');
     expect(harvey.decision?.base).toBe(9.53);
-    /* The questionable charge is in there, not only a tag beside it. */
+    /* Questionable is a tag beside the number, not a charge in it (13 October 2026). */
     const status = harvey.components.find((c) => c.key === 'status')!;
-    expect(status.value).toBeLessThan(0);
-    expect(harvey.decision!.points).toBeLessThan(9.53);
+    expect(status.value).toBe(0);
+    expect(harvey.statusFlag).toMatch(/^Questionable/);
   });
 });
 

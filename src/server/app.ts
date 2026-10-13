@@ -3339,8 +3339,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     return jsonResponse(await service.refresh());
   });
 
-  /* Three, so the columns stay readable on a phone (October 2026). */
-  const MAX_COMPARE = 3;
+  /* Four: two or three fit a phone, four scroll sideways (13 October 2026). */
+  const MAX_COMPARE = 4;
   /**
    * The Compare picker's lists: My roster, Waivers, All players.
    *
