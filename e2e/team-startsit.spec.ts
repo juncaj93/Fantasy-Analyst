@@ -798,19 +798,25 @@ test.describe('the comparison tool', () => {
     await page.getByTestId('compare-open').click();
     await allPlayers(page);
     await choose(page, '1001');
-    const before = (await page.getByTestId('compare-strip').boundingBox())!;
-    await page.locator('.sheet-body').evaluate((el) => (el.scrollTop = 400));
-    await page.waitForTimeout(200);
-    const after = (await page.getByTestId('compare-strip').boundingBox())!;
-    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(2);
-    await expect(page.getByTestId('compare-add')).toBeVisible();
+    await page.waitForTimeout(600);
+    // Scroll the list well past the strip, the way a thumb does.
+    const list = (await page.getByTestId('compare-candidate').nth(2).boundingBox())!;
+    await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2);
+    await page.mouse.wheel(0, 1500);
+    await page.waitForTimeout(400);
+    const strip = (await page.getByTestId('compare-strip').boundingBox())!;
+    expect(strip.y, 'the strip is still on screen').toBeGreaterThanOrEqual(0);
+    expect(strip.y + strip.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await expect(page.getByTestId('compare-add')).toBeInViewport();
+    await expect(page.getByTestId('compare-chosen')).toBeInViewport();
   });
 
   test('switches tabs mid-selection: a roster player against a free agent', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await page.getByTestId('compare-tab-waivers').click();
-    const free = page.getByTestId('compare-candidate').first();
+    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1001"]')).toHaveCount(0);
+    const free = page.locator('[data-testid="compare-candidate"][data-chosen="false"]').first();
     await expect(free).toBeVisible();
     // Waivers lists only players nobody rosters.
     await expect(page.getByTestId('compare-owner')).toHaveCount(0);
@@ -858,7 +864,9 @@ test.describe('the comparison tool', () => {
   for (const count of [2, 3] as const) {
     test(`fits the whole comparison on one screen with ${count} players`, async ({ page }) => {
       await page.getByTestId('compare-open').click();
-      for (const id of ['1001', '1004', '1008'].slice(0, count)) await choose(page, id);
+      await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+      const ids = await page.getByTestId('compare-candidate').evaluateAll((els, n) => els.slice(0, n).map((e) => e.getAttribute('data-player-id')!), count);
+      for (const id of ids) await choose(page, id);
       await showComparison(page);
       await page.waitForTimeout(400);
       const viewport = page.viewportSize()!;
@@ -877,7 +885,11 @@ test.describe('the comparison tool', () => {
       const box = (await page.getByTestId(id).first().boundingBox())!;
       expect(box.height, id).toBeGreaterThanOrEqual(44);
     }
+    // Reached by keyboard, which is when a focus ring has to show.
     await page.getByTestId('compare-add').focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('compare-add')).toBeFocused();
     const outline = await page.getByTestId('compare-add').evaluate((el) => getComputedStyle(el).outlineStyle);
     expect(outline).not.toBe('none');
   });

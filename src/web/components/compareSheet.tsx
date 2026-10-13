@@ -114,6 +114,12 @@ export function CompareSheet({
     return [ALL, ...orderFilterChips(startable)];
   }, [rosterPositions]);
 
+  /*
+   * A new tab or position is a new list: clear the old one first, so a quick
+   * tap cannot land on a row from the list that is being replaced.
+   */
+  useEffect(() => setRows(null), [tab, position]);
+
   /* The list. Debounced so typing is one request, not one per letter. */
   useEffect(() => {
     let cancelled = false;
@@ -210,7 +216,7 @@ export function CompareSheet({
         <ul className="cmp2-chips" aria-label="Players being compared">
           {ids.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
-              <span className="cmp2-chip-name">{shortName(names[id] ?? id)}</span>
+              <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>
               <span className="cmp2-chip-pts">{pts(pointsOf(id))}</span>
               <button
                 type="button"
@@ -572,6 +578,14 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
 function signed(v: number): string {
   if (Math.abs(v) < 0.005) return '0.0';
   return `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
+}
+
+/** The surname alone, for a chip with three others beside it on a phone. */
+function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  const last = parts[parts.length - 1]!;
+  return /^(jr\.?|sr\.?|ii|iii|iv)$/i.test(last) && parts.length > 2 ? parts[parts.length - 2]! : last;
 }
 
 /** `J. Smith-Njigba` from `Jaxon Smith-Njigba`; a defence keeps its name. */

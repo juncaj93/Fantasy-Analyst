@@ -1785,7 +1785,7 @@ function LineupCard({
           <span className="matchup-best-move-body">
             {head}
             <span className="matchup-best-move-names">
-              {lineup.currentPoints == null ? 'No change to suggest yet' : 'Keep your lineup'}
+              {lineup.currentPoints == null ? 'No change to suggest yet' : 'No swap clears the bar'}
             </span>
           </span>
         </div>

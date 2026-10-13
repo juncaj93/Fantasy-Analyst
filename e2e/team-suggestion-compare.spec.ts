@@ -74,6 +74,40 @@ test.describe('the Team round of 30 September', () => {
     await expect(page.getByTestId('compare-tabs')).toBeVisible();
   });
 
+  /*
+   * Best move (October 2026): the Matchup row's grammar on Team. Label in gray,
+   * names in the text colour, numbers in gray, the priced count kept, and the
+   * close-call line when the week's posture settled it.
+   */
+  test('Best move reads like the Matchup row, and says why on a close call', async ({ page }) => {
+    await page.route('**/api/leagues/*/lineup', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const swap = {
+        slot: 'FLEX', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1001', outName: 'Marcus Vance', gain: -0.3, reason: 'x',
+        tiebreak: { pill: 'explosive', posture: 'underdog', sentence: "Close call. You're the underdog, so the higher ceiling gets the nod." },
+      };
+      await route.fulfill({ response, body: JSON.stringify({ ...body, swaps: [swap], fills: [] }) });
+    });
+    await page.reload();
+    await page.getByTestId('tab-team').click();
+    const card = page.getByTestId('lineup-card');
+    await expect(card).toContainText('Best move');
+    await expect(card).not.toContainText('Changes to consider');
+    await expect(page.getByTestId('lineup-sourcing')).toHaveText(/^\d+\/\d+ priced$/);
+    await expect(page.getByTestId('best-move-points')).toContainText('projected');
+    await expect(page.getByTestId('best-move-tiebreak')).toHaveText("Close call. You're the underdog, so the higher ceiling gets the nod.");
+    const colours = await card.evaluate((el) => ({
+      label: getComputedStyle(el.querySelector('.matchup-best-move-label')!).color,
+      names: getComputedStyle(el.querySelector('.matchup-best-move-names')!).color,
+      numbers: getComputedStyle(el.querySelector('.matchup-best-move-metrics')!).color,
+    }));
+    expect(colours.label).not.toBe(colours.names);
+    expect(colours.numbers).not.toBe(colours.names);
+    const box = (await card.boundingBox())!;
+    expect(box.height / page.viewportSize()!.height).toBeLessThan(0.2);
+  });
+
   test('never prints a plain forecast for a player who may not play', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
     const rows = page.locator('[data-testid="bench-row"], [data-testid="starter-row"][data-starter="true"]');

@@ -10611,12 +10611,12 @@ div.matchup-result {
 .cmp2-chips {
   display: flex;
   flex: 1;
+  flex-wrap: wrap;
   min-width: 0;
   gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-x: auto;
 }
 .cmp2-chip {
   display: inline-flex;
@@ -10631,7 +10631,7 @@ div.matchup-result {
   color: var(--paper-ink);
   white-space: nowrap;
 }
-.cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 9.5em; }
+.cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 3em; max-width: 7.5em; }
 .cmp2-chip-pts { color: var(--paper-dim); font-variant-numeric: tabular-nums; }
 .cmp2-chip-x,
 .cmp2-add {
