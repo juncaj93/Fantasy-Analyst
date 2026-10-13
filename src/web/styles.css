@@ -10592,15 +10592,13 @@ div.matchup-result {
   gap: var(--sp-2);
 }
 .best-move-row .matchup-best-move-names { color: var(--text); }
-.best-move-why {
-  font-size: 0.76rem;
-  color: var(--text-dim);
-}
+.best-move-why,
 .best-move-warn {
   font-size: 0.76rem;
-  font-weight: 600;
-  color: var(--warn);
+  line-height: 1.25;
 }
+.best-move-why { color: var(--text-dim); }
+.best-move-warn { font-weight: 600; color: var(--warn); }
 .best-move-hold { grid-template-columns: minmax(0, 1fr); }
 
 /*

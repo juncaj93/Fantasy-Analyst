@@ -122,10 +122,13 @@ test.describe('the Team round of 30 September', () => {
       if ((await figure.count()) === 0) continue;
       if (code === 'OUT' || code === 'IR') {
         await expect(figure).toHaveText('—');
-      } else if (code === 'Q' || code === 'D') {
+      } else if (code === 'D') {
         const text = (await figure.textContent())?.trim();
         if (text === '—') continue;
         await expect(figure).toHaveClass(/proj-risk/);
+      } else if (code === 'Q') {
+        // Questionable costs nothing since 13 October 2026: his plain number, beside the Q tag.
+        await expect(figure).not.toHaveClass(/proj-risk/);
       }
     }
   });
