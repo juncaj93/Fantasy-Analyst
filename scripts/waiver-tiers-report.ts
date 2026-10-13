@@ -34,6 +34,7 @@ import { decisionPoints } from '../src/core/startsit/decisionPoints.ts';
 import { buildPlayerRate, RATE_BASIS_LABEL } from '../src/core/tradeValue/rate.ts';
 import { byeOf } from '../src/core/tradeValue/weeks.ts';
 import { myBudget } from '../src/core/faab/budget.ts';
+import type { BidderStyle } from '../src/core/waivers/managerSeeds.ts';
 import { adviseBid, buildRivalProfiles, type BidSignals, type ClaimRecord } from '../src/core/waivers/bidModel.ts';
 import type { DstPlanSources } from '../src/core/dst/assemble.ts';
 import type { ScheduleTeamWeek } from '../src/core/nfl/schedule.ts';
@@ -116,6 +117,7 @@ const realName = new Map(sleeperRosters.map((r) => [r.roster_id, users.find((u) 
 const rosters = (inputs.rosters as { rosterId: number; ownerName: string | null; isMine: boolean; playerIds: string[] }[]).map((r) => ({
   ...r,
   ownerName: realName.get(r.rosterId) ?? r.ownerName,
+  bidStyle: (inputs.bidStyles?.[String(r.rosterId)] ?? null) as BidderStyle | null,
 }));
 
 /*
@@ -402,7 +404,7 @@ const claimsOf = (obs: { rosterId: number; playerId: string | null; amount: numb
     .filter((o) => o.playerId != null)
     .map((o) => ({ rosterId: o.rosterId, playerId: o.playerId!, amount: o.amount, won: o.outcome === 'won', voided: o.voided === true, run: `week ${o.week}` }));
 const claims = claimsOf(inputs.observations ?? []);
-const seats = rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine }));
+const seats = rosters.map((r) => ({ rosterId: r.rosterId, name: r.ownerName ?? `Roster ${r.rosterId}`, isMine: r.isMine, style: r.bidStyle }));
 const { profiles, targetsPerRun, validClaims } = buildRivalProfiles({ seats, claims });
 
 console.log(`\n=== BID TRACE (capture ${snapshot.capturedAt}, ${new Date(snapshot.capturedAt).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET) ===`);

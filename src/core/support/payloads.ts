@@ -266,6 +266,12 @@ export interface WaiverPlanInputs {
    * `vegas` only on a waiver@11 capture, and never read back.
    */
   ahead?: { vegas?: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
+  /**
+   * Each seeded manager's bidding style, by roster id, taken from the real
+   * name before it became `Manager N`. Without it the capture's own bids treat
+   * every seat as a default chaser. Absent on a capture before waiver@12.
+   */
+  bidStyles?: Record<string, string>;
   rosters: SnapshotRoster[];
   /**
    * The player table, distilled to the players who can reach the answer.
