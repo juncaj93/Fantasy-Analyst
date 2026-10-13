@@ -34,6 +34,38 @@ const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID || '1385016656425668608';
 const BEFORE_SHA = process.env.BEFORE_SHA ?? '76d8464fc49611090074223b6acbcd61f7cb9873';
 const dir = mkdtempSync(join(tmpdir(), 'startsit-r2-'));
 
+/*
+ * FOLLOW-UP (the default since 13 October 2026): the round's second and last
+ * production check. Pills under the tightened thresholds, the tie-break on the
+ * real matchup, and the Best move card against the lineup rows. The full
+ * audit and backtest below run only with FULL=1, which the Probe workflow
+ * never sets, so re-running this workflow cannot repeat that read.
+ */
+if (!process.env.FULL) {
+  const health = await fetch(`${APP}/api/health`).then((r) => r.json()).catch(() => null);
+  console.log(`production sha: ${health?.release?.gitSha ?? '?'}`);
+  const leagues = await fetch(`${APP}/api/leagues`).then((r) => r.json());
+  const leagueId = process.env.LEAGUE_ID || leagues?.leagues?.find((l) => l.isSelected)?.id;
+  if (!leagueId) throw new Error('no selected league');
+  const snap = await fetch(`${APP}/api/leagues/${leagueId}/support-snapshot?context=lineup`);
+  console.log(`support snapshot (lineup): HTTP ${snap.status}`);
+  writeFileSync(join(dir, 'lineup.json'), await snap.text());
+  const lineup = await fetch(`${APP}/api/leagues/${leagueId}/lineup`).then((r) => r.json()).catch(() => null);
+  const margin = lineup?.modeSuggestion?.margin ?? null;
+  const posture = margin == null || margin === 0 ? '' : margin < 0 ? 'underdog' : 'favourite';
+  console.log(`matchup: ${lineup?.modeSuggestion?.detail ?? '?'} (margin ${margin ?? 'unknown'}) -> posture ${posture || 'none'}`);
+  writeFileSync(join(dir, 'roster.json'), await fetch(`${APP}/api/leagues/${leagueId}/roster`).then((r) => r.text()));
+  console.log(
+    execFileSync('node', ['--experimental-transform-types', '--no-warnings', 'scripts/startsit-round2-followup.ts', dir, posture], {
+      encoding: 'utf8',
+      env: process.env,
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  );
+  console.log('production endpoints read once each: /api/health, /api/leagues, the lineup support snapshot, /lineup, /roster');
+  process.exit(0);
+}
+
 const health = await fetch(`${APP}/api/health`).then((r) => r.json()).catch(() => null);
 console.log(`production sha: ${health?.release?.gitSha ?? '?'}`);
 const leagues = await fetch(`${APP}/api/leagues`).then((r) => r.json());
