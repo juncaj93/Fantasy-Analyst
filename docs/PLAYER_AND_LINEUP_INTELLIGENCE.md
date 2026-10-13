@@ -312,3 +312,52 @@ cannot print one under the other's label.
   running app and the multi-week value falls back to role trend and the
   expected-points gap. The component that could not be computed reports itself
   unknown rather than contributing a zero.
+
+## Start/Sit round 2 (October 2026): Vegas first, pills, one number
+
+**Principle (settled with Alex):** do not try to be smarter than Vegas. The
+market number is the score; everything else is a small capped nudge or text.
+
+**Scoring** (`core/startsit/scoringRules.ts`, engine `startsit@4`):
+
+- Lifetime news, role trend, touchdown dependency, game script, explosive role
+  and opportunity are computed and shown as text and add zero points.
+  Recent news (30d), opponent by role and the uncertainty penalty stay as
+  nudges inside the existing 10% budget. Availability stays a gate outside it.
+- Weather has three states: a real forecast moves only the passing game and
+  kickers, only for strong wind or snow; a dome or closed roof is "known,
+  unaffected" (fixture list first, `core/nfl/roofs.ts` for a blank roof);
+  otherwise "no forecast yet". No forecast feed is connected.
+- A prop taken before the latest game line is scaled by how far the team's
+  implied total moved, capped at 8% (`staleLine.ts`). On 13 October no game
+  qualified: props and lines are stored from the same fetch.
+- The line-to-average conversion (`propConversion.ts`: de-vig, lognormal and
+  Poisson means, touchdowns as a rate) is built, tested and **off**. The
+  backtest below found it raised the average miss.
+
+**Backtest** (`scripts/probe-startsit-round2.mjs`, 13 October 2026, weeks 1-4,
+477 fully priced player-weeks, league-scored actual points):
+
+| method | average miss | higher-scored won | close calls (<2 pts) |
+| --- | --- | --- | --- |
+| before this round | 4.838 | 71.4% | 56.1% |
+| shipped rules | 4.840 | 71.4% | 56.3% |
+| with the conversion on | 4.896 | 71.4% | 55.8% |
+
+Actual points ran above the bare line by 17% for backs and 8% for receivers,
+so lines do read low on average; reading them as averages cut the bias but
+not the miss. Production stores only the over price, so two-sided de-vig never
+applies to yardage.
+
+**Pills** (`pills.ts`): Explosive, Steady, Wide range, read off the same lines,
+at most one, none under an eight-point week. They never change a score. Inside
+the 0.6-point close-call band the underdog takes Explosive and the favourite
+Steady (`tiebreak.ts`), in the lineup and in Compare.
+
+**Screens:** Team's card is "Best move" in the Matchup row's style and is the
+only start/sit advice in the app. Matchup shows no recommendation. Compare is
+one screen: a pinned strip of up to three players, a picker with My roster,
+Waivers and All players sorted by this week's number, a side-by-side verdict
+and one table. The picker, Compare, Best move and the waiver tiers all print
+`weekPoints()` (`core/startsit/weekPoints.ts`); `tests/startsit.oneNumber.test.ts`
+fails if two of them disagree.
