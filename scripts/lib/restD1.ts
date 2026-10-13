@@ -38,7 +38,7 @@ export async function openRestD1(token: string, accountId?: string, name = 'fant
     });
     return res.json().catch(() => null);
   };
-  const account = accountId ?? (await call('/accounts'))?.result?.[0]?.id;
+  const account = accountId || (await call('/accounts'))?.result?.[0]?.id;
   const dbs = await call(`/accounts/${account}/d1/database?name=${name}`);
   const uuid = dbs?.result?.find((d: any) => d.name === name)?.uuid;
   if (!account || !uuid) throw new Error('could not resolve the D1 database through the Cloudflare API');

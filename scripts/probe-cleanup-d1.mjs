@@ -22,7 +22,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
-const steps = new Set((process.env.STEPS ?? 'sha,readers,trades,replay,gap').split(',').map((s) => s.trim()));
+const steps = new Set((process.env.STEPS || 'sha,readers,trades,replay,gap').split(',').map((s) => s.trim()));
 const heading = (t) => console.log(`\n${'#'.repeat(70)}\n# ${t}\n${'#'.repeat(70)}`);
 
 function child(args, label) {
