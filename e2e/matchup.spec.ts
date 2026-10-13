@@ -941,22 +941,6 @@ test.describe('no advice on Matchup', () => {
   });
 });
 
-/**
- * Leave the screen and come back to it, as a browser reports it.
- *
- * The screen refreshes on the way back rather than on a timer wherever it can,
- * so this is the cheapest honest way to drive a re-read in a test: exactly the
- * pair of events an iPhone fires when an app is backgrounded and reopened.
- */
-async function returnToScreen(page: Page) {
-  await page.evaluate(() => {
-    const set = (value: string) => Object.defineProperty(document, 'visibilityState', { value, configurable: true });
-    set('hidden');
-    document.dispatchEvent(new Event('visibilitychange'));
-    set('visible');
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-}
 
 /**
  * A player on a bye says so, in the row, at every width.

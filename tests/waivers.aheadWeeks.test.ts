@@ -163,8 +163,11 @@ describe('a later week’s Vegas lines', () => {
       () => 'QB',
       profile,
     );
-    /* 250 × 0.04 + 1.5 × 6 + 10 × 0.1 */
-    expect(points.get('Love')).toBeCloseTo(20, 1);
+    /*
+     * 250 × 0.04 + 1.5 × 6 + 10 × 0.1 = 20 as bare lines; read as averages
+     * (the October 2026 conversion this week's number uses too) it is 21.3.
+     */
+    expect(points.get('Love')).toBeCloseTo(21.32, 1);
   });
 
   it('leaves out a partial market: one line of three is not a week', () => {
