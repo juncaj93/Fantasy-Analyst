@@ -415,7 +415,7 @@ function postureReason(bid: number, rivals: readonly RivalOdds[], expected: numb
 function postureWhy(rivals: readonly RivalOdds[], expected: number): string {
   if (expected < 0.3) return 'Nobody is likely chasing him';
   const top = rivals[0];
-  if (expected < 0.8 && top) return `${top.name} is the one likely rival`;
+  if (expected < 0.8 && top) return `${top.name} is the only likely bidder`;
   return expected < 1.5 ? 'About one other manager is likely to bid' : 'Two or more other managers are likely to bid';
 }
 

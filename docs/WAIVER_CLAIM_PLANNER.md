@@ -1,10 +1,109 @@
 # The waiver claim planner
 
-> **Status (October 2026): tiers.** The Waivers screen and Team's waiver line
+> **Status (13 October 2026): tiers, round 2** (need-aware rivals, drop score,
+> stash rules, a "Do this" per hole; see "Round 2" below).
+>
+> **Earlier status (October 2026): tiers.** The Waivers screen and Team's waiver line
 > draw three tiers scored by what each move adds to the lineup, with a bid from
 > the league's own bidding behaviour. The fixed bars described further down
 > (2.5 / 3.0 over a starter, 0.5 / 1.0 over a bench player) still build the
 > board that an older cached response draws, and nothing else.
+
+## Round 2 (13 October 2026, waiver@13)
+
+Alex's feedback on the live screen: the bid named RonJonathan, who holds three
+quarterbacks, as Jordan Love's top rival; the drop was Braelon Allen, whom he had
+just started; Mark Andrews, a tight end bye fill, sat on the Watch list behind
+the same drop as Love; De'Von Achane, out for the season, was offered as a stash.
+
+### Rivals: need, money, history (`rivalNeed.ts`, `rivalHistory.ts`, `bidModel.ts`)
+
+For each other manager and a player at one position:
+
+    chance = his bid rate on players somebody bids on
+           × his interest in the position (his share of bids there against the league's)
+           × his roster's need there over the next two weeks
+           × the player's pull (last week's points, Sleeper's trend: 0.85 to 1.45)
+           × his taste for last week's scorers, beyond the league's own
+
+**Need**, from his real roster: players who can start at the position in each of
+the coming two weeks (not on bye, not Out, IR, PUP or suspended; a backup who
+projects under QB 12, RB/WR 6, TE 5 counts half), against the slots there.
+Measured on 2,394 manager-and-player pairs from 2024 to 2026 (Alex excluded):
+
+| position | hole | no spare | a backup | surplus |
+| --- | --- | --- | --- | --- |
+| QB | ×3 | ×1.1 | ×0.4 | ×0.25 ("has 3 QBs, unlikely") |
+| TE | ×3 | ×1 | ×1 | ×0.5 |
+| DEF | ×2 | ×0.8 | ×0.7 | ×0.7 |
+| RB | ×1.5 | ×1.3 | ×0.75 | ×1 |
+| WR | ×2.5 | ×1.2 | ×1.2 | ×0.9 |
+
+**Money**: his FAAB left caps his likely bid; with nothing left he can only bid $0.
+
+**History**: Sleeper's documented transactions along the `previous_league_id`
+chain (three seasons: 2024, 2025, 2026), failed claims included where Sleeper
+kept them. Per manager per season, one settings row
+`waivers.rivalHistory.<league>.<season>.<user>` written by the Wednesday manager
+derive: contested players he bid on, by position, each bid as a share of FAAB
+left, last week's scorers he chased (this season only: earlier seasons have no
+stored points), instant pickups against claims. This season's row is rebuilt on
+each Waivers load from the claims the strategy context already holds. Seasons
+weigh 1, 0.6, 0.36. Alex's seeds are the prior: the seed's rate counts as 15
+contested players and its typical bid as 4 bids, so three seasons of record
+outweigh it.
+
+**Bids by tier**: Do this wins about 3 in 4 (range 1 in 2 to 9 in 10); Worth
+considering wins about 1 in 2 (range 1 in 3 to 3 in 4); a stash and the Watch
+list are $0 to $1, never more. Each likely rival is shown with a percent and a
+few words (`QB on bye in week 6, no backup`, `has 3 QBs, unlikely`, `only $3
+left`, `rarely bids on QBs`).
+
+**Backtest** (`scripts/waiver-rival-backtest.ts`): every manager on every player
+anybody bid on, 2,660 pairs: Brier 0.117 against the old model's 0.139, log loss
+0.381 against 0.558, 367 bids expected against 402 real (the old model expected
+146). On the 266 awarded claims, with the winner as "you" and both aiming at 3 in
+4: 240 won against 232, $1,316 bid against $1,556. This season alone: 36 of 39
+against 33, but $242 against $89. The rival count on awarded claims reads high
+(302 against 136) by construction: treating the winner as "you" hides every
+rival who bid more than him.
+
+### Drops (`dropScore.ts`)
+
+    score = 0.25 × season average + 0.35 × recent (last three weeks, 3:2:1)
+          + 0.40 × the Start/Sit number over the window (byes, injuries counted)
+          + role ±0.5 + held (drafted 0.75, four weeks or more 0.5)
+          + 3 for the direct handcuff to an elite back on the roster
+
+Lowest goes first among drops that cost the move within a point of its best.
+A player in Alex's Sleeper lineup is not a drop unless the add is the same
+position and three points a game better (an Out or IR starter is not
+protected). A drop never scores above the add's own points a game. **Elite**:
+top 12 backs league-wide by points a game this season (two games or more) whose
+Start/Sit number is 12 or more. Handcuff: same club, ranked 2 behind the elite
+back's 1 on Sleeper's depth chart (`sleeper.playerNotes`, from the daily player
+sync) or the stored chart. Season points: `sleeper.seasonPoints.<season>`,
+rebuilt by the three-hourly league read from the weekly rows. Weeks held: the
+latest completed transaction that brought him in, else the draft.
+
+Every move shown gets a different drop, assigned together (`assignDrops`):
+"Do this" moves first, then the most total lineup gain, then the lowest total
+drop score.
+
+### Stashes (`stash.ts`)
+
+From Sleeper's injury status, body part and note: a torn ACL or Achilles, or
+"season-ending" or "for the season", is never offered. A timeline in the note
+counts from this week; a return after week 14 is never offered. No timeline (the
+usual case on IR) is a Watch list name labelled `return unknown`. A plain Out is
+back soon.
+
+### Holes
+
+Every different starting hole in the coming week is its own "Do this" with its
+own drop (a QB bye and a TE bye are two); at most one non-hole upgrade joins
+them. A hole fill is never on the Watch list. Team's waiver line is the first
+two of the same list.
 
 ## Tiers (`core/waivers/tiers.ts`)
 
