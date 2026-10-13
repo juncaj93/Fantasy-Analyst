@@ -62,6 +62,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
+ * How a starter row speaks its figure. Kept as one literal so
+ * `tests/smokeStarterFigure.test.ts` can check it against the labels the app
+ * actually builds.
+ */
+const STARTER_FIGURE = /projected [\d.]+ points|projection unavailable|, out, no projection shown(?: \([\d.]+ if he played\)|(?! \())/i;
+
+/**
  * The destinations, in the shapes the bar has.
  *
  * One slot is seasonal and exactly one of Draft and Waivers is ever in it, so
@@ -1755,12 +1762,14 @@ test.describe('the season features', () => {
        * (`out, no projection shown (10.1 if he played)`). That wording is
        * accepted only alongside `out`, so a healthy starter cannot pass by
        * saying it (owner's call, 6 October 2026).
+       *
+       * The bracket is there only when he had a projection to lose. A player
+       * ruled Out with no line and no published figure has nothing to put in
+       * it (Will Shipley, week 6), so it is optional; when it is present its
+       * figure must still be a number (13 October 2026).
        */
       await expect(card).toHaveAttribute('aria-label', /^[A-Z0-9_/]+: \S/);
-      await expect(card).toHaveAttribute(
-        'aria-label',
-        /projected [\d.]+ points|projection unavailable|, out, no projection shown \([\d.]+ if he played\)/i,
-      );
+      await expect(card).toHaveAttribute('aria-label', STARTER_FIGURE);
     }
     for (const card of await page.getByTestId('bench-row').all()) {
       await expect(card).not.toHaveClass(/card-pos/);
