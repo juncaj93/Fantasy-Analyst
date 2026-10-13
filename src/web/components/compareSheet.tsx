@@ -436,10 +436,17 @@ export function verdictLine(comparison: StartSitComparison): string {
   const b = next ? weekPointsOf(next).points : null;
   if (a == null || b == null || !next) return `Start ${shortName(pick.name)}.`;
   const gap = a - b;
-  const vegas = (e: StartSitEvaluation) => e.components.find((c) => c.key === 'vegas')?.value ?? 0;
-  const fromLines = Math.abs(vegas(pick) - vegas(next)) >= Math.abs(gap) * 0.6;
+  /*
+   * Whether the gap is mostly the base, and which base: "the Vegas lines" only
+   * when both players' base is the full Vegas number, otherwise "the published
+   * projection" (Alex, 13 October 2026: it said Vegas over two Sleeper weeks).
+   */
+  const base = (e: StartSitEvaluation) => e.decision?.base ?? 0;
+  const fromBase = Math.abs(base(pick) - base(next)) >= Math.abs(gap) * 0.6;
+  const bothVegas = weekPointsOf(pick).basis === 'market' && weekPointsOf(next).basis === 'market';
+  const source = bothVegas ? 'the Vegas lines' : 'the published projection';
   const close = gap < 0.75 ? 'Close call. ' : '';
-  return `${close}Start ${shortName(pick.name)}, ${gap.toFixed(1)} pts ahead${fromLines ? ', mostly on the Vegas lines' : ''}.`;
+  return `${close}Start ${shortName(pick.name)}, ${gap.toFixed(1)} pts ahead${fromBase ? `, mostly on ${source}` : ''}.`;
 }
 
 function Verdict({ comparison }: { comparison: StartSitComparison }) {

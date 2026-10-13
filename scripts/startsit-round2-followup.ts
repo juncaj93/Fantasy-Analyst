@@ -13,7 +13,10 @@
  *  b. the lineup with and without the posture, every starter/bench pair
  *     inside the close-call band with their pills, and whether the tie-break
  *     fired;
- *  c. the lineup rows' change count against the Best move card.
+ *  c. the lineup rows' change count against the Best move card;
+ *  d. Team's "N/N priced" count;
+ *  e. injury freshness: Sleeper's status on the rostered players and the
+ *     nflverse report's last outcome.
  */
 
 import { readFileSync } from 'node:fs';
@@ -177,5 +180,49 @@ const cardChange = withPosture.swaps[0] ?? withPosture.fills[0] ?? null;
 console.log(`rows: ${verdicts.map((r) => `${r.slot}:${r.verdict}`).join(' ')}`);
 console.log(`lineup rows say ${rowChanges.length} change(s); the card says ${cardChange ? 'a change' : '"No swap clears the bar"'}`);
 console.log(rowChanges.length > 0 && !cardChange ? `MISMATCH on the real roster: ${rowChanges.map((r) => `${r.slot} ${r.verdict}`).join(', ')}` : 'no mismatch on the real roster');
+
+/* ================================================ d. Team "N/N priced" */
+console.log('\n################ d. TEAM "N/N priced" ################');
+const filled = withPosture.slots.filter((slot) => slot.playerId);
+const pricedSlots = filled.filter((slot) => slot.projectionSource === 'market');
+console.log(`${pricedSlots.length}/${filled.length} priced (starters with a full Vegas market; the rest: ${filled
+  .filter((slot) => slot.projectionSource !== 'market')
+  .map((slot) => `${slot.slot} ${all.find((e) => e.playerId === slot.playerId)?.name ?? slot.playerId} (${slot.projectionSource ?? 'none'})`)
+  .join(', ') || 'none'})`);
+
+/* ============================================ e. injury freshness (Sleeper) */
+/*
+ * Are the Q, D and OUT badges current? Sleeper's status is the designation the
+ * app believes first (core/injury/model.ts); the nflverse report only adds the
+ * body part and practice week. Reads Alex's rostered players only, plus the
+ * one-row-per-source state table, so this costs a few dozen rows.
+ */
+console.log('\n################ e. INJURY FRESHNESS ################');
+const rosterIds: string[] = [...new Set([
+  ...(roster.starters ?? []).map((p: { playerId: string }) => p.playerId),
+  ...(roster.bench ?? []).map((p: { playerId: string }) => p.playerId),
+  ...all.map((e) => e.playerId),
+])].filter(Boolean);
+const statusRows = rosterIds.length
+  ? await db
+      .prepare(`SELECT id, full_name, status, updated_at FROM players WHERE id IN (${rosterIds.map(() => '?').join(',')})`)
+      .bind(...rosterIds)
+      .all<{ id: string; full_name: string; status: string | null; updated_at: string }>()
+  : { results: [] };
+const statusList = statusRows.results ?? [];
+const newest = statusList.map((r) => r.updated_at).sort().at(-1) ?? null;
+const oldest = statusList.map((r) => r.updated_at).sort()[0] ?? null;
+const ageHours = (iso: string | null) => (iso ? ((now - Date.parse(iso)) / 3_600_000).toFixed(1) : '-');
+console.log(`Sleeper status on Alex's ${statusList.length} rostered players: newest write ${newest ?? '-'} (${ageHours(newest)} h ago), oldest ${oldest ?? '-'} (${ageHours(oldest)} h ago)`);
+const flagged = statusList.filter((r) => r.status && !/^active$/i.test(r.status));
+console.log(`designated now: ${flagged.length ? flagged.map((r) => `${r.full_name} ${r.status}`).join(', ') : 'none'}`);
+const snapshotFlags = all.filter((e) => e.statusFlag).map((e) => `${e.name}: ${e.statusFlag}`);
+console.log(`the lineup snapshot's flags: ${snapshotFlags.length ? snapshotFlags.join('; ') : 'none'}`);
+const sources = await db
+  .prepare(`SELECT source, season, checked_at, source_modified_at, ingested_at, last_outcome, last_note FROM injury_source_state`)
+  .all<{ source: string; season: string; checked_at: string | null; source_modified_at: string | null; ingested_at: string | null; last_outcome: string | null; last_note: string | null }>();
+for (const r of sources.results ?? []) {
+  console.log(`nflverse report (${r.source} ${r.season}): last check ${r.checked_at ?? '-'}, file changed ${r.source_modified_at ?? '-'}, last stored ${r.ingested_at ?? '-'} (${ageHours(r.ingested_at)} h ago), outcome ${r.last_outcome ?? '-'}${r.last_note ? `: ${r.last_note}` : ''}`);
+}
 
 console.log(`\nthis script's own D1 reads: ${db.statements()} statements, ${db.rowsRead()} rows`);
