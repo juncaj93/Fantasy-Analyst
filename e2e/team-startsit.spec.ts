@@ -742,15 +742,16 @@ test.describe('the comparison tool', () => {
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
     await expect(page.getByTestId('compare-tab-mine')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
-    const shown = await page.getByTestId('compare-points').evaluateAll((els) =>
-      els.map((e) => ({ text: e.querySelector('.cmp2-num')?.textContent ?? '', soft: e.textContent?.includes('lower confidence') ?? false })),
-    );
-    const tier = (r: { text: string; soft: boolean }) => (r.text === '–' ? 2 : r.soft ? 1 : 0);
+    // Strictly by the number, priced and published mixed; nobody's number and Out last.
+    const shown = await page.getByTestId('compare-points').evaluateAll((els) => els.map((e) => e.querySelector('.cmp2-num')?.textContent ?? ''));
+    const last = (t: string) => (t === '–' || t === 'Out' ? 1 : 0);
     for (let i = 1; i < shown.length; i++) {
       const [a, b] = [shown[i - 1]!, shown[i]!];
-      expect(tier(a) <= tier(b), `tiers in order at row ${i}`).toBe(true);
-      if (tier(a) === tier(b) && tier(a) < 2) expect(Number(a.text)).toBeGreaterThanOrEqual(Number(b.text));
+      expect(last(a) <= last(b), `numbers before dashes at row ${i}`).toBe(true);
+      if (!last(a) && !last(b)) expect(Number(a), `highest first at row ${i}`).toBeGreaterThanOrEqual(Number(b));
     }
+    // A status shows only when he is not active: never "ACT".
+    await expect(page.getByTestId('compare-picker')).not.toContainText('ACT');
     // Every roster row says starter or bench, in words.
     const roles = await page.getByTestId('compare-role').allInnerTexts();
     expect(roles.length).toBeGreaterThan(0);
@@ -875,21 +876,34 @@ test.describe('the comparison tool', () => {
     await choose(page, '1001');
     await choose(page, '1004');
     await showComparison(page);
-    const vegas = page.locator('[data-testid="compare-factor"][data-factor="vegas"]');
+    const vegas = page.locator('[data-testid="compare-factor"][data-factor="base"]');
     await expect(vegas).toHaveAttribute('aria-expanded', 'false');
     await vegas.click();
     await expect(vegas).toHaveAttribute('aria-expanded', 'true');
+    // Base says where it came from in words: the priced lines and what each is worth.
     await expect(page.getByTestId('compare-factor-detail')).toBeVisible();
+    await expect(page.getByTestId('compare-factor-detail')).toContainText(/Vegas: .*= \d+\.\d pts|Sleeper projection: \d+\.\d pts/);
     // No heading, no footer, no availability row: the card's chip says that.
     const grid = page.getByTestId('compare-grid');
     await expect(grid).not.toContainText('How the score is built');
     await expect(grid).not.toContainText('No effect');
     await expect(page.locator('[data-testid="compare-factor"][data-factor="status"]')).toHaveCount(0);
     // Short labels, one line each.
-    await expect(vegas.locator('.cmp2-factor-label')).toHaveText('Vegas lines');
+    await expect(vegas.locator('.cmp2-factor-label')).toHaveText('Base');
     await expect(grid.locator('.cmp2-total .cmp2-pin')).toHaveText('Score');
-    for (const label of await grid.locator('.cmp2-factor-label').allInnerTexts()) {
-      expect(label, 'a short label').toMatch(/^(Vegas lines|Recent news|Opponent|Uncertainty|Weather)$/);
+    const labels = await grid.locator('.cmp2-factor-label').allInnerTexts();
+    expect(labels.slice(0, 4)).toEqual(['Base', 'Recent news', 'Opponent', 'Uncertainty']);
+    for (const label of labels.slice(4)) expect(label, 'only a row that moved somebody').toMatch(/^(Weather|Availability)$/);
+    // Every column adds up to its Score.
+    const columns = await page.getByTestId('compare-column').count();
+    const cells = await grid.locator('[data-testid="compare-factor"]').evaluateAll((rows) =>
+      rows.map((r) => [...r.querySelectorAll('[data-testid="compare-cell"]')].map((c) => c.textContent ?? '')),
+    );
+    const totals = await grid.locator('[data-testid="compare-total"] [role="cell"]').allInnerTexts();
+    for (let i = 0; i < columns; i++) {
+      if (totals[i] === '–' || totals[i] === 'Out') continue;
+      const sum = cells.reduce((acc, row) => acc + (row[i] === '–' ? 0 : Number(row[i]!.replace('−', '-'))), 0);
+      expect(sum.toFixed(1), `column ${i} adds up`).toBe(totals[i]);
     }
   });
 
@@ -924,7 +938,7 @@ test.describe('the comparison tool', () => {
       if (count === 4) {
         // Four scroll sideways inside the table, and the row labels stay put.
         const table = page.getByTestId('compare-table-scroll');
-        const label = page.locator('[data-testid="compare-factor"][data-factor="vegas"] .cmp2-pin');
+        const label = page.locator('[data-testid="compare-factor"][data-factor="base"] .cmp2-pin');
         const before = (await label.boundingBox())!;
         await table.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
         await page.waitForTimeout(150);
@@ -1107,6 +1121,10 @@ test.describe('the control row, and refresh', () => {
     const status = page.getByTestId('refresh-status');
     await expect(status).toBeVisible({ timeout: 20_000 });
     await expect(status).toContainText('Updated');
+    // One short line; the sources behind it are a tap away.
+    const box = (await status.boundingBox())!;
+    expect(box.height, 'one line, not a paragraph').toBeLessThanOrEqual(46);
+    await page.getByTestId('refresh-status-toggle').click();
     // Weather is named rather than quietly missing from the list.
     await expect(status).toContainText('weather');
     await expect(status).toContainText('no forecast source connected');
@@ -1124,7 +1142,9 @@ test.describe('the control row, and refresh', () => {
     await pullToRefresh(page);
     const status = page.getByTestId('refresh-status');
     await expect(status).toBeVisible({ timeout: 20_000 });
-    // The failures are named, not swallowed...
+    // The line counts them; the failures are named, not swallowed...
+    await expect(status).toContainText('2 sources behind');
+    await page.getByTestId('refresh-status-toggle').click();
     await expect(status).toContainText('injury source did not answer');
     await expect(status).toContainText('monthly entity ceiling reached');
     // ...and the last-good recommendation is still on screen.
@@ -1275,7 +1295,15 @@ test.describe('a borrowed projection says whose it is', () => {
         for (const group of ['starters', 'bench', 'undecidable']) {
           body[group] = ((body[group] ?? []) as Record<string, unknown>[]).map((e) =>
             e['playerId'] === target['playerId']
-              ? { ...e, projection: BORROWED, projectionSource: 'sleeper', expectation: { points: null, coverage: 0 } }
+              ? {
+                  ...e,
+                  projection: BORROWED,
+                  projectionSource: 'sleeper',
+                  expectation: { ...(e['expectation'] as object), points: null, coverage: 0 },
+                  // The row prints the one decision number (13 October 2026), so the fake carries one too.
+                  decision: { points: BORROWED, basis: 'published', base: BORROWED, adjustments: 0 },
+                  components: ((e['components'] ?? []) as Record<string, unknown>[]).filter((c) => c['key'] !== 'status'),
+                }
               : e,
           );
         }

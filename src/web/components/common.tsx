@@ -264,6 +264,38 @@ const missingPortraits = new Set<string>();
  * and never the club's mark, which is already on the line beside it and would
  * be the row saying the same thing twice.
  */
+/**
+ * A 32px face for Compare's cards (beside the score) and picker rows (Alex, 13
+ * October 2026). Not a dense list: Compare holds at most four players and its
+ * picker is a chooser, so a face earns its width there. Lazy, straight from
+ * Sleeper's CDN like every other face (no Worker, no D1 read), initials when
+ * Sleeper has none, and the club's mark for a defence, which is not a person.
+ */
+export function CompactFace({
+  playerId,
+  name,
+  position,
+  team,
+}: {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+}) {
+  if (position === 'DEF' || position === 'DST') {
+    return (
+      <span className="cmp2-face cmp2-face-team" aria-hidden="true">
+        <TeamLogo team={team} />
+      </span>
+    );
+  }
+  return (
+    <span className="cmp2-face" aria-hidden="true">
+      <PlayerFace playerId={playerId} name={name} position={position} size={32} testId="compare-face" />
+    </span>
+  );
+}
+
 export function PlayerFace({
   playerId,
   name,

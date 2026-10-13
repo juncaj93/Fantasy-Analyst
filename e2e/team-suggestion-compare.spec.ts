@@ -111,6 +111,27 @@ test.describe('the Team round of 30 September', () => {
     expect(box.height / page.viewportSize()!.height).toBeLessThan(0.2);
   });
 
+  /* Alex, 13 October 2026: Best move printed "15.3 vs -97.0 projected" for Will Shipley. */
+  test('Best move names an Out player as Out, never by the internal gate value', async ({ page }) => {
+    await page.route('**/api/leagues/*/lineup', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const swap = { slot: 'TE', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1009', outName: 'Nate Kowalski', gain: 108, reason: 'x' };
+      await route.fulfill({ response, body: JSON.stringify({ ...body, swaps: [swap], fills: [] }) });
+    });
+    await page.reload();
+    await page.getByTestId('tab-team').click();
+    const change = page.getByTestId('lineup-swap');
+    await expect(change).toContainText('Start Andre Sotelo over Nate Kowalski, who is Out');
+    await expect(change).not.toContainText(/-9\d|−9\d/);
+    await expect(page.getByTestId('best-move-points')).not.toContainText(' vs ');
+    // And the picker lists him as Out, at the bottom, never as a negative number.
+    await page.getByTestId('compare-open').click();
+    const row = page.locator('[data-testid="compare-candidate"][data-player-id="1009"]');
+    await expect(row.getByTestId('compare-points')).toContainText('Out');
+    await expect(page.getByTestId('compare-picker')).not.toContainText(/-9\d\.\d/);
+  });
+
   test('never prints a plain forecast for a player who may not play', async ({ page }) => {
     await page.getByTestId('bench-toggle').click();
     const rows = page.locator('[data-testid="bench-row"], [data-testid="starter-row"][data-starter="true"]');
