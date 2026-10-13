@@ -2851,13 +2851,16 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/trades/smart', async (ctx) => {
     const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 5) || 5, 20);
     const leagueId = ctx.url.searchParams.get('leagueId');
-    const board = await new SmartTradeService(ctx.env.db).build({ limit, ...(leagueId ? { leagueId } : {}) });
+    const { board, inputs } = await new SmartTradeService(ctx.env.db).buildWithInputs({
+      limit,
+      ...(leagueId ? { leagueId } : {}),
+    });
     /*
      * Held to Check a trade's answer (finding T3, October 2026): an idea the
      * rest-of-season check says favours the other team is left off, and every
      * idea shown carries that verdict. See `core/trades/seasonCheck.ts`.
      */
-    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, board.offers);
+    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, board.offers, inputs);
     return jsonResponse(applySeasonChecks(board, checks).board);
   });
 

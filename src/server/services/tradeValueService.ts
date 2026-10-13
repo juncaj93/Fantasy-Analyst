@@ -26,7 +26,7 @@
  * and the model then ranks them by its own number.
  */
 
-import { evaluatePlayer, type StartSitEvaluation } from '../../core/startsit/engine.ts';
+import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../../core/startsit/engine.ts';
 import { boundedFreeAgentIds } from '../../core/roster/freeAgents.ts';
 import { buildRosterShape, buildScoringProfile, startablePositions } from '../../core/sleeper/scoring.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
@@ -308,6 +308,15 @@ export class TradeValueService {
   async checkIdeas(
     leagueId: string,
     ideas: readonly { id: string; partnerRosterId: number; give: readonly string[]; get: readonly string[] }[],
+    /**
+     * Inputs the caller has already read for rostered players in this request.
+     *
+     * The Trades board reads every rostered player's inputs to find the ideas,
+     * and this check used to read the same players again from scratch. Handing
+     * them over leaves only the free agents to read. The verdicts are the same:
+     * see {@link prepare}.
+     */
+    known?: readonly StartSitInput[],
   ): Promise<Map<string, TradeEvaluation>> {
     if (ideas.length === 0) return new Map<string, TradeEvaluation>();
     const { league, rosters, state } = await this.leagueOf(leagueId);
@@ -318,6 +327,7 @@ export class TradeValueService {
       rosters,
       state,
       ideas.map((i) => ({ id: i.id, a: mine.rosterId, b: i.partnerRosterId, aSends: i.give, bSends: i.get })),
+      known,
     );
   }
 
@@ -326,6 +336,7 @@ export class TradeValueService {
     rosters: RosterRecord[],
     state: NflState | null,
     deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
+    known?: readonly StartSitInput[],
   ): Promise<Map<string, TradeEvaluation>> {
     const out = new Map<string, TradeEvaluation>();
     const byId = new Map(rosters.map((r) => [r.rosterId, r] as const));
@@ -347,6 +358,7 @@ export class TradeValueService {
       playerIds: [...new Set(involved.flatMap((r) => r.playerIds))],
       reserveIds: [...new Set(involved.flatMap((r) => r.reserveIds))],
       movedIds: [...new Set(valid.flatMap((d) => [...d.aSends, ...d.bSends]))],
+      ...(known ? { known } : {}),
     });
     const sideOf = (roster: RosterRecord): TradeSide => ({
       label: labelOf(roster),
@@ -520,6 +532,8 @@ export class TradeValueService {
     reserveIds: string[];
     /** The players the question is about. A defence among them is what makes every defence get read. */
     movedIds: string[];
+    /** Inputs already read for rostered players in this request; see {@link checkIdeas}. */
+    known?: readonly StartSitInput[];
   }): Promise<Prepared> {
     const { league, rosters, state } = opts;
     const profile = buildScoringProfile(league.scoringSettings, league.rosterPositions);
@@ -538,7 +552,14 @@ export class TradeValueService {
      * when one is in the trade: a defence nobody moves cancels out of both
      * lineups, and reading all thirty-two to prove it would be a waste.
      */
-    const players = await new PlayerRepo(this.db).listAll();
+    /*
+     * The week's context does not depend on the dictionary, so the two are
+     * read together instead of one after the other. Same reads, same results.
+     */
+    const [players, context] = await Promise.all([
+      new PlayerRepo(this.db).listAll(),
+      buildStartSitContext(this.db, undefined, this.now()),
+    ]);
     const startable = startablePositions(shape);
     const positionById = new Map(players.map((p) => [p.id, p.position] as const));
     const wantDef = startable.has('DEF') && opts.movedIds.some((id) => positionById.get(id) === 'DEF');
@@ -551,12 +572,30 @@ export class TradeValueService {
     });
 
     const allIds = [...new Set([...opts.playerIds, ...freeAgentIds])];
-    const context = await buildStartSitContext(this.db, undefined, this.now());
-    const inputs = await startSitInputsFor(this.db, allIds, {
-      context,
-      now: this.now(),
-      reserveIds: opts.reserveIds,
-    });
+    /*
+     * Read only what the caller has not already read.
+     *
+     * An input is a pure function of the player, the stored rows and the
+     * week's context, plus one flag: `onReserve`, which the reserve list sets
+     * and is applied below exactly as `startSitInputsFor` applies it. So a
+     * rostered player's input from the caller's read is the one this would
+     * have built, and only the free agents that set replacement level still
+     * need reading. Order is the order of `allIds`, as before.
+     */
+    const have = new Map((opts.known ?? []).map((i) => [i.player.id, i] as const));
+    const reserveSet = new Set(opts.reserveIds);
+    const missingIds = allIds.filter((id) => !have.has(id));
+    const fresh =
+      missingIds.length === 0
+        ? []
+        : await startSitInputsFor(this.db, missingIds, { context, now: this.now(), reserveIds: opts.reserveIds });
+    const freshById = new Map(fresh.map((i) => [i.player.id, i] as const));
+    const inputs: StartSitInput[] = [];
+    for (const id of allIds) {
+      const reused = have.get(id);
+      const input = reused ? (reserveSet.has(id) ? { ...reused, onReserve: true } : reused) : freshById.get(id);
+      if (input) inputs.push(input);
+    }
     const evaluations = new Map<string, StartSitEvaluation>();
     for (const input of inputs) {
       evaluations.set(input.player.id, evaluatePlayer({ ...input, mode: 'balanced', now: this.now() }, profile));

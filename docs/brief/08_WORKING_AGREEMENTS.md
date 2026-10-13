@@ -88,6 +88,21 @@ polling loops.
 
 ---
 
+## Production checks share the D1 allowance
+
+Every production check reads from the same 5,000,000-row daily D1 allowance as
+Alex's own use, and the app answers every request with an error once it is
+spent. Batch all checks for a round into one combined Probe run, never poll,
+and read Cloudflare's usage numbers (free) rather than the database when the
+question is about cost. The Probe workflow enforces this: any probe that
+touches production first reads today's usage and stands down, saying so, when
+the day is past 50% (`scripts/d1-budget-guard.mjs`, set by
+`PROBE_CEILING_PERCENT`). Probes that only read Cloudflare's own numbers, and
+the cheap `/api/health` release-SHA check, are exempt. The daily sweep keeps
+its own, stricter 30% ceiling.
+
+---
+
 ## Reporting
 
 Report at meaningful checkpoints — implementation complete, exact head pushed,

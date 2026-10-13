@@ -22,6 +22,7 @@
 import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
 import { buildFetchPlan, manualRefreshThresholdMinutes, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
+import { slateWindow } from '../../core/nfl/slateWindow.ts';
 import { KICKOFF_CHECKPOINT_HOURS, reconcileKickoff } from '../../core/vegas/kickoffClock.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
@@ -1148,10 +1149,26 @@ export class VegasRefreshService {
   ): Promise<Map<string, number>> {
     const playerIds = [...eventOf.keys()];
     const eventIds = [...eventOf.values()].map((e) => e?.eventId).filter((id): id is string => id != null);
-    const [props, fetched] = await Promise.all([
-      this.props.latestForPlayers(playerIds),
-      this.props.newestFetchByEvent(eventIds),
-    ]);
+    /*
+     * Only the players whose answer can matter are asked about, and only for
+     * whether they carry a line at all.
+     *
+     * The loop below uses a player's lines for one thing: `byEvent` ignores
+     * them, and otherwise a player with none is skipped. A player whose game has
+     * never been bought has no age whichever way that goes. So the lines are
+     * read for the players whose game has a purchase on record, in the
+     * kickoff-clock pass not at all, and as a yes or no (see
+     * {@link PropsRepo.playersWithAnyLine}, which gives the same answer as the
+     * unwindowed read this replaced for every player).
+     */
+    const fetched = await this.props.newestFetchByEvent(eventIds);
+    const boughtGame = (id: string): boolean => {
+      const eventId = eventOf.get(id)?.eventId;
+      return eventId != null && Number.isFinite(Date.parse(fetched.get(eventId) ?? ''));
+    };
+    const withLine = byEvent
+      ? new Set<string>()
+      : await this.props.playersWithAnyLine(playerIds.filter(boughtGame), slateWindow(new Date(now)));
     const out = new Map<string, number>();
     for (const id of playerIds) {
       /*
@@ -1163,7 +1180,7 @@ export class VegasRefreshService {
        * defence would read as never fetched for ever and put its game in every
        * pass of the week instead of its own six.
        */
-      if (!byEvent && (props.get(id)?.length ?? 0) === 0) continue;
+      if (!byEvent && !withLine.has(id)) continue;
       const eventId = eventOf.get(id)?.eventId;
       const at = eventId ? Date.parse(fetched.get(eventId) ?? '') : NaN;
       if (Number.isFinite(at)) out.set(id, (now - at) / 60_000);

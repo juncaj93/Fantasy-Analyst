@@ -15,6 +15,7 @@
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import type { OfferEvaluation } from '../../core/trades/bilateral.ts';
 import { seasonCheckOf, type SeasonCheck } from '../../core/trades/seasonCheck.ts';
+import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { Database } from '../db.ts';
 import { TradeValueService } from './tradeValueService.ts';
 
@@ -23,6 +24,8 @@ export async function seasonChecksFor(
   sleeper: SleeperClient,
   leagueId: string | null | undefined,
   offers: readonly OfferEvaluation[],
+  /** Inputs the board already read for every rostered player, so they are not read twice. */
+  known?: readonly StartSitInput[],
 ): Promise<Map<string, SeasonCheck>> {
   if (!leagueId || offers.length === 0) return new Map();
   try {
@@ -34,6 +37,7 @@ export async function seasonChecksFor(
         give: o.give.map((p) => p.playerId),
         get: o.get.map((p) => p.playerId),
       })),
+      known,
     );
     return new Map([...evaluations].map(([id, evaluation]) => [id, seasonCheckOf(evaluation)] as const));
   } catch (err) {

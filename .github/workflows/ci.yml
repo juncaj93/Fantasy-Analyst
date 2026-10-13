@@ -224,7 +224,7 @@ jobs:
       # and below — rather than a fourth raise.
       - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
         timeout-minutes: 18
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           # Artifact names have to be unique across a matrix, or the jobs race
