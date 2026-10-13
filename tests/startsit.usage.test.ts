@@ -16,6 +16,7 @@ import { evaluatePlayer } from '../src/core/startsit/engine.ts';
 import { buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { UsageWeek } from '../src/core/usage/role.ts';
 import { candidate } from './helpers/startsit.ts';
+import { LEGACY_RULES } from '../src/core/startsit/scoringRules.ts';
 
 const HALF_PPR = buildScoringProfile({ rec: 0.5, pass_td: 4 }, []);
 
@@ -118,16 +119,23 @@ describe('usage outranks recent fantasy points', () => {
     week({ week: 6, targets: 4, receptions: 3, recYards: 40, recTds: 0 }),
   ];
 
-  it('prefers the high-volume player with no touchdowns', () => {
+  it('preferred the high-volume player with no touchdowns, on the old rules', () => {
     // Identical market expectation, so the only difference is the usage read.
-    const b = evaluatePlayer({ ...candidate('b', 'Volume', 'WR', 12), usageWeeks: volume }, HALF_PPR);
-    const a = evaluatePlayer({ ...candidate('a', 'Scores', 'WR', 12), usageWeeks: scores }, HALF_PPR);
+    const b = evaluatePlayer({ ...candidate('b', 'Volume', 'WR', 12), usageWeeks: volume }, HALF_PPR, LEGACY_RULES);
+    const a = evaluatePlayer({ ...candidate('a', 'Scores', 'WR', 12), usageWeeks: scores }, HALF_PPR, LEGACY_RULES);
     expect(b.score!).toBeGreaterThan(a.score!);
+    expect(a.drivers.join(' ')).toMatch(/TD-dependent/i);
   });
 
-  it('says why, in the drivers rather than only in the number', () => {
+  it('leaves the market to decide since October 2026, and still says it in words', () => {
+    // The line already prices volume and touchdown reliance; the reads stay as text.
+    const b = evaluatePlayer({ ...candidate('b', 'Volume', 'WR', 12), usageWeeks: volume }, HALF_PPR);
     const a = evaluatePlayer({ ...candidate('a', 'Scores', 'WR', 12), usageWeeks: scores }, HALF_PPR);
-    expect(a.drivers.join(' ')).toMatch(/TD-dependent/i);
+    expect(b.score!).toBeCloseTo(a.score!, 2);
+    const td = a.components.find((c) => c.key === 'td_dependency')!;
+    expect(td.value).toBe(0);
+    expect(td.textOnly).toBe(true);
+    expect(td.display).toMatch(/scores/i);
   });
 });
 

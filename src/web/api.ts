@@ -1191,10 +1191,21 @@ export interface StartSitEvaluation {
   team: string;
   expectation: {
     points: number | null;
-    contributions: { market: string; line: number | null; points: number; detail: string; probability?: number }[];
+    contributions: {
+      market: string;
+      line: number | null;
+      points: number;
+      detail: string;
+      probability?: number;
+      /** The bare line's worth, when the conversion to an average moved it. */
+      linePoints?: number;
+    }[];
     missingMarkets: string[];
     coverage: number;
     notes: string[];
+    /** The same markets as bare lines, when the conversion moved the total. */
+    lineTotal?: number;
+    staleScale?: { factor: number; detail: string };
   };
   components: {
     key: string;
@@ -1206,9 +1217,13 @@ export interface StartSitEvaluation {
     modeWeight?: number;
     /** What to print when it differs from `value`: a row held to the published week's budget. */
     shownValue?: number;
+    /** Shown as text and worth no points: the market prices it (October 2026). */
+    textOnly?: boolean;
     unknown: boolean;
   }[];
   score: number | null;
+  /** Explosive, Steady or Wide range, read off the prop lines. Never part of the score. */
+  pill?: PillReading;
   /**
    * The weekly fantasy projection, or null when there is not an honest one.
    *
@@ -1292,7 +1307,9 @@ export interface StartSitEvaluation {
 /** Floor, Balanced or Ceiling — which question Start/Sit is answering. */
 export type StartSitMode = 'balanced' | 'floor' | 'ceiling';
 import type { ModeSuggestion } from '../core/startsit/modeSuggest.ts';
-export type { ModeSuggestion };
+import type { PillReading } from '../core/startsit/pills.ts';
+import type { TiebreakNote } from '../core/startsit/tiebreak.ts';
+export type { ModeSuggestion, PillReading, TiebreakNote };
 
 /** Which lineup spot a comparison is actually about. */
 export interface ComparisonSlot {
@@ -1311,6 +1328,8 @@ export interface StartSitComparison {
   evaluations: StartSitEvaluation[];
   recommendedPlayerId: string | null;
   margin: number | null;
+  /** Set when the pill tie-break chose the recommendation. */
+  tiebreak?: TiebreakNote;
   confidence: string;
   reasons: string[];
   warnings: string[];
@@ -1445,6 +1464,8 @@ export interface LineupSwap {
   outName: string;
   gain: number;
   reason: string;
+  /** Set when a close call was settled by the week's posture rather than the points. */
+  tiebreak?: TiebreakNote;
 }
 
 /** An empty Sleeper slot this lineup fills. Names nobody to bench. */

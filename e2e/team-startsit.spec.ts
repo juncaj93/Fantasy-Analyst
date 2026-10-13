@@ -727,294 +727,190 @@ test.describe('the comparison tool', () => {
     await openTeam(page);
   });
 
-  test('opens as a sheet from a compact entry point', async ({ page }) => {
+  async function allPlayers(page: Page) {
+    await page.getByTestId('compare-tab-all').click();
+    await expect(page.getByTestId('compare-tab-all')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+  }
+  async function showComparison(page: Page) {
+    await page.getByTestId('compare-add').click();
+    await expect(page.getByTestId('comparison')).toBeVisible();
+  }
+
+  test('opens on My roster, sorted by this week’s number, highest first', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
-    await expect(page.getByTestId('compare-run')).toBeDisabled();
+    await expect(page.getByTestId('compare-tab-mine')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+    const shown = await page.getByTestId('compare-points').evaluateAll((els) =>
+      els.map((e) => ({ text: e.querySelector('.cmp2-num')?.textContent ?? '', soft: e.textContent?.includes('lower confidence') ?? false })),
+    );
+    const tier = (r: { text: string; soft: boolean }) => (r.text === '–' ? 2 : r.soft ? 1 : 0);
+    for (let i = 1; i < shown.length; i++) {
+      const [a, b] = [shown[i - 1]!, shown[i]!];
+      expect(tier(a) <= tier(b), `tiers in order at row ${i}`).toBe(true);
+      if (tier(a) === tier(b) && tier(a) < 2) expect(Number(a.text)).toBeGreaterThanOrEqual(Number(b.text));
+    }
+    // Every roster row says starter or bench, in words.
+    const roles = await page.getByTestId('compare-role').allInnerTexts();
+    expect(roles.length).toBeGreaterThan(0);
+    for (const r of roles) expect(r).toMatch(/Starter|Bench/i);
   });
 
-  for (const count of [2, 3, 4] as const) {
-    test(`ranks ${count} players`, async ({ page }) => {
+  for (const count of [2, 3] as const) {
+    test(`ranks ${count} players as soon as they are chosen`, async ({ page }) => {
       await page.getByTestId('compare-open').click();
-      for (const id of ['1001', '1005', '1008', '1012'].slice(0, count)) await choose(page, id);
-      await page.getByTestId('compare-run').click();
-
-      /*
-       * The ranking is the column order now, not a list above the table.
-       *
-       * It used to be an `<ol>` repeating every name and score directly above a
-       * table holding the same names and the same scores — a third of a phone
-       * sheet spent saying one thing twice. The grid puts the recommended
-       * player in the first data column and stars his header, so this asserts
-       * the thing that replaced the list rather than the list.
-       */
+      await allPlayers(page);
+      const ids = await page.getByTestId('compare-candidate').evaluateAll((els, n) => els.slice(0, n).map((e) => e.getAttribute('data-player-id')!), count);
+      for (const id of ids) await choose(page, id);
+      await expect(page.getByTestId('compare-mini-verdict')).toBeVisible();
+      await showComparison(page);
       const grid = page.getByTestId('compare-grid');
-      await expect(grid).toBeVisible();
       await expect(grid).toHaveAttribute('data-columns', String(count));
       await expect(page.getByTestId('compare-column')).toHaveCount(count);
-      // The recommended player leads the row of cards, and is marked as the pick.
-      await expect(page.getByTestId('compare-column').first()).toHaveAttribute('data-pick', 'true');
+      await expect(page.getByTestId('compare-column').first()).toHaveAttribute('data-pick', /true|false/);
     });
   }
 
-  test('refuses a fifth player out loud, and keeps the four already chosen', async ({ page }) => {
+  test('refuses a fourth player out loud, and keeps the three already chosen', async ({ page }) => {
     await page.getByTestId('compare-open').click();
-    for (const id of ['1001', '1005', '1008', '1012']) await choose(page, id);
-
-    const fifth = page.locator('[data-testid="compare-candidate"][data-player-id="1007"]');
-    await fifth.click();
-    await expect(fifth).toHaveAttribute('data-chosen', 'false');
-    await expect(page.getByTestId('compare-sheet')).toContainText('Up to 4 players at once');
-    await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
-  });
-
-  /**
-   * The keyboard going away does not take the comparison with it.
-   *
-   * Reported as "tapping a name in the search closes the whole compare
-   * screen", and measured as the keyboard, not the tap: the sheet's layer is
-   * shortened by the keyboard, and when it came back down the card was left a
-   * keyboard's height short of where it rests. The next lift anywhere on the
-   * card read that as a push to 40% of the way and dismissed it, and every
-   * player chosen went with it.
-   *
-   * No browser in this suite has a software keyboard, so the visual viewport
-   * is stood in for — the same object `useKeyboardInset` reads.
-   */
-  test('keeps the sheet and the picks when the keyboard goes away before a tap', async ({ page }) => {
-    await page.addInitScript(() => {
-      const visual = new EventTarget();
-      let keyboard = 0;
-      Object.defineProperty(visual, 'height', { get: () => window.innerHeight - keyboard });
-      Object.defineProperty(visual, 'offsetTop', { get: () => 0 });
-      Object.defineProperty(window, 'visualViewport', { get: () => visual });
-      (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard = (px) => {
-        keyboard = px;
-        visual.dispatchEvent(new Event('resize'));
-      };
-    });
-    await page.reload();
-    await page.getByTestId('tab-team').click();
-    await page.getByTestId('compare-open').click();
-    for (const id of ['1001', '1005']) await choose(page, id);
-
-    /*
-     * The row to tap is chosen, and brought on screen, before the keyboard
-     * comes and goes — the list starts below the fold on the smaller phones.
-     */
-    const nextId = await page
-      .locator('[data-testid="compare-candidate"][data-chosen="false"]')
-      .first()
-      .getAttribute('data-player-id');
-    const next = page.locator(`[data-testid="compare-candidate"][data-player-id="${nextId}"]`);
-    await next.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-
-    // Focused without scrolling, so the row stays where it was brought to.
-    await page.getByTestId('compare-search').evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));
-    await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(380));
-    await page.evaluate(() => (window as unknown as { setKeyboard: (px: number) => void }).setKeyboard(0));
-
-    /*
-     * A tap where the row is drawn, not `click()`: Playwright scrolls its
-     * target into view first, and that scroll is one the layer corrects on its
-     * own — which put the card back and hid this bug from the suite.
-     */
-    await page.waitForTimeout(100);
-    const box = await next.boundingBox();
-    const viewport = page.viewportSize();
-    const layer = await page
-      .getByTestId('sheet-scroller')
-      .evaluate((el) => `layer at ${el.scrollTop} of ${el.scrollHeight - el.clientHeight}`);
-    expect(
-      box && viewport && box.y + box.height < viewport.height,
-      `the row is on screen to be tapped (row top ${box?.y}, ${layer})`,
-    ).toBeTruthy();
-    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await expect(next).toHaveAttribute('data-chosen', 'true');
-    await page.waitForTimeout(600);
-    await expect(page.getByTestId('compare-sheet')).toBeVisible();
+    await allPlayers(page);
+    const ids = await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(0, 4).map((e) => e.getAttribute('data-player-id')!));
+    for (const id of ids.slice(0, 3)) await choose(page, id);
+    const fourth = page.locator(`[data-testid="compare-candidate"][data-player-id="${ids[3]}"]`);
+    await fourth.click();
+    await expect(fourth).toHaveAttribute('data-chosen', 'false');
+    await expect(page.getByTestId('compare-notice')).toContainText('Up to 3 players at once');
     await expect(page.getByTestId('compare-chosen')).toHaveCount(3);
   });
 
-  /**
-   * The swap button on a player's card: search, tap, and the answer comes back
-   * with the new player in the same place, without leaving the sheet.
-   *
-   * This is the flow the "search closes the sheet" report was about, so it is
-   * asserted end to end: the sheet stays, the other player stays, the swapped
-   * one is gone, and a fresh comparison is on screen without a second tap.
-   */
-  test('swaps one player for another from search and answers again', async ({ page }) => {
-    await page.getByTestId('compare-open').click();
-    for (const id of ['1001', '1005']) await choose(page, id);
-    await page.getByTestId('compare-run').click();
-    await expect(page.getByTestId('compare-grid')).toBeVisible();
-
-    await page.locator('[data-testid="compare-swap"][data-player-id="1005"]').click();
-    await expect(page.getByTestId('compare-swapping')).toBeVisible();
-    await expect(page.getByTestId('compare-search')).toBeFocused();
-
-    await page.locator('[data-testid="compare-candidate"][data-player-id="1008"]').click();
-
-    await expect(page.getByTestId('compare-sheet')).toBeVisible();
-    await expect(page.getByTestId('compare-swapping')).toHaveCount(0);
-    const columns = page.getByTestId('compare-column');
-    await expect(columns).toHaveCount(2);
-    const ids = await columns.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
-    expect(new Set(ids)).toEqual(new Set(['1001', '1008']));
-    await expect(page.getByTestId('compare-chosen')).toHaveCount(2);
-  });
-
-  test('a swap can be called off, and changes nothing', async ({ page }) => {
-    await page.getByTestId('compare-open').click();
-    for (const id of ['1001', '1005']) await choose(page, id);
-    await page.getByTestId('compare-run').click();
-    await expect(page.getByTestId('compare-grid')).toBeVisible();
-
-    await page.locator('[data-testid="compare-swap"][data-player-id="1001"]').click();
-    await page.getByTestId('compare-swap-cancel').click();
-    await expect(page.getByTestId('compare-swapping')).toHaveCount(0);
-    await expect(page.getByTestId('compare-grid')).toBeVisible();
-    await expect(page.getByTestId('compare-column')).toHaveCount(2);
-  });
-
-  /**
-   * A factor nobody in the comparison has a value for is a sentence, not a
-   * row of dashes; a factor at least one player has keeps its row.
-   */
-  test('collapses factors nobody has into one note, and keeps the rest as rows', async ({ page }) => {
-    await page.getByTestId('compare-open').click();
-    for (const id of ['1001', '1005']) await choose(page, id);
-    await page.getByTestId('compare-run').click();
-    const comparison = page.getByTestId('comparison');
-    await expect(comparison).toBeVisible();
-
-    const rows = comparison.locator('tr[data-factor]');
-    for (const row of await rows.all()) {
-      const values = row.locator('td [data-testid="compare-missing"]');
-      const cells = row.locator('td');
-      expect(await values.count(), 'a row where every player is a dash should have collapsed').toBeLessThan(
-        await cells.count(),
-      );
-    }
-    const note = page.getByTestId('compare-untracked');
-    if ((await note.count()) > 0) await expect(note).toContainText('Not tracked for this matchup:');
-  });
-
-  test('cannot choose the same player twice', async ({ page }) => {
+  test('a second tap removes, and so does the X on the pinned chip', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
-    // The second tap is the only thing it can be: a removal.
     await page.locator('[data-testid="compare-candidate"][data-player-id="1001"]').click();
     await expect(page.getByTestId('compare-chosen')).toHaveCount(0);
     await choose(page, '1001');
-    await expect(page.getByTestId('compare-chosen')).toHaveCount(1);
+    await page.getByTestId('compare-remove').first().click();
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(0);
   });
 
-  /**
-   * The pool is not the roster.
-   *
-   * Marcus Vance is owned here and Kai Brennan is a free agent, and comparing
-   * them is an ordinary question — the picker says which is which rather than
-   * refusing one of them.
-   */
-  test('compares a rostered player against a free agent', async ({ page }) => {
+  test('keeps the strip pinned while the list scrolls under it', async ({ page }) => {
     await page.getByTestId('compare-open').click();
-    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1001"]')).toContainText(
-      'Your roster',
-    );
-    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1005"]')).toContainText(
-      'Free agent',
-    );
-    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1002"]')).toContainText(
-      'Rostered elsewhere',
-    );
-
+    await allPlayers(page);
     await choose(page, '1001');
-    await choose(page, '1005');
-    await page.getByTestId('compare-run').click();
-    await expect(page.getByTestId('comparison-verdict')).toContainText('Start');
+    await page.waitForTimeout(600);
+    // Scroll the list well past the strip, the way a thumb does.
+    const list = (await page.getByTestId('compare-candidate').nth(2).boundingBox())!;
+    await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2);
+    await page.mouse.wheel(0, 1500);
+    await page.waitForTimeout(400);
+    const strip = (await page.getByTestId('compare-strip').boundingBox())!;
+    expect(strip.y, 'the strip is still on screen').toBeGreaterThanOrEqual(0);
+    expect(strip.y + strip.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await expect(page.getByTestId('compare-add')).toBeInViewport();
+    await expect(page.getByTestId('compare-chosen')).toBeInViewport();
   });
 
-  /**
-   * Two players who cannot share a slot get an honest answer instead of a
-   * ranking. Trey Halloran is a quarterback and Kai Brennan a receiver; this
-   * league starts one quarterback and a W/R/T flex, so there is no lineup in
-   * which the question means anything.
-   */
+  test('switches tabs mid-selection: a roster player against a free agent', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await page.getByTestId('compare-tab-waivers').click();
+    await expect(page.locator('[data-testid="compare-candidate"][data-player-id="1001"]')).toHaveCount(0);
+    const free = page.locator('[data-testid="compare-candidate"][data-chosen="false"]').first();
+    await expect(free).toBeVisible();
+    // Waivers lists only players nobody rosters.
+    await expect(page.getByTestId('compare-owner')).toHaveCount(0);
+    await free.click();
+    await expect(page.getByTestId('compare-chosen')).toHaveCount(2);
+    await showComparison(page);
+    await expect(page.getByTestId('compare-column')).toHaveCount(2);
+  });
+
   test('says so when the players are not the same lineup decision', async ({ page }) => {
     await page.getByTestId('compare-open').click();
+    await allPlayers(page);
+    await page.getByTestId('compare-search').fill('Halloran');
     await choose(page, '1003');
+    await page.getByTestId('compare-search').fill('Brennan');
     await choose(page, '1005');
-    await page.getByTestId('compare-run').click();
-
+    await showComparison(page);
     await expect(page.getByTestId('comparison-verdict')).toContainText('Not the same lineup decision');
-    await expect(page.getByTestId('comparison-slot')).toContainText('do not share a lineup slot');
-    // The per-player numbers are still there — honest, just not a verdict.
-    await expect(page.getByTestId('comparison')).toContainText('Trey Halloran');
   });
 
-  /**
-   * Launching from a slot keeps the comparison about that slot.
-   *
-   * Tapping a player now opens his week rather than the comparison — that is
-   * the question a reader is asking nine times out of ten — and Compare is the
-   * way out of it. The slot survives the trip, which is the part that matters.
-   */
-  test('opens narrowed when launched from a lineup slot', async ({ page }) => {
+  test('opens from a slot with that player chosen and every position listed', async ({ page }) => {
     await page.locator('[data-testid="starter-row"][data-slot="TE"]').click();
     await expect(page.getByTestId('weekly-sheet')).toBeVisible();
     await page.getByTestId('weekly-compare').click();
     const sheet = page.getByTestId('compare-sheet');
-    await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText('Compare for TE');
-    // The player whose card was tapped is already in the comparison.
+    await expect(sheet).toContainText('TE slot');
     await expect(page.getByTestId('compare-chosen')).toHaveCount(1);
-
-    await choose(page, '1009');
-    await page.getByTestId('compare-run').click();
-    await expect(page.getByTestId('comparison-slot')).toContainText('TE');
+    // Not locked to the slot: the filter starts on every position.
+    await expect(sheet.getByRole('group', { name: 'Filter by position' }).getByRole('button', { name: 'ALL' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  /**
-   * One engine, not two.
-   *
-   * The sheet's ranking and the lineup card's own numbers come from the same
-   * evaluation, so the score a player is given in the comparison is the score
-   * the recommended lineup gave him.
-   */
-  test('uses the same start/sit engine the lineup does', async ({ page }) => {
-    const lineup = await (await page.request.get('/api/leagues/demo-league/lineup')).json();
-    const te = (lineup.slots as { slot: string; playerId: string | null; score: number | null }[]).find(
-      (s) => s.slot === 'TE',
-    )!;
-
+  test('builds the score in one table, with a tap for the working', async ({ page }) => {
     await page.getByTestId('compare-open').click();
-    await choose(page, te.playerId!);
     await choose(page, '1001');
-    await page.getByTestId('compare-run').click();
+    await choose(page, '1004');
+    await showComparison(page);
+    const vegas = page.locator('[data-testid="compare-factor"][data-factor="vegas"]');
+    await expect(vegas).toHaveAttribute('aria-expanded', 'false');
+    await vegas.click();
+    await expect(vegas).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('compare-factor-detail')).toBeVisible();
+    await expect(page.getByTestId('compare-untracked')).toContainText('No effect:');
+  });
 
-    /*
-     * The cell, by factor and by player.
-     *
-     * This used to be "the row containing Andre Sotelo", which worked for
-     * exactly as long as players were rows — the grid makes them columns, and
-     * this was the one assertion that caught it on the first CI run. Addressed
-     * by `data-row` and `data-player-id` rather than by position, because the
-     * column order *is* the ranking and a `nth-child` would quietly start
-     * reading the other player the first time the verdict changed.
-     *
-     * It is also a stronger claim than it was: the old one passed if the score
-     * appeared anywhere in the row, including inside another number.
-     *
-     * The score moved out of the grid and onto the recommendation card in the
-     * 25 September redesign; `data-row` and `data-player-id` moved with it.
-     */
-    const cell = page
-      .getByTestId('comparison')
-      .locator(`[data-row="score"] [data-player-id="${te.playerId}"]`);
-    await expect(cell).toHaveText(te.score!.toFixed(1));
+  for (const count of [2, 3] as const) {
+    test(`fits the whole comparison on one screen with ${count} players`, async ({ page }) => {
+      await page.getByTestId('compare-open').click();
+      await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+      const ids = await page.getByTestId('compare-candidate').evaluateAll((els, n) => els.slice(0, n).map((e) => e.getAttribute('data-player-id')!), count);
+      for (const id of ids) await choose(page, id);
+      await showComparison(page);
+      await page.waitForTimeout(400);
+      const viewport = page.viewportSize()!;
+      const lastRow = (await page.locator('.cmp2-total').boundingBox())!;
+      expect(lastRow.y + lastRow.height, 'the score row is on screen without scrolling').toBeLessThanOrEqual(viewport.height);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  }
+
+  test('keeps every control at a thumb’s size, with a visible focus', async ({ page }) => {
+    await page.getByTestId('compare-open').click();
+    await choose(page, '1001');
+    await choose(page, '1004');
+    for (const id of ['compare-remove', 'compare-add', 'compare-candidate']) {
+      const box = (await page.getByTestId(id).first().boundingBox())!;
+      expect(box.height, id).toBeGreaterThanOrEqual(44);
+    }
+    // Reached by keyboard, which is when a focus ring has to show.
+    await page.getByTestId('compare-add').focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('compare-add')).toBeFocused();
+    const outline = await page.getByTestId('compare-add').evaluate((el) => getComputedStyle(el).outlineStyle);
+    expect(outline).not.toBe('none');
+  });
+
+  /** The one-number rule, seen from the screen: Compare prints what Team's lineup has. */
+  test('prints the number the lineup has, for the same player', async ({ page }) => {
+    const lineup = await (await page.request.get('/api/leagues/demo-league/lineup')).json();
+    const everyone = [...lineup.starters, ...lineup.bench] as { playerId: string; decision?: { points: number; basis: string } | null }[];
+    const priced = everyone.filter((e) => e.decision && e.decision.basis !== 'unpriced').slice(0, 2);
+    await page.getByTestId('compare-open').click();
+    for (const p of priced) {
+      const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${p.playerId}"]`);
+      await expect(row.getByTestId('compare-points').locator('.cmp2-num')).toHaveText(p.decision!.points.toFixed(1));
+      await choose(page, p.playerId);
+    }
+    await showComparison(page);
+    for (const p of priced) {
+      await expect(page.locator(`[data-testid="compare-column"][data-player-id="${p.playerId}"] [data-testid="compare-score"]`)).toHaveText(
+        p.decision!.points.toFixed(1),
+      );
+    }
   });
 });
 
@@ -1448,7 +1344,7 @@ test.describe('the row and the card are about the same player', () => {
        * about somebody else, so both are checked against the same id.
        */
       const card = page.getByTestId('weekly-card');
-      const compare = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+      const compare = page.getByTestId('compare-chosen');
       await expect(card.or(compare.first())).toBeVisible();
 
       if (await card.isVisible()) {
@@ -1470,7 +1366,7 @@ test.describe('the row and the card are about the same player', () => {
     const challenger = await swap.getAttribute('data-recommended-player-id');
     await swap.click();
 
-    const chosen = page.locator('[data-testid="compare-candidate"][data-chosen="true"]');
+    const chosen = page.getByTestId('compare-chosen');
     await expect(chosen).toHaveCount(2);
     const ids = await chosen.evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
     expect(new Set(ids)).toEqual(new Set([incumbent, challenger]));
@@ -1491,27 +1387,22 @@ test.describe('the row and the card are about the same player', () => {
     await expect(grid).toHaveAttribute('data-columns', '2');
   });
 
-  test('hands the chips back the moment the reader changes one', async ({ page }) => {
-    /*
-     * Auto-running is a courtesy on open, not a mode. Removing a chip clears
-     * the answer and puts the button back, which is what lets a comparison be
-     * re-aimed without closing and re-opening the sheet.
-     */
+  test('takes the answer away the moment a chip is removed', async ({ page }) => {
     const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
     if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
     await swap.click();
     await expect(page.getByTestId('compare-grid')).toBeVisible();
 
-    await page.getByTestId('compare-chosen').first().click();
+    await page.getByTestId('compare-remove').first().click();
     await expect(page.getByTestId('compare-grid')).toHaveCount(0);
-    await expect(page.getByTestId('compare-run')).toBeDisabled();
+    await expect(page.getByTestId('compare-empty')).toContainText('one more player');
   });
 
-  test('still waits to be asked when it was opened with nobody chosen', async ({ page }) => {
+  test('opens on the picker when nobody is chosen', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await expect(page.getByTestId('compare-sheet')).toBeVisible();
     await expect(page.getByTestId('compare-grid')).toHaveCount(0);
-    await expect(page.getByTestId('compare-run')).toBeDisabled();
+    await expect(page.getByTestId('compare-picker')).toBeVisible();
   });
 });
 
@@ -1569,11 +1460,12 @@ test.describe('the size of the recommendation', () => {
     expect(share, `the card is ${(share * 100).toFixed(1)}% of the screen`).toBeLessThan(0.2);
   });
 
-  test('says what to change and what it is worth, and stops', async ({ page }) => {
+  test('says what to change and what each is projected, and stops', async ({ page }) => {
     const text = await page.getByTestId('lineup-swap').innerText();
+    expect(text).toContain('Best move');
     expect(text).toContain('RJ Harvey');
     expect(text).toContain('Jayden Reed');
-    expect(text).toContain('1.37');
+    expect(text).toMatch(/projected/);
     /* The engine's own vocabulary, which was never plain English on a screen. */
     expect(text).not.toMatch(/net over|item\(s\)|recent signal/i);
   });

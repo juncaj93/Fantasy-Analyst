@@ -64,6 +64,7 @@ import {
   type SupportSnapshot,
 } from './schema.ts';
 import type { LineupPayload } from './payloads.ts';
+import type { Posture } from '../startsit/tiebreak.ts';
 
 /** Everything the live route and Demo Mode already hold when they draw the screen. */
 export interface LineupCaptureInput {
@@ -88,6 +89,8 @@ export interface LineupCaptureInput {
   profile: ScoringProfile;
   inputs: StartSitInput[];
   mode: StartSitMode;
+  /** Underdog or favourite this week, for the pill tie-break. */
+  posture?: Posture | null;
   published: ReadonlyMap<string, number>;
   nflState: NflState | null;
   props: { fetchedAt: string | null; provider: string | null; events: number };
@@ -111,6 +114,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
     profile: input.profile,
     currentStarterIds: input.mine.starterIds,
     mode: input.mode,
+    posture: input.posture ?? null,
     published: input.published,
     unknownPlayers: input.mine.playerIds.length - input.inputs.length,
     now: input.now,
@@ -175,6 +179,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
         rules: captureLeagueRules(input.league),
         currentStarterIds: input.mine.starterIds,
         mode: input.mode,
+        ...(input.posture ? { posture: input.posture } : {}),
         startSit,
         published: Object.fromEntries(input.published),
         unknownPlayers: input.mine.playerIds.length - input.inputs.length,
@@ -204,6 +209,7 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
     profile,
     currentStarterIds: inputs.currentStarterIds,
     mode: inputs.mode,
+    posture: inputs.posture ?? null,
     published: new Map(Object.entries(inputs.published)),
     unknownPlayers: inputs.unknownPlayers,
     /*

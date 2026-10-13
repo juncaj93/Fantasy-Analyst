@@ -34,6 +34,7 @@ import { weeklyProjection, type ProjectableEvaluation, type ProjectionSource } f
 import { weeklyIntelligence, type WeeklyIntelligence } from '../contracts/integration.ts';
 import type { StartSitEvaluation, StartSitInput } from './engine.ts';
 import type { StartSitMode } from './mode.ts';
+import type { Posture } from './tiebreak.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 
 /** An evaluation with the weekly card and the display projection attached. */
@@ -96,6 +97,8 @@ export interface LineupAssemblyRequest {
    * changes nothing: see `recommendLineup`'s own note on the field.
    */
   opponentExposure?: ReadonlyMap<string, OpponentExposure>;
+  /** Underdog or favourite this week, for the pill tie-break. */
+  posture?: Posture | null;
   now?: string | Date;
 }
 
@@ -115,6 +118,7 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
     mode: request.mode,
     published,
     ...(request.opponentExposure === undefined ? {} : { opponentExposure: request.opponentExposure }),
+    ...(request.posture ? { posture: request.posture } : {}),
     ...(request.now === undefined ? {} : { now: request.now }),
   });
 

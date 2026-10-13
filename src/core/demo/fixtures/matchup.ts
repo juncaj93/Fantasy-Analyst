@@ -111,7 +111,7 @@ const CLOSE: Scores = {
 
 /** The finished games went the reader's way, and the live ones are following. */
 const LEADING: Scores = {
-  p001: 27.1, p003: 15.2, p016: 13.6, p023: 8.6, p009: 7.9, p025: 2.7,
+  p001: 29.8, p003: 15.2, p016: 13.6, p023: 8.6, p009: 7.9, p025: 2.7,
   p004: 13.2, p002: 19.6, p017: 5.1, p011: 14.8, p006: 8.4, p005: 8.2, p021: 4.9,
 };
 

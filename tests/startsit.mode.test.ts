@@ -17,6 +17,13 @@ import { LINEUP_PREFERENCE_TOLERANCE, recommendLineup } from '../src/core/starts
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { UsageWeek } from '../src/core/usage/role.ts';
 import { candidate } from './helpers/startsit.ts';
+/*
+ * The mode machinery, measured on the components it used to weight. Since
+ * October 2026 those components are text only (see `scoringRules.ts`), so the
+ * mode barely moves a score under the live rules; the machinery is tested on
+ * the old rules, where it still has something to scale.
+ */
+import { LEGACY_RULES } from '../src/core/startsit/scoringRules.ts';
 
 const HALF_PPR = buildScoringProfile({ rec: 0.5, pass_td: 4 }, []);
 const SHAPE = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'BN']);
@@ -56,7 +63,7 @@ const VOLATILE = [
 describe('the mode reweights one engine', () => {
   it('produces the same components in every mode', () => {
     const keys = START_SIT_MODES.map((mode) =>
-      evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode }, HALF_PPR).components.map(
+      evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES).components.map(
         (c) => c.key,
       ),
     );
@@ -65,7 +72,7 @@ describe('the mode reweights one engine', () => {
   });
 
   it('records what the mode did to each component', () => {
-    const floor = evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode: 'floor' }, HALF_PPR);
+    const floor = evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode: 'floor' }, HALF_PPR, LEGACY_RULES);
     const usage = floor.components.find((c) => c.key === 'usage_level')!;
     expect(usage.modeWeight).toBe(MODE_WEIGHTS.floor['usage_level']);
     /*
@@ -83,7 +90,7 @@ describe('the mode reweights one engine', () => {
 
   it('prefers the safe player in Floor and the volatile one in Ceiling', () => {
     const score = (usageWeeks: UsageWeek[], mode: 'floor' | 'ceiling' | 'balanced') =>
-      evaluatePlayer({ ...candidate('x', 'X', 'WR', 11), usageWeeks, mode }, HALF_PPR).score!;
+      evaluatePlayer({ ...candidate('x', 'X', 'WR', 11), usageWeeks, mode }, HALF_PPR, LEGACY_RULES).score!;
 
     expect(score(SAFE, 'floor') - score(VOLATILE, 'floor')).toBeGreaterThan(
       score(SAFE, 'ceiling') - score(VOLATILE, 'ceiling'),
@@ -92,8 +99,8 @@ describe('the mode reweights one engine', () => {
 
   it('keeps Balanced between the two', () => {
     const gap = (mode: 'floor' | 'ceiling' | 'balanced') =>
-      evaluatePlayer({ ...candidate('a', 'A', 'WR', 11), usageWeeks: SAFE, mode }, HALF_PPR).score! -
-      evaluatePlayer({ ...candidate('b', 'B', 'WR', 11), usageWeeks: VOLATILE, mode }, HALF_PPR).score!;
+      evaluatePlayer({ ...candidate('a', 'A', 'WR', 11), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES).score! -
+      evaluatePlayer({ ...candidate('b', 'B', 'WR', 11), usageWeeks: VOLATILE, mode }, HALF_PPR, LEGACY_RULES).score!;
     expect(gap('balanced')).toBeLessThan(gap('floor'));
     expect(gap('balanced')).toBeGreaterThan(gap('ceiling'));
   });
@@ -102,8 +109,8 @@ describe('the mode reweights one engine', () => {
     // Eight points of market expectation is not a tie, and no amount of
     // reweighting may turn it into one.
     for (const mode of START_SIT_MODES) {
-      const better = evaluatePlayer({ ...candidate('a', 'A', 'WR', 18), usageWeeks: VOLATILE, mode }, HALF_PPR);
-      const worse = evaluatePlayer({ ...candidate('b', 'B', 'WR', 10), usageWeeks: SAFE, mode }, HALF_PPR);
+      const better = evaluatePlayer({ ...candidate('a', 'A', 'WR', 18), usageWeeks: VOLATILE, mode }, HALF_PPR, LEGACY_RULES);
+      const worse = evaluatePlayer({ ...candidate('b', 'B', 'WR', 10), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES);
       expect(better.score!).toBeGreaterThan(worse.score!);
     }
   });

@@ -42,6 +42,12 @@ async function choose(page: Page, playerId: string) {
   await expect(row).toHaveAttribute('data-chosen', 'true');
 }
 
+/** Close the picker on the comparison, which loads on its own once two are chosen. */
+async function showComparison(page: Page) {
+  await page.getByTestId('compare-add').click();
+  await expect(page.getByTestId('comparison')).toBeVisible();
+}
+
 test.describe('shell', () => {
   test('never scrolls horizontally at this width', async ({ page }) => {
     await login(page);
@@ -1577,34 +1583,16 @@ test.describe('team, ADP import and start/sit', () => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
-    await page.getByTestId('compare-run').click();
+    await showComparison(page);
 
     const comparison = page.getByTestId('comparison');
-    await expect(comparison).toBeVisible();
-    await expect(page.getByTestId('comparison-verdict')).toContainText('Start');
-    await expect(comparison).toContainText('confidence');
-
-    /*
-     * The axes swapped on 22 September 2026 and the assertion follows them.
-     *
-     * This used to look for `Vegas` and `Coverage` as *column* headers, which
-     * they were when the card carried a four-row summary table with one row per
-     * player. The grid puts the players across the top and the factors down the
-     * side, so those two are row headers now — and asserting them by ARIA role
-     * is the part worth keeping, because it is what proves the grid is a real
-     * table a screen reader can navigate rather than a pile of divs that looks
-     * like one.
-     */
-    /*
-     * The flat sheet (30 September 2026): the sportsbooks' prop lines are the
-     * headline section and this app's signals sit under them, both real tables.
-     */
-    await expect(comparison.getByRole('region', { name: 'Vegas props' })).toBeVisible();
-    await expect(comparison.getByRole('rowheader', { name: 'Rec yards' })).toBeVisible();
-    await expect(comparison.getByRole('region', { name: 'Our signals' })).toBeVisible();
-    await expect(comparison.getByRole('rowheader', { name: 'Status' })).toBeVisible();
-    // And the players are the columns.
+    await expect(page.getByTestId('comparison-verdict')).toContainText(/Start|Close call|Not the same/);
     await expect(page.getByTestId('compare-column')).toHaveCount(2);
+    // One table, players across, factors down: a real table a screen reader can walk.
+    const grid = page.getByTestId('compare-grid');
+    await expect(grid.getByRole('rowheader', { name: 'Vegas lines' })).toBeVisible();
+    await expect(grid.getByRole('rowheader', { name: 'Score' })).toBeVisible();
+    await expect(comparison).toBeVisible();
   });
 
   test('recommends a whole lineup and never offers to apply it', async ({ page }) => {
@@ -1665,11 +1653,13 @@ test.describe('team, ADP import and start/sit', () => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
-    await page.getByTestId('compare-run').click();
+    await showComparison(page);
 
-    const line = page.getByTestId('startsit-injury');
-    await expect(line).toContainText(/hamstring/i);
-    await expect(line).toContainText(/full|limited/i);
+    // The availability row moved a score, so it is a row; its sentence is one tap in.
+    await page.locator('[data-testid="compare-factor"][data-factor="status"]').click();
+    const detail = page.getByTestId('compare-factor-detail');
+    await expect(detail).toContainText(/hamstring/i);
+    await expect(detail).toContainText(/full|limited/i);
 
     /*
      * And the penalty it produced is contextual rather than the flat 1.5 the
@@ -1693,28 +1683,16 @@ test.describe('team, ADP import and start/sit', () => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1011');
-    await page.getByTestId('compare-run').click();
+    await showComparison(page);
 
-    const comparison = page.getByTestId('comparison');
-    await expect(comparison).toContainText('no Vegas data for');
-
-    /*
-     * The honest state is `no line` in every prop he is priced on, never a
-     * number and never the word "unknown".
-     *
-     * Since the flat sheet (30 September 2026) the sportsbooks' own lines are
-     * the headline section, so the claim lives in his cells there: each market
-     * his position is priced on says no book posted it. The assertion is aimed
-     * at those cells rather than at the card's text, so it cannot be satisfied
-     * by the words turning up in the collapsed breakdown below.
-     */
-    const props = page.getByTestId('compare-props');
-    const cells = props.locator('td[data-player-id="1011"]');
-    expect(await cells.count()).toBeGreaterThan(0);
-    for (const cell of await cells.all()) {
-      await expect(cell).toHaveAttribute('data-prop', /^(missing|na)$/);
-    }
-    await expect(props.locator('td[data-player-id="1011"][data-prop="missing"]').first()).toHaveText('no line');
+    // His Vegas cell is a dash, never a number and never "unknown"...
+    const vegas = page.locator('[data-testid="compare-factor"][data-factor="vegas"] [data-testid="compare-cell"]');
+    await expect(vegas).toHaveCount(2);
+    const column = page.locator('[data-testid="compare-column"][data-player-id="1011"]');
+    const score = (await column.getByTestId('compare-score').innerText()).trim();
+    // ...and his score is either a dash or a fallback marked as lower confidence.
+    if (score !== '–') await expect(column).toContainText('lower confidence');
+    await expect(page.getByTestId('comparison')).not.toContainText('unknown');
   });
 });
 

@@ -118,10 +118,13 @@ describe('inside the engine', () => {
   it('lets news move a player by no more than 3% of his market number', () => {
     const quiet = evaluatePlayer(candidate('a', 'A', 'WR', 14), HALF_PPR);
     const loud = evaluatePlayer(candidate('a', 'A', 'WR', 14, { signal: signalWithNet(-20) }), HALF_PPR);
+    // The market number here is the 14-point line read as an average.
+    const base = component(loud, 'vegas').value;
     const news = component(loud, 'news_recent').value + component(loud, 'news_raw').value;
-    expect(Math.abs(news)).toBeLessThanOrEqual(0.03 * 14 + 1e-9);
-    expect(quiet.score! - loud.score!).toBeLessThanOrEqual(0.03 * 14 + 1e-9);
-    expect(component(loud, 'news_raw').value).toBeGreaterThanOrEqual(-0.01 * 14 - 1e-9);
+    expect(Math.abs(news)).toBeLessThanOrEqual(0.03 * base + 1e-9);
+    expect(quiet.score! - loud.score!).toBeLessThanOrEqual(0.03 * base + 1e-9);
+    // Lifetime news is text only since October 2026.
+    expect(component(loud, 'news_raw').value).toBe(0);
   });
 
   it('keeps the breakdown adding up to the score', () => {

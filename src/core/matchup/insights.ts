@@ -267,20 +267,11 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
     });
   }
 
-  /* ------------------------------------------------------ lineup leverage */
-  if (input.decision.best) {
-    const best = input.decision.best;
-    candidates.push({
-      key: `lineup:${best.outPlayerId}:${best.inPlayerId}`,
-      kind: 'lineup_leverage',
-      urgency: 'act_now',
-      headline: `Starting ${name(best.inPlayerId)} over ${name(best.outPlayerId)} adds ${percent(best.gain)} to your win odds`,
-      detail: best.reason,
-      playerId: best.inPlayerId,
-      side: 'mine',
-      winImpact: best.gain,
-    });
-  }
+  /*
+   * No lineup-leverage insight since October 2026. A sentence that says "start
+   * X over Y" is a recommendation, and the Matchup screen recommends nothing:
+   * the Team screen's Best move card is the one place the app gives one.
+   */
 
   /* -------------------------------------------------------------- clinch */
   if (input.clinch.mathematical && input.clinch.leader) {
@@ -606,8 +597,8 @@ function benchSwings(
         urgency: 'informational',
         headline: `Bench swing: ${name(benched.playerId)} outscored ${name(starter.playerId)} by ${gap.toFixed(1)}`,
         detail: modelPreferredStarter
-          ? 'The outcome swung against the pregame recommendation.'
-          : 'The pregame projection had preferred him too.',
+          ? 'The pregame projections had the starter ahead.'
+          : 'The pregame projections had him ahead too.',
         playerId: benched.playerId,
         side: 'mine',
         winImpact: round4(Math.min(0.4, gap / 30)),

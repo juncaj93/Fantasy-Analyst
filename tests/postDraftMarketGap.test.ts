@@ -34,6 +34,15 @@ import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { seedDemoData, MOCK_GAMES } from '../src/devserver/seed.ts';
 import { createTestDb } from './helpers/db.ts';
 import { player } from './helpers/players.ts';
+import { lineForMean } from '../src/core/startsit/propConversion.ts';
+import { SCORING_RULES } from '../src/core/startsit/scoringRules.ts';
+/** A line whose converted average is exactly `points` (see `lineForMean`). */
+function fixtureLine(position: string, points: number): number {
+  return position === 'QB'
+    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
+    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
+}
+
 
 const HALF_PPR = buildScoringProfile(
   { rec: 0.5, pass_td: 4, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rec_td: 6, rush_td: 6 },
@@ -80,7 +89,7 @@ function priced(id: string, name: string, position: string, points: number): Sta
         playerId: id,
         sourcePlayerName: name,
         market: position === 'QB' ? 'pass_yards' : 'receiving_yards',
-        line: position === 'QB' ? points / 0.04 : points * 10,
+        line: fixtureLine(position, points),
         overPrice: -110,
         underPrice: -110,
         bookCount: 3,

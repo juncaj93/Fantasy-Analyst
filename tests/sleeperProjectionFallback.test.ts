@@ -920,6 +920,15 @@ describe('no recommendation engine can reach the fallback', () => {
          * topped up from it.
          */
         'server/services/tradeValueService.ts',
+        /*
+         * The Compare picker's lists (October 2026). It reads the published
+         * week for exactly what `/api/startsit/compare` reads it for, through
+         * the same `decisionPoints`, so a row in the list and the comparison a
+         * tap later print the same number. It also cuts a long free-agent list
+         * by that figure before evaluating; that orders a picker, and decides
+         * nothing about a lineup.
+         */
+        'server/services/comparePool.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );
