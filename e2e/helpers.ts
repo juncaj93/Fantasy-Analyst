@@ -492,9 +492,19 @@ export async function clearMyGuys(page: Page): Promise<void> {
  */
 export async function withoutTiers(page: Page, over: Record<string, unknown> = {}): Promise<void> {
   await page.route('**/api/leagues/*/waivers', async (route) => {
-    const response = await route.fetch();
-    const original = await response.json();
-    const { tiers: _tiers, ...rest } = original as Record<string, unknown>;
-    await route.fulfill({ response, body: JSON.stringify({ ...rest, ...over }) });
+    /*
+     * A refresh can replace this request while it is in flight, and WebKit
+     * then disposes the response before it is read (13 October 2026, the
+     * pull-to-refresh spec at 430). That request no longer matters: the one
+     * that replaced it is rewritten by this same handler.
+     */
+    try {
+      const response = await route.fetch();
+      const original = await response.json();
+      const { tiers: _tiers, ...rest } = original as Record<string, unknown>;
+      await route.fulfill({ response, body: JSON.stringify({ ...rest, ...over }) });
+    } catch {
+      await route.continue().catch(() => {});
+    }
   });
 }
