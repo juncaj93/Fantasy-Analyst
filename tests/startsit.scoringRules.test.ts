@@ -153,13 +153,15 @@ describe('one number per player per week', () => {
     expect(weekPoints(nobody).points).toBeNull();
   });
 
-  it('sorts priced first by points, then the fallbacks, then nobody', () => {
+  /* Alex, 13 October 2026: strictly by the number; "lower confidence" is a tag, not a sort key. */
+  it('sorts strictly by the number, priced and published mixed, with nobody and Out last', () => {
     const rows = [
-      { name: 'Fallback big', week: { points: 15, basis: 'published' as const, lowerConfidence: true } },
-      { name: 'Nobody', week: { points: null, basis: 'none' as const, lowerConfidence: true } },
-      { name: 'Priced small', week: { points: 8, basis: 'market' as const, lowerConfidence: false } },
-      { name: 'Priced big', week: { points: 14, basis: 'market' as const, lowerConfidence: false } },
+      { name: 'Fallback big', week: { points: 15, basis: 'published' as const, lowerConfidence: true, out: false } },
+      { name: 'Nobody', week: { points: null, basis: 'none' as const, lowerConfidence: true, out: false } },
+      { name: 'Priced small', week: { points: 8, basis: 'market' as const, lowerConfidence: false, out: false } },
+      { name: 'Ruled out', week: { points: null, basis: 'market' as const, lowerConfidence: true, out: true } },
+      { name: 'Priced big', week: { points: 14, basis: 'market' as const, lowerConfidence: false, out: false } },
     ];
-    expect([...rows].sort(byWeekPoints).map((r) => r.name)).toEqual(['Priced big', 'Priced small', 'Fallback big', 'Nobody']);
+    expect([...rows].sort(byWeekPoints).map((r) => r.name)).toEqual(['Fallback big', 'Priced big', 'Priced small', 'Nobody', 'Ruled out']);
   });
 });

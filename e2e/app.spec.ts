@@ -1590,7 +1590,7 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(page.getByTestId('compare-column')).toHaveCount(2);
     // One table, players across, factors down: a real table a screen reader can walk.
     const grid = page.getByTestId('compare-grid');
-    await expect(grid.getByRole('rowheader', { name: 'Vegas lines' })).toBeVisible();
+    await expect(grid.getByRole('rowheader', { name: 'Base' })).toBeVisible();
     await expect(grid.getByRole('rowheader', { name: 'Score' })).toBeVisible();
     await expect(comparison).toBeVisible();
   });
@@ -1657,12 +1657,10 @@ test.describe('team, ADP import and start/sit', () => {
 
     // Availability is a chip on his card, not a row; Questionable is a warning.
     await expect(page.locator('[data-testid="compare-factor"][data-factor="status"]')).toHaveCount(0);
-    const chip = page.locator('[data-testid="compare-column"][data-player-id="1004"]').getByTestId('availability-chip');
-    await expect(chip).toHaveText('Questionable');
-    await expect(chip).toHaveAttribute('data-tone', 'warn');
-    // The injury and the practice week are on the chip's title, word for word.
-    await expect(chip).toHaveAttribute('title', /hamstring/i);
-    await expect(chip).toHaveAttribute('title', /full|limited/i);
+    // The same small badge Team uses: Q, with the word in its name.
+    const chip = page.locator('[data-testid="compare-column"][data-player-id="1004"]').getByTestId('injury-tag');
+    await expect(chip).toHaveText('Q');
+    await expect(chip).toHaveAttribute('aria-label', 'Questionable');
 
     /* And it costs him nothing: shown, not scored (13 October 2026). */
     const comparison = await (
@@ -1684,9 +1682,9 @@ test.describe('team, ADP import and start/sit', () => {
     await choose(page, '1011');
     await showComparison(page);
 
-    // His Vegas cell is a dash, never a number and never "unknown"...
-    const vegas = page.locator('[data-testid="compare-factor"][data-factor="vegas"] [data-testid="compare-cell"]');
-    await expect(vegas).toHaveCount(2);
+    // His Base cell is a dash, never a number and never "unknown"...
+    const base = page.locator('[data-testid="compare-factor"][data-factor="base"] [data-testid="compare-cell"]');
+    await expect(base).toHaveCount(2);
     const column = page.locator('[data-testid="compare-column"][data-player-id="1011"]');
     const score = (await column.getByTestId('compare-score').innerText()).trim();
     // ...and his score is either a dash or a fallback marked as lower confidence.

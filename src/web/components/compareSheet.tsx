@@ -29,14 +29,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type PillReading, type StartSitComparison, type StartSitEvaluation } from '../api.ts';
-import { PositionPill } from './common.tsx';
+import { CompactFace, InjuryTag, PositionPill } from './common.tsx';
 import { SearchField, SegmentedControl, Sheet } from './native.tsx';
 import { CheckIcon } from './icons.tsx';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
-import { weekPointsFrom } from '../../core/startsit/weekPoints.ts';
-import { availabilityChip } from '../../core/startsit/availabilityChip.ts';
+import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
+import { baseExplanation, compareTable } from '../compareTable.ts';
 
 /** Two or three fit a 360px phone; four scroll sideways. Matched by the server. */
 export const MAX_COMPARE = 4;
@@ -68,6 +68,12 @@ const ALL = 'ALL';
 /** `12.4`, or a dash for nobody's number. */
 export function pts(points: number | null | undefined): string {
   return points == null ? '–' : points.toFixed(1);
+}
+
+/** A week's number as printed: `Out` for a ruled-out player, never his gate value. */
+export function weekText(week: WeekPoints | null | undefined): string {
+  if (week?.out) return 'Out';
+  return pts(week?.points);
 }
 
 export function PillChip({ pill, testId = 'pill' }: { pill: PillReading | null | undefined; testId?: string }) {
@@ -191,11 +197,11 @@ export function CompareSheet({
   };
 
   /* Each chip's number: the list's when it has him, the comparison's otherwise. Same function either way. */
-  const pointsOf = (id: string): number | null => {
-    const fromRow = rows?.find((r) => r.id === id)?.week.points;
+  const weekOf = (id: string): WeekPoints | null => {
+    const fromRow = rows?.find((r) => r.id === id)?.week;
     if (fromRow !== undefined) return fromRow;
     const evaluation = comparison?.evaluations.find((e) => e.playerId === id);
-    return evaluation ? weekPointsFrom(evaluation.decision).points : null;
+    return evaluation ? weekPointsOf(evaluation) : null;
   };
 
   const subtitle = [comparison?.week != null ? `Week ${comparison.week}` : null, slot ? `${slot} slot` : null]
@@ -221,7 +227,7 @@ export function CompareSheet({
           {ids.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
               <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>
-              <span className="cmp2-chip-pts">{pts(pointsOf(id))}</span>
+              <span className="cmp2-chip-pts">{weekText(weekOf(id))}</span>
               <button
                 type="button"
                 className="cmp2-chip-x"
@@ -241,7 +247,7 @@ export function CompareSheet({
           aria-expanded={pickerOpen}
           onClick={() => setPickerOpen((open) => !open)}
         >
-          {pickerOpen ? (ids.length >= 2 ? 'See comparison' : 'Hide list') : '+ Add'}
+          {pickerOpen ? (ids.length >= 2 ? 'Compare' : 'Hide list') : '+ Add'}
         </button>
       </div>
 
@@ -358,16 +364,17 @@ function Picker({
                   data-player-id={row.id}
                   data-chosen={on ? 'true' : 'false'}
                   aria-pressed={on}
-                  aria-label={`${row.name}, ${row.position} ${row.team}, ${row.week.points == null ? 'no projection' : `${pts(row.week.points)} projected`}${row.week.lowerConfidence && row.week.points != null ? ', lower confidence' : ''}${on ? ', in the comparison' : ''}`}
+                  aria-label={`${row.name}, ${row.position} ${row.team}, ${row.week.out ? 'out' : row.week.points == null ? 'no projection' : `${pts(row.week.points)} projected`}${row.week.lowerConfidence && row.week.points != null ? ', lower confidence' : ''}${on ? ', in the comparison' : ''}`}
                   onClick={() => onToggle(row)}
                 >
                   <span className="cmp2-row-check" aria-hidden="true">
                     {on ? <CheckIcon size={14} /> : null}
                   </span>
+                  <CompactFace playerId={row.id} name={row.name} position={row.position} team={row.team} />
                   <span className="cmp2-row-who">
                     <span className="cmp2-row-name">
-                      {row.name}
-                      {row.status ? <span className="cmp2-row-status">{statusCode(row.status)}</span> : null}
+                      <span className="cmp2-row-name-text">{row.name}</span>
+                      <InjuryTag status={row.status} />
                     </span>
                     <span className="cmp2-row-meta">
                       <PositionPill position={row.position} />
@@ -389,8 +396,8 @@ function Picker({
                     </span>
                   </span>
                   <span className="cmp2-row-pts" data-testid="compare-points">
-                    <span className={row.week.lowerConfidence ? 'cmp2-num cmp2-num-soft' : 'cmp2-num'}>{pts(row.week.points)}</span>
-                    {row.week.lowerConfidence ? (
+                    <span className={row.week.lowerConfidence ? 'cmp2-num cmp2-num-soft' : 'cmp2-num'}>{weekText(row.week)}</span>
+                    {row.week.lowerConfidence && row.week.points != null ? (
                       <span className="cmp2-soft" data-testid="lower-confidence">
                         lower confidence
                       </span>
@@ -409,7 +416,7 @@ function Picker({
 /* ------------------------------------------------------------- the verdict */
 
 function rankedColumns(comparison: StartSitComparison): StartSitEvaluation[] {
-  const points = (e: StartSitEvaluation) => weekPointsFrom(e.decision).points ?? -Infinity;
+  const points = (e: StartSitEvaluation) => weekPointsOf(e).points ?? -Infinity;
   const pick = comparison.recommendedPlayerId;
   return [...comparison.evaluations].sort((a, b) =>
     a.playerId === pick ? -1 : b.playerId === pick ? 1 : points(b) - points(a),
@@ -425,8 +432,8 @@ export function verdictLine(comparison: StartSitComparison): string {
   if (!pick) return 'Not enough to choose between them.';
   if (comparison.tiebreak) return comparison.tiebreak.sentence;
   const next = columns.find((e) => e.playerId !== pick.playerId) ?? null;
-  const a = weekPointsFrom(pick.decision).points;
-  const b = next ? weekPointsFrom(next.decision).points : null;
+  const a = weekPointsOf(pick).points;
+  const b = next ? weekPointsOf(next).points : null;
   if (a == null || b == null || !next) return `Start ${shortName(pick.name)}.`;
   const gap = a - b;
   const vegas = (e: StartSitEvaluation) => e.components.find((c) => c.key === 'vegas')?.value ?? 0;
@@ -446,7 +453,7 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
         style={{ gridTemplateColumns: `repeat(${columns.length}, ${columns.length > 3 ? 'minmax(88px, 1fr)' : 'minmax(0, 1fr)'})` }}
       >
         {columns.map((e) => {
-          const week = weekPointsFrom(e.decision);
+          const week = weekPointsOf(e);
           const lead = e.playerId === pick;
           return (
             <li
@@ -458,10 +465,14 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
             >
               <span className="cmp2-col-name">{shortName(e.name)}</span>
               <span className="cmp2-col-meta">
-                {e.position} · {e.team}
+                <PositionPill position={e.position} /> {e.team}
               </span>
-              <span className="cmp2-col-score" data-testid="compare-score">
-                {pts(week.points)}
+              {/* The face sits in the empty space beside the score, never in the name's width. */}
+              <span className="cmp2-col-scoreline">
+                <span className="cmp2-col-score" data-testid="compare-score">
+                  {weekText(week)}
+                </span>
+                <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} />
               </span>
               {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
               <span className="cmp2-col-slot" data-testid="compare-slot-pill">
@@ -472,7 +483,7 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
                 )}
               </span>
               <span className="cmp2-col-slot" data-testid="compare-slot-availability">
-                <AvailabilityChipView evaluation={e} />
+                <InjuryTag status={designationOf(e.statusFlag) ?? (e.ruledOut ? 'Out' : null)} />
               </span>
               {lead ? (
                 <span className="cmp2-start">
@@ -492,59 +503,26 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
 
 /* --------------------------------------------------------- the score table */
 
-interface FactorRow {
-  key: string;
-  label: string;
-  cells: { value: number | null; display: string }[];
-}
-
-/** One line each. A factor not named here keeps the engine's own label. */
-const SHORT_LABEL: Record<string, string> = {
-  vegas: 'Vegas lines',
-  news_recent: 'Recent news',
-  matchup_role: 'Opponent',
-  uncertainty: 'Uncertainty',
-  weather: 'Weather',
-};
-
-/** Availability is the card's chip, never a row (13 October 2026). */
-const NOT_A_ROW = new Set(['status']);
-
 /**
- * One row per factor that moved anybody, Vegas always first. A factor that
- * moved nobody is not shown at all.
+ * The table: Base, Recent news, Opponent, Uncertainty, Score, and they add up.
+ * The arithmetic lives in `compareTable.ts`. A tap on Base says where it came
+ * from in words; a tap on any other row shows the engine's sentence for it.
  */
-export function scoreRows(columns: StartSitEvaluation[]): FactorRow[] {
-  const keys: { key: string; label: string }[] = [];
-  for (const e of columns) {
-    for (const c of e.components) {
-      if (NOT_A_ROW.has(c.key) || keys.some((k) => k.key === c.key)) continue;
-      keys.push({ key: c.key, label: c.label });
-    }
-  }
-  const rows: FactorRow[] = [];
-  for (const { key, label } of keys) {
-    const cells = columns.map((e) => {
-      const c = e.components.find((x) => x.key === key);
-      const value = c == null || c.unknown || c.textOnly ? null : (c.shownValue ?? c.value);
-      return { value, display: c?.display ?? 'not read' };
-    });
-    const moved = cells.some((cell) => cell.value != null && Math.abs(cell.value) >= 0.005);
-    if (moved || key === 'vegas') rows.push({ key, label: SHORT_LABEL[key] ?? label, cells });
-  }
-  return rows;
-}
-
 function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
-  const rows = scoreRows(columns);
+  const { rows, score } = compareTable(columns);
   const [open, setOpen] = useState<string | null>(null);
   const wide = columns.length > 3;
   /* Four columns get a fixed width each and the table scrolls; the labels stay pinned. */
   const grid = {
     gridTemplateColumns: wide
-      ? `84px repeat(${columns.length}, 64px)`
-      : `minmax(0, 1.1fr) repeat(${columns.length}, minmax(0, 1fr))`,
+      ? `92px repeat(${columns.length}, 64px)`
+      : `minmax(0, 1.2fr) repeat(${columns.length}, minmax(0, 1fr))`,
+  };
+  const detail = (key: string, e: StartSitEvaluation): string => {
+    if (key === 'base') return baseExplanation(e);
+    const c = e.components.find((x) => x.key === key);
+    return c == null || c.unknown ? 'Nothing to read yet.' : c.display;
   };
   return (
     <section
@@ -581,28 +559,28 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
               </span>
               {row.cells.map((cell, i) => (
                 <span role="cell" key={columns[i]!.playerId} className="cmp2-num" data-testid="compare-cell">
-                  {cell.value == null ? '–' : row.key === 'vegas' ? cell.value.toFixed(1) : signed(cell.value)}
+                  {cell.text}
                 </span>
               ))}
             </button>
             {open === row.key ? (
               <div className="cmp2-detail" data-testid="compare-factor-detail">
-                {row.cells.map((cell, i) => (
-                  <p key={columns[i]!.playerId}>
-                    <strong>{shortName(columns[i]!.name)}:</strong> {cell.display}
+                {columns.map((e) => (
+                  <p key={e.playerId}>
+                    <strong>{shortName(e.name)}:</strong> {detail(row.key, e)}
                   </p>
                 ))}
               </div>
             ) : null}
           </div>
         ))}
-        <div className="cmp2-tr cmp2-total" role="row" style={grid}>
+        <div className="cmp2-tr cmp2-total" role="row" style={grid} data-testid="compare-total">
           <span role="rowheader" className="cmp2-pin">
             Score
           </span>
-          {columns.map((e) => (
-            <span role="cell" key={e.playerId} className="cmp2-num">
-              {pts(weekPointsFrom(e.decision).points)}
+          {score.map((cell, i) => (
+            <span role="cell" key={columns[i]!.playerId} className="cmp2-num">
+              {cell.text}
             </span>
           ))}
         </div>
@@ -611,28 +589,7 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
   );
 }
 
-/** The card's availability chip: a warning for Questionable, stronger for Out and Doubtful. */
-function AvailabilityChipView({ evaluation }: { evaluation: StartSitEvaluation }) {
-  const chip = availabilityChip(evaluation);
-  if (!chip) return null;
-  return (
-    <span
-      className={`avail-chip avail-chip-${chip.tone}`}
-      data-testid="availability-chip"
-      data-tone={chip.tone}
-      title={evaluation.statusFlag ?? chip.label}
-    >
-      {chip.label}
-    </span>
-  );
-}
-
 /* ----------------------------------------------------------------- helpers */
-
-function signed(v: number): string {
-  if (Math.abs(v) < 0.005) return '0.0';
-  return `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
-}
 
 /** The surname alone, for a chip or a column head with three others beside it on a phone. */
 function lastName(name: string): string {
@@ -649,10 +606,10 @@ export function shortName(name: string): string {
   return `${parts[0]!.charAt(0)}. ${parts.slice(1).join(' ')}`;
 }
 
-function statusCode(status: string): string {
-  const word = status.split(/[ ·]/)[0]!.toUpperCase();
-  if (word.startsWith('QUEST')) return 'Q';
-  if (word.startsWith('DOUBT')) return 'D';
-  if (word === 'OUT' || word === 'IR' || word === 'PUP' || word === 'SUS') return word;
-  return word.slice(0, 3);
+/** `Questionable · hamstring · limited → full` → `Questionable`, for the small badge. */
+function designationOf(statusFlag: string | null | undefined): string | null {
+  const first = statusFlag?.split('·')[0]?.trim();
+  return first ? first : null;
 }
+
+

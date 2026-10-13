@@ -65,7 +65,7 @@ import { unwindOne } from '../tabReset.ts';
 import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
-import { weekPointsFrom } from '../../core/startsit/weekPoints.ts';
+import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { postureFrom } from '../../core/startsit/tiebreak.ts';
 
 interface OpenSlot {
@@ -506,17 +506,7 @@ export function TeamScreen({
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       ) : (
         <>
-          {refresh ? (
-            <div className="faint" data-testid="refresh-status" style={{ margin: '0 4px 10px' }}>
-              {refresh.headline}
-              {refresh.sources.some((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped')
-                ? ` — ${refresh.sources
-                    .filter((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped')
-                    .map((s) => `${s.source}: ${s.detail}`)
-                    .join('; ')}`
-                : ''}
-            </div>
-          ) : null}
+          {refresh ? <RefreshStatus refresh={refresh} /> : null}
 
           {!roster ? (
             <SkeletonRows rows={6} testId="roster-skeleton" />
@@ -560,7 +550,7 @@ export function TeamScreen({
               {!roster.live && lineup?.found ? (
                 <LineupCard
                   lineup={lineup}
-                  pointsOf={(id) => weekPointsFrom(evaluations.get(id)?.decision).points}
+                  weekOf={(id) => weekPointsOf(evaluations.get(id))}
                   pillOf={(id) => evaluations.get(id)?.pill}
                   evaluationOf={(id) => evaluations.get(id) ?? null}
                   onOpen={(slot, seed) => setCompare({ slot, seed })}
@@ -601,12 +591,8 @@ export function TeamScreen({
                       row={row}
                       current={row.currentPlayerId ? (byId.get(row.currentPlayerId) ?? null) : null}
                       recommended={row.recommendedPlayerId ? (byId.get(row.recommendedPlayerId) ?? null) : null}
-                      currentProjection={{
-                        points: row.currentPlayerId ? (evaluations.get(row.currentPlayerId)?.projection ?? null) : null,
-                        source: row.currentPlayerId
-                          ? (evaluations.get(row.currentPlayerId)?.projectionSource ?? null)
-                          : null,
-                      }}
+                      currentProjection={rowWeek(row.currentPlayerId ? evaluations.get(row.currentPlayerId) : null)}
+                      recommendedProjection={rowWeek(row.recommendedPlayerId ? evaluations.get(row.recommendedPlayerId) : null)}
                       /*
                        * The fixture of whoever leads the row, looked up the
                        * same way the projection beside it is, so the chip and
@@ -686,10 +672,7 @@ export function TeamScreen({
               {roster.live ? null : (
                 <BenchSection
                   players={bench}
-                  projectionOf={(playerId) => ({
-                    points: evaluations.get(playerId)?.projection ?? null,
-                    source: evaluations.get(playerId)?.projectionSource ?? null,
-                  })}
+                  projectionOf={(playerId) => rowWeek(evaluations.get(playerId))}
                   fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
                   evaluationOf={(playerId) => evaluations.get(playerId) ?? null}
                   summary={benchSummary}
@@ -817,6 +800,24 @@ export function TeamScreen({
  */
 type RowProjectionSource = 'market' | 'sleeper' | 'preseason' | null | undefined;
 
+/**
+ * A Team row's figure, from the one function every other surface uses.
+ *
+ * Until 13 October 2026 the rows printed `weeklyProjection` (the bare market
+ * or Rotowire's week) while Best move, Compare and the picker printed
+ * `decisionPoints` (the same base plus the small news, opponent and
+ * uncertainty nudges), so Walker read 15.1 on his row and 15.3 on Best move.
+ * The row now starts from the decision number before the availability charge,
+ * and `rowFigure` applies that charge exactly as the score does. The rough
+ * preseason figure stays only where there is no week number at all.
+ */
+function rowWeek(evaluation: StartSitEvaluation | null | undefined): { points: number | null; source: RowProjectionSource } {
+  const before = weekPointsBeforeStatus(evaluation);
+  if (before != null) return { points: before, source: evaluation?.decision?.basis === 'market' ? 'market' : 'sleeper' };
+  if (evaluation?.projectionSource === 'preseason') return { points: evaluation.projection ?? null, source: 'preseason' };
+  return { points: null, source: null };
+}
+
 function projectionTitle(projection: number | null | undefined, source: RowProjectionSource): string {
   if (projection == null) return 'No projection yet — no betting market has priced him';
   if (source === 'sleeper') return "Projected points · Rotowire's published figure, via Sleeper";
@@ -871,6 +872,7 @@ function VerdictCard({
   current,
   recommended,
   currentProjection,
+  recommendedProjection,
   subjectEvaluation,
   recommendedEvaluation,
   fixture,
@@ -889,6 +891,8 @@ function VerdictCard({
    * row that could print Rotowire's model as this app's.
    */
   currentProjection: { points: number | null; source: RowProjectionSource };
+  /** The same for whoever this app would start, from the same function. */
+  recommendedProjection: { points: number | null; source: RowProjectionSource };
   /** The row subject's evaluation, for whether he can play; see `rowFigure`. */
   subjectEvaluation: RowFigureEvaluation | null;
   /** The challenger's, for the same rule on the verdict line. */
@@ -936,10 +940,7 @@ function VerdictCard({
   const blocked = (subject ? row.vacancy.find((v) => v.playerId === subject.playerId) : null) ?? row.vacancy[0] ?? null;
   const borrowed = blocked?.publishedProjection ?? null;
   /* The figure belonging to whoever leads the row — see the trailing field. */
-  const shown =
-    row.verdict === 'fill'
-      ? { points: row.projection, source: row.projectionSource }
-      : currentProjection;
+  const shown = row.verdict === 'fill' ? recommendedProjection : currentProjection;
 
   /*
    * A row may not say there is no figure while a figure is on it.
@@ -961,7 +962,7 @@ function VerdictCard({
    */
   const denialBesideAFigure = (blocked?.kind ?? 'unscorable') === 'unscorable' && shown.points != null;
   const figure = rowFigure(shown.points, subjectEvaluation);
-  const challenger = rowFigure(row.projection, recommendedEvaluation);
+  const challenger = rowFigure(recommendedProjection.points, recommendedEvaluation);
 
   if (!subject) {
     /*
@@ -1696,16 +1697,66 @@ function LineupSourcing({ lineup }: { lineup: LineupRecommendation }) {
   );
 }
 
+/**
+ * What the last refresh did, in one short line that opens on a tap.
+ *
+ * It used to spell out every source that was behind, which on 13 October 2026
+ * was two lines of "injury: refused: 77 of 113 players changed at once…" above
+ * the lineup. Now: the headline and how many sources are behind, and the
+ * detail one tap away. Weather is always "not connected" and is not counted,
+ * but it is still listed when the line is opened.
+ */
+function RefreshStatus({ refresh }: { refresh: StartSitRefreshReport }) {
+  const [open, setOpen] = useState(false);
+  const behind = refresh.sources.filter((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped');
+  const counted = behind.filter((s) => s.source !== 'weather');
+  if (behind.length === 0) {
+    return (
+      <div className="faint refresh-status" data-testid="refresh-status">
+        {refresh.headline}
+      </div>
+    );
+  }
+  return (
+    <div className="refresh-status" data-testid="refresh-status">
+      <button
+        type="button"
+        className="refresh-status-toggle faint"
+        aria-expanded={open}
+        data-testid="refresh-status-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="refresh-status-line">
+          {refresh.headline}
+          {counted.length > 0 ? ` · ${counted.length} source${counted.length === 1 ? '' : 's'} behind` : ''}
+        </span>
+        <span className="dense-chevron" aria-hidden="true">
+          {open ? '⌃' : '›'}
+        </span>
+      </button>
+      {open ? (
+        <ul className="refresh-status-detail faint" data-testid="refresh-status-detail">
+          {behind.map((s) => (
+            <li key={s.source}>
+              <strong>{s.source}:</strong> {s.detail}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function LineupCard({
   lineup,
-  pointsOf,
+  weekOf,
   pillOf,
   evaluationOf,
   onOpen,
 }: {
   lineup: LineupRecommendation;
-  /** This week's number for a player, from `weekPointsFrom`: the one Compare prints. */
-  pointsOf: (playerId: string) => number | null;
+  /** This week's number for a player, from `weekPointsOf`: the one Compare prints. */
+  weekOf: (playerId: string) => WeekPoints;
   pillOf: (playerId: string) => StartSitEvaluation['pill'] | undefined;
   /** For the one-line warning when the player to start may not play. */
   evaluationOf: (playerId: string) => StartSitEvaluation | null;
@@ -1724,6 +1775,12 @@ function LineupCard({
   const [fill = null] = lineup.fills ?? [];
   const useFill = fill != null && (best == null || fill.gain >= best.gain);
   const risks = (lineup.lateSwapRisks ?? []).filter((r) => r.starting);
+  /* A ruled-out player reads "Out", never the engine's gate value. */
+  const pts = (id: string) => {
+    const week = weekOf(id);
+    return week.out ? 'Out' : fmt(week.points);
+  };
+  const outgoingOut = best != null && weekOf(best.outPlayerId).out;
   /* Questionable costs nothing in the score, so it is said here instead. */
   const warning = useFill
     ? availabilityWarning(fill.inName, evaluationOf(fill.inPlayerId))
@@ -1751,7 +1808,7 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-fill"
           data-seed={fill.inPlayerId}
-          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${fmt(pointsOf(fill.inPlayerId))} projected.${warning ? ` ${warning}.` : ''} Compare.`}
+          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${pts(fill.inPlayerId)} projected.${warning ? ` ${warning}.` : ''} Compare.`}
           onClick={() => onOpen(fill.slot, [fill.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1761,7 +1818,7 @@ function LineupCard({
               <span className="matchup-best-move-slot">{fill.slot}</span>
             </span>
             <span className="matchup-best-move-metrics">
-              {fmt(pointsOf(fill.inPlayerId))} projected · {fill.slot} is empty in Sleeper
+              {pts(fill.inPlayerId)} projected · {fill.slot} is empty in Sleeper
             </span>
             {warningLine}
           </span>
@@ -1774,7 +1831,7 @@ function LineupCard({
           data-testid="lineup-swap"
           data-seed={`${best.outPlayerId},${best.inPlayerId}`}
           data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
-          aria-label={`Best move: start ${best.inName} over ${best.outName} at ${best.slot}, ${fmt(pointsOf(best.inPlayerId))} against ${fmt(pointsOf(best.outPlayerId))} projected.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
+          aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${pts(best.inPlayerId)} projected` : `${pts(best.inPlayerId)} against ${pts(best.outPlayerId)} projected`}.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
           onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1782,11 +1839,12 @@ function LineupCard({
             <span className="matchup-best-move-swap">
               <span className="matchup-best-move-names">
                 Start {best.inName} over {best.outName}
+                {outgoingOut ? ', who is Out' : ''}
               </span>
               <span className="matchup-best-move-slot">{best.slot}</span>
             </span>
             <span className="matchup-best-move-metrics" data-testid="best-move-points">
-              {fmt(pointsOf(best.inPlayerId))} vs {fmt(pointsOf(best.outPlayerId))} projected
+              {outgoingOut ? `${pts(best.inPlayerId)} projected` : `${pts(best.inPlayerId)} vs ${pts(best.outPlayerId)} projected`}
               <PillChip pill={pillOf(best.inPlayerId)} />
             </span>
             {best.tiebreak ? (

@@ -10448,36 +10448,37 @@ div.matchup-result {
 
 /* ============================================== the compare sheet (Team → Compare) */
 /*
- * The redesign approved on 25 September 2026: the decision first, the working
- * after it, in the mockup's warm paper palette.
- *
- * **The palette is re-valued, not replaced.** `.sheet-compare` points the
- * ordinary role tokens at the `--paper-*` set, so the search field, the chips,
- * the segmented control and the notices inside this sheet take the paper look
- * without a line of their own, and Dark is Dark because every `--paper-*` has a
- * dark value in the theme blocks above.
+ * Since 13 October 2026 the sheet wears the app's own look: the cool gray page
+ * and white cards Team and Waivers use, the same fonts and position colours.
+ * The warm paper palette is gone from it. Inside the sheet every `--paper-*`
+ * name the compare rules still use points at an ordinary role token, so there
+ * is no second palette and Dark follows the app's Dark.
  */
 .sheet-compare {
-  --surface: var(--paper);
-  --surface-raised: var(--paper-card);
-  --surface-inset: var(--paper-card);
-  --surface-sunken: var(--paper-control);
-  --separator: var(--paper-line);
-  --separator-soft: var(--paper-line-soft);
-  --border: var(--paper-line);
-  --text: var(--paper-ink);
-  --text-dim: var(--paper-dim);
-  --text-faint: var(--paper-faint);
-  --neg: var(--paper-warn);
-  --pos: var(--paper-teal);
-  --pos-tint: var(--paper-teal-tint);
-  /* The system face since 30 September 2026: the approved flat mockup uses it. */
-  --cmp-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --cmp-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
-  --cmp-mono: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --surface: var(--paper-bg);
-
-  font-family: var(--cmp-sans);
+  --paper: var(--bg);
+  --paper-bg: var(--bg);
+  --paper-card: var(--surface-raised);
+  --paper-head: var(--surface-inset);
+  --paper-control: var(--surface-sunken);
+  --paper-line: var(--separator);
+  --paper-line-soft: var(--separator-soft);
+  --paper-hair: var(--separator-soft);
+  --paper-track: var(--surface-sunken);
+  --paper-ink: var(--text);
+  --paper-label: var(--text-dim);
+  --paper-dim: var(--text-dim);
+  --paper-faint: var(--text-faint);
+  --paper-teal: var(--pos);
+  --paper-teal-tint: var(--pos-tint);
+  --paper-warn: var(--warn);
+  --paper-warn-tint: var(--warn-tint);
+  --paper-blue: var(--accent);
+  --paper-red: var(--neg);
+  --paper-green: var(--pos);
+  --cmp-sans: inherit;
+  --cmp-display: inherit;
+  --cmp-mono: inherit;
+  --surface: var(--bg);
 }
 
 /* `Done` as the mockup draws it: a word in the accent colour, still a full tap target. */
@@ -10582,6 +10583,27 @@ div.matchup-result {
 .pill-chip-steady { color: var(--paper-teal); }
 .pill-chip-wide_range { color: var(--paper-blue); }
 
+/* Team: what the last refresh did, one line that opens on a tap (13 October 2026). */
+.refresh-status { margin: 0 4px 10px; font-size: 0.8rem; }
+.refresh-status-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  margin-block: calc((32px - var(--tap)) / 2);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.refresh-status-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.refresh-status-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.refresh-status-detail { margin: 2px 0 0; padding-left: 16px; line-height: 1.4; }
+
 /* Team: the Best move card, in the Matchup recommendation's grammar. */
 .best-move-card { margin-bottom: var(--sp-2); }
 .best-move-card .matchup-best-move { margin-bottom: 0; }
@@ -10592,6 +10614,8 @@ div.matchup-result {
   gap: var(--sp-2);
 }
 .best-move-row .matchup-best-move-names { color: var(--text); }
+/* Team's Best move may wrap: "who is Out" must never be cut off (13 October 2026). */
+.best-move-row .matchup-best-move-names { white-space: normal; overflow: visible; line-height: 1.25; }
 .best-move-why,
 .best-move-warn {
   font-size: 0.76rem;
@@ -10715,7 +10739,7 @@ div.matchup-result {
 .cmp2-list > li + li { border-top: 1px solid var(--paper-line-soft); }
 .cmp2-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
@@ -10731,12 +10755,30 @@ div.matchup-result {
 .cmp2-row-check { color: var(--paper-teal); display: inline-flex; justify-content: center; }
 .cmp2-row-who { display: grid; gap: 2px; min-width: 0; }
 .cmp2-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 0.9rem;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cmp2-row-name-text { overflow: hidden; text-overflow: ellipsis; }
+.cmp2-row-name .injury-tag { flex: 0 0 auto; }
+/* A small face (13 October 2026): 32px, lazy, initials when Sleeper has none, only in space nothing else needs. */
+.cmp2-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+.cmp2-face .player-face { width: 32px; height: 32px; }
+.cmp2-face-team img { width: 26px; height: 26px; }
 .cmp2-row-status { margin-left: 4px; font-size: 0.7rem; font-weight: 700; color: var(--paper-warn); }
 .cmp2-row-meta {
   display: flex;
@@ -10792,23 +10834,17 @@ div.matchup-result {
   height: 18px;
   overflow: hidden;
 }
-.avail-chip {
-  display: inline-flex;
+.cmp2-col-scoreline {
+  display: flex;
   align-items: center;
-  max-width: 100%;
-  padding: 0 6px;
-  border-radius: var(--radius-pill);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 16px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
 }
-/* Words on both, so colour is never the only cue. */
-.avail-chip-warn { color: var(--paper-ink); background: var(--paper-warn-tint); border: 1px solid var(--paper-warn); }
-.avail-chip-out { color: var(--paper-card); background: var(--paper-red); border: 1px solid var(--paper-red); }
+/* Four cards are too narrow to spare the room: no face there, the name and score win. */
+.cmp2-cols-wide .cmp2-col-scoreline .cmp2-face { display: none; }
+.cmp2-col-meta { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .cmp2-col-name {
   max-width: 100%;
   font-size: 0.86rem;

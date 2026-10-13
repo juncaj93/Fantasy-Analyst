@@ -370,3 +370,26 @@ heading and no "no effect" line. Two or three players fit one screen; with four
 the cards and the table scroll sideways and the table's labels stay pinned. The picker, Compare, Best move and the waiver tiers all print
 `weekPoints()` (`core/startsit/weekPoints.ts`); `tests/startsit.oneNumber.test.ts`
 fails if two of them disagree.
+
+### 13 October 2026 follow-up: one number on Team too
+
+- **Cause of the mismatches Alex saw.** Team's lineup rows printed
+  `weeklyProjection` (the bare market or Rotowire's week) while Best move,
+  Compare and the picker printed `decisionPoints` (the same base plus the
+  capped news, opponent and uncertainty nudges). Not a cache. The rows now read
+  `weekPointsBeforeStatus` and `rowFigure` applies the availability charge, so
+  every surface prints `weekPointsOf`. `tests/startsit.oneNumber.test.ts` covers
+  the rows, the "Start X instead" figure, Best move, Compare, the picker and the
+  Team waiver line against the Waivers page.
+- **Out is a word.** `weekPointsFrom(decision, ruledOut)` returns no number and
+  `out: true`; screens print "Out" and Best move says "who is Out". The gate is
+  unchanged.
+- **No fragments.** A partial market with nothing published has no number
+  anywhere (the waiver tiers already refused it). The published store holds one
+  total per player, so filling individual stats from Sleeper would need a
+  schema change.
+- **Compare table.** Base, Recent news, Opponent, Uncertainty, Score, summing on
+  screen (`src/web/compareTable.ts`). Base is the full Vegas number or Sleeper's
+  week; tapping it lists each priced line and its points in words.
+- **Lists** sort strictly by the number, priced and published mixed, with
+  nobody's number and Out last.

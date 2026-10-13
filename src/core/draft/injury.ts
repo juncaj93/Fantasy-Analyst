@@ -40,6 +40,9 @@ const STATUS_TAGS: Record<string, InjuryStatusTag> = {
   OUT: { code: 'OUT', label: 'Out', tone: 'out' },
   IR: { code: 'IR', label: 'Injured reserve', tone: 'out' },
   'INJURED RESERVE': { code: 'IR', label: 'Injured reserve', tone: 'out' },
+  /* The engine's own wording on a Start/Sit card (`core/injury/startsit.ts`). */
+  'ON IR': { code: 'IR', label: 'Injured reserve', tone: 'out' },
+  'ON PUP': { code: 'PUP', label: 'Physically unable to perform', tone: 'out' },
   PUP: { code: 'PUP', label: 'Physically unable to perform', tone: 'out' },
   SUS: { code: 'SUS', label: 'Suspended', tone: 'out' },
   SUSPENDED: { code: 'SUS', label: 'Suspended', tone: 'out' },
