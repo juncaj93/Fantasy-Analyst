@@ -118,6 +118,7 @@ const scale = (k: number): PillRules => ({
   back: { ...PILL_RULES.back, explosiveMinTd: PILL_RULES.back.explosiveMinTd * k, steadyMinRush: PILL_RULES.back.steadyMinRush * k },
   quarterback: { ...PILL_RULES.quarterback, explosiveMinRush: PILL_RULES.quarterback.explosiveMinRush * k, steadyMinPass: PILL_RULES.quarterback.steadyMinPass * k },
   wideMinTdShare: PILL_RULES.wideMinTdShare * k,
+  minPoints: PILL_RULES.minPoints,
 });
 for (const [label, rules] of [['shipped', PILL_RULES], ['10% looser', scale(0.9)], ['10% stricter', scale(1.1)]] as const) {
   const c = pillCounts(rules);

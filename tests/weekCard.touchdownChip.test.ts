@@ -60,8 +60,7 @@ describe('a market total shows every market in it', () => {
       prop('receptions', 4.5),
       prop('anytime_td', null, 0.42),
     ]);
-    // 9.62 as bare lines; read as averages (and 42% as 0.54 TDs) since October 2026.
-    expect(expectation.points).toBeCloseTo(10.8, 2);
+    expect(expectation.points).toBeCloseTo(9.62, 2);
     expect(expectation.missingMarkets).toEqual([]);
     expect(card.props.map((p) => `${p.label} ${p.value}`)).toEqual(['Rec yards 48.5', 'Anytime TD 42%', 'Receptions 4.5']);
   });

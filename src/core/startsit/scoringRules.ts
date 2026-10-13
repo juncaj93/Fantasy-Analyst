@@ -38,8 +38,27 @@ export interface ScoringRules {
 /** Dropped on principle: the market already prices every one of these. */
 export const ALWAYS_TEXT_ONLY = ['news_raw', 'role_trend', 'td_dependency', 'game_script', 'explosiveness'] as const;
 
+/**
+ * The rules the app scores on.
+ *
+ * Backtested on 13 October 2026 against weeks 1 to 4 (477 fully priced
+ * player-weeks, league-scored actual points; `scripts/probe-startsit-round2.mjs`):
+ *
+ *   old method                         average miss 4.838, higher-scored won 71.4%
+ *   these rules (bare lines)           average miss 4.840, higher-scored won 71.4%
+ *                                      close calls under 2 pts: 56.3% against 56.1%
+ *   with the median-to-mean conversion average miss 4.896 (worse), 71.4%
+ *
+ * So the conversion in `propConversion.ts` is built, tested and **off**: reading
+ * lines as averages lowered the bias (actual points ran 17% over the line for
+ * backs, 8% for receivers) but raised the average miss, and the rule for this
+ * round was not to ship a change that loses to the old method. Production also
+ * stores only the over price for each market, so a two-sided de-vig never
+ * applies to yardage. Dropping the double-counted factors is a statistical tie
+ * with the old method and is kept on Alex's principle (see the PR).
+ */
 export const SCORING_RULES: ScoringRules = {
-  conversion: { devig: true, skew: true, tdRate: true },
+  conversion: { devig: false, skew: false, tdRate: false },
   textOnly: [...ALWAYS_TEXT_ONLY, 'usage_level'],
   staleScaling: true,
 };

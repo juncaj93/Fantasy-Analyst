@@ -142,7 +142,7 @@ describe('the whole conversion on real-shaped boards', () => {
   it('lifts a receiver by a few percent, and records the bare-line figure beside it', () => {
     const board = [prop('receiving_yards', 62.5), prop('receptions', 5.5), prop('anytime_td', null, { impliedProbability: 0.38 })];
     const before = buildExpectation('WR', board, LEAGUE, LINE_AS_MEDIAN);
-    const after = buildExpectation('WR', board, LEAGUE);
+    const after = buildExpectation('WR', board, LEAGUE, ALL);
     expect(after.points!).toBeGreaterThan(before.points!);
     expect(after.points! / before.points!).toBeLessThan(1.15);
     expect(after.lineTotal).toBeCloseTo(before.points!, 2);
@@ -152,7 +152,7 @@ describe('the whole conversion on real-shaped boards', () => {
   });
 
   it('applies this league’s six-point passing TD to the converted rate', () => {
-    const qb = buildExpectation('QB', [prop('pass_yards', 245.5), prop('pass_tds', 1.5), prop('rush_yards', 12.5)], LEAGUE);
+    const qb = buildExpectation('QB', [prop('pass_yards', 245.5), prop('pass_tds', 1.5), prop('rush_yards', 12.5)], LEAGUE, ALL);
     const td = qb.contributions.find((c) => c.market === 'pass_tds')!;
     expect(td.points).toBeCloseTo((td.mean ?? 0) * 6, 1);
   });
@@ -164,9 +164,19 @@ describe('the whole conversion on real-shaped boards', () => {
       signal: null,
     };
     const legacy = evaluatePlayer(input, LEAGUE, LEGACY_RULES);
-    const current = evaluatePlayer(input, LEAGUE, SCORING_RULES);
+    const converted = evaluatePlayer(input, LEAGUE, { ...SCORING_RULES, conversion: ALL });
     expect(legacy.expectation.points).toBeCloseTo(7 + 2.5 + 2.4, 2);
-    expect(current.expectation.points!).toBeGreaterThan(legacy.expectation.points!);
+    expect(converted.expectation.points!).toBeGreaterThan(legacy.expectation.points!);
+  });
+
+  /*
+   * Off in production since the 13 October 2026 backtest: it lowered the bias
+   * and raised the average miss (see `scoringRules.ts`). This holds it off.
+   */
+  it('ships off: the live rules read every line as quoted', () => {
+    expect(SCORING_RULES.conversion).toEqual(LINE_AS_MEDIAN);
+    const board = [prop('receiving_yards', 62.5), prop('receptions', 5.5)];
+    expect(buildExpectation('WR', board, LEAGUE).points).toBeCloseTo(6.25 + 2.75, 2);
   });
 });
 

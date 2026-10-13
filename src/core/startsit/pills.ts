@@ -18,7 +18,7 @@
  * on everybody would say nothing.
  *
  * The thresholds are round numbers chosen against this week's priced players
- * (the October 2026 audit printed how many land in each), not fitted values.
+ * (the 13 October 2026 audit printed how many land in each), not fitted values.
  */
 
 import type { MarketKey, PlayerProp } from '../vegas/types.ts';
@@ -75,7 +75,14 @@ export const PILL_RULES = {
     steadyMaxRush: 20,
   },
   /** Wide range, any position: this share of the week rests on a touchdown. */
-  wideMinTdShare: 0.4,
+  wideMinTdShare: 0.45,
+  /**
+   * No pill below this many points. The 13 October audit put Wide range on 193
+   * of 407 priced players with no floor, almost all of them depth players whose
+   * tiny yardage lines make any touchdown price look like most of the week.
+   * A pill is for a start/sit decision, and those players are not one.
+   */
+  minPoints: 8,
 } as const;
 
 type Widen<T> = { [K in keyof T]: T[K] extends number ? number : Widen<T[K]> };
@@ -89,7 +96,7 @@ export function pillFor(
   expectation: VegasExpectation,
   rules: PillRules = PILL_RULES,
 ): PillReading | null {
-  if (expectation.points == null || expectation.points <= 0) return null;
+  if (expectation.points == null || expectation.points < rules.minPoints) return null;
   const line = (market: MarketKey): number | null => {
     const prop = props.find((p) => p.market === market);
     return prop?.line != null && Number.isFinite(prop.line) ? prop.line : null;

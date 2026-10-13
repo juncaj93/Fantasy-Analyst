@@ -46,7 +46,13 @@ describe('reading a pill off the lines', () => {
   });
 
   it('calls a goal-line week wide range, whatever else it looks like', () => {
-    expect(pill('RB', [prop('rush_yards', 22.5), prop('receiving_yards', 4.5), prop('receptions', 0.5), prop('anytime_td', null, 0.5)])).toBe('wide_range');
+    expect(pill('RB', [prop('rush_yards', 42.5), prop('receiving_yards', 4.5), prop('receptions', 0.5), prop('anytime_td', null, 0.7)])).toBe('wide_range');
+  });
+
+  it('leaves a depth player alone, whatever his lines look like', () => {
+    // Under eight points this is not a start/sit decision, and the audit found
+    // that tiny lines made nearly every such player look touchdown-reliant.
+    expect(pill('RB', [prop('rush_yards', 22.5), prop('receiving_yards', 4.5), prop('receptions', 0.5), prop('anytime_td', null, 0.5)])).toBeNull();
   });
 
   it('reads backs and quarterbacks on their own markets', () => {

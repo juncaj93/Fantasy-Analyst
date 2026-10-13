@@ -77,9 +77,7 @@ const stevensonFull = evaluatePlayer(
 describe('the market number itself does not move', () => {
   it('is still the partial sum, because trades price on it', () => {
     expect(marketProjection(stevenson)).toBe(0.75);
-    // 218.5 pass yds and 24.5 rush yds read as averages, not medians (11.19 as
-    // bare lines before October 2026); still nothing imputed for pass TDs.
-    expect(marketProjection(maye)).toBe(11.49);
+    expect(marketProjection(maye)).toBe(11.19);
   });
 
   it('knows which markets are missing', () => {

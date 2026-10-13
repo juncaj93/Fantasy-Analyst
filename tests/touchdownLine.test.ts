@@ -77,8 +77,7 @@ describe('the market number', () => {
     const e = buildExpectation('RB', board(1.5, 0.31), HALF_PPR);
     const td = e.contributions.find((c) => c.market === 'anytime_td')!;
     expect(td.probability).toBeCloseTo(0.675, 2);
-    // Scored as the touchdowns that chance averages, -ln(1 - p), since October 2026.
-    expect(td.points).toBeCloseTo(-Math.log(1 - 0.675) * 6, 1);
+    expect(td.points).toBeCloseTo(0.675 * 6, 1);
     expect(td.detail).toMatch(/31% for over 1.5 TDs/);
     expect(e.missingMarkets).toEqual([]);
   });

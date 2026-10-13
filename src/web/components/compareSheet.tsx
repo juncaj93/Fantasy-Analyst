@@ -329,7 +329,7 @@ function Picker({
         value={position}
         onChange={onPosition}
         compact
-        segments={segments.map((p) => ({ id: p, label: p, ...(p === 'FLX' ? { testId: 'flx-filter' } : {}) }))}
+        segments={segments.map((p) => ({ id: p, label: p, ...(p === 'FLX' ? { testId: 'flx-filter', ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends' } : {}) }))}
       />
       {rows == null ? (
         <p className="cmp2-empty">Loading…</p>
