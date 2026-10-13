@@ -59,6 +59,8 @@ import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '
 import { TRADE_VALUE } from '../tradeValue/evaluate.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import type { WeekSource } from './aheadWeeks.ts';
+import { DROP_RULES, dropScore, readDrops, type DropReading, type DropSignals } from './dropScore.ts';
+import type { StashVerdict } from './stash.ts';
 
 /**
  * The thresholds, in weighted lineup points over the three-week window.
@@ -179,6 +181,18 @@ export interface TierRequest {
   excludedPositions: ReadonlySet<string>;
   /** Replacement level by position: the free agents' points a game. */
   replacement: ReadonlyMap<string, number>;
+  /**
+   * The drop score's inputs for each rostered player (`dropScore.ts`): season
+   * and recent points, how long he has been held, his role, whether he is in
+   * Alex's Sleeper lineup, whether he is an elite back's handcuff. Absent or
+   * empty: the drop is the cheapest one for the lineup, as before.
+   */
+  dropSignals?: ReadonlyMap<string, DropSignals> | undefined;
+  /**
+   * The stash verdict for each injured free agent (`stash.ts`). Absent: the
+   * old rule (Out or IR, good when healthy).
+   */
+  stash?: ReadonlyMap<string, StashVerdict> | undefined;
 }
 
 export interface TierPreference {
@@ -209,8 +223,12 @@ export interface TierMove {
   /** His number for each window week and where it came from. */
   weekNumbers: { week: number; points: number; source: WeekSource }[];
   prefs: TierPreference[];
-  /** Who he would replace on the roster. Null: an open spot. */
-  drop: { playerId: string; name: string; position: string } | null;
+  /**
+   * Who he would replace on the roster. Null: an open spot. `reason` says why
+   * this player is the drop, `score` is his drop score, when the drop score
+   * was read.
+   */
+  drop: { playerId: string; name: string; position: string; reason?: string | null; score?: number | null; handcuff?: boolean } | null;
   /** What cutting the drop costs on its own, weighted (lineup and depth). */
   dropCost: number | null;
   /** Other moves on this list that want the same roster spot. */
@@ -220,6 +238,8 @@ export interface TierMove {
   /** Set when he is an alternative to the "Do this" move rather than a second one. */
   alternativeTo: string | null;
   planExcluded: string | null;
+  /** For a stash: `back around week 9`, `return unknown`. */
+  stashLabel?: string | null;
 }
 
 export interface DeadSpot {
@@ -235,7 +255,14 @@ export interface DeadSpot {
 }
 
 export interface WaiverTierPlan {
+  /** The first "Do this" move, kept for older readers. */
   doThis: TierMove | null;
+  /**
+   * Every "Do this" move: one for each different starting hole this week (a QB
+   * bye and a TE bye are two), plus at most one big upgrade. Each has its own
+   * drop.
+   */
+  doThese: TierMove[];
   consider: TierMove[];
   watch: TierMove[];
   dropReady: DeadSpot[];
@@ -247,6 +274,10 @@ export interface WaiverTierPlan {
   unvalued: number;
   /** Every valued free agent's best move, for the audit report. Not drawn. */
   all: TierMove[];
+  /** Free agents never offered, and why: out for the season, back too late. */
+  excluded: { playerId: string; name: string; reason: string }[];
+  /** Each bench player's drop score, lowest first, when it was read. */
+  dropScores: { playerId: string; name: string; score: number; reason: string; protectedAs: string | null }[];
 }
 
 interface Valuation {
@@ -325,6 +356,27 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     insurance: number;
     after: Valuation;
   }
+
+  /*
+   * The drop score, read once over every player who could be cut. With it,
+   * a player in Alex's Sleeper lineup is not a drop (unless the add is the
+   * same position and clearly better), and among drops that cost the move
+   * about the same, the lowest score goes first.
+   */
+  const signals = request.dropSignals && request.dropSignals.size > 0 ? request.dropSignals : null;
+  const readings: Map<string, DropReading> = new Map();
+  if (signals) {
+    const all = cuttable.map((p) => signals.get(p.playerId)).filter((x): x is DropSignals => x != null);
+    /* "Lowest on your bench" compares the bench: a lineup player is scored but not compared. */
+    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup || x.unavailable))) readings.set(id, r);
+    for (const x of all) if (!readings.has(x.playerId)) readings.set(x.playerId, { ...dropScore(x), reason: 'in your Sleeper lineup' });
+  }
+  const scoreOf = (id: string): number | null => readings.get(id)?.score ?? null;
+  const lineupLocked = (p: TierPlayer, c: TierCandidate): boolean => {
+    const sig = signals?.get(p.playerId);
+    if (!sig || !sig.inLineup || sig.unavailable) return false;
+    return !(p.position === c.position && (c.rate ?? 0) >= (p.rate ?? 0) + DROP_RULES.clearlyBetter);
+  };
   const optionsFor = (c: TierCandidate, roster: readonly TierPlayer[], spots: number): Option[] => {
     const before = value(roster);
     const out: Option[] = [];
@@ -344,12 +396,30 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         !p.onReserve &&
         !excluded.has(p.position) &&
         p.rate != null &&
-        /* Never cut a better player for a worse one because of a short-term bye or injury. */
-        (overReplacement(p) ?? 0) < cOver,
+        !lineupLocked(p, c) &&
+        /*
+         * Never cut a better player for a worse one because of a short-term bye
+         * or injury: with the drop score, nobody whose score is above the add's
+         * own points a game; without it, nobody further above a free agent.
+         */
+        (signals && readings.has(p.playerId) ? (scoreOf(p.playerId) ?? 0) < (c.rate ?? 0) : (overReplacement(p) ?? 0) < cOver),
     );
     const open = allowed.filter((p) => !request.protections.has(p.playerId));
     for (const p of open.length > 0 ? open : allowed) tryDrop(p);
-    return out.sort((a, b) => b.lineup + b.insurance - (a.lineup + a.insurance) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
+    const gainOf = (o: Option) => o.lineup + o.insurance;
+    if (!signals) {
+      return out.sort((a, b) => gainOf(b) - gainOf(a) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
+    }
+    /* About as good for the lineup, then the lowest drop score; an open spot first. */
+    const top = out.reduce((m, o) => Math.max(m, gainOf(o)), -Infinity);
+    const near = (o: Option) => gainOf(o) >= top - DROP_RULES.gainSlack;
+    return out.sort(
+      (a, b) =>
+        Number(near(b)) - Number(near(a)) ||
+        (near(a) ? (a.drop ? (scoreOf(a.drop.playerId) ?? 99) : -1) - (b.drop ? (scoreOf(b.drop.playerId) ?? 99) : -1) : 0) ||
+        gainOf(b) - gainOf(a) ||
+        (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''),
+    );
   };
 
   const prefsFor = (c: TierCandidate, option: Option): TierPreference[] => {
@@ -386,7 +456,16 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       rate: c.rate ?? 0,
       weekNumbers: weeks.map((week, k) => ({ week, points: round2(pointsIn(c, k)), source: c.weekSources?.[k] ?? 'this_week' })),
       prefs,
-      drop: option.drop ? { playerId: option.drop.playerId, name: option.drop.name, position: option.drop.position } : null,
+      drop: option.drop
+        ? {
+            playerId: option.drop.playerId,
+            name: option.drop.name,
+            position: option.drop.position,
+            reason: readings.get(option.drop.playerId)?.reason ?? null,
+            score: scoreOf(option.drop.playerId),
+            handcuff: request.protections.get(option.drop.playerId)?.kind === 'handcuff',
+          }
+        : null,
       dropCost: option.drop ? (dropCost.get(option.drop.playerId) ?? null) : null,
       competesWith: [],
       alternatives: [],
@@ -397,7 +476,14 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
 
   const options = new Map<string, Option[]>();
   const best: TierMove[] = [];
+  const excludedFas: { playerId: string; name: string; reason: string }[] = [];
   for (const c of candidates) {
+    /* A season-ending injury, or a return after the playoffs start, is never offered. */
+    const verdict = request.stash?.get(c.playerId);
+    if (verdict && (verdict.kind === 'season_ending' || verdict.kind === 'too_late')) {
+      excludedFas.push({ playerId: c.playerId, name: c.name, reason: verdict.label });
+      continue;
+    }
     const list = optionsFor(c, valued, request.openSpots);
     options.set(c.playerId, list);
     if (list.length === 0) continue;
@@ -406,7 +492,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
 
   /*
    * An injured-reserve stash is measured past the window: three weeks of an Out
-   * player are zero, and the reason to hold him is the weeks after.
+   * player are zero, and the reason to hold him is the weeks after. With the
+   * stash verdicts, only a return before the playoffs counts, and an unknown
+   * return is a Watch list name.
    */
   const stashable = (m: TierMove) => {
     const c = candidates.find((x) => x.playerId === m.playerId);
@@ -414,10 +502,21 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     if (!['out', 'ir', 'pup'].includes(c.designation)) return false;
     return (overReplacement(c) ?? 0) >= TIER_RULES.stashOverReplacement;
   };
+  const stashUnknown = new Set<string>();
   for (const m of best) {
     if (m.gain < TIER_RULES.consider && stashable(m)) {
+      const verdict = request.stash?.get(m.playerId) ?? null;
       m.reasonCode = 'ir_stash';
-      m.reason = `Out now, worth a starting spot when back; you have an open IR slot to hold him`;
+      if (verdict == null) {
+        m.reason = `Out now, worth a starting spot when back; you have an open IR slot to hold him`;
+      } else if (verdict.kind === 'back_by') {
+        m.stashLabel = verdict.label;
+        m.reason = `Out now, ${verdict.label}; worth a starting spot then, and you have an open IR slot`;
+      } else {
+        m.stashLabel = 'return unknown';
+        m.reason = `Out now, return unknown; a name to watch, not a stash yet`;
+        stashUnknown.add(m.playerId);
+      }
     }
   }
 
@@ -425,78 +524,59 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     sortKey(b) - sortKey(a) || b.gain - a.gain || a.name.localeCompare(b.name);
   const ranked = best.filter((m) => m.planExcluded == null).sort(order);
 
-  /*
-   * Do this: a hole in the first week, or a big upgrade. Depth for a bye two
-   * weeks out is worth considering however large, because nothing needs doing
-   * about it yet.
-   */
   const isHole = (m: TierMove) => m.reasonCode === 'hole_bye' || m.reasonCode === 'hole_injury' || m.reasonCode === 'hole_empty';
-  const doThis =
-    ranked.find(
-      (m) => (isHole(m) && m.gain >= TIER_RULES.consider) || (m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis),
-    ) ?? null;
-  if (doThis) {
-    doThis.tier = 'do_this';
-    if (doThis.reasonCode === 'upgrade') doThis.reasonCode = 'big_upgrade';
-  }
-
-  /* Spots: one roster spot is used once, strongest move first. */
-  const used = new Map<string, string>();
-  let openLeft = request.openSpots;
-  const assign = (m: TierMove): boolean => {
-    const list = options.get(m.playerId) ?? [];
-    for (const option of list) {
-      if (option.drop == null) {
-        if (openLeft <= 0) continue;
-      } else if (used.has(option.drop.playerId)) {
-        const holder = used.get(option.drop.playerId)!;
-        if (!m.competesWith.includes(holder)) m.competesWith.push(holder);
-        continue;
-      }
-      if (option !== list[0]) {
-        const replaced = moveFor(candidates.find((c) => c.playerId === m.playerId)!, option, base);
-        Object.assign(m, { ...replaced, tier: m.tier, competesWith: m.competesWith, alternatives: m.alternatives, reasonCode: m.reasonCode === 'ir_stash' ? 'ir_stash' : replaced.reasonCode, reason: m.reasonCode === 'ir_stash' ? m.reason : replaced.reason });
-      }
-      if (option.drop == null) openLeft -= 1;
-      else used.set(option.drop.playerId, m.name);
-      return true;
-    }
-    return false;
-  };
-  if (doThis) assign(doThis);
-
-  const consider: TierMove[] = [];
-  const watch: TierMove[] = [];
-  let stashTaken = false;
   /*
    * One row per need. Four quarterbacks for one bye are one decision: the best
    * is listed and the rest ride on it as alternatives, sharing its drop rather
    * than reaching for a starter to cut.
    */
   const needOf = (m: TierMove) =>
-    m.reasonCode === 'hole_bye' || m.reasonCode === 'hole_injury' || m.reasonCode === 'hole_empty' || m.reasonCode === 'bye_depth' || m.reasonCode === 'injury_backup'
-      ? m.reason
-      : null;
-  const byNeed = new Map<string, TierMove>();
-  if (doThis && needOf(doThis)) byNeed.set(needOf(doThis)!, doThis);
+    isHole(m) || m.reasonCode === 'bye_depth' || m.reasonCode === 'injury_backup' ? m.reason : null;
+
+  /*
+   * Do this: every different starting hole in the coming week (a QB bye and a
+   * TE bye are two), and at most one big upgrade. Depth for a bye two weeks
+   * out is worth considering however large, because nothing needs doing about
+   * it yet.
+   */
+  const doThese: TierMove[] = [];
+  const holeNeeds = new Set<string>();
   for (const m of ranked) {
-    if (m === doThis) continue;
+    if (!isHole(m) || m.gain < TIER_RULES.consider) continue;
+    if (holeNeeds.has(m.reason)) continue;
+    holeNeeds.add(m.reason);
+    doThese.push(m);
+  }
+  const big = ranked.find((m) => m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis);
+  if (big) {
+    big.reasonCode = 'big_upgrade';
+    doThese.push(big);
+  }
+  for (const m of doThese) m.tier = 'do_this';
+
+  const byNeed = new Map<string, TierMove>();
+  for (const m of doThese) if (needOf(m)) byNeed.set(needOf(m)!, m);
+  const consider: TierMove[] = [];
+  const watch: TierMove[] = [];
+  let stashTaken = false;
+  for (const m of ranked) {
+    if (doThese.includes(m)) continue;
     const need = needOf(m);
     const holder = need ? byNeed.get(need) : undefined;
     if (holder) {
       if (holder.alternatives.length < TIER_RULES.maxAlternatives) holder.alternatives.push(m.name);
       continue;
     }
-    const stash = m.reasonCode === 'ir_stash' && !stashTaken;
-    const qualifies = m.gain >= TIER_RULES.consider || stash;
-    if (qualifies && consider.length < TIER_RULES.maxConsider && assign(m)) {
+    const stash = m.reasonCode === 'ir_stash' && !stashUnknown.has(m.playerId) && !stashTaken;
+    const qualifies = (m.gain >= TIER_RULES.consider && m.reasonCode !== 'ir_stash') || stash;
+    if (qualifies && consider.length < TIER_RULES.maxConsider) {
       m.tier = 'consider';
       if (stash) stashTaken = true;
       consider.push(m);
       if (need) byNeed.set(need, m);
       continue;
     }
-    if (m.gain >= TIER_RULES.watch && watch.length < TIER_RULES.maxWatch) {
+    if ((m.gain >= TIER_RULES.watch || stashUnknown.has(m.playerId)) && watch.length < TIER_RULES.maxWatch) {
       m.tier = 'watch';
       watch.push(m);
       if (need) byNeed.set(need, m);
@@ -504,33 +584,109 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   }
 
   /*
-   * The "Do this" move and a consider move can fill the same hole. Measured on
-   * the roster after the first one lands, a consider move that adds little is
-   * an alternative, not a second claim.
+   * Drops, assigned together: every move shown gets a different drop, chosen
+   * to keep the most lineup points across all of them (and, between equals,
+   * to cut the lowest drop scores). "Do this" moves are placed first; a
+   * "consider" move with no drop left is moved to the Watch list, except a
+   * move that fills a real starting hole, which is never on the Watch list.
    */
-  if (doThis) {
-    const after = [...valued.filter((p) => p.playerId !== doThis.drop?.playerId), candidates.find((c) => c.playerId === doThis.playerId)!];
-    for (const m of consider) {
-      const c = candidates.find((x) => x.playerId === m.playerId)!;
-      const list = optionsFor(c, after, Math.max(0, openLeft));
-      const top = list.find((o) => o.drop == null || o.drop.playerId === m.drop?.playerId) ?? list[0];
-      const second = top ? round2(top.lineup + top.insurance) : 0;
-      if (second < TIER_RULES.consider && m.reasonCode !== 'ir_stash') m.alternativeTo = doThis.name;
+  const candidateOf = (m: TierMove) => candidates.find((c) => c.playerId === m.playerId)!;
+  const shown = [...doThese, ...consider];
+  const choice = assignDrops(
+    shown.map((m) => ({
+      id: m.playerId,
+      priority: m.tier === 'do_this' || isHole(m) ? 1 : 0,
+      options: (options.get(m.playerId) ?? []).slice(0, 8).map((o) => ({
+        dropId: o.drop?.playerId ?? null,
+        gain: round2(o.lineup + o.insurance),
+        score: o.drop ? (scoreOf(o.drop.playerId) ?? 0) : -1,
+      })),
+    })),
+    request.openSpots,
+  );
+  const used = new Map<string, string>();
+  const apply = (m: TierMove, index: number | null) => {
+    const list = options.get(m.playerId) ?? [];
+    const option = index == null ? null : list[index];
+    if (!option) return false;
+    if (option !== list[0]) {
+      const replaced = moveFor(candidateOf(m), option, base);
+      Object.assign(m, {
+        ...replaced,
+        tier: m.tier,
+        competesWith: m.competesWith,
+        alternatives: m.alternatives,
+        ...(m.stashLabel !== undefined ? { stashLabel: m.stashLabel } : {}),
+        reasonCode: m.reasonCode === 'ir_stash' || m.reasonCode === 'big_upgrade' ? m.reasonCode : replaced.reasonCode,
+        reason: m.reasonCode === 'ir_stash' ? m.reason : replaced.reason,
+      });
+    }
+    if (option.drop) used.set(option.drop.playerId, m.name);
+    return true;
+  };
+  const firstChoice = new Map(shown.map((m) => [m.playerId, (options.get(m.playerId) ?? [])[0]?.drop?.playerId ?? null]));
+  const unplaced: TierMove[] = [];
+  for (const m of shown) if (!apply(m, choice.get(m.playerId) ?? null)) unplaced.push(m);
+  /* A move that did not get the spot it wanted most says who has it. */
+  for (const m of shown) {
+    const want = firstChoice.get(m.playerId);
+    const holder = want ? used.get(want) : undefined;
+    if (holder && holder !== m.name && !m.competesWith.includes(holder)) m.competesWith.push(holder);
+  }
+  for (const m of unplaced) {
+    if (m.tier === 'consider' && !isHole(m)) {
+      consider.splice(consider.indexOf(m), 1);
+      m.tier = 'watch';
+      watch.unshift(m);
+    }
+  }
+  /* The Watch list: each name on a spot nobody above is using, where one exists. */
+  for (const m of watch) {
+    const list = options.get(m.playerId) ?? [];
+    const free = list.findIndex((o) => o.drop == null || !used.has(o.drop.playerId));
+    if (free > 0) apply(m, free);
+    else if (free < 0 && list[0]?.drop) {
+      const holder = used.get(list[0].drop.playerId);
+      if (holder && !m.competesWith.includes(holder)) m.competesWith.push(holder);
     }
   }
 
+  /*
+   * A "Do this" move and a consider move can fill the same hole. Measured on
+   * the roster after the "Do this" move at his position lands, a consider move
+   * that adds little is an alternative, not a second claim.
+   */
+  for (const m of consider) {
+    const first = doThese.find((d) => d.position === m.position) ?? null;
+    if (!first || m.reasonCode === 'ir_stash') continue;
+    const after = [...valued.filter((p) => p.playerId !== first.drop?.playerId), candidateOf(first)];
+    const list = optionsFor(candidateOf(m), after, Math.max(0, request.openSpots - (first.drop ? 0 : 1)));
+    const top = list.find((o) => o.drop == null || o.drop.playerId === m.drop?.playerId) ?? list[0];
+    const second = top ? round2(top.lineup + top.insurance) : 0;
+    if (second < TIER_RULES.consider) m.alternativeTo = first.name;
+  }
+
   /* Who competes for whose spot, both ways. */
-  const listed = [...(doThis ? [doThis] : []), ...consider];
+  const listed = [...doThese, ...consider];
   for (const m of listed) {
-    if (!m.drop) continue;
     for (const other of listed) {
       if (other === m || !other.competesWith.includes(m.name)) continue;
       if (!m.competesWith.includes(other.name)) m.competesWith.push(other.name);
     }
   }
 
+  const dropScores = [...readings.entries()]
+    .map(([id, r]) => {
+      const p = valued.find((x) => x.playerId === id);
+      const sig = signals?.get(id);
+      const protectedAs = sig?.inLineup && !sig.unavailable ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
+      return { playerId: id, name: p?.name ?? id, score: r.score, reason: r.reason, protectedAs };
+    })
+    .sort((a, b) => a.score - b.score);
+
   return {
-    doThis,
+    doThis: doThese[0] ?? null,
+    doThese,
     consider,
     watch,
     dropReady,
@@ -539,7 +695,64 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     valued: candidates.length,
     unvalued,
     all: best.sort(order),
+    excluded: excludedFas,
+    dropScores,
   };
+}
+
+/**
+ * Give each move a different drop (or an open spot), keeping the most lineup
+ * points across all of them.
+ *
+ * Small and exact: at most five moves and eight options each, searched
+ * depth-first. The objective, in order: place as many priority moves ("Do
+ * this", or a hole) as possible; then as many moves; then the most total gain;
+ * then the lowest total drop score. Returns each placed move's option index.
+ */
+export function assignDrops(
+  moves: readonly { id: string; priority: number; options: readonly { dropId: string | null; gain: number; score: number }[] }[],
+  openSpots: number,
+): Map<string, number> {
+  let bestKey: number[] | null = null;
+  let bestPick: (number | null)[] = [];
+  const pick: (number | null)[] = [];
+  const taken = new Set<string>();
+  const better = (a: number[], b: number[]) => {
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i]! - b[i]!) > 1e-9) return a[i]! > b[i]!;
+    return false;
+  };
+  const walk = (i: number, open: number, prio: number, count: number, gain: number, score: number) => {
+    if (i === moves.length) {
+      const key = [prio, count, Math.round(gain * 100) / 100, -score];
+      if (bestKey == null || better(key, bestKey)) {
+        bestKey = key;
+        bestPick = [...pick];
+      }
+      return;
+    }
+    const m = moves[i]!;
+    m.options.forEach((o, k) => {
+      if (o.dropId == null) {
+        if (open <= 0) return;
+        pick[i] = k;
+        walk(i + 1, open - 1, prio + m.priority, count + 1, gain + o.gain, score + Math.max(0, o.score));
+        return;
+      }
+      if (taken.has(o.dropId)) return;
+      taken.add(o.dropId);
+      pick[i] = k;
+      walk(i + 1, open, prio + m.priority, count + 1, gain + o.gain, score + o.score);
+      taken.delete(o.dropId);
+    });
+    pick[i] = null;
+    walk(i + 1, open, prio, count, gain, score);
+  };
+  walk(0, openSpots, 0, 0, 0, 0);
+  const out = new Map<string, number>();
+  bestPick.forEach((k, i) => {
+    if (k != null) out.set(moves[i]!.id, k);
+  });
+  return out;
 }
 
 /** A player's points for window week `k` before availability: that week's own number, else his rate. */

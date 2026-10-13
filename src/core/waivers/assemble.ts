@@ -70,6 +70,11 @@ import { buildTierInputs } from './tierInputs.ts';
 import type { AheadNumbers } from './aheadWeeks.ts';
 import { planWaiverTiers } from './tiers.ts';
 import { buildTiersView, tierClaimPlan, type WaiverTiersView } from './tierPlan.ts';
+import { blendRivalTendency, seedTendency, type RivalSeasonAggregate } from './rivalHistory.ts';
+import { positionNeed } from './rivalNeed.ts';
+import { seedFor } from './managerSeeds.ts';
+import type { RivalContext } from './bidModel.ts';
+import type { InjuryNote } from './stash.ts';
 import { lastCompletedWeek } from '../sleeper/weekPoints.ts';
 import type { ClaimRecord } from './bidModel.ts';
 import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
@@ -86,6 +91,27 @@ export interface WaiverHistoryContext {
   baseline: LeagueTransactionBaseline | null;
   week: number;
   finalWeek: number;
+}
+
+export interface WaiverRound2Inputs {
+  /**
+   * Each rival's season rows (`waivers.rivalHistory.*`), keyed by his roster
+   * id today, with the row's `userId` replaced by that roster id: no Sleeper
+   * identity travels with the request.
+   */
+  managerSeasons: Record<string, RivalSeasonAggregate[]>;
+  /** Every player's points week by week this season, in league scoring. */
+  seasonPoints: Record<string, number[]>;
+  /** The weeks those cover, 1 to this. */
+  seasonPointsThrough: number;
+  /** Players on this roster added by transaction this season, with the week and how. */
+  heldSince: Record<string, { week: number; how: string }>;
+  /** Players this roster drafted. */
+  drafted: string[];
+  /** Sleeper's injury body part and note per injured player. */
+  injuryNotes: Record<string, InjuryNote>;
+  /** Sleeper's depth-chart order per skill player. */
+  depthOrder: Record<string, number>;
 }
 
 export interface WaiverAssemblyRequest {
@@ -209,6 +235,12 @@ export interface WaiverAssemblyRequest {
    * on this week's figure, as before.
    */
   ahead?: AheadNumbers | null | undefined;
+  /**
+   * Waivers round 2 (October 2026): the need-aware rivals, the drop score and
+   * the stash rules. Plain records so a support snapshot carries them as they
+   * are. Absent: the planner and the bids behave exactly as before.
+   */
+  round2?: WaiverRound2Inputs | null | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -660,8 +692,17 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    */
   const tiers = await (async (): Promise<WaiverTiersView | null> => {
     try {
+      const round2 = request.round2 ?? null;
+      const positionById = new Map(request.players.map((p) => [p.id, (p.position ?? '').toUpperCase()] as const));
+      const teamOf = new Map(request.players.map((p) => [p.id, (p.team ?? '').toUpperCase()] as const));
       const clubs = [
-        ...new Set([...rosterInputs, ...candidateInputs].map((i) => (i.player.team ?? '').toUpperCase()).filter((t) => t.length > 0)),
+        ...new Set(
+          [
+            ...[...rosterInputs, ...candidateInputs].map((i) => (i.player.team ?? '').toUpperCase()),
+            /* Round 2 reads every rival's byes, so every rostered club. */
+            ...(round2 ? [...rosteredIds].map((id) => teamOf.get(id) ?? '') : []),
+          ].filter((t) => t.length > 0),
+        ),
       ].sort();
       const fixtures: ScheduleTeamWeek[] =
         request.dstSources && clubs.length > 0
@@ -688,8 +729,22 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         reserveSlots: request.reserveSlots ?? shape.irSlots,
         excludedPositions: new Set([DEFENCE_POSITION]),
         ahead: request.ahead ?? null,
+        ...(round2
+          ? {
+              /* No season row yet (a fresh deploy): the drop and handcuff reads stay as before. */
+              seasonPoints: round2.seasonPointsThrough > 0 ? new Map(Object.entries(round2.seasonPoints)) : undefined,
+              seasonPointsThrough: round2.seasonPointsThrough,
+              positionOf: (id: string) => positionById.get(id) ?? null,
+              heldSince: new Map(Object.entries(round2.heldSince)),
+              draftedIds: new Set(round2.drafted),
+              currentStarterIds: request.currentStarterIds,
+              injuryNotes: new Map(Object.entries(round2.injuryNotes)),
+              depthOrder: new Map(Object.entries(round2.depthOrder)),
+            }
+          : {}),
       });
       const plan = planWaiverTiers(inputs.request);
+      const rivalsFor = round2 ? rivalReader(request, round2, fixtures, inputs.window.weeks.slice(0, 2)) : undefined;
       const claims: ClaimRecord[] = request.observations
         .filter((o) => o.playerId != null)
         .map((o) => ({
@@ -721,6 +776,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         evaluations: inputs.evaluations,
         week: request.week,
         finalWeek: request.history?.finalWeek ?? request.strategy?.finalWeek ?? 14,
+        rivalsFor,
       });
     } catch {
       return null;
@@ -740,4 +796,69 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   })();
 
   return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, tiers, lineup, pickup };
+}
+
+/**
+ * Each rival's record, need and FAAB for one position: the need-aware bid
+ * model's read (`bidModel.ts`). Need is read over the coming two weeks from
+ * his roster, the player table's status and club, this week's projection,
+ * and the fixtures (a club with no game that week is on bye). Memoised by
+ * position: a board asks about the same five positions many times.
+ */
+function rivalReader(
+  request: WaiverAssemblyRequest,
+  round2: WaiverRound2Inputs,
+  fixtures: readonly ScheduleTeamWeek[],
+  weeks: readonly number[],
+): (position: string) => ReadonlyMap<number, RivalContext> {
+  const byId = new Map(request.players.map((p) => [p.id, p] as const));
+  const playing = new Map<number, Set<string>>();
+  for (const f of fixtures) if (f.opponent) (playing.get(f.week) ?? playing.set(f.week, new Set()).get(f.week)!).add(f.team.toUpperCase());
+  const onBye = (team: string, week: number): boolean | null => {
+    const set = playing.get(week);
+    if (!set || set.size === 0 || !team) return null;
+    return !set.has(team.toUpperCase());
+  };
+  const starters = request.shape.starters;
+  const remainingOf = new Map((request.budgets?.rosters ?? []).map((r) => [r.rosterId, r.remaining] as const));
+  const tendencies = new Map(
+    request.rosters
+      .filter((r) => !r.isMine)
+      .map((r) => {
+        const style = r.bidStyle ?? seedFor(r.ownerName)?.style ?? 'chaser';
+        const rows = round2.managerSeasons[String(r.rosterId)] ?? [];
+        const tendency = rows.length > 0 ? blendRivalTendency({ userId: String(r.rosterId), style, aggregates: rows, currentSeason: request.season }) : seedTendency(String(r.rosterId), style);
+        return [r.rosterId, tendency] as const;
+      }),
+  );
+  const memo = new Map<string, Map<number, RivalContext>>();
+  return (position: string) => {
+    const pos = position.toUpperCase();
+    const hit = memo.get(pos);
+    if (hit) return hit;
+    const out = new Map<number, RivalContext>();
+    for (const r of request.rosters) {
+      if (r.isMine) continue;
+      const reserve = new Set(r.reserveIds ?? []);
+      const roster = r.playerIds
+        .map((id) => byId.get(id))
+        .filter((p): p is NonNullable<typeof p> => p != null)
+        .map((p) => ({
+          playerId: p.id,
+          name: p.fullName,
+          position: (p.position ?? '').toUpperCase(),
+          team: (p.team ?? '').toUpperCase(),
+          status: p.status ?? null,
+          onReserve: reserve.has(p.id),
+          projection: request.published?.get(p.id) ?? null,
+        }));
+      out.set(r.rosterId, {
+        tendency: tendencies.get(r.rosterId)!,
+        need: positionNeed({ starters, weeks, roster, onBye }, pos),
+        remaining: remainingOf.get(r.rosterId) ?? null,
+      });
+    }
+    memo.set(pos, out);
+    return out;
+  };
 }

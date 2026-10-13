@@ -51,6 +51,7 @@ const WAIVER_LOAD = [
   'SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule',
   'SELECT team, AVG(implied) AS implied',
   'SELECT value_json FROM settings WHERE key = ?',
+  'SELECT key, value_json FROM settings WHERE key IN',
   'select player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json from sleeper_weekly_projections',
   'select week, player_id, pts_std',
 ];
@@ -59,6 +60,7 @@ const NEW = [
   { label: 'fixture read for byes (new)', test: /nfl_schedule WHERE season = \? AND week >= \? AND week <= \? AND team IN/ },
   { label: 'earlier-week projections (new)', test: /sleeper_weekly_projections/i },
   { label: 'settings row (last week\'s points among them)', test: /FROM settings WHERE key = \?/ },
+  { label: 'round 2: season points, player notes, rival seasons (one batched read)', test: /FROM settings WHERE key IN/ },
 ];
 
 if (!TOKEN) {

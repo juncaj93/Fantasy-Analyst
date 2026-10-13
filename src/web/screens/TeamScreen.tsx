@@ -1546,7 +1546,7 @@ function WaiverSection({
    * two, "Do this" first. A week with neither says so in one line.
    */
   if (tiers) {
-    const top = [...(tiers.doThis ? [tiers.doThis] : []), ...tiers.consider].slice(0, TEAM_WAIVER_ROWS);
+    const top = [...(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])), ...tiers.consider].slice(0, TEAM_WAIVER_ROWS);
     if (top.length === 0) {
       return (
         <div className="card card-tight" data-testid="waiver-card">

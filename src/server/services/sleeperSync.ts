@@ -21,6 +21,7 @@ import { nowIso, type Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { PLAYER_NOTES_KEY, playerNotesOf } from '../../core/sleeper/playerNotes.ts';
 
 export interface SleeperUserSetting {
   userId: string;
@@ -49,6 +50,8 @@ export class SleeperSyncService {
       const raw = await this.client.getAllPlayers();
       const canonical = toCanonicalPlayers(raw);
       const { written } = await this.players.upsertMany(canonical);
+      /* Depth order and injury notes for Waivers, from the same answer: one settings row, no request. */
+      await this.settings.set(PLAYER_NOTES_KEY, playerNotesOf(raw, new Date())).catch(() => undefined);
       const total = await this.players.count();
       await this.settings.logSync('players', 'ok', `${written} players written`, startedAt);
       return { written, total };

@@ -14,7 +14,7 @@ import { recommendBid } from '../faab/strategy.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
 import { myBudget } from '../faab/budget.ts';
 import type { PriceSummary } from '../faab/bids.ts';
-import { adviseBid, type BidSignals, type ClaimRecord, type RivalSeat, buildRivalProfiles } from './bidModel.ts';
+import { adviseBid, type BidPosture, type BidSignals, type ClaimRecord, type RivalContext, type RivalSeat, buildRivalProfiles } from './bidModel.ts';
 import { STYLE_PRIORS } from './managerSeeds.ts';
 import type { DeadSpot, TierMove, WaiverTierPlan } from './tiers.ts';
 import type { PickupState, WaiverRules } from './clearWindow.ts';
@@ -34,8 +34,10 @@ export interface TierBid {
   ceiling: number | null;
   /** The competition probably goes above what he is worth to you. */
   overCeiling: boolean;
-  /** The other managers most likely to bid, most likely first. */
-  likely: { name: string; chance: number; style: string }[];
+  /** The other managers most likely to bid, most likely first, with the few words behind each. */
+  likely: { name: string; chance: number; style: string; why?: string | null }[];
+  /** How hard the bid tries: a hole, an upgrade, or a stash. Absent on older responses. */
+  posture?: BidPosture;
   /** Set when the record is thin. */
   thin: string | null;
   /** When a claim clears, ISO. */
@@ -58,7 +60,7 @@ export interface BidTrace {
   targetsPerRun: number;
   expectedBidders: number;
   /** The five most likely other bidders, with their chance and likely bid. */
-  bidders: { name: string; style: string; chance: number; likelyBid: number }[];
+  bidders: { name: string; style: string; chance: number; likelyBid: number; why?: string | null; parts?: unknown }[];
 }
 
 export interface TierRow extends TierMove {
@@ -67,7 +69,10 @@ export interface TierRow extends TierMove {
 }
 
 export interface WaiverTiersView {
+  /** The first "Do this" move, for older readers. */
   doThis: TierRow | null;
+  /** Every "Do this" move: one per starting hole, plus at most one big upgrade. Absent on older responses. */
+  doThese?: TierRow[];
   consider: TierRow[];
   watch: TierRow[];
   dropReady: DeadSpot[];
@@ -96,6 +101,12 @@ export interface WaiverTiersView {
   }[];
   /** Each other manager's bidding profile behind the bids. */
   profiles: { name: string; style: string; source: 'seed' | 'default'; note: string | null; claimsPerRun: number; bids: number[] }[];
+  /** Free agents never offered, and why (out for the season, back too late). Not drawn. */
+  excluded?: WaiverTierPlan['excluded'];
+  /** Each bench player's drop score, lowest first. Not drawn; the sheet shows the drop's own reason. */
+  dropScores?: WaiverTierPlan['dropScores'];
+  /** The rival read, per manager: record, need is per player. Not drawn. */
+  bidderReads?: { name: string; rate: number; seasons: string[]; source: 'history' | 'seed'; remaining: number | null; interest: Record<string, number>; chase: number }[];
 }
 
 export interface TierViewInput {
@@ -116,6 +127,11 @@ export interface TierViewInput {
   evaluations: ReadonlyMap<string, StartSitEvaluation>;
   week: number;
   finalWeek: number;
+  /**
+   * The need-aware rival read: for a position, each rival's record, need and
+   * FAAB, by roster id. Absent: the old model reads every rival.
+   */
+  rivalsFor?: ((position: string) => ReadonlyMap<number, RivalContext>) | undefined;
 }
 
 export function buildTiersView(input: TierViewInput): WaiverTiersView {
@@ -123,6 +139,8 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
   const remaining = input.budgets ? (myBudget(input.budgets)?.remaining ?? null) : null;
   const { profiles, targetsPerRun, validClaims } = buildRivalProfiles({ seats: input.seats, claims: input.claims });
 
+  const postureOf = (m: TierMove): BidPosture =>
+    m.tier === 'do_this' ? 'do_this' : m.tier === 'consider' && m.reasonCode !== 'ir_stash' ? 'consider' : 'stash';
   const rowFor = (m: TierMove): TierRow => {
     const pickup = input.pickup[m.playerId] ?? null;
     const lastWeekPoints = input.lastWeek.points ? (input.lastWeek.points.get(m.playerId) ?? 0) : null;
@@ -145,8 +163,18 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       roleRising: role === 'rising_high' || role === 'rising_moderate',
       freshDrop: pickup?.state === 'waivers' && pickup.reason === 'dropped' && (input.held.has(m.playerId) || input.paidFor.has(m.playerId)),
     };
-    const advice = adviseBid({ signals, profiles, targetsPerRun, validClaims, remaining });
-    const ceiling = ceilingFor(m, input);
+    const posture = postureOf(m);
+    const advice = adviseBid({
+      signals,
+      profiles,
+      targetsPerRun,
+      validClaims,
+      remaining,
+      rivals: input.rivalsFor?.(m.position),
+      position: m.position,
+      posture: input.rivalsFor ? posture : undefined,
+    });
+    const ceiling = posture === 'stash' ? null : ceilingFor(m, input);
     const overCeiling = ceiling != null && advice.recommended > ceiling;
     const recommended = overCeiling ? ceiling : advice.recommended;
     return {
@@ -165,7 +193,8 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         likely: advice.rivals
           .filter((r) => r.chance >= 0.1)
           .slice(0, 3)
-          .map((r) => ({ name: r.name, chance: r.chance, style: STYLE_PRIORS[r.style].label })),
+          .map((r) => ({ name: r.name, chance: r.chance, style: STYLE_PRIORS[r.style].label, ...(r.why !== undefined ? { why: r.why } : {}) })),
+        ...(input.rivalsFor ? { posture } : {}),
         thin: advice.thin,
         until: pickup?.until ?? null,
         trace: {
@@ -175,14 +204,23 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
           validClaims,
           targetsPerRun,
           expectedBidders: advice.expectedRivals,
-          bidders: advice.rivals.slice(0, 5).map((r) => ({ name: r.name, style: r.style, chance: r.chance, likelyBid: r.likelyBid })),
+          bidders: advice.rivals.slice(0, 5).map((r) => ({
+            name: r.name,
+            style: r.style,
+            chance: r.chance,
+            likelyBid: r.likelyBid,
+            ...(r.why !== undefined ? { why: r.why } : {}),
+            ...(r.parts ? { parts: r.parts } : {}),
+          })),
         },
       },
     };
   };
 
+  const doThese = (input.plan.doThese ?? (input.plan.doThis ? [input.plan.doThis] : [])).map(rowFor);
   return {
-    doThis: input.plan.doThis ? rowFor(input.plan.doThis) : null,
+    doThis: doThese[0] ?? null,
+    doThese,
     consider: input.plan.consider.map(rowFor),
     watch: input.plan.watch.map(rowFor),
     dropReady: input.plan.dropReady,
@@ -211,6 +249,24 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       claimsPerRun: p.claimsPerRun,
       bids: p.bids,
     })),
+    excluded: input.plan.excluded ?? [],
+    dropScores: input.plan.dropScores ?? [],
+    ...(input.rivalsFor
+      ? {
+          bidderReads: profiles.map((p) => {
+            const c = input.rivalsFor!('QB').get(p.rosterId);
+            return {
+              name: p.name,
+              rate: c?.tendency.rate ?? 0,
+              seasons: c?.tendency.seasons ?? [],
+              source: c?.tendency.source ?? 'seed',
+              remaining: c?.remaining ?? null,
+              interest: c?.tendency.interest ?? {},
+              chase: c?.tendency.chase ?? 1,
+            };
+          }),
+        }
+      : {}),
   };
 }
 
@@ -259,11 +315,11 @@ export function freeAgentRule(rules: WaiverRules): string {
  * Empty when nothing is a must-do this week.
  */
 export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): WaiverClaimPlan {
-  const m = view.doThis;
-  const dropHints = [view.doThis, ...view.consider, ...view.watch]
+  const moves = view.doThese && view.doThese.length > 0 ? view.doThese : view.doThis ? [view.doThis] : [];
+  const dropHints = [...moves, ...view.consider, ...view.watch]
     .filter((r): r is TierRow => r != null && r.drop != null)
     .map((r) => ({ addPlayerId: r.playerId, dropName: r.drop!.name, label: `Drop ${r.drop!.name}` }));
-  if (!m) {
+  if (moves.length === 0) {
     return {
       surface: false,
       state: view.consider.length > 0 || view.watch.length > 0 ? 'no_move' : 'no_targets',
@@ -281,49 +337,55 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
       generatedAt,
     };
   }
-  const free = m.bid.kind === 'free';
-  const bidText = m.bid.kind === 'claim' && m.bid.recommended != null ? `bid $${m.bid.recommended}` : null;
-  const claim: WaiverClaimLine = {
-    rank: 1,
-    claimId: `${m.playerId}>${m.drop?.playerId ?? 'none'}`,
-    group: 1,
-    addPlayerId: m.playerId,
-    addName: m.name,
-    addPosition: m.position,
-    addTeam: m.team,
-    dropPlayerId: m.drop?.playerId ?? null,
-    dropName: m.drop?.name ?? null,
-    bid: m.bid.kind === 'claim' ? m.bid.recommended : null,
-    bidRange:
-      m.bid.kind === 'claim' && m.bid.low != null && m.bid.high != null
-        ? m.bid.low === m.bid.high
-          ? `$${m.bid.low}`
-          : `$${m.bid.low}–${m.bid.high}`
-        : null,
-    headline: [`Add ${m.name}`, free ? FREE_AGENT_PHRASE : bidText].filter(Boolean).join(' · '),
-    detail: `${m.reason} · +${m.gain.toFixed(1)} pts`,
-    qualifier: null,
-    relation: 'primary',
-    why: [m.reason, m.bid.reason],
-    pickup: null,
-  };
-  const group: WaiverClaimGroup = {
-    index: 1,
-    drop: m.drop ? { playerId: m.drop.playerId, name: m.drop.name } : null,
-    headline: m.drop ? `Drop ${m.drop.name}` : 'Open roster spot: this one needs no drop',
-    keep: [],
-    keepNote: null,
-    formNote: null,
-    firstRank: 1,
-    lastRank: 1,
-  };
+  /* One claim per move, each under its own drop: two holes are two claims, never one drop twice. */
+  const claims: WaiverClaimLine[] = [];
+  const groups: WaiverClaimGroup[] = [];
+  moves.forEach((m, i) => {
+    const rank = i + 1;
+    const free = m.bid.kind === 'free';
+    const bidText = m.bid.kind === 'claim' && m.bid.recommended != null ? `bid $${m.bid.recommended}` : null;
+    claims.push({
+      rank,
+      claimId: `${m.playerId}>${m.drop?.playerId ?? 'none'}`,
+      group: rank,
+      addPlayerId: m.playerId,
+      addName: m.name,
+      addPosition: m.position,
+      addTeam: m.team,
+      dropPlayerId: m.drop?.playerId ?? null,
+      dropName: m.drop?.name ?? null,
+      bid: m.bid.kind === 'claim' ? m.bid.recommended : null,
+      bidRange:
+        m.bid.kind === 'claim' && m.bid.low != null && m.bid.high != null
+          ? m.bid.low === m.bid.high
+            ? `$${m.bid.low}`
+            : `$${m.bid.low}–${m.bid.high}`
+          : null,
+      headline: [`Add ${m.name}`, free ? FREE_AGENT_PHRASE : bidText].filter(Boolean).join(' · '),
+      detail: `${m.reason} · +${m.gain.toFixed(1)} pts`,
+      qualifier: null,
+      relation: 'primary',
+      why: [m.reason, m.bid.reason],
+      pickup: null,
+    });
+    groups.push({
+      index: rank,
+      drop: m.drop ? { playerId: m.drop.playerId, name: m.drop.name } : null,
+      headline: m.drop ? `Drop ${m.drop.name}` : 'Open roster spot: this one needs no drop',
+      keep: [],
+      keepNote: null,
+      formNote: null,
+      firstRank: rank,
+      lastRank: rank,
+    });
+  });
   return {
     surface: true,
     state: 'plan',
     headline: 'Do this',
     instruction: null,
-    groups: [group],
-    claims: [claim],
+    groups,
+    claims,
     note: null,
     mechanics: null,
     outcomes: [],

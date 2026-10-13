@@ -413,6 +413,11 @@ export default {
             await weekPoints.refreshRecent(weekOpts);
             /* The waiver planner's later weeks: at most three Sleeper calls, each behind a twelve-hour gate. */
             await weekPoints.refreshAheadWeeks(weekOpts);
+            /*
+             * The season's points, one row, for the drop score: one row read on most
+             * runs, a rebuild every twelve hours, at most two missing weeks fetched.
+             */
+            await weekPoints.refreshSeasonPoints(weekOpts).catch((err: unknown) => console.error('season points failed', err));
           }
         } catch (err) {
           console.error('league read failed', err);

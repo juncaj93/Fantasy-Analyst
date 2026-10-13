@@ -18,6 +18,7 @@
  */
 
 import { SleeperClient } from '../../core/sleeper/client.ts';
+import type { SleeperTransaction } from '../../core/sleeper/types.ts';
 import { buildBudgetState, type LeagueBudgetState } from '../../core/faab/budget.ts';
 import { collectBids, losingBidNote, summarisePrices, type BidHistory, type PriceSummary } from '../../core/faab/bids.ts';
 import { toSnapshot, velocity, trendingHeadline, type TrendingVelocity } from '../../core/market/trending.ts';
@@ -89,6 +90,13 @@ export interface StrategyContext {
    * last week. With {@link waiverRules}, what says who is still on waivers.
    */
   leagueDrops: Map<string, string>;
+  /**
+   * This season's moves, compact, for Waivers round 2 (`waiverRound2.ts`):
+   * every published claim with when it ran, each roster's instant and claimed
+   * adds, and when each player on your roster arrived. Read from the
+   * transactions already loaded above: no extra read.
+   */
+  seasonMoves?: SeasonMoves;
   /** The league's waiver window, or null when its settings say nothing usable. */
   waiverRules: WaiverRules | null;
   notes: string[];
@@ -308,6 +316,7 @@ export class LeagueStrategyService {
       trendingDrops: dropCapture ? velocity(dropCapture, null) : new Map(),
       recentlyDropped,
       leagueDrops,
+      seasonMoves: seasonMovesOf(stored, mine),
       waiverRules: waiverRulesOf(league.leagueSettings),
       notes,
     };
@@ -329,3 +338,46 @@ export class LeagueStrategyService {
   }
 }
 
+export interface SeasonMoves {
+  claims: { rosterId: number; playerId: string; week: number; amount: number; won: boolean; voided: boolean; at: number }[];
+  adds: { rosterId: number; kind: 'free_agent' | 'waiver' }[];
+  /** Your roster's players, by the latest completed move that brought each one in. */
+  heldSince: Map<string, { week: number; how: string }>;
+}
+
+/** This season's claims, adds and arrivals, from the stored transactions. */
+export function seasonMovesOf(stored: readonly SleeperTransaction[], mine: number | null): SeasonMoves {
+  const claims: SeasonMoves['claims'] = [];
+  const adds: SeasonMoves['adds'] = [];
+  const heldSince = new Map<string, { week: number; how: string; at: number }>();
+  for (const t of stored) {
+    const at = typeof t.status_updated === 'number' ? t.status_updated : (t.created ?? 0);
+    const rosterId = Number(t.roster_ids?.[0]);
+    if (t.type === 'waiver' && (t.status === 'complete' || t.status === 'failed')) {
+      const playerId = Object.keys(t.adds ?? {})[0];
+      if (playerId && Number.isFinite(rosterId)) {
+        claims.push({
+          rosterId,
+          playerId,
+          week: Number(t.leg ?? 0),
+          amount: Math.round(Number(t.settings?.['waiver_bid'] ?? 0)),
+          won: t.status === 'complete',
+          voided: /too many players/i.test(String(t.metadata?.['notes'] ?? '')),
+          at,
+        });
+      }
+    }
+    if (t.status !== 'complete') continue;
+    if ((t.type === 'free_agent' || t.type === 'waiver') && Number.isFinite(rosterId)) adds.push({ rosterId, kind: t.type });
+    for (const [playerId, to] of Object.entries(t.adds ?? {})) {
+      if (mine == null || Number(to) !== mine) continue;
+      const known = heldSince.get(playerId);
+      if (!known || known.at < at) heldSince.set(playerId, { week: Number(t.leg ?? 0), how: t.type ?? 'move', at });
+    }
+  }
+  return {
+    claims,
+    adds,
+    heldSince: new Map([...heldSince].map(([id, h]) => [id, { week: h.week, how: h.how }])),
+  };
+}

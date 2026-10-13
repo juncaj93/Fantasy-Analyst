@@ -207,6 +207,7 @@ export async function captureWaiverSnapshot(
       ownerName: roster.ownerName,
       isMine: roster.isMine,
       playerIds: roster.playerIds,
+      reserveIds: roster.reserveIds,
       bidStyle: bidStyles[String(roster.rosterId)] ?? null,
     })),
     strategy,
@@ -309,6 +310,8 @@ export async function captureWaiverSnapshot(
         ...(input.request.recentPublished === undefined ? {} : { recentPublished: Object.fromEntries(input.request.recentPublished) }),
         ...(input.request.reserveSlots === undefined ? {} : { reserveSlots: input.request.reserveSlots }),
         ...(input.request.ahead === undefined ? {} : { ahead: captureAhead(input.request.ahead, input.request) }),
+        /* Already keyed by roster id and free of names: carried as it is. */
+        ...(input.request.round2 === undefined ? {} : { round2: input.request.round2 }),
         bidStyles,
         rosters,
         players: players.kept.map(capturePlayer),
@@ -368,12 +371,14 @@ function withoutWaiverMaps<T extends object>(strategy: T): T {
     recentlyDropped: _recent,
     leagueDrops: _league,
     waiverRules: _rules,
+    seasonMoves: _moves,
     ...rest
   } = strategy as T & {
     trendingDrops?: unknown;
     recentlyDropped?: unknown;
     leagueDrops?: unknown;
     waiverRules?: unknown;
+    seasonMoves?: unknown;
   };
   return rest as T;
 }
@@ -410,14 +415,33 @@ function distilPlayers(
 export async function replayWaiverSnapshot(
   snapshot: SupportSnapshot<WaiverPlanPayload>,
 ): Promise<ReplayReport> {
-  const { inputs, output } = snapshot.decision;
+  const { output } = snapshot.decision;
+  const { request, roster, candidates, derivation } = waiverRequestFromSnapshot(snapshot);
+  const replayed = await assembleWaiverPlan(request);
+  return reportWaiverReplay(snapshot, output, replayed, roster, candidates, derivation);
+}
+
+/**
+ * The assembly request a snapshot was captured with, rebuilt.
+ *
+ * Its own function so a probe can hand the same request to two builds (the
+ * code before a change and the code after it) and print both boards from one
+ * set of inputs.
+ */
+export function waiverRequestFromSnapshot(snapshot: SupportSnapshot<WaiverPlanPayload>): {
+  request: WaiverAssemblyRequest;
+  roster: StartSitInput[];
+  candidates: StartSitInput[];
+  derivation: ReturnType<typeof rehydrateLeagueRules>['derivation'];
+} {
+  const { inputs } = snapshot.decision;
   const dstSources: DstPlanSources | null = inputs.dst == null ? null : snapshotDstSources(inputs.dst);
 
   const roster: StartSitInput[] = rehydrateStartSitInputs(inputs.roster);
   const candidates: StartSitInput[] = rehydrateStartSitInputs(inputs.candidates);
 
   const { shape, profile, derivation } = rehydrateLeagueRules(inputs.rules);
-  const replayed = await assembleWaiverPlan({
+  const request: WaiverAssemblyRequest = {
     shape,
     profile,
     rosterInputs: roster,
@@ -452,6 +476,7 @@ export async function replayWaiverSnapshot(
     ...(inputs.recentPublished === undefined ? {} : { recentPublished: new Map(Object.entries(inputs.recentPublished)) }),
     ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
     ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
+    ...(inputs.round2 === undefined ? {} : { round2: inputs.round2 }),
     rosters: inputs.rosters.map((roster) => ({
       ...roster,
       bidStyle: (inputs.bidStyles?.[String(roster.rosterId)] as BidderStyle | undefined) ?? null,
@@ -495,8 +520,19 @@ export async function replayWaiverSnapshot(
        generation stamp are all measured from it. */
     now: new Date(Date.parse(snapshot.capturedAt)),
     generatedAt: inputs.generatedAt,
-  });
+  };
+  return { request, roster, candidates, derivation };
+}
 
+function reportWaiverReplay(
+  snapshot: SupportSnapshot<WaiverPlanPayload>,
+  output: SupportSnapshot<WaiverPlanPayload>['decision']['output'],
+  replayed: Awaited<ReturnType<typeof assembleWaiverPlan>>,
+  roster: StartSitInput[],
+  candidates: StartSitInput[],
+  derivation: ReturnType<typeof rehydrateLeagueRules>['derivation'],
+): ReplayReport {
+  const { inputs } = snapshot.decision;
   const differences: ReplayReport['differences'] = [];
   compareStructural('output', output, replayed, differences);
   compareFreshness(snapshot.decision.freshness, [roster, candidates], differences);
