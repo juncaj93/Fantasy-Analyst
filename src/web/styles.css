@@ -5244,11 +5244,6 @@ table.compact tr:last-child td {
  * selection the loudest thing in the sheet, which it is not: it is a record of
  * what you have already done.
  */
-.chip-removable {
-  min-height: var(--tap);
-  padding-block: 12px;
-  background-clip: content-box;
-}
 
 /* Strongest action: a filled, unmissable chip. */
 .tag-take {
@@ -8736,66 +8731,14 @@ div.matchup-result {
 }
 
 /* ---------------------------------------------------- best-move sheet */
-.matchup-best-move-lead {
-  font-size: 0.95rem;
-  font-weight: 620;
-  letter-spacing: -0.01em;
-  margin: 0 2px 2px;
-}
 
 /* The two men the swap names, as the way through to their evidence. */
-.matchup-best-move-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  width: 100%;
-  min-height: var(--tap);
-  padding: 0 2px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--separator-soft);
-  font: inherit;
-  font-size: 0.84rem;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
 
-.matchup-best-move-player:active {
-  background: var(--pressed);
-}
 
-.matchup-best-move-player-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* One of the moves that did not win, in the order the engine ranked it. */
-.matchup-best-move-other {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  padding: 6px 2px;
-  border-bottom: 1px solid var(--separator-soft);
-  font-size: 0.84rem;
-}
 
-.matchup-best-move-other-swap {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.matchup-best-move-other-odds {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-}
 
 /* ---------------------------------------------------------- starter rows */
 .matchup-rows {
@@ -10427,33 +10370,8 @@ div.matchup-result {
  * state says so in a tick as well as a fill, so it never depends on colour
  * alone.
  */
-.cmp-action-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin: var(--sp-2) 2px;
-}
 
-.owner-chip {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 var(--sp-3);
-  border-radius: 999px;
-  border: 1px solid var(--separator);
-  background: var(--surface);
-  color: var(--accent-text);
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 600;
-  cursor: pointer;
-}
 
-.owner-chip[aria-pressed='true'] {
-  background: var(--accent-tint, var(--surface-sunken));
-  border-color: var(--accent-text);
-}
 
 /*
  * The names run out of room before the number does.
@@ -10599,504 +10517,6 @@ div.matchup-result {
   color: var(--paper-faint);
 }
 
-.cmp {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-5);
-}
-
-.cmp-busy {
-  opacity: 0.6;
-  transition: opacity var(--dur-fast) var(--ease);
-}
-
-/* ------------------------------------------------------------- who */
-
-.cmp-owner {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--paper-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cmp-owner-mine {
-  color: var(--paper-teal);
-}
-
-.cmp-owner-free {
-  color: var(--paper-warn);
-}
-
-/* A 16px glyph on a 44px target: the mark and the target are two boxes. */
-.cmp-swap {
-  flex: 0 0 auto;
-  width: var(--tap);
-  height: var(--tap);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--paper-dim);
-  cursor: pointer;
-}
-
-.cmp-swap:active {
-  background: var(--pressed);
-}
-
-.cmp-swap:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-/* A third and fourth player share the row, so the names come down a size. */
-
-/* ------------------------------------------------------------- the answer */
-
-/* ------------------------------------------------------------- the projection */
-
-/* ------------------------------------------------------------- the working */
-
-/* ------------------------------------------------------------- the note */
-
-.cmp-reasons {
-  margin: 0;
-}
-
-/* ------------------------------------------------------------- the picker, below an answer */
-
-.cmp-picker-head {
-  margin: var(--sp-2) 2px var(--sp-2);
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--paper-line);
-}
-
-.cmp-swapping {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin: var(--sp-2) 0 0;
-  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
-  background: var(--paper-teal-tint);
-  border: 1px solid var(--insight-line);
-  border-radius: var(--radius);
-  font-size: 0.82rem;
-  color: var(--paper-ink);
-}
-
-.cmp-swapping .btn {
-  min-height: var(--tap);
-}
-
-/*
- * Nothing to report, as a mark rather than as a number.
- *
- * The whole point of this pass. A bold `0.00` under `Vegas market expectation
- * (unknown)` is a real number and a real zero to anybody reading it, and the
- * engine never summed it — `evaluatePlayer` filters `unknown` components out of
- * the score, so those cells were always cosmetic. Measured on production on 22
- * September 2026: every unknown component on the owner's roster sat at exactly
- * 0, and `sum(known)` equalled `sum(all)` for all ten players.
- *
- * Quieter than a value and wider than a hyphen, and it must not be mistaken for
- * a minus sign — hence the em dash and the centring inside a right-aligned
- * cell, which is what stops `—` and `-1.50` reading as the same kind of thing
- * at a glance.
- */
-.compare-missing {
-  display: inline-block;
-  min-width: 1.4em;
-  text-align: center;
-  color: var(--text-faint);
-  font-weight: 400;
-}
-
-/* A coverage of 0% is a fact about the book, not a fault, but it earns a look. */
-.compare-zero-coverage {
-  color: var(--text-faint);
-}
-
-/*
- * The projection and its provenance, in the same vocabulary the Matchup screen
- * uses. Dotted for Rotowire's week, dashed plus an `EST` tag for an August
- * season total over sixteen games. See `.matchup-player-proj-borrowed` — this
- * is deliberately the same two marks rather than a second language for one
- * idea, and at this larger type size they are legible without the opacity step
- * that row needs.
- */
-.compare-proj {
-  font-variant-numeric: tabular-nums;
-}
-
-.compare-proj-borrowed {
-  font-style: italic;
-  color: var(--text-dim);
-  text-decoration: underline dotted var(--text-faint);
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
-}
-
-.compare-proj-preseason {
-  text-decoration: none;
-}
-
-.compare-provenance {
-  margin: var(--sp-1) 2px;
-  font-size: 0.72rem;
-  line-height: 1.45;
-}
-
-/* ============================================== the flat compare sheet */
-/*
- * `reference-mockup-v2.html`, approved by the owner on 30 September 2026: white
- * cards on warm grey, hairlines between rows, one thin bar per player, the
- * sportsbooks' own lines first and this app's signals under them, one quiet
- * note. No dark hero card. Every colour is a `--paper-*` token, so Dark is the
- * same layout with the dark values from the theme blocks.
- */
-.cmpf {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
-.cmpf-card {
-  background: var(--paper-card);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.cmpf-ids {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  background: var(--paper-card);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.cmpf-id {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-  padding: 12px 14px;
-}
-
-.cmpf-id + .cmpf-id {
-  border-left: 1px solid var(--paper-hair);
-}
-
-.cmpf-id-top {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.cmpf-status-tag {
-  font-size: 0.66rem;
-  font-weight: 600;
-  color: var(--paper-dim);
-  background: var(--paper-track);
-  border-radius: 6px;
-  padding: 2px 6px;
-}
-
-.cmpf-swap {
-  margin-left: auto;
-  display: inline-grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  margin-block: -12px;
-  margin-right: -12px;
-  border: 0;
-  background: none;
-  color: var(--paper-faint);
-  cursor: pointer;
-}
-
-.cmpf-id-name {
-  font-size: 0.94rem;
-  font-weight: 700;
-  color: var(--paper-ink);
-  overflow-wrap: anywhere;
-}
-
-.cmpf-id-meta {
-  font-size: 0.72rem;
-  color: var(--paper-faint);
-}
-
-.cmpf-id .cmp-owner {
-  font-size: 0.66rem;
-}
-
-.cmpf-rec {
-  padding: 13px 16px 14px;
-}
-
-.cmpf-rec-label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 9px;
-  font-size: 0.69rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--paper-green);
-}
-
-.cmpf-rec-label-none {
-  color: var(--paper-dim);
-}
-
-.cmpf-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cmpf-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.cmpf-bar-name {
-  flex: 0 0 64px;
-  font-size: 0.78rem;
-  color: var(--paper-label);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmpf-bar-track {
-  flex: 1;
-  height: 7px;
-  border-radius: 4px;
-  background: var(--paper-track);
-  overflow: hidden;
-}
-
-.cmpf-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--paper-trail);
-}
-
-.cmpf-bar-lead .cmpf-bar-fill {
-  background: var(--paper-green);
-}
-
-.cmpf-bar-value {
-  flex: 0 0 38px;
-  text-align: right;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--paper-faint);
-}
-
-.cmpf-bar-lead .cmpf-bar-value {
-  color: var(--paper-ink);
-}
-
-.cmpf-rec-why {
-  margin: 10px 0 0;
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: var(--paper-dim);
-}
-
-.cmpf-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.cmpf-eyebrow {
-  padding: 0 14px 3px;
-  font-size: 0.69rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--paper-faint);
-}
-
-.cmpf-table table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.cmpf-table tbody,
-.cmpf-table thead {
-  display: block;
-}
-
-.cmpf-row {
-  display: grid;
-  align-items: center;
-  padding: 7px 16px;
-}
-
-.cmpf-table tbody .cmpf-row + .cmpf-row,
-.cmpf-table thead + tbody .cmpf-row:first-child {
-  border-top: 1px solid var(--paper-hair);
-}
-
-.cmpf-row th,
-.cmpf-row td {
-  padding: 0;
-  font-weight: inherit;
-  min-width: 0;
-}
-
-.cmpf-row th[scope='row'] {
-  text-align: left;
-  font-size: 0.78rem;
-  font-weight: 400;
-  color: var(--paper-label);
-}
-
-.cmpf-row td {
-  text-align: right;
-  font-size: 0.8rem;
-  color: var(--paper-ink);
-}
-
-.cmpf-head {
-  padding-top: 9px;
-  padding-bottom: 5px;
-}
-
-.cmpf-head th[scope='col'] {
-  text-align: right;
-  font-size: 0.63rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--paper-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmpf-num-strong {
-  font-weight: 600;
-}
-
-.cmpf-na {
-  color: var(--paper-trail);
-}
-
-.cmpf-noline {
-  font-size: 0.7rem;
-  color: var(--paper-faint);
-  font-style: italic;
-}
-
-.cmpf-good {
-  color: var(--paper-green);
-  font-size: 0.76rem;
-}
-
-.cmpf-bad {
-  color: var(--paper-red);
-}
-
-.cmpf-row .cmpf-bad {
-  font-size: 0.76rem;
-}
-
-.cmpf-status {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.cmpf-sub {
-  font-size: 0.66rem;
-  color: var(--paper-faint);
-}
-
-.cmpf-fine {
-  margin: 0;
-  padding: 5px 14px 0;
-  font-size: 0.69rem;
-  line-height: 1.4;
-  color: var(--paper-faint);
-}
-
-.cmpf-rec .cmpf-fine {
-  padding: 6px 0 0;
-}
-
-.cmpf-italic {
-  font-style: italic;
-}
-
-.cmpf-empty {
-  margin: 0;
-  padding: 12px 16px;
-  font-size: 0.78rem;
-  color: var(--paper-dim);
-}
-
-.cmpf-note {
-  display: flex;
-  gap: 9px;
-  padding: 0 2px;
-}
-
-.cmpf-note::before {
-  content: '';
-  flex: 0 0 2.5px;
-  border-radius: 2px;
-  background: var(--paper-blue);
-}
-
-.cmpf-note p {
-  margin: 0;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: var(--paper-dim);
-}
-
-.cmpf-details > summary {
-  font-size: 0.75rem;
-  color: var(--paper-faint);
-}
-
-.cmpf-breakdown {
-  margin-top: 10px;
-}
-
-.cmpf-breakdown-name {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--paper-ink);
-}
-
 /* ======================================================== check a trade */
 /*
  * A player picked for a trade check is the same list row with the selection
@@ -11136,4 +10556,255 @@ div.matchup-result {
   overflow-wrap: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ============================================= Best move and Compare, Oct 2026 */
+
+/* Pills: what shape a week has. A word on every one, so colour is never the only cue. */
+.pill-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.pill-chip-explosive { color: var(--paper-warn); }
+.pill-chip-steady { color: var(--paper-teal); }
+.pill-chip-wide_range { color: var(--paper-blue); }
+
+/* Team: the Best move card, in the Matchup recommendation's grammar. */
+.best-move-card { margin-bottom: var(--sp-2); }
+.best-move-card .matchup-best-move { margin-bottom: 0; }
+.best-move-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.best-move-row .matchup-best-move-names { color: var(--text); }
+.best-move-why {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+.best-move-hold { grid-template-columns: minmax(0, 1fr); }
+
+/* Compare: the pinned strip. */
+.cmp2-strip {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 calc(-1 * var(--sp-4));
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--paper-bg);
+  border-bottom: 1px solid var(--paper-line);
+}
+.cmp2-chips {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+.cmp2-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--paper-card);
+  border: 1px solid var(--paper-line);
+  font-size: 0.8rem;
+  color: var(--paper-ink);
+  white-space: nowrap;
+}
+.cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 9.5em; }
+.cmp2-chip-pts { color: var(--paper-dim); font-variant-numeric: tabular-nums; }
+.cmp2-chip-x,
+.cmp2-add {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--paper-blue);
+  cursor: pointer;
+}
+.cmp2-chip-x { color: var(--paper-dim); font-size: 0.8rem; }
+.cmp2-add { flex: 0 0 auto; padding: 0 var(--sp-2); font-weight: 600; font-size: 0.85rem; }
+.cmp2-chip-x:focus-visible,
+.cmp2-add:focus-visible,
+.cmp2-row:focus-visible,
+.cmp2-factor:focus-visible,
+.cmp2-mini-verdict:focus-visible {
+  outline: 2px solid var(--paper-blue);
+  outline-offset: -2px;
+}
+.cmp2-notice { margin: var(--sp-2) 0 0; font-size: 0.8rem; color: var(--paper-warn); }
+.cmp2-empty { margin: var(--sp-3) 2px; font-size: 0.85rem; color: var(--paper-dim); }
+
+/* Compare: the picker. */
+.cmp2-picker { display: grid; gap: var(--sp-2); padding-top: var(--sp-2); }
+.cmp2-search { margin: 0; }
+.cmp2-mini-verdict {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--radius);
+  background: var(--paper-card);
+  color: var(--paper-ink);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.cmp2-list { margin: 0; padding: 0; list-style: none; }
+.cmp2-list > li + li { border-top: 1px solid var(--paper-line-soft); }
+.cmp2-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  color: var(--paper-ink);
+  font: inherit;
+  text-align: left;
+}
+.cmp2-row-on { background: var(--paper-teal-tint); }
+.cmp2-row-check { color: var(--paper-teal); display: inline-flex; justify-content: center; }
+.cmp2-row-who { display: grid; gap: 2px; min-width: 0; }
+.cmp2-row-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp2-row-status { margin-left: 4px; font-size: 0.7rem; font-weight: 700; color: var(--paper-warn); }
+.cmp2-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--paper-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cmp2-row-meta .pill-chip { margin-left: 0; }
+.cmp2-tag {
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--paper-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmp2-tag-mine { color: var(--paper-teal); }
+.cmp2-row-pts { display: grid; justify-items: end; gap: 1px; }
+.cmp2-num { font-variant-numeric: tabular-nums; font-weight: 600; }
+.cmp2-row-pts .cmp2-num { font-size: 0.95rem; }
+.cmp2-num-soft { color: var(--paper-dim); }
+.cmp2-soft { font-size: 0.62rem; color: var(--paper-faint); white-space: nowrap; }
+
+/* Compare: the verdict. */
+.cmp2-verdict { padding-top: var(--sp-3); }
+.cmp2-cols { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.cmp2-col {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-2);
+  border-radius: var(--radius);
+  background: var(--paper-card);
+  border: 1px solid var(--paper-line);
+}
+.cmp2-col-lead { border-color: var(--paper-teal); box-shadow: inset 0 0 0 1px var(--paper-teal); }
+.cmp2-col .pill-chip { margin-left: 0; }
+.cmp2-col-name {
+  max-width: 100%;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--paper-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp2-col-meta { font-size: 0.7rem; color: var(--paper-dim); }
+.cmp2-col-score {
+  font-family: var(--cmp-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper-ink);
+}
+.cmp2-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--paper-teal);
+}
+.cmp2-why { margin: var(--sp-2) 2px 0; font-size: 0.84rem; line-height: 1.35; color: var(--paper-ink); }
+
+/* Compare: one table for how the score is built. */
+.cmp2-table { padding-top: var(--sp-3); }
+.cmp2-rows {
+  margin-top: 6px;
+  border-radius: var(--radius);
+  background: var(--paper-card);
+  border: 1px solid var(--paper-line);
+  overflow: hidden;
+}
+.cmp2-tr {
+  display: grid;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  border: 0;
+  background: none;
+  color: var(--paper-ink);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: right;
+}
+.cmp2-tr > :first-child { text-align: left; }
+.cmp2-th { min-height: 32px; font-size: 0.72rem; font-weight: 650; color: var(--paper-label); }
+.cmp2-factor { border-top: 1px solid var(--paper-line-soft); cursor: pointer; }
+.cmp2-factor-label { color: var(--paper-label); }
+.cmp2-factor[aria-expanded='true'] { background: var(--paper-head); }
+.cmp2-total { border-top: 1px solid var(--paper-line); font-weight: 700; }
+.cmp2-detail { padding: 4px var(--sp-3) 8px; background: var(--paper-head); font-size: 0.75rem; color: var(--paper-dim); }
+.cmp2-detail p { margin: 2px 0; }
+.cmp2-noeffect { margin: 6px 2px 0; font-size: 0.72rem; line-height: 1.4; color: var(--paper-faint); }
+.cmp-busy {
+  opacity: 0.6;
+  transition: opacity var(--dur-fast) var(--ease);
 }

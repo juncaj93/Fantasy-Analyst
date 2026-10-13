@@ -23,75 +23,49 @@
  * every one of these is a sentence the user acts on in Sleeper, by hand.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api,
   type LeagueSummary,
   type LineupRecommendation,
   type RosterPlayer,
-  type StartSitComparison,
   type StartSitEvaluation,
   type SlotFixture,
   type StartSitRefreshReport,
   type WaiverAdvice,
 } from '../api.ts';
 import {
-  Badge,
   Confidence,
   Empty,
-  formatAge,
   InjuryTag,
   Notice,
   PlayerIdentity,
-  PositionBadge,
-  PositionPill,
   TeamLogo,
   positionAccentClass,
 } from '../components/common.tsx';
-import { NavBar, PullToRefresh, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
-import {
-  CheckIcon,
-  CompareIcon,
-  DisclosureChevronIcon,
-  RefreshIcon,
-  StarIcon,
-  SwapIcon,
-} from '../components/icons.tsx';
-import {
-  barWidths,
-  explainGap,
-  gapSentence,
-  layoutFactors,
-  shownOf,
-  matchupCell,
-  plain,
-  propRows,
-  shortName,
-  signed,
-  splitStatus,
-  standoutNote,
-} from '../compareLayout.ts';
-import { injuryStatusTag } from '../../core/draft/injury.ts';
+import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
+import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
-import { FLX_FILTER, orderFilterChips, orderPositions, slotAccepts } from '../../core/sleeper/eligibility.ts';
+import { orderPositions } from '../../core/sleeper/eligibility.ts';
 /*
  * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
  * detail and Trades so the three cannot disagree about which round pick 40 was.
  */
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
-import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
 import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
-import { marketLabel } from '../../core/vegas/marketLabel.ts';
 import { DstLine } from '../components/dst.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { noMoveSummary, type NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
+import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
+import { weekPointsFrom } from '../../core/startsit/weekPoints.ts';
+import { postureFrom } from '../../core/startsit/tiebreak.ts';
 
 interface OpenSlot {
   slot: string;
@@ -131,21 +105,6 @@ interface RosterResponse {
   found: boolean;
 }
 
-/** How many players may be compared at once. Matched by the server. */
-const MAX_COMPARE = 4;
-
-/**
- * How deep the comparison picker's list goes.
- *
- * The search itself reaches the whole player universe — the server searches
- * every name and only then cuts to this — so the number is about *browsing*:
- * how far somebody who has typed nothing can scroll before the list ends. Forty
- * was the draft board's old cap and it ended silently, looking exactly like the
- * end of the player pool rather than the end of a page.
- */
-const PICKER_ROWS = 100;
-
-const ALL_FILTER = 'ALL';
 
 export function TeamScreen({
   leagues,
@@ -598,7 +557,12 @@ export function TeamScreen({
                 recommendation at all.
               */}
               {!roster.live && lineup?.found ? (
-                <LineupCard lineup={lineup} onOpen={(slot, seed) => setCompare({ slot, seed })} />
+                <LineupCard
+                  lineup={lineup}
+                  pointsOf={(id) => weekPointsFrom(evaluations.get(id)?.decision).points}
+                  pillOf={(id) => evaluations.get(id)?.pill}
+                  onOpen={(slot, seed) => setCompare({ slot, seed })}
+                />
               ) : null}
 
               {hasRecommendation && !roster.live ? (
@@ -800,8 +764,8 @@ export function TeamScreen({
           slot={compare.slot}
           seed={compare.seed}
           nameOf={(id) => byId.get(id)?.name ?? id}
-          ownedByMe={(id) => byId.has(id)}
           mode={lineup?.found ? (lineup.mode ?? null) : null}
+          posture={postureFrom(lineup?.modeSuggestion?.margin)}
           onClose={() => setCompare(null)}
         />
       ) : null}
@@ -1685,436 +1649,6 @@ function WaiverSection({
 const TEAM_WAIVER_ROWS = 2;
 
 /**
- * Pick two to four players and rank them for one lineup spot.
- *
- * The pool is the whole player universe, not the roster: "start my tight end or
- * the one on waivers" is an ordinary question, and a picker that could only see
- * players you already own could not ask it. Who is *addable* is the waiver
- * card's business; this ranks whoever is chosen.
- *
- * Everything below the picker comes from the same start/sit engine the lineup
- * above was built with — there is exactly one scoring formula in this app.
- */
-function CompareSheet({
-  leagueId,
-  rosterPositions,
-  slot,
-  seed,
-  nameOf,
-  ownedByMe,
-  mode,
-  onClose,
-}: {
-  leagueId: string;
-  rosterPositions: string[];
-  /**
-   * The posture the Team screen's lineup was computed under.
-   *
-   * Sent with the comparison so a suggestion made in Ceiling is checked in
-   * Ceiling: the sheet used to run Balanced whatever the card had used, which
-   * is a second way for the two to disagree. Null lets the server default.
-   */
-  mode: string | null;
-  /** The slot this was launched from, or null when launched from the header. */
-  slot: string | null;
-  seed: string[];
-  nameOf: (id: string) => string;
-  /** Whether a player is on the reader's roster, for the tag on his card. */
-  ownedByMe: (id: string) => boolean;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  /*
-   * Only the reader's own players, when asked.
-   *
-   * Beside the position filter rather than inside it, because it is a
-   * different question: "which of my guys" can be asked of any position. The
-   * server narrows on the same roster rows it writes each row's `Your roster`
-   * tag from, before the page is cut; see `resolveOwnerFilter`.
-   */
-  const [mineOnly, setMineOnly] = useState(false);
-  const [position, setPosition] = useState(() => {
-    // Launched from a slot that takes exactly one position, the picker starts
-    // narrowed to it; from a flex slot, to the flex view. Both are a starting
-    // point the reader can change, never a restriction.
-    if (!slot) return ALL_FILTER;
-    const accepts = slotAccepts(slot);
-    if (accepts.length === 1) return accepts[0]!;
-    return FLX_FILTER;
-  });
-  const [ids, setIds] = useState<string[]>(() => [...new Set(seed)].slice(0, MAX_COMPARE));
-  const [names, setNames] = useState<Record<string, string>>(() =>
-    Object.fromEntries(seed.map((id) => [id, nameOf(id)])),
-  );
-  /*
-   * Whose each chosen player is. Seeded from the roster, and filled in from
-   * the picker's own rows as they arrive, which carry the league's answer.
-   */
-  const [owners, setOwners] = useState<Record<string, PickerPlayer['availability']>>(() =>
-    Object.fromEntries(seed.filter((id) => ownedByMe(id)).map((id) => [id, 'mine' as const])),
-  );
-  const [results, setResults] = useState<PickerPlayer[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [comparison, setComparison] = useState<StartSitComparison | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  /**
-   * The player being swapped out, while the reader picks his replacement.
-   *
-   * Set by the swap button on a player's card and cleared by the pick. While
-   * it is set, a tap on a search result *replaces* that player in the same
-   * position and re-runs the comparison, so the reader lands back on an
-   * answer rather than on a half-built selection.
-   */
-  const [swapping, setSwapping] = useState<string | null>(null);
-  const search = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    setOwners((current) => {
-      let next = current;
-      for (const p of results) {
-        if (p.availability && current[p.id] !== p.availability) {
-          if (next === current) next = { ...current };
-          next[p.id] = p.availability;
-        }
-      }
-      return next;
-    });
-  }, [results]);
-
-  const segments = useMemo(() => {
-    const startable = startablePositions(buildRosterShape(rosterPositions));
-    if (startable.size === 0) return [ALL_FILTER];
-    // The same row the draft board and the players list draw, from the same
-    // helper: positions, then FLX over three of them, then DEF at the end.
-    return [ALL_FILTER, ...orderFilterChips(startable)];
-  }, [rosterPositions]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const handle = window.setTimeout(async () => {
-      setLoading(true);
-      try {
-        const filter = position === ALL_FILTER ? '' : `&position=${encodeURIComponent(position)}`;
-        const owner = mineOnly ? '&owner=mine' : '';
-        const res = await api.get<{ players: PickerPlayer[] }>(
-          `/api/players?q=${encodeURIComponent(query)}&leagueId=${encodeURIComponent(leagueId)}${filter}${owner}&limit=${PICKER_ROWS}`,
-        );
-        if (!cancelled) setResults(res.players);
-      } catch {
-        if (!cancelled) setResults([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [query, position, leagueId, mineOnly]);
-
-  /**
-   * Add or remove one player.
-   *
-   * A player already chosen is removed, which is the only way a tap on a
-   * selected row can be read. A fifth is refused out loud rather than silently
-   * dropping the first — quietly rewriting the selection is how a reader ends up
-   * comparing three players they did not choose.
-   */
-  const toggle = (player: PickerPlayer) => {
-    if (player.availability) setOwners((o) => ({ ...o, [player.id]: player.availability }));
-    if (swapping) {
-      replace(swapping, player);
-      return;
-    }
-    setComparison(null);
-    setError(null);
-    setIds((current) => {
-      if (current.includes(player.id)) return current.filter((id) => id !== player.id);
-      if (current.length >= MAX_COMPARE) {
-        setError(`Up to ${MAX_COMPARE} players at once. Remove one to add another.`);
-        return current;
-      }
-      setNames((n) => ({ ...n, [player.id]: player.name }));
-      return [...current, player.id];
-    });
-  };
-
-  /**
-   * Put `player` where `out` was, and answer again.
-   *
-   * The position in the list is kept, so the chips do not reshuffle under the
-   * reader. Choosing somebody already in the comparison is refused out loud:
-   * a comparison of a player against himself is not a question.
-   */
-  const replace = (out: string, player: PickerPlayer) => {
-    setError(null);
-    if (player.id === out) {
-      setSwapping(null);
-      return;
-    }
-    if (ids.includes(player.id)) {
-      setError(`${player.name} is already in this comparison. Pick somebody else, or cancel the swap.`);
-      return;
-    }
-    const next = ids.map((id) => (id === out ? player.id : id));
-    setNames((n) => ({ ...n, [player.id]: player.name }));
-    setIds(next);
-    setSwapping(null);
-    setQuery('');
-    if (next.length >= 2) void compare(next);
-    else setComparison(null);
-  };
-
-  /** Start a swap: remember who is going, and hand the reader the search. */
-  const startSwap = (playerId: string) => {
-    setError(null);
-    setSwapping(playerId);
-    /*
-     * Focused inside the tap, not on a later frame, so iOS counts it as the
-     * reader's own and raises the keyboard. The field is scrolled to the
-     * middle of the card, above where the keyboard will land.
-     */
-    const input = search.current?.querySelector('input');
-    input?.focus({ preventScroll: true });
-    search.current?.scrollIntoView({ block: 'center' });
-  };
-
-  const compare = async (playerIds: string[] = ids) => {
-    setBusy(true);
-    setError(null);
-    try {
-      setComparison(
-        await api.post<StartSitComparison>('/api/startsit/compare', {
-          leagueId,
-          playerIds,
-          slot,
-          ...(mode ? { mode } : {}),
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /**
-   * Opened from a swap, the answer is already the question.
-   *
-   * Tapping `Start A over B` and then being asked to tap `Compare 2 players` is
-   * a step with nothing in it: the reader chose nobody, the sheet chose both,
-   * and the button's only job is to confirm a selection that was not made by
-   * hand. So a sheet that opens with a full pair runs itself and shows the
-   * comparison.
-   *
-   * Mount only, and deliberately so. Once the sheet is open the chips are the
-   * reader's again — adding or removing one clears the result and puts the
-   * button back, which is the behaviour that lets a comparison be re-aimed
-   * without re-opening anything.
-   */
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (seeded.current) return;
-    seeded.current = true;
-    const pair = [...new Set(seed)].slice(0, MAX_COMPARE);
-    if (pair.length >= 2) void compare(pair);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const title = slot ? `Compare for ${slot}` : 'Compare players';
-  const shownSlot = comparison?.slot?.comparable ? comparison.slot.slot : null;
-  const subtitle = [
-    comparison?.week != null ? `Week ${comparison.week}` : null,
-    shownSlot ? `${shownSlot} slot` : slot ? `${slot} slot` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  const picker = (
-    <>
-      {/*
-        No instructions above the search any more. The owner asked for the
-        room to go to the list (30 September 2026): the button already says how
-        many are chosen, and the list itself shows the whole league.
-      */}
-      {comparison ? (
-        <div className="cmp-eyebrow cmp-picker-head" data-testid="compare-edit-head">
-          Change players
-        </div>
-      ) : null}
-
-      {ids.length > 0 ? (
-        <div className="tag-row" data-testid="compare-selection">
-          {ids.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="tag tag-calm chip-removable"
-              data-testid="compare-chosen"
-              data-player-id={id}
-              aria-label={`Remove ${names[id] ?? id} from the comparison`}
-              onClick={() => {
-                setComparison(null);
-                setError(null);
-                if (swapping === id) setSwapping(null);
-                setIds((current) => current.filter((x) => x !== id));
-              }}
-            >
-              {names[id] ?? id} ✕
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {swapping ? (
-        <div className="cmp-swapping" role="status" data-testid="compare-swapping">
-          <span>
-            Pick a player to replace <strong>{names[swapping] ?? swapping}</strong>.
-          </span>
-          <button type="button" className="btn btn-sm" data-testid="compare-swap-cancel" onClick={() => setSwapping(null)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-
-      {/* First under the header, it needs no gap of its own: the header's padding is the gap. */}
-      <div style={{ margin: comparison || ids.length > 0 || swapping ? '8px 0' : '0 0 8px' }} ref={search}>
-        <SearchField
-          value={query}
-          onChange={setQuery}
-          placeholder="Search players"
-          label={swapping ? `Search for a player to replace ${names[swapping] ?? swapping}` : 'Search players to compare'}
-          testId="compare-search"
-        />
-      </div>
-
-      <SegmentedControl
-        label="Filter by position"
-        value={position}
-        onChange={setPosition}
-        segments={segments.map((p) => ({
-          id: p,
-          label: p,
-          ...(p === FLX_FILTER
-            ? { ariaLabel: 'Flex-eligible players: running backs, receivers and tight ends', testId: 'flx-filter' }
-            : {}),
-        }))}
-      />
-
-      {error ? <Notice tone="warn">{error}</Notice> : null}
-
-      {/* The action and the filter share one row, so the list starts a row higher. */}
-      <div className="cmp-action-row">
-        {swapping ? null : (
-          <button
-            className="btn btn-primary"
-            data-testid="compare-run"
-            disabled={ids.length < 2 || busy}
-            onClick={() => void compare()}
-          >
-            {busy ? 'Comparing…' : `Compare ${ids.length} player${ids.length === 1 ? '' : 's'}`}
-          </button>
-        )}
-        <button
-          type="button"
-          className="owner-chip"
-          data-testid="compare-mine-filter"
-          aria-pressed={mineOnly}
-          onClick={() => setMineOnly((on) => !on)}
-        >
-          {mineOnly ? '✓ ' : ''}My roster
-        </button>
-      </div>
-
-      {loading && results.length === 0 ? (
-        <SkeletonRows rows={5} testId="compare-skeleton" />
-      ) : results.length === 0 ? (
-        <Empty>{mineOnly ? 'Nobody on your roster matches that.' : 'Nobody matching that search.'}</Empty>
-      ) : (
-        <div role="list" aria-label={swapping ? 'Players to swap in' : 'Players to compare'}>
-          {results.map((p) => {
-            const chosen = ids.includes(p.id);
-            return (
-              <button
-                key={p.id}
-                className={chosen ? 'player-row player-row-open' : 'player-row'}
-                data-testid="compare-candidate"
-                data-player-id={p.id}
-                data-chosen={chosen ? 'true' : 'false'}
-                aria-pressed={chosen}
-                onClick={() => toggle(p)}
-              >
-                <div className="player-row-top">
-                  <span className="rank">{chosen ? '✓' : ''}</span>
-                  <span className="player-name">{p.name}</span>
-                  <PositionBadge position={p.position} team={p.team} />
-                </div>
-                <div className="player-row-metrics">
-                  <span className="metric">{availabilityLabel(p.availability)}</span>
-                  {p.status ? <Badge tone="warn">{p.status}</Badge> : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </>
-  );
-
-  return (
-    <Sheet
-      title={
-        <span className="cmp-title">
-          <span className="cmp-title-main">{title}</span>
-          {subtitle ? (
-            <span
-              className="cmp-title-sub"
-              {...(comparison?.slot?.comparable ? { 'data-testid': 'comparison-slot', title: comparison.slot.detail } : {})}
-            >
-              {subtitle}
-            </span>
-          ) : null}
-        </span>
-      }
-      accessibleLabel={title}
-      className="sheet-compare"
-      onClose={onClose}
-      testId="compare-sheet"
-    >
-      {/*
-        With an answer on screen, the answer leads and the picker follows it
-        under "Change players". Before there is one, the picker is all there is.
-        Busy is shown on the answer itself, so a swap does not blank the sheet.
-      */}
-      {comparison ? (
-        <div aria-busy={busy} className={busy ? 'cmp-busy' : undefined}>
-          <ComparisonCard comparison={comparison} availability={owners} onSwap={startSwap} />
-        </div>
-      ) : null}
-      {picker}
-    </Sheet>
-  );
-}
-
-interface PickerPlayer {
-  id: string;
-  name: string;
-  position: string;
-  team: string;
-  status: string | null;
-  /** Absent when the response predates league-aware availability. */
-  availability?: 'mine' | 'rostered' | 'available';
-}
-
-function availabilityLabel(availability: PickerPlayer['availability']): string {
-  if (availability === 'mine') return 'Your roster';
-  if (availability === 'rostered') return 'Rostered elsewhere';
-  if (availability === 'available') return 'Free agent';
-  return '';
-}
-
-/**
  * Whole-roster start/sit, as a difference from what Sleeper currently has set.
  *
  * The first thing on the screen, because it is the part that asks something of
@@ -2162,647 +1696,112 @@ function LineupSourcing({ lineup }: { lineup: LineupRecommendation }) {
 
 function LineupCard({
   lineup,
+  pointsOf,
+  pillOf,
   onOpen,
 }: {
   lineup: LineupRecommendation;
+  /** This week's number for a player, from `weekPointsFrom`: the one Compare prints. */
+  pointsOf: (playerId: string) => number | null;
+  pillOf: (playerId: string) => StartSitEvaluation['pill'] | undefined;
   /** Open the Compare sheet on this change's players, in its slot. */
   onOpen: (slot: string, seed: string[]) => void;
 }) {
   /*
-   * The change worth making, and everything else.
+   * "Best move", since October 2026: the one place in the app that says who to
+   * start, drawn in the Matchup recommendation's style (label in gray, names in
+   * black, numbers in gray) so it takes one compact row rather than a card.
    *
-   * The optimiser already sorts its swaps biggest-gain-first, so "the best one"
-   * is the first one rather than a new judgement made here.
+   * The optimiser sorts its swaps biggest-gain-first, so the best one is the
+   * first one. An empty slot is a change too and leads when it is worth more.
    */
   const [best = null] = lineup.swaps;
-  /*
-   * An empty slot is a change too, and usually the bigger one.
-   *
-   * Carried apart from the swaps because it names nobody to bench; see
-   * `LineupFill`. It leads when it is worth more than the best swap, which is
-   * the same biggest-gain-first rule the swap list already follows.
-   */
   const [fill = null] = lineup.fills ?? [];
-  const change =
-    fill != null && (best == null || fill.gain >= best.gain)
-      ? { ...fill, tail: `at ${fill.slot}, empty in Sleeper`, testId: 'lineup-fill', seed: [fill.inPlayerId] }
-      : best && { ...best, tail: `over ${best.outName}`, testId: 'lineup-swap', seed: [best.outPlayerId, best.inPlayerId] };
-  const risks = lineup.lateSwapRisks ?? [];
-  const material = risks.filter((r) => r.starting);
+  const useFill = fill != null && (best == null || fill.gain >= best.gain);
+  const risks = (lineup.lateSwapRisks ?? []).filter((r) => r.starting);
 
-  return (
-    <div className="card lineup-card" data-testid="lineup-card">
-      <div className="header-row">
-        <strong>Changes to consider</strong>
-        <LineupSourcing lineup={lineup} />
-      </div>
-
-      {change == null ? (
-        <div className="faint" data-testid="lineup-verdict">
-          {lineup.currentPoints == null
-            ? 'No changes to suggest from what is known so far.'
-            : 'Your lineup already matches the recommendation.'}
-        </div>
-      ) : (
-        /*
-         * One change, one line, one number.
-         *
-         * This card used to run to a third of the screen: the swap, its
-         * engine-side reason ("a positive recent signal (+1 net over 1
-         * item(s))"), a count of the smaller changes, a promise that the app
-         * never edits a lineup, and a disclosure headed `Recommended lineup in
-         * full`. Every one of those was true and none of them was what the
-         * reader came for, which is *what to change*.
-         *
-         * The smaller changes are not lost and were never only here: every slot
-         * row below carries its own verdict, so a swap the app wants appears
-         * under the man it replaces — which is the same list, in the place it is
-         * actually actionable. The full recommended lineup is that list of rows.
-         * Repeating both above them was the card competing with the screen.
-         */
-        /*
-         * And one tap from its reasoning (30 September 2026).
-         *
-         * The same Compare sheet a swap row opens, on the same two players in
-         * the same slot. Since both rank on `decisionPoints` it cannot argue
-         * with the sentence that opened it.
-         */
-        <button
-          type="button"
-          className="lineup-change"
-          data-testid={change.testId}
-          data-seed={change.seed.join(',')}
-          aria-label={`Start ${change.inName} ${change.tail}, plus ${change.gain} at ${change.slot}. Compare them.`}
-          onClick={() => onOpen(change.slot, change.seed)}
-        >
-          <span className="lineup-change-names">
-            Start <strong>{change.inName}</strong> {change.tail}
-          </span>
-          <span className="lineup-change-meta">
-            <span className="lineup-change-gain">+{change.gain}</span>
-            <span className="lineup-change-slot">{change.slot}</span>
-            <span className="lineup-change-chevron" aria-hidden="true">
-              ›
-            </span>
-          </span>
-        </button>
-      )}
-
-      {/*
-        The one risk that is worth a line above the fold, and no others.
-
-        A late-swap risk on somebody *starting* is a Sunday-morning problem the
-        reader has to plan for. The same risk on a bench player is a fact about
-        a player they are not starting, and the warnings beside it are usually
-        about missing data — both are true, neither changes what to do first, so
-        both wait inside the disclosure.
-      */}
-      {material.map((risk) => (
-        <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk">
-          {risk.name} — {risk.detail}
-        </div>
-      ))}
-
-      {/*
-        And nothing else on the card.
-
-        `How this was worked out` was a disclosure of the lineup's notes, and
-        the notes are about the *lineup* while the card is about one change.
-        Opened under `Start RJ Harvey over Jayden Reed` it read: Tampa Bay
-        could not be scored, Kenneth Walker is in FLEX rather than RB, three of
-        fifteen players use Rotowire's figure, one projection below is
-        Rotowire's, no published projection is quoted for QB. Five true
-        sentences, none of them about RJ Harvey, under a heading promising to
-        explain him.
-
-        The provenance they carry has a better home and already has it: a
-        borrowed figure is drawn with a dotted rule on the row it belongs to,
-        with the source in that figure's own title and in the row's
-        `aria-label`. That is the claim made *beside the number it is about*,
-        which is what the disclosure was reaching for and could not do from up
-        here.
-
-        So the card is the header and the change, and nothing else.
-      */}
-    </div>
-  );
-}
-
-/**
- * Two to four players, laid out so the decision comes first.
- *
- * ## What this replaced, and why
- *
- * A single table: `Projected` at the top, then the start/sit score, then every
- * factor the engine has, one full-width row each, dashes included. On the FLEX
- * comparison the owner photographed on 25 September 2026 (Bateman against
- * Collins), five of fourteen rows were dashes for both men, and the number
- * that decides the lineup sat *under* a projection that pointed the other way
- * (8.7 against 12.3 projected, 9.1 against −0.3 on the score) with nothing on
- * screen saying why.
- *
- * So the order is the order of the question:
- *
- *  1. who is being compared, and whose they are (the identity row, which is
- *     also where a player is swapped out);
- *  2. the answer: the start/sit score, big for the leader, a bar per player on
- *     one scale, and one line naming the factors that make up the gap;
- *  3. the raw projection, smaller, because it is context and not the verdict;
- *  4. the working, in three short cards, with a factor nobody has a value for
- *     collapsed into one sentence instead of a row of dashes;
- *  5. the engine's own note about market coverage, when there is one.
- *
- * Nothing here computes a score. Every number is the one the server sent, and
- * the grouping, the bars and the gap line are arithmetic on those numbers; see
- * `compareLayout.ts`.
- *
- * ## A dash is not a zero
- *
- * `evaluatePlayer` sums only the components it marks `unknown: false`, so an
- * unknown component contributes nothing and is drawn `—`, with the engine's
- * reason in its title and accessible name. A genuinely computed zero (an
- * uncharged availability, say) still prints `0.00`, because that is a real
- * reading.
- *
- * ## Why the factor cards are tables
- *
- * Every cell is the value of one named factor for one named player, which is
- * the one structure a screen reader already navigates in two dimensions. The
- * player names are drawn once, above the first card, and each table carries
- * them again as a visually hidden header row so that "Availability, Nico
- * Collins, −2.10" is still announced as such.
- */
-function ComparisonCard({
-  comparison,
-  availability,
-  onSwap,
-}: {
-  comparison: StartSitComparison;
-  /** Whose each player is, when the sheet knows. */
-  availability: Record<string, PickerPlayer['availability']>;
-  /** Start replacing one player; the sheet owns the search that finishes it. */
-  onSwap: (playerId: string) => void;
-}) {
-  const winner = comparison.evaluations.find((e) => e.playerId === comparison.recommendedPlayerId);
-  /*
-   * A comparison with no legal shared slot is reported, never forced. The
-   * numbers are still the same per-player evaluation as everywhere else, but
-   * "Start X" over players who cannot occupy the same spot would be answering
-   * a question nobody asked.
-   */
-  const comparable = comparison.slot?.comparable ?? true;
-  /*
-   * The number the verdict was made on, per player: `decisionPoints` where the
-   * server sent it (every worker since 30 September 2026), `score` from an
-   * older cached answer. The bars and the order read the same number the
-   * recommendation did, so the sheet cannot rank one way and draw another.
-   */
-  const pointsOf = (e: StartSitEvaluation): number | null => e.decision?.points ?? e.score;
-  const ranked = [...comparison.evaluations].sort((a, b) => (pointsOf(b) ?? -Infinity) - (pointsOf(a) ?? -Infinity));
-  /*
-   * Column order is the ranking when there is one, and the reader's own order
-   * when there is not: the eye starts at the first column, and the recommended
-   * player should be the one it lands on.
-   */
-  const columns = comparable ? ranked : comparison.evaluations;
-  const pick = comparable && winner ? winner : null;
-  const runnerUp = pick ? (ranked.find((e) => e.playerId !== pick.playerId && pointsOf(e) != null) ?? null) : null;
-
-  const bars = barWidths(columns.map((e) => pointsOf(e)));
-  const gap = pick && runnerUp ? explainGap(pick, runnerUp) : null;
-  const sentence =
-    pick && runnerUp && comparison.margin != null
-      ? gapSentence({
-          leader: pick,
-          runnerUp,
-          margin: comparison.margin,
-          drivers: gap?.drivers ?? [],
-          projectionShortfall: gap?.projectionShortfall ?? null,
-        })
-      : null;
-
-  const props = propRows(columns);
-  const cols = columns.length;
-  const grid = { gridTemplateColumns: `minmax(0, 1.3fr) repeat(${cols}, minmax(0, 1fr))` };
-
-  /*
-   * Our signals: four rows, in the mockup's order, each read off a field the
-   * engine already filled. Weather is drawn only when a game is indoors, the
-   * one weather fact this app has; there is no forecast source connected (see
-   * `StartSitRefreshService.weatherStatus`), so an outdoor game has nothing to
-   * say and the row would be a line of dashes pretending to be a reading.
-   */
-  const componentOf = (e: StartSitEvaluation, key: string) => e.components.find((c) => c.key === key) ?? null;
-  const anyIndoor = columns.some((e) => e.weather?.indoor);
-  /*
-   * A signal nobody here has a reading for is a word in the closing line, not
-   * a row of dashes: the same rule the factor tables kept since 22 September.
-   */
-  const anyUsage = columns.some((e) => {
-    const c = componentOf(e, 'usage_level');
-    return c != null && !c.unknown;
-  });
-  const anyFixture = columns.some((e) => e.fixture != null);
-  const shownKeys = new Set(['vegas', 'uncertainty', 'status', 'usage_level', 'matchup_role', 'weather']);
-  const { untracked } = layoutFactors(columns);
-  const notTracked = [
-    ...untracked.filter((f) => !shownKeys.has(f.key)).map((f) => f.label.toLowerCase()),
-    ...(anyUsage ? [] : ['opportunity']),
-    ...(anyFixture ? [] : ['matchup']),
-    ...(anyIndoor ? [] : ['weather forecasts']),
-  ];
-
-  const statusOf = (e: StartSitEvaluation) => splitStatus(e.statusFlag);
-  const insight = comparison.comparability?.detail ?? null;
-  const note = standoutNote({
-    players: columns.map((e) => ({ name: e.name, statusWord: statusOf(e)?.word ?? null, locked: e.lock?.locked ?? false })),
-    lateSwap: comparison.lateSwap ?? null,
-    coverageNote: insight,
-  });
-  /*
-   * Warnings the sections below already say are not said twice: a status is
-   * its own row, the coverage note may be the closing note, and a locked game
-   * is the closing note when there is one.
-   */
-  const warnings = comparison.warnings.filter(
-    (w) => w !== insight && w !== note && !/ is listed /.test(w) && !/already kicked off/.test(w),
-  );
-  const source = [
-    comparison.dataFreshness?.provider ?? 'no odds provider',
-    comparison.dataFreshness?.fetchedAt ? `updated ${formatAge(comparison.dataFreshness.fetchedAt)}` : null,
-    `${comparison.confidence} confidence`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  return (
-    <div className="cmp cmpf" data-testid="comparison" data-columns={cols}>
-      {/* 1. Who: position and status, name, club and fixture. */}
-      <ul className="cmpf-ids" aria-label="Players in this comparison" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-        {columns.map((e) => {
-          const status = statusOf(e);
-          const code = injuryStatusTag(e.statusFlag);
-          const matchup = matchupCell(e.fixture ?? null);
-          return (
-            <li
-              key={e.playerId}
-              className="cmpf-id"
-              data-testid="compare-column"
-              data-player-id={e.playerId}
-              data-pick={pick?.playerId === e.playerId ? 'true' : 'false'}
-            >
-              <div className="cmpf-id-top">
-                <PositionPill position={e.position} />
-                {code ? (
-                  <span className="cmpf-status-tag" title={status?.word ?? e.statusFlag ?? ''}>
-                    {code.code}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="cmpf-swap"
-                  data-testid="compare-swap"
-                  data-player-id={e.playerId}
-                  aria-label={`Swap ${e.name} for another player`}
-                  onClick={() => onSwap(e.playerId)}
-                >
-                  <SwapIcon size={15} />
-                </button>
-              </div>
-              <div className="cmpf-id-name">{e.name}</div>
-              {/*
-                Club and fixture from the label `fixtureOf` already wrote, and
-                the matchup word the Team row's chip prints. Not re-derived from
-                `opponent` and `home`: `vs` and `@` were swapped once in this
-                codebase by exactly that second derivation.
-              */}
-              <div className="cmpf-id-meta">
-                {[e.team, e.fixture?.label, matchup && matchup.tone !== 'unknown' ? matchup.text.split(' · ')[0]!.toLowerCase() : null]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </div>
-              <OwnerTag owner={availability[e.playerId]} />
-            </li>
-          );
-        })}
-      </ul>
-
-      {/* 2. The answer: one line, a thin bar each, one sentence. */}
-      <section className="cmpf-card cmpf-rec" aria-label="Recommendation">
-        <div className={pick ? 'cmpf-rec-label' : 'cmpf-rec-label cmpf-rec-label-none'}>
-          {pick ? <CheckIcon size={13} /> : null}
-          <span data-testid="comparison-verdict">
-            {!comparable
-              ? 'Not the same lineup decision'
-              : pick
-                ? `Recommended · Start ${pick.name}`
-                : 'No recommendation'}
-          </span>
-        </div>
-        <ul className="cmpf-bars" data-row="score">
-          {columns.map((e, i) => {
-            const points = pointsOf(e);
-            const lead = pick?.playerId === e.playerId;
-            return (
-              <li key={e.playerId} className={lead ? 'cmpf-bar cmpf-bar-lead' : 'cmpf-bar'}>
-                <span className="cmpf-bar-name">{shortName(e.name)}</span>
-                <span className="cmpf-bar-track" aria-hidden="true">
-                  {bars[i] != null ? <span className="cmpf-bar-fill" style={{ width: `${bars[i]}%` }} /> : null}
-                </span>
-                <span className="cmpf-bar-value" data-player-id={e.playerId}>
-                  {points == null ? (
-                    <CompareMissing reason="not enough data to rank him" label="Start/sit score" name={e.name} />
-                  ) : (
-                    <span title="The start/sit score this verdict was made on, the same number the Team screen's suggestions use. Not a forecast.">
-                      {plain(points)}
-                    </span>
-                  )}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-        {sentence ? (
-          <p className="cmpf-rec-why" data-testid="comparison-margin">
-            {sentence}
-          </p>
-        ) : null}
-        {/* Whose weekly figures those are, when some are borrowed. See `assembleComparison`. */}
-        {(comparison.projectionNotes ?? []).map((n) => (
-          <p className="cmpf-fine" key={n} data-testid="compare-projection-note">
-            {n}
-          </p>
-        ))}
-      </section>
-
-      {!comparable && comparison.slot ? (
-        <div className="hint hint-caution" data-testid="comparison-slot">
-          {comparison.slot.detail}
-        </div>
-      ) : null}
-      {warnings.map((w) => (
-        <div className="hint hint-caution" key={w}>
-          {w}
-        </div>
-      ))}
-
-      {/* 3. The sportsbooks' own lines: the headline evidence. */}
-      <section className="cmpf-section" aria-label="Vegas props" data-testid="compare-props">
-        <div className="cmpf-eyebrow">Vegas props</div>
-        <div className="cmpf-card cmpf-table">
-          {props.length === 0 ? (
-            <p className="cmpf-empty">
-              {columns.every((e) => e.position.toUpperCase() === 'DEF')
-                ? 'Defences are priced from the game line, not player props.'
-                : 'No player props apply to these positions.'}
-            </p>
-          ) : (
-            <table>
-              <caption className="sr-only">Sportsbook prop lines</caption>
-              <thead>
-                <tr className="cmpf-row cmpf-head" style={grid}>
-                  <th scope="col">
-                    <span className="sr-only">Market</span>
-                  </th>
-                  {columns.map((e) => (
-                    <th scope="col" key={e.playerId}>
-                      {shortName(e.name)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {props.map((row) => (
-                  <tr key={row.market} className="cmpf-row" style={grid} data-market={row.market}>
-                    <th scope="row">{row.label}</th>
-                    {row.cells.map((cell, i) => (
-                      <td key={columns[i]!.playerId} data-player-id={columns[i]!.playerId} data-prop={cell.kind}>
-                        {cell.kind === 'line' ? (
-                          <span className={row.market === 'anytime_td' ? 'cmpf-num cmpf-num-strong' : 'cmpf-num'}>{cell.text}</span>
-                        ) : cell.kind === 'na' ? (
-                          <span className="cmpf-na" title={`${row.label} is not a market for his position`} aria-label="does not apply">
-                            —
-                          </span>
-                        ) : (
-                          <span className="cmpf-noline" title="Priced for his position, but no book has posted this line">
-                            no line
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <p className="cmpf-fine" data-testid="compare-source">
-          {source}
-        </p>
-      </section>
-
-      {/* 4. This app's own reads, quieter, under the market. */}
-      <section className="cmpf-section" aria-label="Our signals" data-testid="compare-grid" data-columns={cols}>
-        <div className="cmpf-eyebrow">Our signals</div>
-        <div className="cmpf-card cmpf-table">
-          <table>
-            <caption className="sr-only">This app&apos;s signals</caption>
-            <thead className="sr-only">
-              <tr>
-                <th scope="col">Signal</th>
-                {columns.map((e) => (
-                  <th scope="col" key={e.playerId}>
-                    {e.name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="cmpf-row" style={grid} data-factor="status">
-                <th scope="row">Status</th>
-                {columns.map((e) => {
-                  const status = statusOf(e);
-                  return (
-                    <td key={e.playerId} data-player-id={e.playerId}>
-                      {status ? (
-                        <span className="cmpf-status" data-testid="startsit-injury" title={e.statusFlag ?? ''}>
-                          <span className="cmpf-bad">{status.word}</span>
-                          {status.detail ? <span className="cmpf-sub">{status.detail}</span> : null}
-                        </span>
-                      ) : (
-                        <span className="cmpf-num">Active</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-              {anyUsage ? (
-              <tr className="cmpf-row" style={grid} data-factor="usage_level">
-                <th scope="row">Opportunity</th>
-                {columns.map((e) => {
-                  const c = componentOf(e, 'usage_level');
-                  return (
-                    <td key={e.playerId} data-testid="compare-cell" data-player-id={e.playerId}>
-                      {c == null || c.unknown ? (
-                        <CompareMissing reason={c?.display ?? 'no usage data'} label="Opportunity" name={e.name} />
-                      ) : (
-                        <span className="cmpf-num" title={c.display}>
-                          {signed(shownOf(c))}
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-              ) : null}
-              {anyFixture ? (
-              <tr className="cmpf-row" style={grid} data-factor="matchup">
-                <th scope="row">Matchup</th>
-                {columns.map((e) => {
-                  const m = matchupCell(e.fixture ?? null);
-                  return (
-                    <td key={e.playerId} data-player-id={e.playerId}>
-                      {m == null ? (
-                        <CompareMissing reason="no fixture on file" label="Matchup" name={e.name} />
-                      ) : (
-                        <span
-                          className={m.tone === 'good' ? 'cmpf-good' : m.tone === 'bad' ? 'cmpf-bad' : 'cmpf-num'}
-                          title={e.fixture?.note ?? ''}
-                        >
-                          {m.text}
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-              ) : null}
-              {anyIndoor ? (
-                <tr className="cmpf-row" style={grid} data-factor="weather">
-                  <th scope="row">Weather</th>
-                  {columns.map((e) => (
-                    <td key={e.playerId} data-player-id={e.playerId}>
-                      {e.weather?.indoor ? (
-                        <span className="cmpf-num">Dome</span>
-                      ) : (
-                        <CompareMissing reason="no forecast source is connected" label="Weather" name={e.name} />
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-        {notTracked.length > 0 ? (
-          <p className="cmpf-fine cmpf-italic" data-testid="compare-untracked">
-            Not tracked for this matchup: {notTracked.join(', ')}.
-          </p>
-        ) : null}
-      </section>
-
-      {/* 5. One note, the one that matters most for this pair. */}
-      {note ? (
-        <div className="cmpf-note" role="note" data-testid="compare-insight">
-          <p>{note}</p>
-        </div>
-      ) : null}
-
-      {/*
-        The whole working, for the reader who wants it and out of the way of the
-        one who does not: every component with the engine's own sentence, the
-        market contributions and the expectation's notes.
-      */}
-      <details className="disclosure cmpf-details">
-        <summary>How the score is built</summary>
-        {comparison.reasons.length > 0 ? (
-          <ul className="reason-list cmp-reasons">
-            {comparison.reasons.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-        ) : null}
-        {columns.map((e) => (
-          <div key={e.playerId} className="cmpf-breakdown">
-            <div className="cmpf-breakdown-name">{e.name}</div>
-            <div className="components">
-              {e.components.map((c) => (
-                <div className="component" key={c.key}>
-                  <span className="component-label">
-                    {c.label}
-                    {c.unknown ? ' (unknown)' : ''}
-                  </span>
-                  <span className="component-value">{c.unknown ? '—' : shownOf(c).toFixed(2)}</span>
-                  <span className="component-detail">{c.display}</span>
-                </div>
-              ))}
-            </div>
-            {e.expectation.contributions.length > 0 ? (
-              <div className="components">
-                {e.expectation.contributions.map((c) => (
-                  <div className="component" key={c.market}>
-                    <span className="component-label">{marketLabel(c.market)}</span>
-                    <span className="component-value">{c.points.toFixed(2)}</span>
-                    <span className="component-detail">{c.detail}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {e.expectation.notes.map((n) => (
-              <div className="faint" key={n}>
-                {n}
-              </div>
-            ))}
-          </div>
-        ))}
-      </details>
-    </div>
-  );
-}
-
-/**
- * Whose a player is, as a small tag on his card.
- *
- * Three states, the same three the picker already reads from the league
- * (`availabilityLabel`), each with a word so the colour never carries it
- * alone. Nothing at all when the sheet has not been told, rather than a guess.
- */
-function OwnerTag({ owner }: { owner: PickerPlayer['availability'] }) {
-  if (owner === 'mine') {
-    return (
-      <span className="cmp-owner cmp-owner-mine">
-        <StarIcon size={12} />
-        On your team
-      </span>
-    );
-  }
-  if (owner === 'available') return <span className="cmp-owner cmp-owner-free">Free agent</span>;
-  if (owner === 'rostered') return <span className="cmp-owner">Rostered elsewhere</span>;
-  return <span />;
-}
-
-/**
- * A cell with nothing in it, and the reason why.
- *
- * Not `0.00`, and not an empty cell either: an empty cell in a grid reads as a
- * rendering fault, and the reader cannot tell it from a column that failed to
- * load. The dash is a mark that means "asked, and there is no answer", the
- * reason is in the title for a pointer and in the accessible name for a screen
- * reader, and the two are the same sentence the engine wrote.
- */
-function CompareMissing({ reason, label, name }: { reason: string; label: string; name: string }) {
-  return (
-    <span
-      className="compare-missing"
-      data-testid="compare-missing"
-      title={`${label} — ${reason}. No value is being invented.`}
-      aria-label={`${label} for ${name}: no data. ${reason}.`}
-    >
-      —
+  const head = (
+    <span className="best-move-head">
+      <span className="matchup-best-move-label">Best move</span>
+      <LineupSourcing lineup={lineup} />
     </span>
   );
+
+  return (
+    <div className="best-move-card" data-testid="lineup-card">
+      {useFill ? (
+        <button
+          type="button"
+          className="matchup-best-move best-move-row"
+          data-testid="lineup-fill"
+          data-seed={fill.inPlayerId}
+          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${fmt(pointsOf(fill.inPlayerId))} projected. Compare.`}
+          onClick={() => onOpen(fill.slot, [fill.inPlayerId])}
+        >
+          <span className="matchup-best-move-body">
+            {head}
+            <span className="matchup-best-move-swap">
+              <span className="matchup-best-move-names">Start {fill.inName}</span>
+              <span className="matchup-best-move-slot">{fill.slot}</span>
+            </span>
+            <span className="matchup-best-move-metrics">
+              {fmt(pointsOf(fill.inPlayerId))} projected · {fill.slot} is empty in Sleeper
+            </span>
+          </span>
+          <span className="dense-chevron" aria-hidden="true">›</span>
+        </button>
+      ) : best ? (
+        <button
+          type="button"
+          className="matchup-best-move best-move-row"
+          data-testid="lineup-swap"
+          data-seed={`${best.outPlayerId},${best.inPlayerId}`}
+          data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
+          aria-label={`Best move: start ${best.inName} over ${best.outName} at ${best.slot}, ${fmt(pointsOf(best.inPlayerId))} against ${fmt(pointsOf(best.outPlayerId))} projected.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''} Compare them.`}
+          onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId])}
+        >
+          <span className="matchup-best-move-body">
+            {head}
+            <span className="matchup-best-move-swap">
+              <span className="matchup-best-move-names">
+                Start {best.inName} over {best.outName}
+              </span>
+              <span className="matchup-best-move-slot">{best.slot}</span>
+            </span>
+            <span className="matchup-best-move-metrics" data-testid="best-move-points">
+              {fmt(pointsOf(best.inPlayerId))} vs {fmt(pointsOf(best.outPlayerId))} projected
+              <PillChip pill={pillOf(best.inPlayerId)} />
+            </span>
+            {best.tiebreak ? (
+              <span className="best-move-why" data-testid="best-move-tiebreak">
+                {best.tiebreak.sentence}
+              </span>
+            ) : null}
+          </span>
+          <span className="dense-chevron" aria-hidden="true">›</span>
+        </button>
+      ) : (
+        <div className="matchup-best-move best-move-row best-move-hold" data-testid="lineup-verdict">
+          <span className="matchup-best-move-body">
+            {head}
+            <span className="matchup-best-move-names">
+              {lineup.currentPoints == null ? 'No change to suggest yet' : 'Keep your lineup'}
+            </span>
+          </span>
+        </div>
+      )}
+      {risks.map((risk) => (
+        <div className="hint hint-caution" key={risk.playerId} data-testid="late-swap-risk">
+          {risk.name}: {risk.detail}
+        </div>
+      ))}
+    </div>
+  );
 }
 
+function fmt(points: number | null): string {
+  return points == null ? '–' : points.toFixed(1);
+}
 
 /**
  * The roster during an active draft.
