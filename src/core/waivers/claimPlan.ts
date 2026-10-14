@@ -101,6 +101,13 @@ export interface WaiverClaimGroup {
   formNote?: string | null;
   firstRank: number;
   lastRank: number;
+  /**
+   * Waivers round 2: the best few players to cut for this claim, cheapest
+   * first, drawn as a short numbered list under the claim (`1. Tre' Harris
+   * WR · 1.2 pts`). `addPlayerId` opens that claim's detail sheet.
+   */
+  bestDrops?: { playerId: string; name: string; position: string; stat: string }[];
+  addPlayerId?: string;
 }
 
 /** Which honest ending this is. */

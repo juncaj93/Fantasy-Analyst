@@ -480,20 +480,25 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
   });
 });
 
-/* One honest spot (Shipley to IR) and a second hole with none left. */
-test.describe('round 2 follow-up: an IR move, and a hole where Alex picks the drop', () => {
+/*
+ * Alex's live screen, 14 October: Shipley to IR for Love, and Andrews with
+ * the best drops listed under him, Tre' Harris first (a just-added receiver
+ * with 1.2 points), then the two elite backs' handcuffs.
+ */
+const BEST_DROPS = [
+  { playerId: 'd-th', name: "Tre' Harris", position: 'WR', stat: '1.2 pts', reason: "in your Sleeper lineup with little to show for it, lowest season points on your bench (1.2), held 1 week" },
+  { playerId: 'd-br', name: 'Brian Robinson', position: 'RB', stat: 'handcuff to Bijan Robinson', reason: 'handcuff; 10.8 pts this season, held 2 weeks, handcuff to Bijan Robinson' },
+  { playerId: 'd-ej', name: 'Emmett Johnson', position: 'RB', stat: 'handcuff to Kenneth Walker', reason: 'handcuff; 12.3 pts this season, held 4 weeks, handcuff to Kenneth Walker' },
+];
+test.describe('round 2 follow-up: an IR move, and the best drops under Andrews', () => {
   test.beforeEach(async ({ page }) => {
     const base = round2Fixture();
     const love = { ...base.doThese[0]!, drop: { playerId: 'd-ship', name: 'Will Shipley', position: 'RB', reason: 'Out; your open IR slot holds him, so no drop', score: null, handcuff: false, viaReserve: true } };
     const andrews = {
       ...base.doThese[1]!,
       tier: 'do_this',
-      drop: null,
-      needsSpot: [
-        { playerId: 'd-br', name: 'Brian Robinson', reason: 'handcuff; 10.8 pts this season, held 2 weeks, handcuff to Bijan Robinson' },
-        { playerId: 'd-ej', name: 'Emmett Johnson', reason: 'handcuff; 12.3 pts this season, held 4 weeks, handcuff to Kenneth Walker' },
-        { playerId: 'd-mc', name: 'Ladd McConkey', reason: 'kept as a high pick; 21.7 pts this season, drafted' },
-      ],
+      drop: { playerId: 'd-th', name: "Tre' Harris", position: 'WR', reason: BEST_DROPS[0]!.reason, score: 4.25, handcuff: false },
+      bestDrops: BEST_DROPS,
       bid: { ...(base.doThese[1]!.bid as Record<string, unknown>), posture: 'do_this' },
     };
     const miller = move({ playerId: 'r5', name: 'Kendre Miller', position: 'RB', team: 'NO', tier: 'watch', gain: 2.2, reason: 'Starts over Braelon Allen, +2.2 pts in week 6', drop: null, needsSpot: [] });
@@ -502,11 +507,17 @@ test.describe('round 2 follow-up: an IR move, and a hole where Alex picks the dr
       ...ROUND2_PLAN,
       groups: [
         { ...ROUND2_PLAN.groups[0], drop: null, headline: 'Move Will Shipley to IR, then claim Jordan Love' },
-        { ...ROUND2_PLAN.groups[1], drop: null, headline: 'Pick your drop: Brian Robinson (handcuff); Emmett Johnson (handcuff); Ladd McConkey (round 4 pick)' },
+        {
+          ...ROUND2_PLAN.groups[1],
+          drop: { playerId: 'd-th', name: "Tre' Harris" },
+          headline: "Best drops: Tre' Harris, Brian Robinson, Emmett Johnson",
+          bestDrops: BEST_DROPS.map(({ reason: _r, ...c }) => c),
+          addPlayerId: 'r2',
+        },
       ],
       claims: [
         { ...ROUND2_PLAN.claims[0], dropPlayerId: null, dropName: null },
-        { ...ROUND2_PLAN.claims[1], dropPlayerId: null, dropName: null },
+        { ...ROUND2_PLAN.claims[1], dropPlayerId: 'd-th', dropName: "Tre' Harris" },
       ],
     };
     await inSeason(page);
@@ -514,32 +525,76 @@ test.describe('round 2 follow-up: an IR move, and a hole where Alex picks the dr
     await openWaivers(page);
   });
 
-  test('says "Shipley to IR" for Love and "pick your drop" for Andrews, both under Do this', async ({ page }) => {
+  test('says "Shipley to IR" for Love and lists the best drops under Andrews, Harris first', async ({ page }) => {
     const doRows = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
     await expect(doRows).toHaveCount(2);
     await expect(doRows.nth(0).getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
-    await expect(page.getByTestId('waiver-plan')).toContainText('Pick your drop: Brian Robinson');
-    await expect(page.getByTestId('waiver-plan')).toContainText('Move Will Shipley to IR, then claim Jordan Love');
+    const card = page.getByTestId('waiver-plan');
+    await expect(card).toContainText('Move Will Shipley to IR, then claim Jordan Love');
+    const groups = card.getByTestId('waiver-plan-group');
+    /* The list sits under the Andrews step, not under Love. */
+    await expect(groups.nth(0).getByTestId('best-drops')).toHaveCount(0);
+    const list = groups.nth(1).getByTestId('best-drops');
+    await expect(list.getByTestId('best-drops-label')).toHaveText('Best drops (tap for why)');
+    const lines = list.getByTestId('best-drop');
+    await expect(lines).toHaveCount(3);
+    await expect(lines.nth(0)).toHaveText("1.Tre' Harris WR \u00b7 1.2 pts");
+    await expect(lines.nth(1)).toContainText('Brian Robinson');
+    for (let i = 0; i < 3; i++) await expect(lines.nth(i)).not.toContainText('(');
+    /* The step comes first, then the list. */
+    const claimBox = (await groups.nth(1).getByTestId('waiver-plan-claim').boundingBox())!;
+    const listBox = (await list.boundingBox())!;
+    expect(listBox.y).toBeGreaterThan(claimBox.y);
     /* A Watch list name never borrows a spot another row uses. */
     const watchRow = page.locator('[data-testid="waiver-tier-row"][data-player-id="r5"]');
     await expect(watchRow.getByTestId('tier-drop')).toContainText('needs a roster spot');
     await expect(watchRow.getByTestId('tier-drop')).not.toContainText('Will Shipley');
-    const second = page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]');
-    await expect(second).toHaveAttribute('data-tier', 'do_this');
-    await expect(second.getByTestId('tier-drop')).toContainText('you pick the spot');
     await noSidewaysScroll(page);
     await noTransactionControl(page);
   });
 
-  test('lists the cheapest spots with a reason each, inside the phone', async ({ page }) => {
-    await page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]').click();
+  test('keeps every best-drops line to two lines at most, with no sideways scroll', async ({ page }) => {
+    const lines = page.getByTestId('waiver-plan').getByTestId('best-drop');
+    await expect(lines).toHaveCount(3);
+    for (let i = 0; i < 3; i++) {
+      const el = lines.nth(i);
+      const box = (await el.boundingBox())!;
+      const lineHeight = await el.evaluate((n) => parseFloat(getComputedStyle(n).lineHeight));
+      expect(box.height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+    await noSidewaysScroll(page);
+  });
+
+  test('opens the sheet with the full reasons when the list is tapped', async ({ page }) => {
+    await page.getByTestId('waiver-plan').getByTestId('best-drops').click();
     const sheet = page.getByTestId('tier-detail');
-    await expect(sheet.getByTestId('tier-detail-drop')).toContainText('Pick your drop:');
-    const list = sheet.getByTestId('tier-detail-needs-spot');
-    await expect(list).toContainText('Brian Robinson (handcuff;');
-    await expect(list).toContainText('Ladd McConkey (kept as a high pick;');
+    await expect(sheet).toContainText('Mark Andrews');
+    const items = sheet.getByTestId('tier-detail-best-drop');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toContainText('lowest season points on your bench (1.2)');
+    await expect(items.nth(1)).toContainText('handcuff to Bijan Robinson');
     const box = (await sheet.getByTestId('tier-detail-drop').boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await noSidewaysScroll(page);
+  });
+
+  test('Team shows the same list under Andrews, and Shipley to IR for Love', async ({ page }) => {
+    await page.getByTestId('tab-team').click();
+    const rows = page.getByTestId('waiver-card').getByTestId('waiver-tier-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0).getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
+    await expect(rows.nth(0).getByTestId('best-drops')).toHaveCount(0);
+    const lines = rows.nth(1).getByTestId('best-drop');
+    await expect(lines).toHaveCount(3);
+    await expect(lines.nth(0)).toContainText("Tre' Harris");
+    for (let i = 0; i < 3; i++) {
+      const el = lines.nth(i);
+      const box = (await el.boundingBox())!;
+      const lineHeight = await el.evaluate((n) => parseFloat(getComputedStyle(n).lineHeight));
+      expect(box.height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+    }
+    await noSidewaysScroll(page);
+    await noTransactionControl(page);
   });
 });

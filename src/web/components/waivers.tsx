@@ -73,7 +73,7 @@ function UnknownField({ what }: { what: string }) {
  * a backup to your own starter, who looks like the obvious cut the plan
  * skipped; he gets a clause on the drop line (see `ClaimGroup`).
  */
-export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefined }) {
+export function WaiverPlanCard({ plan, onOpenDrops }: { plan: WaiverClaimPlan | null | undefined; onOpenDrops?: (addPlayerId: string) => void }) {
   if (!plan?.surface) return null;
 
   return (
@@ -99,7 +99,12 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
       */}
       {plan.claims.length > 0 && (plan.groups ?? []).length > 0 ? (
         (plan.groups ?? []).map((group) => (
-          <ClaimGroup key={group.index} group={group} claims={plan.claims.filter((c) => c.group === group.index)} />
+          <ClaimGroup
+            key={group.index}
+            group={group}
+            claims={plan.claims.filter((c) => c.group === group.index)}
+            {...(onOpenDrops && group.addPlayerId ? { onOpenDrops: () => onOpenDrops(group.addPlayerId!) } : {})}
+          />
         ))
       ) : plan.claims.length > 0 ? (
         <ol className="claim-plan-list" data-testid="waiver-plan-claims">
@@ -184,7 +189,24 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
  * When the plan passed over a backup to one of your starters, the drop line
  * says so in one clause, because that is the cut a reader expected.
  */
-function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: WaiverClaimLine[] }) {
+function ClaimGroup({ group, claims, onOpenDrops }: { group: WaiverClaimGroup; claims: WaiverClaimLine[]; onOpenDrops?: () => void }) {
+  /*
+   * Waivers round 2: a claim that costs somebody lists the best few to cut
+   * under the claim, numbered, rather than a sentence above it (Alex, 14
+   * October). Tapping the list opens the claim's sheet with the full reasons.
+   */
+  if (group.bestDrops && group.bestDrops.length > 0) {
+    return (
+      <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
+        <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
+          {claims.map((claim) => (
+            <ClaimLine key={claim.claimId} claim={claim} />
+          ))}
+        </ol>
+        <BestDrops items={group.bestDrops} {...(onOpenDrops ? { onOpen: onOpenDrops } : {})} />
+      </div>
+    );
+  }
   return (
     <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
       <div className="claim-plan-drop" data-testid="waiver-plan-drop">
@@ -707,5 +729,49 @@ export function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
         : ' No winning bids recorded in this league yet.'}
       <div>{faab.losingBids}</div>
     </div>
+  );
+}
+
+/**
+ * The best few players to cut for a claim, cheapest first: a small muted
+ * label, then one numbered line each, `Tre' Harris  WR · 1.2 pts`. Name in
+ * normal weight, the stat muted; no clauses. With `onOpen` the whole block is
+ * a button onto the claim's sheet, where the full reasons are. Without it
+ * (inside a row that is itself a button) it is plain text and the row opens
+ * the sheet. Nothing here drops anybody: Alex makes the cut in Sleeper.
+ */
+export function BestDrops({
+  items,
+  onOpen,
+  hint = true,
+}: {
+  items: readonly { playerId: string; name: string; position?: string; stat?: string }[];
+  onOpen?: () => void;
+  hint?: boolean;
+}) {
+  const body = (
+    <>
+      <span className="best-drops-label" data-testid="best-drops-label">
+        Best drops{hint ? ' (tap for why)' : ''}
+      </span>
+      {items.slice(0, 3).map((c, i) => (
+        <span className="best-drops-line" key={c.playerId} data-testid="best-drop" data-player-id={c.playerId}>
+          <span className="best-drops-rank">{i + 1}.</span>
+          <span className="best-drops-text">
+            <span className="best-drops-name">{c.name}</span>{' '}
+            <span className="best-drops-stat">{[c.position, c.stat].filter(Boolean).join(' \u00b7 ')}</span>
+          </span>
+        </span>
+      ))}
+    </>
+  );
+  return onOpen ? (
+    <button type="button" className="best-drops best-drops-tap" data-testid="best-drops" onClick={onOpen}>
+      {body}
+    </button>
+  ) : (
+    <span className="best-drops" data-testid="best-drops">
+      {body}
+    </span>
   );
 }

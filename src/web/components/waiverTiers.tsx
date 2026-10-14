@@ -14,7 +14,7 @@ import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
 import { PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
-import { clearDay } from './waivers.tsx';
+import { BestDrops, clearDay } from './waivers.tsx';
 
 /** Where a week's number came from, short enough for a phone row. */
 const WEEK_SOURCE_SHORT: Record<WeekSource, string> = {
@@ -86,7 +86,7 @@ function PickupLine({ row }: { row: TierRow }) {
   );
 }
 
-export function TierRowButton({ row, onOpen }: { row: TierRow; onOpen: () => void }) {
+export function TierRowButton({ row, onOpen, showDrops = false }: { row: TierRow; onOpen: () => void; showDrops?: boolean }) {
   const extra = row.alternatives.length > 0 ? `Or ${row.alternatives.join(', ')}` : row.competesWith.length > 0 ? `Same spot as ${row.competesWith.join(', ')}` : null;
   return (
     <button
@@ -107,6 +107,8 @@ export function TierRowButton({ row, onOpen }: { row: TierRow; onOpen: () => voi
         </span>
       </div>
       <PickupLine row={row} />
+      {/* Team's waiver line has no plan card above it, so the list rides on the row; the row opens the sheet. */}
+      {showDrops && row.bestDrops && row.bestDrops.length > 0 ? <BestDrops items={row.bestDrops} /> : null}
       <div className="waiver-notes" data-testid="tier-reason">
         {row.reason}
       </div>
@@ -199,7 +201,7 @@ export function TierSections({
  */
 function keptLine(row: TierRow, tiers: WaiverTiersView): string | null {
   const scores = tiers.dropScores ?? [];
-  if (scores.length === 0 || !row.drop) return null;
+  if (scores.length === 0 || !row.drop || row.bestDrops?.length) return null;
   const cut = row.drop.score ?? null;
   const kept = scores.filter(
     (d) =>
@@ -278,19 +280,22 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
                   : row.drop
                     ? `Drop ${row.drop.name}`
                     : 'An open roster spot; no drop needed'}
-              {row.needsSpot && row.needsSpot.length > 0 ? (
-                <span data-testid="tier-detail-needs-spot">
-                  {' '}
-                  {row.tier === 'do_this' ? '' : 'Lowest-cost options: '}
-                  {row.needsSpot.map((c, i) => (
-                    <span key={c.playerId}>
-                      {i > 0 ? '; ' : ''}
-                      {c.name} <span className="faint">({c.reason})</span>
-                    </span>
-                  ))}
-                </span>
+              {(row.bestDrops ?? row.needsSpot ?? []).length > 0 ? (
+                <>
+                  {row.needsSpot || row.tier === 'do_this' ? null : <span className="faint"> Lowest-cost options:</span>}
+                  {/* Best drops, cheapest first, each with its full reason (Alex, 14 October). */}
+                  <ol className="best-drops-why" data-testid="tier-detail-needs-spot">
+                    {(row.bestDrops ?? row.needsSpot ?? []).slice(0, 3).map((c) => (
+                      <li key={c.playerId} data-testid="tier-detail-best-drop">
+                        {c.name}
+                        {c.position || c.stat ? <span className="faint"> {[c.position, c.stat].filter(Boolean).join(' \u00b7 ')}</span> : null}
+                        <span className="best-drops-reason faint">{c.reason}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </>
               ) : null}
-              {row.drop?.reason ? (
+              {row.drop?.reason && !row.bestDrops ? (
                 <span className="faint" data-testid="tier-detail-drop-why">
                   {' '}
                   · {row.drop.reason}

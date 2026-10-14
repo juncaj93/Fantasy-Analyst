@@ -59,7 +59,7 @@ import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '
 import { TRADE_VALUE } from '../tradeValue/evaluate.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import type { WeekSource } from './aheadWeeks.ts';
-import { DROP_RULES, dropScore, readDrops, type DropReading, type DropSignals } from './dropScore.ts';
+import { DROP_RULES, dropScore, isDeadSpot, readDrops, type DropReading, type DropSignals } from './dropScore.ts';
 import type { StashVerdict } from './stash.ts';
 
 /**
@@ -159,6 +159,18 @@ export interface TierProtection {
   note: string;
 }
 
+/** A player Alex could cut for a move: `Tre' Harris · WR · 1.2 pts`, and the full reason for the sheet. */
+export interface SpotChoice {
+  playerId: string;
+  name: string;
+  reason: string;
+  position?: string;
+  /** One short stat for the list: season points or a role note. */
+  stat?: string;
+  /** Coming week's lineup points lost if he is cut, and who takes his slot. For the report. */
+  weekOneLoss?: { points: number; replacedBy: string | null; replacementPoints: number | null };
+}
+
 export interface TierRequest {
   shape: RosterShape;
   /** The NFL weeks of the window, oldest first. Same length as `weights`. */
@@ -249,7 +261,13 @@ export interface TierMove {
    * player is protected. The cheapest few to free a spot with, each with a
    * one-line reason; Alex picks.
    */
-  needsSpot?: { playerId: string; name: string; reason: string }[];
+  needsSpot?: SpotChoice[];
+  /**
+   * The best few players to cut for this move, cheapest first: the drop
+   * itself, then the next ones; or the `needsSpot` list. Set on a move that
+   * uses a drop, never on an IR move or an open spot.
+   */
+  bestDrops?: SpotChoice[];
   /** What cutting the drop costs on its own, weighted (lineup and depth). */
   dropCost: number | null;
   /** Other moves on this list that want the same roster spot. */
@@ -298,7 +316,17 @@ export interface WaiverTierPlan {
   /** Free agents never offered, and why: out for the season, back too late. */
   excluded: { playerId: string; name: string; reason: string }[];
   /** Each bench player's drop score, lowest first, when it was read. */
-  dropScores: { playerId: string; name: string; score: number; reason: string; protectedAs: string | null }[];
+  dropScores: {
+    playerId: string;
+    name: string;
+    score: number;
+    reason: string;
+    protectedAs: string | null;
+    /** A recent pickup with nothing to show: offered first. */
+    deadSpot?: boolean;
+    parts?: DropReading['parts'];
+    factors?: Record<string, unknown>;
+  }[];
 }
 
 interface Valuation {
@@ -386,18 +414,33 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * same position and clearly better), and among drops that cost the move
    * about the same, the lowest score goes first.
    */
-  const signals = request.dropSignals && request.dropSignals.size > 0 ? request.dropSignals : null;
+  /*
+   * "In your lineup" means the app's own best legal lineup for the coming
+   * week, not Sleeper's slots: Sleeper keeps last week's lineup until it is
+   * reset (Alex, 14 October: Tre' Harris sat in a week 5 slot). Same solver
+   * as the planner; an injured player or one on bye counts at his own
+   * number, so a week off never takes a real starter out of it.
+   */
+  const appLineup = comingWeekLineup(valued, slots, weeks[0]);
+  const signals =
+    request.dropSignals && request.dropSignals.size > 0
+      ? new Map([...request.dropSignals].map(([id, s]) => [id, { ...s, inLineup: appLineup.has(id) }] as const))
+      : null;
   const readings: Map<string, DropReading> = new Map();
   if (signals) {
     const all = cuttable.map((p) => signals.get(p.playerId)).filter((x): x is DropSignals => x != null);
-    /* "Lowest on your bench" compares the bench: a lineup player is scored but not compared. */
-    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup))) readings.set(id, r);
-    for (const x of all) if (!readings.has(x.playerId)) readings.set(x.playerId, { ...dropScore(x), reason: 'in your Sleeper lineup' });
+    /*
+     * "Lowest on your bench" compares the bench: a lineup player is scored but
+     * not compared, unless he is a dead spot (a recent pickup with nothing to
+     * show), who is a drop like anyone on the bench.
+     */
+    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup || isDeadSpot(x)))) readings.set(id, r);
+    for (const x of all) if (!readings.has(x.playerId)) readings.set(x.playerId, { ...dropScore(x), reason: 'in your best lineup this week' });
   }
   const scoreOf = (id: string): number | null => readings.get(id)?.score ?? null;
   const lineupLocked = (p: TierPlayer, c: TierCandidate): boolean => {
     const sig = signals?.get(p.playerId);
-    if (!sig || !sig.inLineup) return false;
+    if (!sig || !sig.inLineup || isDeadSpot(sig)) return false;
     /* An injured starter is still a starter: an injury never makes him cheaper to cut. */
     return !(p.position === c.position && (c.rate ?? 0) >= (p.rate ?? 0) + DROP_RULES.clearlyBetter);
   };
@@ -426,6 +469,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const allowed = roster.filter(
       (p) =>
         !p.onReserve &&
+        /* IR before any drop: a player an open IR slot can take is moved there, never cut. */
+        !reserveIds.has(p.playerId) &&
         !excluded.has(p.position) &&
         p.rate != null &&
         !lineupLocked(p, c) &&
@@ -692,23 +737,43 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * with, high draft picks last; Alex picks (Alex, 14 October: Andrews for
    * LaPorta's bye). Any other move goes to the Watch list.
    */
-  const spotCandidates = (taken: ReadonlySet<string>) =>
+  /* What cutting him costs the coming week's best lineup, and who starts instead. */
+  const weekOneLoss = (id: string): SpotChoice['weekOneLoss'] => {
+    if (!base.starters[0]?.has(id)) return { points: 0, replacedBy: null, replacementPoints: null };
+    const without = value(valued.filter((q) => q.playerId !== id));
+    const slot = base.picks[0]?.findIndex((x) => x?.id === id) ?? -1;
+    const sub = slot >= 0 ? without.picks[0]?.find((x) => x != null && x.value > 0 && !base.starters[0]!.has(x.id)) ?? null : null;
+    const subName = sub ? (valued.find((q) => q.playerId === sub.id)?.name ?? sub.id) : null;
+    return { points: round2((base.weekly[0] ?? 0) - (without.weekly[0] ?? 0)), replacedBy: subName, replacementPoints: sub ? round2(sub.value) : null };
+  };
+  const spotChoice = (id: string): SpotChoice => {
+    const p = valued.find((x) => x.playerId === id);
+    const sig = signals?.get(id);
+    const kind = request.protections.get(id);
+    const label = kind?.kind === 'handcuff' ? 'handcuff' : kind?.kind === 'draft_capital' ? kind.note : kind ? 'kept as a high pick' : null;
+    const reason = readings.get(id)?.reason ?? '';
+    const stat =
+      sig?.handcuffOf ? `handcuff to ${sig.handcuffOf}`
+      : kind?.kind === 'draft_capital' && sig?.draftRound ? `round ${sig.draftRound} pick`
+      : sig?.seasonPoints != null ? `${sig.seasonPoints.toFixed(1)} pts`
+      : 'no points yet';
+    return { playerId: id, name: p?.name ?? id, position: p?.position ?? '', stat, reason: label ? `${label}; ${reason}` : reason, weekOneLoss: weekOneLoss(id) };
+  };
+  const spotCandidates = (taken: ReadonlySet<string>): SpotChoice[] =>
     [...readings.entries()]
       .filter(([id]) => !taken.has(id))
       .map(([id, r]) => {
         const p = valued.find((x) => x.playerId === id);
         const sig = signals?.get(id);
-        if (!p || p.onReserve || excluded.has(p.position) || sig?.inLineup) return null;
-        const kind = request.protections.get(id);
-        const label = kind?.kind === 'handcuff' ? 'handcuff' : kind?.kind === 'draft_capital' ? kind.note : kind ? 'kept as a high pick' : null;
-        const why = label ? `${label}; ${r.reason}` : r.reason;
-        /* High draft capital last: offered only when the cheaper options run out. */
-        return { playerId: id, name: p.name, reason: why, score: r.score + (kind?.kind === 'draft_capital' ? 100 : 0) };
+        if (!p || p.onReserve || excluded.has(p.position) || (sig?.inLineup && !isDeadSpot(sig))) return null;
+        /* Dead spots first, then the rest by score, high draft capital last. */
+        const band = sig && isDeadSpot(sig) ? 0 : request.protections.get(id)?.kind === 'draft_capital' ? 2 : 1;
+        return { ...spotChoice(id), band, score: r.score };
       })
       .filter((x): x is NonNullable<typeof x> => x != null)
-      .sort((a, b) => a.score - b.score)
+      .sort((a, b) => a.band - b.band || a.score - b.score)
       .slice(0, 3)
-      .map(({ playerId, name, reason }) => ({ playerId, name, reason }));
+      .map(({ band: _b, score: _s, ...c }) => c);
   for (const m of unplaced) {
     if (signals && isHole(m)) {
       m.drop = null;
@@ -759,6 +824,18 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     if (second < TIER_RULES.consider) m.alternativeTo = first.name;
   }
 
+  /*
+   * The ranked list under each move that costs somebody: the drop it uses,
+   * then the next cheapest nobody else is using (Alex, 14 October: "Best
+   * drops", top three).
+   */
+  if (signals) {
+    for (const m of [...doThese, ...consider]) {
+      if (m.needsSpot && m.needsSpot.length > 0) m.bestDrops = m.needsSpot;
+      else if (m.drop && !m.drop.viaReserve) m.bestDrops = [spotChoice(m.drop.playerId), ...spotCandidates(new Set(used.keys()))].slice(0, 3);
+    }
+  }
+
   /* Who competes for whose spot, both ways. */
   const listed = [...doThese, ...consider];
   for (const m of listed) {
@@ -772,10 +849,36 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     .map(([id, r]) => {
       const p = valued.find((x) => x.playerId === id);
       const sig = signals?.get(id);
-      const protectedAs = sig?.inLineup ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
-      return { playerId: id, name: p?.name ?? id, score: r.score, reason: r.reason, protectedAs };
+      const dead = sig ? isDeadSpot(sig) : false;
+      const protectedAs = dead ? null : sig?.inLineup ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
+      return {
+        playerId: id,
+        name: p?.name ?? id,
+        score: r.score,
+        reason: r.reason,
+        protectedAs,
+        ...(dead ? { deadSpot: true } : {}),
+        parts: r.parts,
+        ...(sig
+          ? {
+              factors: {
+                seasonPoints: sig.seasonPoints,
+                weeksPlayed: sig.weeksPlayed,
+                recent: sig.recent,
+                projection: sig.projection,
+                role: sig.role,
+                heldWeeks: sig.heldWeeks,
+                drafted: sig.drafted,
+                draftRound: sig.draftRound ?? null,
+                inLineup: sig.inLineup,
+                injured: sig.injured ?? false,
+              },
+            }
+          : {}),
+      };
     })
-    .sort((a, b) => a.score - b.score);
+    /* The order a cut is offered in: dead spots, then by score; a lineup starter last. */
+    .sort((a, b) => Number(!a.deadSpot) - Number(!b.deadSpot) || Number(a.protectedAs === 'in your lineup') - Number(b.protectedAs === 'in your lineup') || a.score - b.score);
 
   return {
     doThis: doThese[0] ?? null,
@@ -861,6 +964,20 @@ export function assignDrops(
 }
 
 /** A player's points for window week `k` before availability: that week's own number, else his rate. */
+/** The app's best legal lineup for the coming week, injured and bye-week players at their own number. */
+function comingWeekLineup(players: readonly TierPlayer[], slots: readonly LineupSlotSpec[], week: number | undefined): Set<string> {
+  const pool: LineupCandidate[] = players
+    .filter((p) => !p.onReserve)
+    .map((p) => ({
+      id: p.playerId,
+      position: p.position,
+      /* A bye or an injury is a week off, not a lost job: he counts at his own number. */
+      value: p.byeWeek != null && p.byeWeek === week ? (p.rate ?? 0) : ['healthy', 'unknown', 'active'].includes(p.designation) ? pointsIn(p, 0) * (p.weekly[0] ?? 1) : (p.rate ?? 0),
+    }));
+  const result = bestLineup(slots, pool);
+  return new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
+}
+
 function pointsIn(p: TierPlayer, k: number): number {
   return p.weekValues?.[k] ?? p.rate ?? 0;
 }

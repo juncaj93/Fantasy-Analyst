@@ -102,5 +102,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * the league's IR slots take moves there instead of being cut. A drop must
  * pass both cut rules (over replacement and drop score). A rival's hole the
  * week after next counts about half as much as one this week.
+ *
+ * `waiver@15`: Alex's live screen (14 October). A recent pickup with nothing
+ * to show and no real role is a dead spot: no weeks-held credit, no lineup
+ * protection, and the first drop offered, ahead of elite backs' handcuffs and
+ * high picks. A move that costs somebody lists its best three drops. "In
+ * your lineup" is the app's best week lineup, not Sleeper's leftover slots.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@14', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@15', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

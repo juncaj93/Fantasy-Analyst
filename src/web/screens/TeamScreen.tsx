@@ -1565,7 +1565,7 @@ function WaiverSection({
         </div>
         {line}
         {top.map((row) => (
-          <TierRowButton key={row.playerId} row={row} onOpen={() => onOpenTier?.(row)} />
+          <TierRowButton key={row.playerId} row={row} onOpen={() => onOpenTier?.(row)} showDrops />
         ))}
       </div>
     );
