@@ -36,6 +36,8 @@ export async function readWaiverRound2(
     mine: RosterRecord;
     strategy: StrategyContext | null;
     positionOf: (playerId: string) => string | null;
+    /** The league's `reserve_allow_*` settings, read by the caller. */
+    reserveAllows: { out: boolean; doubtful: boolean; sus: boolean };
   },
 ): Promise<WaiverRound2Inputs> {
   const priorSeasons = Array.from({ length: PRIOR_SEASONS }, (_, i) => String(Number(opts.season) - 1 - i));
@@ -104,5 +106,6 @@ export async function readWaiverRound2(
     drafted: moves ? opts.mine.playerIds.filter((id) => heldSince[id] == null) : [],
     injuryNotes: notes.injury,
     depthOrder: notes.depth,
+    reserveAllows: opts.reserveAllows,
   };
 }

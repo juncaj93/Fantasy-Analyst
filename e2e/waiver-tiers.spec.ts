@@ -479,3 +479,55 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     await noSidewaysScroll(page);
   });
 });
+
+/* One honest spot (Shipley to IR) and a second hole with none left. */
+test.describe('round 2 follow-up: an IR move, and a hole that needs a spot first', () => {
+  test.beforeEach(async ({ page }) => {
+    const base = round2Fixture();
+    const love = { ...base.doThese[0]!, drop: { playerId: 'd-ship', name: 'Will Shipley', position: 'RB', reason: 'Out; your open IR slot holds him, so no drop', score: null, handcuff: false, viaReserve: true } };
+    const andrews = {
+      ...base.doThese[1]!,
+      tier: 'consider',
+      drop: null,
+      needsSpot: [
+        { playerId: 'd-br', name: 'Brian Robinson', reason: 'handcuff; 10.8 pts this season, held 2 weeks, handcuff to Bijan Robinson' },
+        { playerId: 'd-ej', name: 'Emmett Johnson', reason: 'handcuff; 12.3 pts this season, held 4 weeks, handcuff to Kenneth Walker' },
+        { playerId: 'd-mc', name: 'Ladd McConkey', reason: 'kept as a high pick; 21.7 pts this season, drafted' },
+      ],
+      bid: { ...(base.doThese[1]!.bid as Record<string, unknown>), posture: 'consider' },
+    };
+    const tiers = { ...base, doThis: love, doThese: [love], consider: [andrews] };
+    const plan = {
+      ...ROUND2_PLAN,
+      groups: [{ ...ROUND2_PLAN.groups[0], drop: null, headline: 'Move Will Shipley to IR first: this one needs no drop' }],
+      claims: [{ ...ROUND2_PLAN.claims[0], dropPlayerId: null, dropName: null }],
+    };
+    await inSeason(page);
+    await serve(page, { tiers, claimPlan: plan });
+    await openWaivers(page);
+  });
+
+  test('says "Shipley to IR" on the row and the card, and the second hole needs a spot first', async ({ page }) => {
+    const doRow = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
+    await expect(doRow).toHaveCount(1);
+    await expect(doRow.getByTestId('tier-drop')).toContainText('Will Shipley to IR');
+    await expect(page.getByTestId('waiver-plan')).toContainText('Move Will Shipley to IR first');
+    const second = page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]');
+    await expect(second).toHaveAttribute('data-tier', 'consider');
+    await expect(second.getByTestId('tier-drop')).toContainText('needs a spot first');
+    await noSidewaysScroll(page);
+    await noTransactionControl(page);
+  });
+
+  test('lists the cheapest spots with a reason each, inside the phone', async ({ page }) => {
+    await page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]').click();
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet.getByTestId('tier-detail-drop')).toContainText('You need a spot first.');
+    const list = sheet.getByTestId('tier-detail-needs-spot');
+    await expect(list).toContainText('Brian Robinson (handcuff;');
+    await expect(list).toContainText('Ladd McConkey (kept as a high pick;');
+    const box = (await sheet.getByTestId('tier-detail-drop').boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await noSidewaysScroll(page);
+  });
+});

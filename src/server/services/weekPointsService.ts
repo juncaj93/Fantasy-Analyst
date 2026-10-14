@@ -40,7 +40,7 @@ const AHEAD_REFRESH_HOURS = 12;
 const SEASON_REFRESH_HOURS = 12;
 
 /** Missing finished weeks fetched per run while the season row fills. */
-export const SEASON_BACKFILL_PER_RUN = 2;
+export const SEASON_BACKFILL_PER_RUN = 4;
 
 /** How many weeks past the current one are kept: the waiver window's reach. */
 export const AHEAD_WEEKS = 3;

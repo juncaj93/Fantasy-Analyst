@@ -706,6 +706,11 @@ export async function gatherWaiverInputs(
     mine,
     strategy,
     positionOf: (id) => positionOfId.get(id) ?? null,
+    reserveAllows: {
+      out: Number(league.leagueSettings['reserve_allow_out']) === 1,
+      doubtful: Number(league.leagueSettings['reserve_allow_doubtful']) === 1,
+      sus: Number(league.leagueSettings['reserve_allow_sus']) === 1,
+    },
   }).catch(() => null);
   const completed = lastCompletedWeek(
     week,

@@ -318,7 +318,7 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
   const moves = view.doThese && view.doThese.length > 0 ? view.doThese : view.doThis ? [view.doThis] : [];
   const dropHints = [...moves, ...view.consider, ...view.watch]
     .filter((r): r is TierRow => r != null && r.drop != null)
-    .map((r) => ({ addPlayerId: r.playerId, dropName: r.drop!.name, label: `Drop ${r.drop!.name}` }));
+    .map((r) => ({ addPlayerId: r.playerId, dropName: r.drop!.name, label: r.drop!.viaReserve ? `Move ${r.drop!.name} to IR` : `Drop ${r.drop!.name}` }));
   if (moves.length === 0) {
     return {
       surface: false,
@@ -352,8 +352,8 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
       addName: m.name,
       addPosition: m.position,
       addTeam: m.team,
-      dropPlayerId: m.drop?.playerId ?? null,
-      dropName: m.drop?.name ?? null,
+      dropPlayerId: m.drop && !m.drop.viaReserve ? m.drop.playerId : null,
+      dropName: m.drop && !m.drop.viaReserve ? m.drop.name : null,
       bid: m.bid.kind === 'claim' ? m.bid.recommended : null,
       bidRange:
         m.bid.kind === 'claim' && m.bid.low != null && m.bid.high != null
@@ -370,8 +370,12 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
     });
     groups.push({
       index: rank,
-      drop: m.drop ? { playerId: m.drop.playerId, name: m.drop.name } : null,
-      headline: m.drop ? `Drop ${m.drop.name}` : 'Open roster spot: this one needs no drop',
+      drop: m.drop && !m.drop.viaReserve ? { playerId: m.drop.playerId, name: m.drop.name } : null,
+      headline: m.drop?.viaReserve
+        ? `Move ${m.drop.name} to IR first: this one needs no drop`
+        : m.drop
+          ? `Drop ${m.drop.name}`
+          : 'Open roster spot: this one needs no drop',
       keep: [],
       keepNote: null,
       formNote: null,

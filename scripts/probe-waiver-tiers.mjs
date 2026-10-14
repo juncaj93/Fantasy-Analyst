@@ -32,8 +32,11 @@ const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev
 /* Tony's Pizza Fantasy on Sleeper. Public, like every Sleeper league id. */
 const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID || '1385016656425668608';
 const SLEEPER = 'https://api.sleeper.app';
-/* The last commit before Waivers round 2. */
-const BEFORE_SHA = process.env.BEFORE_SHA || '35c4054f677071903379d2c21c133fbd95b2dde9';
+/* Earlier builds to replay on the same inputs, oldest first: before round 2, and round 2 as first shipped (#367). */
+const BEFORES = (process.env.BEFORE_SHAS || 'before round 2=35c4054f677071903379d2c21c133fbd95b2dde9,round 2 as first shipped=d8a6bc1a72b9f3515b8f2071440c1abc8eb17384')
+  .split(',')
+  .map((pair) => pair.split('='))
+  .map(([label, sha]) => ({ label, sha }));
 
 const health = await fetch(`${APP}/api/health`).then((r) => r.json()).catch(() => null);
 console.log(`production sha: ${health?.release?.gitSha ?? '?'}`);
@@ -86,14 +89,18 @@ for (let id = SLEEPER_LEAGUE, depth = 0; id && id !== '0' && depth < 6; depth++)
 }
 console.log(`Sleeper public calls: ${sleeperCalls} (no D1 rows)`);
 
-/* The code before this round, in its own checkout. */
-const old = join(dir, 'before');
-try {
-  execFileSync('git', ['fetch', '--quiet', '--depth', '1', 'origin', BEFORE_SHA], { stdio: 'inherit' });
-  execFileSync('git', ['worktree', 'add', '--quiet', '--detach', old, BEFORE_SHA], { stdio: 'inherit' });
-} catch (err) {
-  console.log(`could not check out the code before this round (${err}); the BEFORE board is skipped`);
-}
+/* Each earlier build, in its own checkout. */
+const olds = [];
+BEFORES.forEach(({ label, sha }, i) => {
+  const at = join(dir, `before-${i}`);
+  try {
+    execFileSync('git', ['fetch', '--quiet', '--depth', '1', 'origin', sha], { stdio: 'inherit' });
+    execFileSync('git', ['worktree', 'add', '--quiet', '--detach', at, sha], { stdio: 'inherit' });
+    olds.push(`${label}=${at}`);
+  } catch (err) {
+    console.log(`could not check out ${label} (${sha}): ${err}; that board is skipped`);
+  }
+});
 
 const run = (script, args) => {
   try {
@@ -106,7 +113,7 @@ const run = (script, args) => {
   }
 };
 
-console.log(run('scripts/waiver-round2-report.ts', [snapshotFile, dir, old]));
+console.log(run('scripts/waiver-round2-report.ts', [snapshotFile, dir, ...olds]));
 console.log("\n=== RIVAL BACKTEST: old model vs need-aware model, every published claim in every season ===");
 const backtest = run('scripts/waiver-rival-backtest.ts', [dir, SLEEPER_LEAGUE]);
 /* The per-claim table is long; the summary is what is read. Both are printed, the table last. */

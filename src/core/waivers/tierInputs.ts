@@ -99,6 +99,8 @@ export interface TierInputRequest {
   injuryNotes?: ReadonlyMap<string, InjuryNote> | undefined;
   /** Sleeper's own depth-chart order per player, preferred over the stored chart for handcuffs. */
   depthOrder?: ReadonlyMap<string, number> | undefined;
+  /** Which statuses this league's IR slots take beyond IR itself. Absent: no IR moves are suggested. */
+  reserveAllows?: { out: boolean; doubtful: boolean; sus: boolean } | undefined;
 }
 
 export interface TierInputs {
@@ -274,6 +276,7 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       excludedPositions: input.excludedPositions,
       replacement,
       ...(dropSignals.size > 0 ? { dropSignals } : {}),
+      ...(input.reserveAllows ? { reserveEligible: reserveEligibleOf(roster, input.reserveAllows) } : {}),
       ...(input.injuryNotes ? { stash } : {}),
     },
     window,
@@ -290,4 +293,10 @@ function addableBefore(input: StartSitInput, pickup: PickupState | undefined, no
   if (!pickup || pickup.state === 'free') return true;
   const until = pickup.until ? Date.parse(pickup.until) : Number.NaN;
   return Number.isFinite(until) && until < kickoff;
+}
+
+/** Rostered players this league's IR slots would take today. */
+function reserveEligibleOf(roster: readonly TierPlayer[], allows: { out: boolean; doubtful: boolean; sus: boolean }): Set<string> {
+  const ok = (d: string) => d === 'ir' || (d === 'out' && allows.out) || (d === 'doubtful' && allows.doubtful) || (d === 'suspended' && allows.sus);
+  return new Set(roster.filter((p) => !p.onReserve && ok(p.designation)).map((p) => p.playerId));
 }

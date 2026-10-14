@@ -90,13 +90,23 @@ rebuilt by the three-hourly league read from the weekly rows. Weeks held: the
 latest completed transaction that brought him in, else the draft.
 
 Every move shown gets a different drop, assigned together (`assignDrops`):
-"Do this" moves first, then the most total lineup gain less 2 points for each
-protected player cut (a market hold; a handcuff counts double), then the lowest
-total drop score. A protected player is a last-resort drop, never a Watch list
-row's spot. A drop also has to pass the over-replacement rule: nobody further
-above a free agent at his position than the add is at his, because points are
-not comparable across positions (waiver@14; on 14 October the live board gave
-both Love and Andrews Will Shipley, the one open spot).
+"Do this" moves first, then the most total lineup gain, then the lowest total
+drop score. A protected player (a high pick kept as a market hold, an elite
+back's handcuff) is never cut. An injured player this league's IR slots take
+(IR; Out, Doubtful or suspended where `reserve_allow_*` says so) moves to an
+open IR slot instead: the row reads `Shipley to IR`, the card `Move Will Shipley
+to IR first: this one needs no drop`. When no honest drop is left, a hole is
+Worth considering with `You need a spot first. Lowest-cost options:` and the
+three cheapest bench players by drop score, each with its reason; Alex picks.
+A drop also has to pass the over-replacement rule: nobody further above a free
+agent at his position than the add is at his, because points are not
+comparable across positions (waiver@14; on 14 October the live board gave both
+Love and Andrews Will Shipley, the one open spot).
+
+Season points backfill up to four missing weeks per three-hourly read. The
+rivals' earlier seasons are written once from the stored ledger on the first
+three-hourly read after a deploy (`ensureRivalHistory`, about 4,500 rows once,
+then one row a run), and refreshed by the Wednesday derive.
 
 ### Stashes (`stash.ts`)
 

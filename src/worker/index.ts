@@ -415,9 +415,11 @@ export default {
             await weekPoints.refreshAheadWeeks(weekOpts);
             /*
              * The season's points, one row, for the drop score: one row read on most
-             * runs, a rebuild every twelve hours, at most two missing weeks fetched.
+             * runs, a rebuild every twelve hours, at most four missing weeks fetched.
              */
             await weekPoints.refreshSeasonPoints(weekOpts).catch((err: unknown) => console.error('season points failed', err));
+            /* The rivals' earlier seasons, once, from the stored ledger: one row read on every later run. */
+            await new ManagerIntelService(env.DB).ensureRivalHistory(selected.id).catch((err: unknown) => console.error('rival history failed', err));
           }
         } catch (err) {
           console.error('league read failed', err);

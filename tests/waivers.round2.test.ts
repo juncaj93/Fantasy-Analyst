@@ -318,10 +318,10 @@ describe('stashes and season-ending injuries', () => {
 
 /*
  * The live board of 14 October 2026: every bench player but Will Shipley was
- * protected (two drafted receivers as market holds, two elite backs' handcuffs),
- * and both "Do this" moves were handed Shipley.
+ * protected (two drafted receivers kept as high picks, two elite backs'
+ * handcuffs), and both "Do this" moves were handed Shipley.
  */
-describe('one open drop and two holes (14 October)', () => {
+describe('two claims, one eligible drop (14 October)', () => {
   const protections = new Map([
     ['BRobinson', { kind: 'handcuff' as const, note: 'backs up Bijan' }],
     ['EJohnson', { kind: 'handcuff' as const, note: 'backs up Walker' }],
@@ -329,29 +329,70 @@ describe('one open drop and two holes (14 October)', () => {
     ['Egbuka', { kind: 'market_hold' as const, note: 'drafted around pick 61' }],
   ]);
   const plan = planWaiverTiers(request({ candidates: [LOVE, ANDREWS], protections }));
+  const all = () => [...plan.doThese, ...plan.consider, ...plan.watch];
 
-  it('still gives each "Do this" move its own drop', () => {
-    const drops = plan.doThese.map((m) => m.drop?.name);
+  it('gives the one eligible drop to one "Do this" move only', () => {
+    expect(plan.doThese.map((m) => m.name)).toEqual(['Love']);
+    expect(plan.doThese[0]!.drop?.name).toBe('Shipley');
+    expect(all().filter((m) => m.drop?.name === 'Shipley')).toHaveLength(1);
+  });
+
+  it('never chooses a protected high pick, a handcuff or Kenneth Walker as a drop', () => {
+    for (const m of all()) {
+      expect(['McConkey', 'Egbuka', 'BRobinson', 'EJohnson', 'Walker']).not.toContain(m.drop?.name);
+    }
+  });
+
+  it('says when no honest second drop exists: Worth considering, "you need a spot first", with the cheapest options', () => {
+    const andrews = plan.consider.find((m) => m.name === 'Andrews');
+    expect(andrews).toBeDefined();
+    expect(andrews!.drop).toBeNull();
+    expect(andrews!.needsSpot!.length).toBeGreaterThanOrEqual(2);
+    expect(andrews!.needsSpot!.length).toBeLessThanOrEqual(3);
+    for (const c of andrews!.needsSpot!) expect(c.reason.length).toBeGreaterThan(0);
+    expect(andrews!.needsSpot!.map((c) => c.name)).not.toContain('Shipley');
+    expect(plan.watch.map((m) => m.name)).not.toContain('Andrews');
+  });
+});
+
+describe('the IR option', () => {
+  const protections = new Map([
+    ['BRobinson', { kind: 'handcuff' as const, note: 'backs up Bijan' }],
+    ['EJohnson', { kind: 'handcuff' as const, note: 'backs up Walker' }],
+    ['McConkey', { kind: 'market_hold' as const, note: 'drafted around pick 41' }],
+    ['Egbuka', { kind: 'market_hold' as const, note: 'drafted around pick 61' }],
+  ]);
+
+  it('moves an Out player to an open IR slot instead of cutting him', () => {
+    const plan = planWaiverTiers(request({ candidates: [LOVE], protections, reserveEligible: new Set(['Shipley']), openReserve: 2 }));
+    expect(plan.doThese[0]!.drop).toMatchObject({ name: 'Shipley', viaReserve: true });
+    expect(plan.doThese[0]!.drop!.reason).toMatch(/open IR slot holds him, so no drop/);
+  });
+
+  it('uses the IR move for one hole and still says the second needs a spot when nothing honest is left', () => {
+    const plan = planWaiverTiers(request({ candidates: [LOVE, ANDREWS], protections, reserveEligible: new Set(['Shipley']), openReserve: 2 }));
+    expect(plan.doThese).toHaveLength(1);
+    expect(plan.doThese[0]!.drop?.viaReserve).toBe(true);
+    expect(plan.consider.find((m) => m.name === 'Andrews')?.needsSpot?.length).toBeGreaterThan(0);
+  });
+
+  it('frees two spots with two IR moves when the league has two open slots', () => {
+    const roster = alexRoster().map((x) => (x.playerId === 'Egbuka' ? { ...x, designation: 'ir', weekly: [0, 0, 0] } : x));
+    const plan = planWaiverTiers(request({ roster, candidates: [LOVE, ANDREWS], protections, reserveEligible: new Set(['Shipley', 'Egbuka']), openReserve: 2 }));
     expect(plan.doThese.map((m) => m.name).sort()).toEqual(['Andrews', 'Love']);
-    expect(new Set(drops).size).toBe(2);
+    expect(plan.doThese.every((m) => m.drop?.viaReserve)).toBe(true);
+    expect(new Set(plan.doThese.map((m) => m.drop?.name)).size).toBe(2);
   });
 
-  it('reaches for a market hold before an elite back’s handcuff', () => {
-    const drops = plan.doThese.map((m) => m.drop?.name);
-    expect(drops).toContain('Shipley');
-    expect(drops.some((d) => d === 'McConkey' || d === 'Egbuka')).toBe(true);
-    expect(drops).not.toContain('BRobinson');
-    expect(drops).not.toContain('EJohnson');
-  });
-
-  it('never offers Kenneth Walker as a drop for a quarterback', () => {
-    for (const m of [...plan.doThese, ...plan.consider, ...plan.watch]) expect(m.drop?.name).not.toBe('Walker');
-  });
-
-  it('prefers an open drop unless the protected one keeps clearly more points', () => {
-    const near = assignDrops([{ id: 'A', priority: 1, options: [{ dropId: 'open', gain: 5, score: 2, held: 0 }, { dropId: 'cuff', gain: 8, score: 8, held: 2 }] }], 0);
-    expect(near.get('A')).toBe(0);
-    const far = assignDrops([{ id: 'A', priority: 1, options: [{ dropId: 'open', gain: 1, score: 2, held: 0 }, { dropId: 'hold', gain: 9, score: 8, held: 1 }] }], 0);
-    expect(far.get('A')).toBe(1);
+  it('counts IR moves against the open slots in the joint assignment', () => {
+    const picks = assignDrops(
+      [
+        { id: 'A', priority: 1, options: [{ dropId: 'x', gain: 5, score: -1, reserve: true }] },
+        { id: 'B', priority: 1, options: [{ dropId: 'y', gain: 5, score: -1, reserve: true }] },
+      ],
+      0,
+      1,
+    );
+    expect(picks.size).toBe(1);
   });
 });

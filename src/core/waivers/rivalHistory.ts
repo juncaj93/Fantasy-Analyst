@@ -416,6 +416,11 @@ export function historyFromTransactions(
   return { claims, adds };
 }
 
+/** When the rival rows were last written for a league: one row, read to skip the work. */
+export function rivalHistoryMarkerKey(leagueId: string): string {
+  return `waivers.rivalHistory.${leagueId}.writtenAt`;
+}
+
 /** The settings key for one manager's season. */
 export function rivalHistoryKey(leagueId: string, season: string, userId: string): string {
   return `waivers.rivalHistory.${leagueId}.${season}.${userId}`;

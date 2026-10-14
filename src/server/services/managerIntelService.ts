@@ -73,7 +73,7 @@ import {
 import { buildManagerDraftProfile, buildRoomProfile, type HistoricalPick } from '../../core/managers/draftProfile.ts';
 import { buildTradeProfile, type TradeEvent } from '../../core/managers/tradeProfile.ts';
 import { buildBiddingProfiles } from '../../core/managers/biddingProfile.ts';
-import { buildBudgetState } from '../../core/faab/budget.ts';
+import { buildBudgetState, readBudgetRule } from '../../core/faab/budget.ts';
 import { isTransactionWeekSettled } from '../../core/league/transactionSettling.ts';
 import { ManagerLedgerRepo } from '../repos/managerLedger.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
@@ -83,7 +83,7 @@ import { ManagerProfileRepo } from '../repos/managerProfiles.ts';
 import { readFinalWeek } from './leagueStrategyService.ts';
 import type { Database } from '../db.ts';
 import { SettingsRepo } from '../repos/settings.ts';
-import { buildRivalSeasonAggregates, historyFromTransactions, rivalHistoryKey } from '../../core/waivers/rivalHistory.ts';
+import { buildRivalSeasonAggregates, historyFromTransactions, rivalHistoryKey, rivalHistoryMarkerKey } from '../../core/waivers/rivalHistory.ts';
 import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
 import type { SleeperTransaction } from '../../core/sleeper/types.ts';
 
@@ -789,9 +789,9 @@ export class ManagerIntelService {
      * points (one row) say who chased last week's scorers; earlier seasons
      * have no points stored and say nothing about it.
      */
-    await this.writeRivalHistory({ leagueId, storedTransactions, identityBySeason, seasonsByUser, positionOf, budgetTotal: budgetState.rule.total, latestSeason }).catch(
-      (err: unknown) => console.error('rival history failed', err),
-    );
+    await this.writeRivalHistory({ leagueId, storedTransactions, identityBySeason, seasonsByUser, positionOf, budgetTotal: budgetState.rule.total, latestSeason })
+      .then(() => this.settings.set(rivalHistoryMarkerKey(leagueId), new Date().toISOString()))
+      .catch((err: unknown) => console.error('rival history failed', err));
 
     const tradeInput = {
       transactions: ledgerTransactions,
@@ -848,6 +848,49 @@ export class ManagerIntelService {
       seasons,
       rosters: rosters.length,
     };
+  }
+
+  /**
+   * The rival rows, once, without waiting for the Wednesday derive.
+   *
+   * Run from the three-hourly league read. One settings row says whether the
+   * rows were ever written; when they were, this is that one read and nothing
+   * else. When they were not (a fresh deploy), it reads the stored ledger once
+   * (this league's transactions, roster identities and the player positions,
+   * about 4,500 rows on this league), writes one row per manager per season,
+   * and sets the marker. Never a Sleeper request.
+   */
+  async ensureRivalHistory(leagueId: string): Promise<{ wrote: number; skipped: string | null }> {
+    if (await this.settings.get<string | null>(rivalHistoryMarkerKey(leagueId), null)) return { wrote: 0, skipped: 'already written' };
+    const league = await this.leagues.getLeague(leagueId);
+    if (!league) return { wrote: 0, skipped: 'league not found' };
+    const [identities, storedTransactions, positions] = await Promise.all([
+      this.ledger.rosterIdentities(leagueId),
+      this.transactions.listBySeason(leagueId),
+      this.positionIndex(),
+    ]);
+    const identityBySeason = new Map<string, Map<number, string>>();
+    for (const season of new Set(identities.map((i) => i.season))) identityBySeason.set(season, ManagerLedgerRepo.identityMapFor(identities, season));
+    const seasonsByUser = new Map<string, string[]>();
+    for (const identity of identities) {
+      if (!identity.userId) continue;
+      const list = seasonsByUser.get(identity.userId) ?? [];
+      if (!list.includes(identity.season)) list.push(identity.season);
+      seasonsByUser.set(identity.userId, list);
+    }
+    const seasons = [...new Set(storedTransactions.map((t) => t.season))].sort();
+    const wrote = await this.writeRivalHistory({
+      leagueId,
+      storedTransactions,
+      identityBySeason,
+      seasonsByUser,
+      positionOf: (id) => positions.get(id) ?? null,
+      budgetTotal: readBudgetRule(league.leagueSettings).total,
+      latestSeason: seasons.at(-1) ?? league.season,
+    });
+    await this.settings.set(rivalHistoryMarkerKey(leagueId), new Date().toISOString());
+    console.log(`rival history: ${wrote} manager-season rows from ${storedTransactions.length} stored transactions, seasons ${seasons.join(', ')}`);
+    return { wrote, skipped: null };
   }
 
   private async writeRivalHistory(args: {
