@@ -528,3 +528,58 @@ describe('a dead spot is the first drop (Tre’ Harris)', () => {
     expect(plan.doThese.find((m) => m.name === 'Andrews')!.bestDrops![0]!.weekOneLoss).toEqual({ points: 0, replacedBy: null, replacementPoints: null });
   });
 });
+
+/*
+ * The Probe of 14 October (build 86edde9), Alex's real numbers: counting
+ * Will Shipley (Out) at his healthy number put him in the week 6 lineup and
+ * pushed Braelon Allen out, so Love's drop was Allen, and Tre' Harris (30.0
+ * pts, 2.6 in week 5, a week 5 pickup) was missing from the list.
+ */
+describe('Alex’s real week 6, from the Probe', () => {
+  const roster = () =>
+    alexRoster().map((x) => {
+      if (x.playerId === 'Harris') return { ...x, rate: 6.3, designation: 'questionable', byeWeek: null, weekly: [1, 1, 1] };
+      if (x.playerId === 'Allen') return { ...x, rate: 6.5 };
+      if (x.playerId === 'McConkey') return { ...x, rate: 7.7, designation: 'questionable', byeWeek: null, weekly: [0.5, 1, 1] };
+      if (x.playerId === 'Egbuka') return { ...x, rate: 8.5 };
+      if (x.playerId === 'Shipley') return { ...x, weekly: [0, 0, 1] };
+      if (x.playerId === 'BRobinson') return { ...x, rate: 4.8 };
+      if (x.playerId === 'EJohnson') return { ...x, rate: 3.8 };
+      return x;
+    });
+  const signals = () => {
+    const m = alexSignals();
+    m.set('Harris', sig('Harris', 'WR', { seasonPoints: 30, recent: [2.6, 7.5, 10.6], projection: 3.95, inLineup: true, heldWeeks: 1, injured: true, healthyRate: 6.3 }));
+    m.set('EJohnson', sig('EJohnson', 'RB', { seasonPoints: 15.5, recent: [0, 1.5, 1.7], projection: 3.81, heldWeeks: 4, handcuffOf: 'Kenneth Walker' }));
+    m.set('BRobinson', sig('BRobinson', 'RB', { seasonPoints: 48.6, recent: [1.6, 25.2, 11], projection: 4.82, heldWeeks: 2, handcuffOf: 'Bijan Robinson' }));
+    m.set('Egbuka', sig('Egbuka', 'WR', { seasonPoints: 42.8, recent: [14.2, 2.3, 8.7], projection: 8.52, drafted: true, draftRound: 6, weeksSinceDraft: 5 }));
+    m.set('McConkey', sig('McConkey', 'WR', { seasonPoints: 30.3, recent: [3, 8, 9], projection: 6, drafted: true, draftRound: 4, weeksSinceDraft: 5, injured: true, healthyRate: 7.7 }));
+    return m;
+  };
+  const protections = new Map([
+    ['BRobinson', { kind: 'handcuff' as const, note: 'backs up Bijan' }],
+    ['EJohnson', { kind: 'handcuff' as const, note: 'backs up Walker' }],
+    ['McConkey', { kind: 'draft_capital' as const, note: 'round 4 pick' }],
+    ['Egbuka', { kind: 'draft_capital' as const, note: 'round 6 pick' }],
+    ['Walker', { kind: 'draft_capital' as const, note: 'round 2 pick' }],
+  ]);
+  const plan = planWaiverTiers(
+    request({ roster: roster(), dropSignals: signals(), candidates: [LOVE, ANDREWS], protections, reserveEligible: new Set(['Shipley']), openReserve: 1 }),
+  );
+
+  it('keeps Allen (a week 6 starter on the app’s numbers) and leaves Shipley (Out) out of the lineup', () => {
+    expect(plan.dropScores.find((d) => d.name === 'Allen')!.protectedAs).toBe('in your lineup');
+    expect(plan.dropScores.find((d) => d.name === 'Shipley')!.protectedAs).not.toBe('in your lineup');
+    for (const m of [...plan.doThese, ...plan.consider, ...plan.watch]) expect(m.drop?.name).not.toBe('Allen');
+  });
+
+  it('uses the IR move for one hole and Harris for the other, Harris first on the list, then the handcuffs', () => {
+    const spots = plan.doThese.map((m) => (m.drop?.viaReserve ? `IR:${m.drop.name}` : (m.drop?.name ?? 'none'))).sort();
+    expect(spots).toEqual(['Harris', 'IR:Shipley']);
+    const harrisMove = plan.doThese.find((m) => m.drop?.name === 'Harris')!;
+    const names = harrisMove.bestDrops!.map((c) => c.name);
+    expect(names[0]).toBe('Harris');
+    expect(names).not.toContain('Egbuka');
+    expect(harrisMove.bestDrops![0]!.weekOneLoss!.points).toBe(0);
+  });
+});

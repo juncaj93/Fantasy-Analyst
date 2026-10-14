@@ -418,8 +418,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * "In your lineup" means the app's own best legal lineup for the coming
    * week, not Sleeper's slots: Sleeper keeps last week's lineup until it is
    * reset (Alex, 14 October: Tre' Harris sat in a week 5 slot). Same solver
-   * as the planner; an injured player or one on bye counts at his own
-   * number, so a week off never takes a real starter out of it.
+   * and the same week numbers as the planner, except that a player on bye
+   * counts at his own number. A player out this week is not in it: he goes
+   * to IR when a slot is open.
    */
   const appLineup = comingWeekLineup(valued, slots, weeks[0]);
   const signals =
@@ -766,8 +767,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         const p = valued.find((x) => x.playerId === id);
         const sig = signals?.get(id);
         if (!p || p.onReserve || excluded.has(p.position) || (sig?.inLineup && !isDeadSpot(sig))) return null;
-        /* Dead spots first, then the rest by score, high draft capital last. */
-        const band = sig && isDeadSpot(sig) ? 0 : request.protections.get(id)?.kind === 'draft_capital' ? 2 : 1;
+        /* Dead spots first, then unprotected players by score, then handcuffs and holds, high draft capital last. */
+        const kind = request.protections.get(id)?.kind;
+        const band = sig && isDeadSpot(sig) ? 0 : !kind ? 1 : kind === 'draft_capital' ? 3 : 2;
         return { ...spotChoice(id), band, score: r.score };
       })
       .filter((x): x is NonNullable<typeof x> => x != null)
@@ -964,15 +966,20 @@ export function assignDrops(
 }
 
 /** A player's points for window week `k` before availability: that week's own number, else his rate. */
-/** The app's best legal lineup for the coming week, injured and bye-week players at their own number. */
+/** The app's best legal lineup for the coming week, on the planner's numbers; bye-week players at their own number. */
 function comingWeekLineup(players: readonly TierPlayer[], slots: readonly LineupSlotSpec[], week: number | undefined): Set<string> {
   const pool: LineupCandidate[] = players
     .filter((p) => !p.onReserve)
     .map((p) => ({
       id: p.playerId,
       position: p.position,
-      /* A bye or an injury is a week off, not a lost job: he counts at his own number. */
-      value: p.byeWeek != null && p.byeWeek === week ? (p.rate ?? 0) : ['healthy', 'unknown', 'active'].includes(p.designation) ? pointsIn(p, 0) * (p.weekly[0] ?? 1) : (p.rate ?? 0),
+      /*
+       * The planner's own number for the week, so a player out this week is
+       * not in it (Probe of 14 October: counting Will Shipley, Out, at his
+       * healthy number pushed Braelon Allen out of it). The one exception is
+       * a bye: a week off, not a lost job, so he counts at his own number.
+       */
+      value: p.byeWeek != null && p.byeWeek === week ? (p.rate ?? 0) : pointsIn(p, 0) * (p.weekly[0] ?? 1),
     }));
   const result = bestLineup(slots, pool);
   return new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
