@@ -1,19 +1,30 @@
 /**
- * The trade engine's "priced" still means a real market number, full stop.
+ * The trade ideas value a player on the week's number, and a partial market is
+ * never a price.
  *
- * PR #285 defined it: a player is priced for a trade when a betting market has
- * produced a number for his week, and the Rotowire and preseason tiers never
- * enter a trade. On 24 September 2026 the display and lineup paths learned to
- * treat a *partial* market — some of a position's lines posted, some not — as
- * not good enough to print, and to fall back to the published figure instead.
+ * PR #285 defined "priced" for trades as "a betting market has produced a
+ * number for his week", and from 24 September 2026 this file held that line
+ * even for a *partial* market (some of a position's lines posted), on the
+ * argument that the display path's completeness rule should stop at the Team
+ * screen.
  *
- * That change must stop at the display and the Team screen's ranking. These
- * hold the line from the trade side:
+ * Changed 15 October 2026, by the owner's decision: a partial line counted as a
+ * full price is the same data bug the Team and Compare screens had fixed (a
+ * Vegas fragment showing a player at 1.6 points), and it emptied the ideas board
+ * every Tuesday and Wednesday. On the 14 October production board it priced
+ * McConkey, Egbuka, Braelon Allen and Pierce at about two points each, and 62 of
+ * 108 checked ideas then failed the value band. The ideas now read the same
+ * per-week number Waivers and Compare do (`decisionPoints`, through
+ * `weekValueOf` in `rosterUtility.ts`):
  *
- *   1. a partial market is still priced, and still valued on its own score;
- *   2. no published figure can reach a trade value, because the trade engine
- *      has no way to be handed one;
- *   3. nothing under `core/trades/` reads the completeness rule at all.
+ *   1. a complete market is the week, as before;
+ *   2. a partial market with Sleeper's published week is valued on that week,
+ *      with the same capped nudges;
+ *   3. a partial market with nothing published is unpriced, exactly like no
+ *      market at all;
+ *   4. the published figure reaches the trade engine only as a plain map and
+ *      only through `decisionPoints`: nothing under `core/trades/` reads the
+ *      completeness rule or the published feed itself.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,7 +32,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { evaluatePlayer, type StartSitInput } from '../src/core/startsit/engine.ts';
 import { marketIsComplete, weeklyProjection } from '../src/core/startsit/projection.ts';
-import { buildRosterViews, isPriced } from '../src/core/trades/rosterUtility.ts';
+import { buildRosterViews, weekValueOf } from '../src/core/trades/rosterUtility.ts';
+import { decisionPoints } from '../src/core/startsit/decisionPoints.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { MarketKey, PlayerProp } from '../src/core/vegas/types.ts';
 import { player } from './helpers/players.ts';
@@ -74,36 +86,47 @@ describe('a partial market in a trade', () => {
     expect(weeklyProjection(evaluation, 9.8).source).toBe('sleeper');
   });
 
-  it('is still priced for a trade', () => {
-    expect(isPriced(evaluation)).toBe(true);
-    expect(isPriced(evaluatePlayer(UNPRICED, PROFILE))).toBe(false);
+  it('is not a price on its own, and is valued on Sleeper’s week when there is one', () => {
+    expect(weekValueOf(evaluation)).toBeNull();
+    const withWeek = weekValueOf(evaluation, new Map([['stevenson', 9.8]]));
+    expect(withWeek).not.toBeNull();
+    expect(withWeek).toBe(decisionPoints(evaluation, new Map([['stevenson', 9.8]]))!.points);
+    expect(weekValueOf(evaluatePlayer(UNPRICED, PROFILE), new Map([['nobody', 7]]))).toBeNull();
   });
 
-  it('is valued on his own market-based score, never on a published figure', () => {
-    const pool = new Map<string, StartSitInput>([
-      ['qb', pricedCandidate('qb', 'Passer', 'QB', 18, { now: NOW })],
-      ['rb1', pricedCandidate('rb1', 'Back One', 'RB', 14, { now: NOW })],
-      ['wr', pricedCandidate('wr', 'Receiver', 'WR', 11, { now: NOW })],
-      ['te', pricedCandidate('te', 'Tight End', 'TE', 8, { now: NOW })],
-      ['stevenson', STEVENSON],
-      ['nobody', UNPRICED],
-    ]);
-    const views = buildRosterViews({
+  const pool = new Map<string, StartSitInput>([
+    ['qb', pricedCandidate('qb', 'Passer', 'QB', 18, { now: NOW })],
+    ['rb1', pricedCandidate('rb1', 'Back One', 'RB', 14, { now: NOW })],
+    ['wr', pricedCandidate('wr', 'Receiver', 'WR', 11, { now: NOW })],
+    ['te', pricedCandidate('te', 'Tight End', 'TE', 8, { now: NOW })],
+    ['stevenson', STEVENSON],
+    ['nobody', UNPRICED],
+  ]);
+  const view = (published?: Map<string, number>) =>
+    buildRosterViews({
       rosters: [{ key: 'mine', playerIds: [...pool.keys()] }],
       pool,
       shape: SHAPE,
       profile: PROFILE,
-    });
-    const view = views.get('mine')!;
-    expect(view.valueOf.get('stevenson')).toBe(evaluation.score);
-    expect(view.unpriced.has('stevenson')).toBe(false);
-    /*
-     * No market and, since 13 October 2026, no Questionable charge either: the
-     * engine has nothing to score him on, exactly like a healthy unquoted back.
-     */
-    expect(view.unscored.has('nobody')).toBe(true);
-    expect(view.unpriced.has('nobody')).toBe(false);
-    expect(view.valueOf.has('nobody')).toBe(false);
+      ...(published ? { published } : {}),
+    }).get('mine')!;
+
+  it('leaves a partial market with nothing published out, as unpriced', () => {
+    const v = view();
+    expect(v.valueOf.has('stevenson')).toBe(false);
+    expect(v.unpriced.has('stevenson')).toBe(true);
+    /* A complete market is the week, unchanged. */
+    expect(v.valueOf.get('rb1')).toBe(decisionPoints(evaluatePlayer(pool.get('rb1')!, PROFILE))!.points);
+    /* No market and no charge: nothing to score him on at all. */
+    expect(v.unscored.has('nobody')).toBe(true);
+    expect(v.valueOf.has('nobody')).toBe(false);
+  });
+
+  it('values a partial market on Sleeper’s published week, never on the fragment', () => {
+    const v = view(new Map([['stevenson', 9.8]]));
+    expect(v.valueOf.get('stevenson')).toBe(decisionPoints(evaluation, new Map([['stevenson', 9.8]]))!.points);
+    expect(v.valueOf.get('stevenson')).not.toBe(evaluation.score);
+    expect(v.unpriced.has('stevenson')).toBe(false);
   });
 });
 
@@ -116,13 +139,14 @@ describe('the trade engine cannot reach the completeness rule', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('takes no published figure: buildRosterViews has no such argument', () => {
-    /*
-     * A compile-time fact checked at run time: the options object is the whole
-     * of what a trade valuation can be told, and a published map is not in it.
-     */
+  it('takes the published week only as a plain map, read only through decisionPoints', () => {
     const source = readFileSync(join(__dirname, '..', 'src', 'core', 'trades', 'rosterUtility.ts'), 'utf8');
-    const signature = source.slice(source.indexOf('export function buildRosterViews('), source.indexOf('): Map<string, RosterView>'));
-    expect(signature).not.toMatch(/published/);
+    expect(source).toMatch(/import \{ decisionPoints \} from '\.\.\/startsit\/decisionPoints\.ts'/);
+    /* No import of the published feed itself anywhere under core/trades. */
+    const dir = join(__dirname, '..', 'src', 'core', 'trades');
+    const feed = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) => /from '[^']*(sleeperProjection|weeklyProjections)[^']*'/.test(readFileSync(join(dir, f), 'utf8')));
+    expect(feed).toEqual([]);
   });
 });

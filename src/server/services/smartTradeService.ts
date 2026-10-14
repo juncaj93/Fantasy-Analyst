@@ -47,6 +47,24 @@ import { startSitInputsFor } from './startSitInputs.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
+import type { SleeperClient } from '../../core/sleeper/client.ts';
+import type { NflState } from '../../core/sleeper/phase.ts';
+import { resolveWeek } from '../../core/matchup/build.ts';
+import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { SleeperProjectionService } from './sleeperProjectionService.ts';
+
+/**
+ * The client handed to the published-week read, which never uses it.
+ *
+ * `publishedFor` reads stored rows only. Smart Trades still holds no Sleeper
+ * client: anything that tried to call through this one would throw, and
+ * `tests/trades.smartService.test.ts` would see the call.
+ */
+const NO_SLEEPER = new Proxy({} as SleeperClient, {
+  get: () => () => {
+    throw new Error('Smart Trades must not call Sleeper');
+  },
+});
 
 /**
  * The board, plus the league it is about.
@@ -240,10 +258,40 @@ export class SmartTradeService {
       rosters.some((r) => r.isMine) &&
       rosters.some((r) => !r.isMine && r.playerIds.length > 0);
     const everyPlayerId = wanted ? [...new Set(rosters.flatMap((r) => r.playerIds))] : [];
-    const inputs = await startSitInputsFor(this.db, everyPlayerId).catch((err): StartSitInput[] => {
-      warnings.push(`player inputs could not be read: ${String(err)}`);
-      return [];
-    });
+    const [inputs, nflState] = await Promise.all([
+      startSitInputsFor(this.db, everyPlayerId).catch((err): StartSitInput[] => {
+        warnings.push(`player inputs could not be read: ${String(err)}`);
+        return [];
+      }),
+      wanted ? new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    /*
+     * Sleeper's published week for every rostered player, read by key.
+     *
+     * The number a player with no complete betting market is valued on, the
+     * same one Waivers, Compare and the Team card use: a partial market is
+     * never a price (`weekValueOf` in `rosterUtility.ts`). One keyed read of
+     * stored rows; Sleeper is not called. A failure leaves complete markets
+     * only, which is the safe reading, not the old partial one.
+     */
+    const positions = new Map(inputs.map((i) => [i.player.id, i.player.position ?? null] as const));
+    const published =
+      inputs.length === 0
+        ? new Map<string, number>()
+        : await new SleeperProjectionService(this.db, NO_SLEEPER)
+            .publishedFor({
+              season: league.season,
+              week: resolveWeek(null, nflState?.week ?? null, nflState?.seasonType ?? null),
+              playerIds: inputs.map((i) => i.player.id),
+              profile,
+              positionOf: (id) => positions.get(id) ?? null,
+              narrow: true,
+            })
+            .catch((err): Map<string, number> => {
+              warnings.push(`Sleeper's published week could not be read: ${String(err)}`);
+              return new Map();
+            });
 
     /*
      * The buy-low and sell-high reads, built once for the whole league.
@@ -282,6 +330,7 @@ export class SmartTradeService {
           isMine: r.isMine,
         })),
         inputs,
+        published,
         history,
         limit: opts.limit,
         warnings,

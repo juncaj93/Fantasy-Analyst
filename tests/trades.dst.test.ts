@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { candidate, defence } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, defence } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import {
   buildRosterViews,

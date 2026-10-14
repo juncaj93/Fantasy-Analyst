@@ -34,14 +34,7 @@ import type { PlayerProp } from '../src/core/vegas/types.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { player } from './helpers/players.ts';
 import { createTestDb } from './helpers/db.ts';
-import { lineForMean } from '../src/core/startsit/propConversion.ts';
-import { SCORING_RULES } from '../src/core/startsit/scoringRules.ts';
-/** A line whose converted average is exactly `points` (see `lineForMean`). */
-function fixtureLine(position: string, points: number): number {
-  return position === 'QB'
-    ? lineForMean('pass_yards', points / 0.04, SCORING_RULES.conversion)
-    : lineForMean('receiving_yards', points * 10, SCORING_RULES.conversion);
-}
+import { pricedCandidate } from './helpers/startsit.ts';
 
 
 const LEAGUE = 'lifecycle-league';
@@ -162,18 +155,8 @@ async function seedWorld(db: NodeSqliteDatabase): Promise<void> {
     ALL.map(([id, position]) => player({ id, fullName: id.toUpperCase(), position, team: 'NE' })),
   );
 
-  const props: PlayerProp[] = ALL.map(([id, position, points]) => ({
-    playerId: id,
-    sourcePlayerName: id.toUpperCase(),
-    market: position === 'QB' ? 'pass_yards' : 'receiving_yards',
-    line: fixtureLine(position, points),
-    overPrice: -110,
-    underPrice: -110,
-    bookCount: 3,
-    consensusMethod: 'median',
-    books: ['a', 'b', 'c'],
-    impliedProbability: null,
-  }));
+    /* Each player's whole board (a single line is a partial market, never a price). */
+  const props: PlayerProp[] = ALL.flatMap(([id, position, points]) => pricedCandidate(id, id.toUpperCase(), position, points).props);
 
   const repo = new PropsRepo(db);
   /*

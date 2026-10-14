@@ -929,6 +929,15 @@ describe('no recommendation engine can reach the fallback', () => {
          * nothing about a lineup.
          */
         'server/services/comparePool.ts',
+        /*
+         * The Trades ideas (15 October 2026, the owner's decision). A partial
+         * betting line counted as a full price emptied the board every Tuesday
+         * and Wednesday, the same bug Team and Compare had fixed. The ideas now
+         * value a player on `decisionPoints`, like Waivers and Compare: the
+         * figure arrives as a plain map, read by key from stored rows (never
+         * from Sleeper), and a complete market always outranks it.
+         */
+        'server/services/smartTradeService.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );

@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { candidate, signalWithNet } from './helpers/startsit.ts';
+import { pricedCandidate as candidate, signalWithNet } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildRosterViews, isPriced, medianByRank, needFor, type RosterView } from '../src/core/trades/rosterUtility.ts';
 import { UNPRICED_SHARE_LIMIT, findBilateralTrades, pricingCoverage, unpricedLine } from '../src/core/trades/bilateral.ts';

@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { candidate } from './helpers/startsit.ts';
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildRosterViews, medianByRank, needFor, positionSlots, type RosterView } from '../src/core/trades/rosterUtility.ts';
 import {
