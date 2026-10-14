@@ -371,7 +371,9 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
     groups.push({
       index: rank,
       drop: m.drop && !m.drop.viaReserve ? { playerId: m.drop.playerId, name: m.drop.name } : null,
-      headline: m.drop?.viaReserve
+      headline: m.needsSpot
+        ? `Pick your drop: ${m.needsSpot.map((c) => `${c.name} (${c.reason})`).join('; ')}`
+        : m.drop?.viaReserve
         ? `Move ${m.drop.name} to IR, then claim ${m.name}`
         : m.drop
           ? `Drop ${m.drop.name}`

@@ -95,9 +95,11 @@ drop score. A protected player (a high pick kept as a market hold, an elite
 back's handcuff) is never cut. An injured player this league's IR slots take
 (IR; Out, Doubtful or suspended where `reserve_allow_*` says so) moves to an
 open IR slot instead: the row reads `Shipley to IR`, the card `Move Will Shipley
-to IR first: this one needs no drop`. When no honest drop is left, a hole is
-Worth considering with `You need a spot first. Lowest-cost options:` and the
-three cheapest bench players by drop score, each with its reason; Alex picks.
+to IR first: this one needs no drop`. When no honest drop is left, a move
+that fills a real starting hole stays "Do this" with `Pick your drop:` and the
+three cheapest bench players by drop score, each with its reason, high draft
+picks last; Alex picks (the row reads `you pick the spot`). Worth considering
+keeps `You need a spot first.` for partial cases and depth.
 A drop also has to pass the over-replacement rule: nobody further above a free
 agent at his position than the add is at his, because points are not
 comparable across positions (waiver@14; on 14 October the live board gave both

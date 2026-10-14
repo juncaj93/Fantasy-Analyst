@@ -687,9 +687,10 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     if (holder && holder !== m.name && !m.competesWith.includes(holder)) m.competesWith.push(holder);
   }
   /*
-   * No honest drop left. A hole stays a hole: it moves to Worth considering
-   * with the cheapest few players to free a spot with, and Alex picks. Any
-   * other move goes to the Watch list.
+   * No honest drop left. A move that fills a real starting hole stays "Do
+   * this" with "Pick your drop:" and the cheapest few players to free a spot
+   * with, high draft picks last; Alex picks (Alex, 14 October: Andrews for
+   * LaPorta's bye). Any other move goes to the Watch list.
    */
   const spotCandidates = (taken: ReadonlySet<string>) =>
     [...readings.entries()]
@@ -710,11 +711,6 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       .map(({ playerId, name, reason }) => ({ playerId, name, reason }));
   for (const m of unplaced) {
     if (signals && isHole(m)) {
-      if (m.tier === 'do_this') {
-        doThese.splice(doThese.indexOf(m), 1);
-        m.tier = 'consider';
-        consider.unshift(m);
-      }
       m.drop = null;
       m.dropCost = null;
       m.needsSpot = spotCandidates(new Set(used.keys()));

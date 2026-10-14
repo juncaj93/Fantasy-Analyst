@@ -354,8 +354,8 @@ describe('two claims, one eligible drop (14 October)', () => {
   const all = () => [...plan.doThese, ...plan.consider, ...plan.watch];
 
   it('gives the one eligible drop to one "Do this" move only', () => {
-    expect(plan.doThese.map((m) => m.name)).toEqual(['Love']);
-    expect(plan.doThese[0]!.drop?.name).toBe('Scrub');
+    expect(plan.doThese.find((m) => m.name === 'Love')!.drop?.name).toBe('Scrub');
+    expect(plan.doThese.filter((m) => m.drop?.name === 'Scrub')).toHaveLength(1);
   });
 
   it('never names the same drop on two rows anywhere: Do this, Worth considering or the Watch list', () => {
@@ -376,15 +376,16 @@ describe('two claims, one eligible drop (14 October)', () => {
     }
   });
 
-  it('says when no honest second drop exists: Worth considering, "you need a spot first", with the cheapest options', () => {
-    const andrews = plan.consider.find((m) => m.name === 'Andrews');
+  it('keeps a real hole fill with no free spot at "Do this", with "pick your drop" and the cheapest options', () => {
+    const andrews = plan.doThese.find((m) => m.name === 'Andrews');
+    expect(andrews!.tier).toBe('do_this');
     expect(andrews!.drop).toBeNull();
     expect(andrews!.needsSpot!.length).toBeGreaterThanOrEqual(2);
     expect(andrews!.needsSpot!.length).toBeLessThanOrEqual(3);
     for (const c of andrews!.needsSpot!) expect(c.reason.length).toBeGreaterThan(0);
     /* Draft capital is offered last, after the handcuffs. */
     expect(andrews!.needsSpot![0]!.name).not.toBe('McConkey');
-    expect(plan.watch.map((m) => m.name)).not.toContain('Andrews');
+    expect([...plan.consider, ...plan.watch].map((m) => m.name)).not.toContain('Andrews');
   });
 });
 
@@ -402,11 +403,11 @@ describe('the IR option', () => {
     expect(plan.doThese[0]!.drop!.reason).toMatch(/open IR slot holds him, so no drop/);
   });
 
-  it('uses the IR move for one hole and still says the second needs a spot when nothing honest is left', () => {
+  it('uses the IR move for one hole and asks Alex to pick a drop for the second when nothing honest is left', () => {
     const plan = planWaiverTiers(request({ candidates: [LOVE, ANDREWS], protections, reserveEligible: new Set(['Shipley']), openReserve: 2 }));
-    expect(plan.doThese).toHaveLength(1);
-    expect(plan.doThese[0]!.drop?.viaReserve).toBe(true);
-    expect(plan.consider.find((m) => m.name === 'Andrews')?.needsSpot?.length).toBeGreaterThan(0);
+    expect(plan.doThese.map((m) => m.name).sort()).toEqual(['Andrews', 'Love']);
+    expect(plan.doThese.find((m) => m.name === 'Love')!.drop?.viaReserve).toBe(true);
+    expect(plan.doThese.find((m) => m.name === 'Andrews')!.needsSpot!.length).toBeGreaterThan(0);
   });
 
   it('frees two spots with two IR moves when the league has two open slots', () => {

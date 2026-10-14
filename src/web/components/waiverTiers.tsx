@@ -73,7 +73,9 @@ function PickupLine({ row }: { row: TierRow }) {
         {row.needsSpot
           ? row.tier === 'watch'
             ? 'needs a roster spot'
-            : 'needs a spot first'
+            : row.tier === 'do_this'
+              ? 'you pick the spot'
+              : 'needs a spot first'
           : row.drop?.viaReserve
             ? `${row.drop.name} to IR first`
             : row.drop
@@ -267,7 +269,9 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
             <dd>
               {row.needsSpot
                 ? row.needsSpot.length > 0
-                  ? 'You need a spot first.'
+                  ? row.tier === 'do_this'
+                    ? 'Pick your drop:'
+                    : 'You need a spot first.'
                   : 'Needs a roster spot: every honest spot is taken by the moves above.'
                 : row.drop?.viaReserve
                   ? `Move ${row.drop.name} to IR, then claim ${row.name}. You make both moves in Sleeper.`
@@ -277,7 +281,7 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
               {row.needsSpot && row.needsSpot.length > 0 ? (
                 <span data-testid="tier-detail-needs-spot">
                   {' '}
-                  Lowest-cost options:{' '}
+                  {row.tier === 'do_this' ? '' : 'Lowest-cost options: '}
                   {row.needsSpot.map((c, i) => (
                     <span key={c.playerId}>
                       {i > 0 ? '; ' : ''}
