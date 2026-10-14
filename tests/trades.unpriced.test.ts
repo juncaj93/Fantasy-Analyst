@@ -423,6 +423,16 @@ describe('a lineup change that moves an unpriced player', () => {
     expect(report.offers.every((o) => !o.user.displaced.includes('ghost'))).toBe(true);
   });
 
+  it('an empty board names the unpriced starter holding ideas back (14 October audit)', () => {
+    const report = run({ '1': GHOST['1']!, '2': GHOST['2']!.filter(([id]) => id !== 'rb5' && id !== 'rb3') });
+    expect(report.offers).toHaveLength(0);
+    expect(report.rejections.some((r) => r.reason === 'unpriced_lineup')).toBe(true);
+    expect(report.notes[0]).toMatch(/Your starter GHOST has no betting line yet, so ideas that move your lineup around him wait until the books post one\.$/);
+    // And with nobody unpriced, the note is the plain one.
+    const plain = run({ '1': GHOST['1']!.filter(([id]) => id !== 'ghost'), '2': [['qb2', 'QB', 20], ['wr5', 'WR', 6]] });
+    expect(plain.notes.join(' ')).not.toMatch(/no betting line yet/);
+  });
+
   it('blocks the ladder for the same move, with his name in the sentence', () => {
     const built = buildLadderFor({
       targetId: 'rb4',

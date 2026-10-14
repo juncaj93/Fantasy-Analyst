@@ -163,6 +163,7 @@ describe('a package that helps both sides', () => {
     expect(pkg!.alex.weighted).toBeGreaterThan(BUILDER.minGain);
     expect(pkg!.them.weighted).toBeGreaterThan(BUILDER.minGain);
     expect(pkg!.alex.restOfSeason).toBeGreaterThan(0);
+    expect(pkg!.them.restOfSeason).toBeGreaterThan(0);
   });
 
   it('carries the three numbers: this week, the next three weeks, the playoffs', () => {
@@ -311,6 +312,11 @@ describe('suggestions when Alex marks nobody on their side', () => {
     expect(result.teams[0]!.suggested).not.toContain('ron-rbC');
   });
 
+  it('All teams suggests only players some 1 for 1 could bring back, never a star nobody would trade', () => {
+    const result = buildTradePackages(input({ team: 'all', sell: ['Tony Pollard'] }));
+    for (const t of result.teams) expect(t.suggested).not.toContain('ron-wrA');
+  });
+
   it('All teams shows at most five, at most two per team, ranked by Alex’s gain', () => {
     const result = buildTradePackages(input({ team: 'all', sell: ['Tony Pollard', 'rb4', 'te2'] }));
     expect(result.packages.length).toBeLessThanOrEqual(BUILDER.shownAll);
@@ -369,6 +375,13 @@ describe('shapes and status', () => {
     expect(statusOf({ edge: 0.2, need: true, alex: 10, them: 8 }).status).toBe('maybe');
     expect(statusOf({ edge: 0.4, need: true, alex: 10, them: 8 }).status).toBe('long_shot');
     expect(statusOf({ edge: 0, need: true, alex: 40, them: 2 }).status).toBe('maybe');
+  });
+
+  it('the status sentence agrees with which way the value leans', () => {
+    /* Found by the production replay: "About even on value" beside "they get more value". */
+    expect(statusOf({ edge: -0.49, need: true, alex: 12, them: 10 }).reason).toBe('You give more value, and it fills a need they have.');
+    expect(statusOf({ edge: 0, need: true, alex: 12, them: 10 }).reason).toBe('About even on value, and it fills a need they have.');
+    expect(statusOf({ edge: -0.3, need: false, alex: 12, them: 10 }).reason).toBe('You give more value, though it fills no clear need of theirs.');
   });
 
   it('a pitch for a thin team, and one with no named need', () => {

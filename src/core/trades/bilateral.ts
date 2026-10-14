@@ -812,10 +812,24 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
      * nothing to fix is a different situation from one whose league has nothing
      * to offer, and a reader can act on the second.
      */
+    /*
+     * …and when one of your own starters has no market price, the reason the
+     * board is empty is partly him. Every idea that would move a player into or
+     * out of your lineup around him is refused (`unpriced_lineup`), so on the
+     * 14 October 2026 board one unpriced tight end held back 17 of 108 checked
+     * ideas, and "nothing helps both sides" was not the whole truth.
+     */
+    const heldBack = [...input.me.unpriced]
+      .filter((id) => input.me.starterIds.has(id) && !input.me.ruledOut.has(id))
+      .map((id) => input.me.nameOf.get(id) ?? id)
+      .sort();
+    const base = hasNeed(input.me)
+      ? 'No bilateral trade in this league currently helps both sides enough to be worth proposing.'
+      : 'Your lineup has no meaningful hole to trade for right now.';
     notes.push(
-      hasNeed(input.me)
-        ? 'No bilateral trade in this league currently helps both sides enough to be worth proposing.'
-        : 'Your lineup has no meaningful hole to trade for right now.',
+      heldBack.length > 0 && rejections.some((r) => r.reason === 'unpriced_lineup')
+        ? `${base} ${heldBack.length === 1 ? `Your starter ${heldBack[0]} has` : `Your starters ${heldBack.join(' and ')} have`} no betting line yet, so ideas that move your lineup around ${heldBack.length === 1 ? 'him' : 'them'} wait until the books post one.`
+        : base,
     );
   }
 

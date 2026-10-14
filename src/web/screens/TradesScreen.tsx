@@ -312,6 +312,17 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           {smart.notes[0]}
         </StatusRow>
       ) : null}
+      {/*
+        The ideas are priced on this week's betting lines alone, which are
+        thinnest early in the week (the 14 October audit: 0 of 108 checked
+        ideas passed). Build a trade judges the rest of the season, so an empty
+        board points to it rather than ending the conversation.
+      */}
+      {smart && smart.offers.length === 0 && (smart.league?.id ?? board.league?.id) ? (
+        <div className="faint trade-builder-hint" data-testid="smart-trades-try-builder">
+          Ideas use this week’s betting lines only. Build a trade below uses the rest of the season.
+        </div>
+      ) : null}
 
       {/*
         Who the search could not look at, and why.

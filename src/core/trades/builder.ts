@@ -254,7 +254,8 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
           }
           return { id: p.playerId, gain, pair };
         })
-        .filter((x) => x.gain > 0.05)
+        /* Asking every team at once, only players some deal could bring back: the budget is too small for the rest. */
+        .filter((x) => x.gain > 0.05 && (!all || x.pair > -Infinity))
         .sort((a, b) => Number(b.pair > -Infinity) - Number(a.pair > -Infinity) || (b.pair > -Infinity ? b.pair - a.pair : b.gain - a.gain) || a.id.localeCompare(b.id))
         .slice(0, all ? BUILDER.suggestionsAllTeams : BUILDER.suggestionsPerTeam)
         .map((x) => x.id);
@@ -403,8 +404,9 @@ function evaluatePackage(
 
   /* Alex's preference: no spare QB or TE unless clearly better (Check a trade's own line). */
   if (a.adjustments.some((x) => x.key === 'second_qb_te')) return { hidden: 'spare_qb_te' };
-  if (aWeighted < BUILDER.minGain) return { hidden: 'no_gain_for_you' };
-  if (bWeighted < BUILDER.minGain) return { hidden: 'no_gain_for_them' };
+  /* Both lineups must gain: weighted toward the coming weeks, and over the whole season too. */
+  if (aWeighted < BUILDER.minGain || a.net + (moveCost?.net ?? 0) <= 0) return { hidden: 'no_gain_for_you' };
+  if (bWeighted < BUILDER.minGain || b.net <= 0) return { hidden: 'no_gain_for_them' };
 
   const giveValue = round1(a.outgoing.reduce((s, p) => s + (p.rosValue ?? 0), 0));
   const getValue = round1(a.incoming.reduce((s, p) => s + (p.rosValue ?? 0), 0));
@@ -486,13 +488,17 @@ export function statusOf(args: { edge: number; need: boolean; alex: number; them
   if (status !== 'long_shot' && args.them < args.alex * 0.25) status = status === 'likely' ? 'maybe' : 'long_shot';
   const reason =
     status === 'likely'
-      ? 'About even on value, and it fills a need they have.'
+      ? args.edge < -BUILDER.band.even
+        ? 'You give more value, and it fills a need they have.'
+        : 'About even on value, and it fills a need they have.'
       : status === 'maybe'
         ? args.edge > BUILDER.band.even
           ? 'Tilted your way on value, but it helps their lineup too.'
           : args.them < args.alex * 0.25
             ? 'Fair on value, but it helps them much less than it helps you.'
-            : 'Fair on value, though it fills no clear need of theirs.'
+            : args.edge < -BUILDER.band.even
+              ? 'You give more value, though it fills no clear need of theirs.'
+              : 'About even on value, though it fills no clear need of theirs.'
         : args.edge > BUILDER.band.maybe
           ? 'You get clearly more value, so they would have to really want it.'
           : 'It helps them only a little next to what it does for you.';
