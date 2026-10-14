@@ -128,6 +128,7 @@ import { SmartTradeService } from './services/smartTradeService.ts';
 import { seasonChecksFor } from './services/tradeIdeaCheck.ts';
 import { applySeasonChecks } from '../core/trades/seasonCheck.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
+import { MAX_MARKS, TradeBuilderService } from './services/tradeBuilderService.ts';
 import { meterDatabase } from './meter.ts';
 import { MAX_BODY_BYTES, MAX_TALLY_BYTES, NewsletterService } from './services/newsletterService.ts';
 import { SeasonMarketService, seasonFor } from './services/seasonMarketService.ts';
@@ -2988,6 +2989,48 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         b,
         aSends: ids('give'),
         bSends: ids('get'),
+      });
+      return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
+    } catch (err) {
+      if (err instanceof TradeCheckError) return errorResponse(err.message, err.status);
+      throw err;
+    }
+  });
+
+  /**
+   * Build a trade: packages from Alex's Sell and Want marks that help both
+   * lineups over the rest of the season.
+   *
+   * `sell` is a comma list of Alex's players; `want` is `rosterId:id,id;rosterId:id`;
+   * `team` is a roster id or `all`; `unmarked=1` also considers players he did
+   * not mark (never his elite backs). The marks live on the phone and arrive
+   * here; nothing is stored. A recommendation only: nothing here proposes,
+   * makes or answers a trade. Reads stored rows and never calls Sleeper.
+   */
+  router.get('/api/leagues/:id/trades/build', async (ctx) => {
+    const q = ctx.url.searchParams;
+    const list = (raw: string | null): string[] =>
+      (raw ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0)
+        .slice(0, MAX_MARKS);
+    const want = new Map<number, string[]>();
+    for (const part of (q.get('want') ?? '').split(';')) {
+      const [team, ids] = part.split(':');
+      const rosterId = Number(team);
+      if (Number.isInteger(rosterId) && ids) want.set(rosterId, list(ids));
+    }
+    const rawTeam = q.get('team') ?? 'all';
+    const team = rawTeam === 'all' ? 'all' : Number(rawTeam);
+    if (team !== 'all' && !Number.isInteger(team)) return errorResponse('team must be a roster id or all', 400);
+    try {
+      const metered = q.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+      const result = await new TradeBuilderService(metered?.db ?? ctx.env.db, ctx.env.sleeper).build(ctx.params['id']!, {
+        sell: list(q.get('sell')),
+        want,
+        team,
+        considerUnmarked: q.get('unmarked') === '1',
       });
       return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
     } catch (err) {
