@@ -101,6 +101,15 @@ function board(label: string, tiers: WaiverTiersView | null | undefined) {
   }
   const drops = doThese.concat(tiers.consider).map((r) => r.drop?.name).filter(Boolean);
   console.log(`distinct drops across Do this and Worth considering: ${new Set(drops).size} of ${drops.length}`);
+  /* The two cases Alex named, checked on every board. */
+  const everyRow = [...doThese, ...tiers.consider, ...tiers.watch];
+  const named = everyRow.filter((r) => r.drop && !r.drop.viaReserve).map((r) => r.drop!.name);
+  const shared = [...new Set(named.filter((n, i) => named.indexOf(n) !== i))];
+  console.log(`SAME-DROP CHECK (every row): ${shared.length === 0 ? 'no player is named as the drop on two rows' : `shared: ${shared.map((n) => `${n} on ${everyRow.filter((r) => r.drop?.name === n).map((r) => r.name).join(' and ')}`).join('; ')}`}`);
+  const mc = everyRow.filter((r) => r.drop?.name === 'Ladd McConkey').map((r) => r.name);
+  console.log(`MCCONKEY CHECK: ${mc.length === 0 ? 'Ladd McConkey is nobody\'s drop' : `Ladd McConkey is the drop for ${mc.join(', ')}`}`);
+  for (const r of doThese) console.log(`SPOT: ${r.name} uses ${r.drop?.viaReserve ? `an IR move (${r.drop.name} to IR)` : r.drop ? `a drop (${r.drop.name})` : 'an open spot'}`);
+  for (const r of tiers.consider.filter((x) => x.needsSpot)) console.log(`SPOT: ${r.name} needs a spot first`);
 }
 
 // ---------------------------------------------------------------- inputs --

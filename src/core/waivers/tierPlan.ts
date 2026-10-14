@@ -372,7 +372,7 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
       index: rank,
       drop: m.drop && !m.drop.viaReserve ? { playerId: m.drop.playerId, name: m.drop.name } : null,
       headline: m.drop?.viaReserve
-        ? `Move ${m.drop.name} to IR first: this one needs no drop`
+        ? `Move ${m.drop.name} to IR, then claim ${m.name}`
         : m.drop
           ? `Drop ${m.drop.name}`
           : 'Open roster spot: this one needs no drop',

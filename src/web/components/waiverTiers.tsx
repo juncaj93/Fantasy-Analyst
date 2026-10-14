@@ -70,7 +70,15 @@ function PickupLine({ row }: { row: TierRow }) {
       ) : null}
       <span data-testid="tier-drop" style={{ overflowWrap: 'anywhere' }}>
         {bid.kind === 'none' ? '' : ' · '}
-        {row.needsSpot ? 'needs a spot first' : row.drop?.viaReserve ? `${row.drop.name} to IR` : row.drop ? `in for ${row.drop.name}` : 'uses an open spot'}
+        {row.needsSpot
+          ? row.tier === 'watch'
+            ? 'needs a roster spot'
+            : 'needs a spot first'
+          : row.drop?.viaReserve
+            ? `${row.drop.name} to IR first`
+            : row.drop
+              ? `in for ${row.drop.name}`
+              : 'uses an open spot'}
       </span>
     </div>
   );
@@ -258,9 +266,11 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
             <dt>Your spot</dt>
             <dd>
               {row.needsSpot
-                ? 'You need a spot first.'
+                ? row.needsSpot.length > 0
+                  ? 'You need a spot first.'
+                  : 'Needs a roster spot: every honest spot is taken by the moves above.'
                 : row.drop?.viaReserve
-                  ? `Move ${row.drop.name} to IR (no drop)`
+                  ? `Move ${row.drop.name} to IR, then claim ${row.name}. You make both moves in Sleeper.`
                   : row.drop
                     ? `Drop ${row.drop.name}`
                     : 'An open roster spot; no drop needed'}

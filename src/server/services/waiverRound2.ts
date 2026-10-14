@@ -22,6 +22,7 @@ import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/wee
 import type { RosterRecord } from '../../core/sleeper/types.ts';
 import type { Database } from '../db.ts';
 import { SettingsRepo } from '../repos/settings.ts';
+import { LeagueRepo } from '../repos/league.ts';
 import type { StrategyContext } from './leagueStrategyService.ts';
 
 /** Seasons before this one whose rival rows are read. */
@@ -44,8 +45,12 @@ export async function readWaiverRound2(
   const rivals = opts.rosters.filter((r) => !r.isMine && r.ownerId);
   const rivalKeys = rivals.flatMap((r) => priorSeasons.map((s) => rivalHistoryKey(opts.leagueId, s, r.ownerId!)));
   const rows = await new SettingsRepo(db)
-    .getMany<unknown>([seasonPointsKey(opts.season), PLAYER_NOTES_KEY, ...rivalKeys])
+    .getMany<unknown>([seasonPointsKey(opts.season), PLAYER_NOTES_KEY, draftRoundsKey(opts.leagueId), ...rivalKeys])
     .catch(() => new Map<string, unknown>());
+  /* This league's own draft, cached once (`ensureDraftRounds`); until then, read from the stored picks. */
+  const draftRounds =
+    (rows.get(draftRoundsKey(opts.leagueId)) as Record<string, number> | undefined) ??
+    (await draftRoundsOf(db, opts.leagueId).catch(() => ({}) as Record<string, number>));
 
   const season = (rows.get(seasonPointsKey(opts.season)) as StoredSeasonPoints | undefined) ?? null;
   const notes = readPlayerNotes((rows.get(PLAYER_NOTES_KEY) as StoredPlayerNotes | undefined) ?? null);
@@ -107,5 +112,33 @@ export async function readWaiverRound2(
     injuryNotes: notes.injury,
     depthOrder: notes.depth,
     reserveAllows: opts.reserveAllows,
+    draftRounds,
   };
+}
+
+/** The settings key holding the round each player went in this league's draft. */
+export function draftRoundsKey(leagueId: string): string {
+  return `waivers.draftRounds.${leagueId}`;
+}
+
+/** Player id to round, from this league's stored draft picks (Sleeper's draft picks endpoint, synced). */
+async function draftRoundsOf(db: Database, leagueId: string): Promise<Record<string, number>> {
+  const picks = await new LeagueRepo(db).listLeagueDraftPicks(leagueId);
+  const out: Record<string, number> = {};
+  for (const p of picks) if (p.teams > 0) out[p.playerId] = Math.ceil(p.pickNo / p.teams);
+  return out;
+}
+
+/**
+ * Cache this league's draft rounds as one settings row, once: a finished draft
+ * never changes. Run from the three-hourly league read; one row read when the
+ * cache is there, one picks read and one write when it is not.
+ */
+export async function ensureDraftRounds(db: Database, leagueId: string): Promise<number> {
+  const settings = new SettingsRepo(db);
+  if (await settings.get<Record<string, number> | null>(draftRoundsKey(leagueId), null)) return 0;
+  const rounds = await draftRoundsOf(db, leagueId);
+  if (Object.keys(rounds).length === 0) return 0;
+  await settings.set(draftRoundsKey(leagueId), rounds);
+  return Object.keys(rounds).length;
 }

@@ -103,6 +103,18 @@ agent at his position than the add is at his, because points are not
 comparable across positions (waiver@14; on 14 October the live board gave both
 Love and Andrews Will Shipley, the one open spot).
 
+Never two moves on one drop, on any row: a Watch list name with no free
+honest spot reads `needs a roster spot` rather than `in for` somebody another
+row uses. Draft capital: a player this league drafted in round 6 or earlier
+(the league's own draft, cached as `waivers.draftRounds.<league>`) is never the
+automatic drop unless he is out for the season; on 14 October that was Ladd
+McConkey, a round-4 pick who was only Questionable. The held bonus grows with
+weeks on the roster (0.2 a week, up to 2.5). An injury never makes a player a
+cheaper drop: an injured player is scored on his healthy number, his recent
+weeks on his season average when that is higher, and an injured starter stays
+protected; he can only go to IR (`Move Will Shipley to IR, then claim Jordan
+Love`).
+
 Season points backfill up to four missing weeks per three-hourly read. The
 rivals' earlier seasons are written once from the stored ledger on the first
 three-hourly read after a deploy (`ensureRivalHistory`, about 4,500 rows once,

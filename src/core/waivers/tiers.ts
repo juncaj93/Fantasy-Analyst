@@ -154,7 +154,7 @@ export interface TierCandidate extends TierPlayer {
 }
 
 export interface TierProtection {
-  kind: 'handcuff' | 'market_hold';
+  kind: 'handcuff' | 'market_hold' | 'draft_capital';
   /** `backs up Kenneth Walker`, `drafted around pick 41`. */
   note: string;
 }
@@ -391,13 +391,14 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   if (signals) {
     const all = cuttable.map((p) => signals.get(p.playerId)).filter((x): x is DropSignals => x != null);
     /* "Lowest on your bench" compares the bench: a lineup player is scored but not compared. */
-    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup || x.unavailable))) readings.set(id, r);
+    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup))) readings.set(id, r);
     for (const x of all) if (!readings.has(x.playerId)) readings.set(x.playerId, { ...dropScore(x), reason: 'in your Sleeper lineup' });
   }
   const scoreOf = (id: string): number | null => readings.get(id)?.score ?? null;
   const lineupLocked = (p: TierPlayer, c: TierCandidate): boolean => {
     const sig = signals?.get(p.playerId);
-    if (!sig || !sig.inLineup || sig.unavailable) return false;
+    if (!sig || !sig.inLineup) return false;
+    /* An injured starter is still a starter: an injury never makes him cheaper to cut. */
     return !(p.position === c.position && (c.rate ?? 0) >= (p.rate ?? 0) + DROP_RULES.clearlyBetter);
   };
   const optionsFor = (c: TierCandidate, roster: readonly TierPlayer[], spots: number): Option[] => {
@@ -655,6 +656,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     request.openReserve,
   );
   const used = new Map<string, string>();
+  let openUsed = 0;
   const apply = (m: TierMove, index: number | null) => {
     const list = options.get(m.playerId) ?? [];
     const option = index == null ? null : list[index];
@@ -672,6 +674,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       });
     }
     if (option.drop) used.set(option.drop.playerId, m.name);
+    else openUsed += 1;
     return true;
   };
   const firstChoice = new Map(shown.map((m) => [m.playerId, (options.get(m.playerId) ?? [])[0]?.drop?.playerId ?? null]));
@@ -694,11 +697,12 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       .map(([id, r]) => {
         const p = valued.find((x) => x.playerId === id);
         const sig = signals?.get(id);
-        const lineup = sig?.inLineup && !sig.unavailable;
-        if (!p || p.onReserve || excluded.has(p.position) || lineup) return null;
+        if (!p || p.onReserve || excluded.has(p.position) || sig?.inLineup) return null;
         const kind = request.protections.get(id);
-        const why = kind ? `${kind.kind === 'handcuff' ? 'handcuff' : 'kept as a high pick'}; ${r.reason}` : r.reason;
-        return { playerId: id, name: p.name, reason: why, score: r.score };
+        const label = kind?.kind === 'handcuff' ? 'handcuff' : kind?.kind === 'draft_capital' ? kind.note : kind ? 'kept as a high pick' : null;
+        const why = label ? `${label}; ${r.reason}` : r.reason;
+        /* High draft capital last: offered only when the cheaper options run out. */
+        return { playerId: id, name: p.name, reason: why, score: r.score + (kind?.kind === 'draft_capital' ? 100 : 0) };
       })
       .filter((x): x is NonNullable<typeof x> => x != null)
       .sort((a, b) => a.score - b.score)
@@ -722,16 +726,26 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       watch.unshift(m);
     }
   }
-  /* The Watch list: each name on a spot nobody above is using, where one exists. */
+  /*
+   * The Watch list: never two rows on one drop, anywhere on the screen. Each
+   * name takes a spot nobody above (or above it on this list) is using: an
+   * open spot, else an honest drop. With none left it says it needs a roster
+   * spot rather than naming somebody else's.
+   */
   for (const m of watch) {
     const list = options.get(m.playerId) ?? [];
-    /* A name to watch never points at a protected player as its spot. */
-    const free = list.findIndex((o) => o.drop == null || (!o.viaReserve && !used.has(o.drop.playerId) && !request.protections.has(o.drop.playerId)));
-    if (free > 0) apply(m, free);
-    else if (free < 0 && list[0]?.drop) {
-      const holder = used.get(list[0].drop.playerId);
-      if (holder && !m.competesWith.includes(holder)) m.competesWith.push(holder);
+    const free = list.findIndex((o) =>
+      o.drop == null ? openUsed < request.openSpots : !o.viaReserve && !used.has(o.drop.playerId) && !request.protections.has(o.drop.playerId),
+    );
+    if (free >= 0) {
+      apply(m, free);
+      continue;
     }
+    const want = list[0]?.drop ? used.get(list[0].drop.playerId) : undefined;
+    if (want && !m.competesWith.includes(want)) m.competesWith.push(want);
+    m.drop = null;
+    m.dropCost = null;
+    m.needsSpot = [];
   }
 
   /*
@@ -762,7 +776,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     .map(([id, r]) => {
       const p = valued.find((x) => x.playerId === id);
       const sig = signals?.get(id);
-      const protectedAs = sig?.inLineup && !sig.unavailable ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
+      const protectedAs = sig?.inLineup ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
       return { playerId: id, name: p?.name ?? id, score: r.score, reason: r.reason, protectedAs };
     })
     .sort((a, b) => a.score - b.score);

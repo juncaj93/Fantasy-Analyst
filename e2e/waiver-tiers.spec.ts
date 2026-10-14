@@ -496,10 +496,11 @@ test.describe('round 2 follow-up: an IR move, and a hole that needs a spot first
       ],
       bid: { ...(base.doThese[1]!.bid as Record<string, unknown>), posture: 'consider' },
     };
-    const tiers = { ...base, doThis: love, doThese: [love], consider: [andrews] };
+    const miller = move({ playerId: 'r5', name: 'Kendre Miller', position: 'RB', team: 'NO', tier: 'watch', gain: 2.2, reason: 'Starts over Braelon Allen, +2.2 pts in week 6', drop: null, needsSpot: [] });
+    const tiers = { ...base, doThis: love, doThese: [love], consider: [andrews], watch: [...base.watch, miller] };
     const plan = {
       ...ROUND2_PLAN,
-      groups: [{ ...ROUND2_PLAN.groups[0], drop: null, headline: 'Move Will Shipley to IR first: this one needs no drop' }],
+      groups: [{ ...ROUND2_PLAN.groups[0], drop: null, headline: 'Move Will Shipley to IR, then claim Jordan Love' }],
       claims: [{ ...ROUND2_PLAN.claims[0], dropPlayerId: null, dropName: null }],
     };
     await inSeason(page);
@@ -510,8 +511,12 @@ test.describe('round 2 follow-up: an IR move, and a hole that needs a spot first
   test('says "Shipley to IR" on the row and the card, and the second hole needs a spot first', async ({ page }) => {
     const doRow = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
     await expect(doRow).toHaveCount(1);
-    await expect(doRow.getByTestId('tier-drop')).toContainText('Will Shipley to IR');
-    await expect(page.getByTestId('waiver-plan')).toContainText('Move Will Shipley to IR first');
+    await expect(doRow.getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
+    await expect(page.getByTestId('waiver-plan')).toContainText('Move Will Shipley to IR, then claim Jordan Love');
+    /* A Watch list name never borrows a spot another row uses. */
+    const watchRow = page.locator('[data-testid="waiver-tier-row"][data-player-id="r5"]');
+    await expect(watchRow.getByTestId('tier-drop')).toContainText('needs a roster spot');
+    await expect(watchRow.getByTestId('tier-drop')).not.toContainText('Will Shipley');
     const second = page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]');
     await expect(second).toHaveAttribute('data-tier', 'consider');
     await expect(second.getByTestId('tier-drop')).toContainText('needs a spot first');

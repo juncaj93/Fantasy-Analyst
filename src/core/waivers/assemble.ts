@@ -112,6 +112,8 @@ export interface WaiverRound2Inputs {
   injuryNotes: Record<string, InjuryNote>;
   /** Sleeper's depth-chart order per skill player. */
   depthOrder: Record<string, number>;
+  /** The round this league drafted each player in, from its own draft. Absent on older files. */
+  draftRounds?: Record<string, number>;
   /** Which statuses this league's IR slots take beyond IR itself (`reserve_allow_*`). Absent on older files. */
   reserveAllows?: { out: boolean; doubtful: boolean; sus: boolean };
 }
@@ -743,6 +745,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
               injuryNotes: new Map(Object.entries(round2.injuryNotes)),
               depthOrder: new Map(Object.entries(round2.depthOrder)),
               ...(round2.reserveAllows ? { reserveAllows: round2.reserveAllows } : {}),
+              ...(round2.draftRounds ? { draftRounds: new Map(Object.entries(round2.draftRounds)) } : {}),
             }
           : {}),
       });
