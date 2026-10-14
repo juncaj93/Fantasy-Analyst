@@ -34,6 +34,7 @@ import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
 import { TradeCheckFold } from '../components/tradeCheck.tsx';
+import { TradeBuilderFold } from '../components/tradeBuilder.tsx';
 import { TradeLadderFold } from '../components/tradeLadder.tsx';
 import { unwindOne } from '../tabReset.ts';
 
@@ -360,6 +361,15 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         is the tool for the idea the reader brought. Absent when no league is
         resolved, which is the one case with nothing to check.
       */}
+      {/*
+        Build a trade: Alex marks who he would sell and who he wants, and the
+        builder finds packages that help both lineups. Closed and free until it
+        is opened, like Check a trade below it; its marks live on this phone.
+      */}
+      {(smart?.league?.id ?? board.league?.id) ? (
+        <TradeBuilderFold leagueId={(smart?.league?.id ?? board.league?.id)!} />
+      ) : null}
+
       {(smart?.league?.id ?? board.league?.id) ? (
         <TradeCheckFold leagueId={(smart?.league?.id ?? board.league?.id)!} />
       ) : null}
