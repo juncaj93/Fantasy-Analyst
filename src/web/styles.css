@@ -10936,3 +10936,79 @@ div.matchup-result {
   opacity: 0.6;
   transition: opacity var(--dur-fast) var(--ease);
 }
+
+/*
+ * Best drops under a claim (Waivers round 2, Alex 14 October): a small muted
+ * label, then up to three numbered lines, name in normal weight and the stat
+ * muted. Each line wraps under its own name, never past two lines on a phone.
+ */
+.best-drops {
+  display: block;
+  width: 100%;
+  margin-top: var(--sp-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.best-drops-tap {
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.best-drops-tap:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+}
+
+.best-drops-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.best-drops-line {
+  display: flex;
+  gap: 6px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.best-drops-rank {
+  flex: 0 0 1.2em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.best-drops-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.best-drops-name {
+  font-weight: 450;
+}
+
+.best-drops-stat {
+  color: var(--text-dim);
+}
+
+/* The same list on the detail sheet, with each one's full reason under it. */
+.best-drops-why {
+  margin: 4px 0 0;
+  padding-inline-start: 1.3em;
+}
+
+.best-drops-why li {
+  margin: 2px 0;
+}
+
+.best-drops-reason {
+  display: block;
+  font-size: 0.76rem;
+}

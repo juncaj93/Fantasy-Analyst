@@ -371,7 +371,9 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
     groups.push({
       index: rank,
       drop: m.drop && !m.drop.viaReserve ? { playerId: m.drop.playerId, name: m.drop.name } : null,
-      headline: m.needsSpot
+      headline: m.bestDrops && m.bestDrops.length > 0
+        ? `Best drops: ${m.bestDrops.map((c) => c.name).join(', ')}`
+        : m.needsSpot
         ? `Pick your drop: ${m.needsSpot.map((c) => `${c.name} (${c.reason})`).join('; ')}`
         : m.drop?.viaReserve
         ? `Move ${m.drop.name} to IR, then claim ${m.name}`
@@ -383,6 +385,12 @@ export function tierClaimPlan(view: WaiverTiersView, generatedAt: string): Waive
       formNote: null,
       firstRank: rank,
       lastRank: rank,
+      ...(m.bestDrops && m.bestDrops.length > 0
+        ? {
+            bestDrops: m.bestDrops.map((c) => ({ playerId: c.playerId, name: c.name, position: c.position ?? '', stat: c.stat ?? '' })),
+            addPlayerId: m.playerId,
+          }
+        : {}),
     });
   });
   return {

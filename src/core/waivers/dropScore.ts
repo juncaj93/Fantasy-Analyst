@@ -17,7 +17,8 @@
  *                    with byes and injuries counted as missed weeks)
  *           + role: +0.5 rising, −0.5 falling (snaps and touches trend)
  *           + held: +0.2 a week on the roster, up to +2.5 (a drafted player
- *                   counts every week since the draft), 0 just added
+ *                   counts every week since the draft), 0 just added, and 0
+ *                   for anyone who has not produced (see {@link DEAD_SPOT})
  *           + handcuff to one of your elite backs: +3
  *
  * Every number is one the app already has: last week's points store
@@ -72,6 +73,35 @@ export const DROP_RULES = {
 } as const;
 
 export const ELITE_RB = { rank: 12, minGames: 2, minRate: 12 } as const;
+
+/**
+ * A dead spot: a recent pickup who has produced nothing and has no real role
+ * (Alex, 14 October: Tre' Harris, added a week before, 1.2 points, sat in his
+ * lineup because nobody better was healthy). Being new or being in the
+ * lineup protects nobody who has not earned it: a dead spot is the first drop
+ * offered, ahead of any handcuff and any high pick.
+ */
+export const DEAD_SPOT = {
+  /** Held this many weeks or fewer counts as a recent pickup. */
+  recentWeeks: 2,
+  /** Below this many points a game, season and lately, he has not produced. */
+  ppg: 5,
+} as const;
+
+/** Has he produced (season or lately, points a game) or does he have a rising role? */
+export function hasProduced(s: DropSignals): boolean {
+  const season = s.seasonPoints != null && s.weeksPlayed > 0 ? s.seasonPoints / s.weeksPlayed : 0;
+  return s.role === 'rising' || season >= DEAD_SPOT.ppg || recentAverage(s.recent) >= DEAD_SPOT.ppg;
+}
+
+/**
+ * A recent pickup, not drafted and not a handcuff, who has not produced. A
+ * player who is out now is never one: missed games are not evidence (he goes
+ * to IR, or is judged when he is back).
+ */
+export function isDeadSpot(s: DropSignals): boolean {
+  return !s.unavailable && !s.drafted && s.heldWeeks != null && s.heldWeeks <= DEAD_SPOT.recentWeeks && !s.handcuffOf && !hasProduced(s);
+}
 
 export interface DropSignals {
   playerId: string;
@@ -130,7 +160,8 @@ export function dropScore(s: DropSignals): DropReading {
   const projection = s.injured && s.healthyRate != null ? Math.max(s.projection, s.healthyRate) : s.projection;
   const role = s.role === 'rising' ? DROP_BONUS.rising : s.role === 'falling' ? DROP_BONUS.falling : 0;
   const weeksHeld = s.drafted ? (s.weeksSinceDraft ?? 0) : (s.heldWeeks ?? 0);
-  const held = Math.min(DROP_BONUS.heldCap, DROP_BONUS.heldPerWeek * Math.max(0, weeksHeld));
+  /* Weeks held protect only a player who has produced or has a real role; an injury out never costs him them. */
+  const held = s.unavailable || hasProduced(s) ? Math.min(DROP_BONUS.heldCap, DROP_BONUS.heldPerWeek * Math.max(0, weeksHeld)) : 0;
   const handcuff = s.handcuffOf ? DROP_BONUS.handcuff : 0;
   const parts = {
     season: round2(DROP_WEIGHTS.season * season),
@@ -159,6 +190,7 @@ export function readDrops(bench: readonly DropSignals[]): Map<string, DropReadin
     const bits: string[] = [];
     const total = s.seasonPoints ?? 0;
     if (s.unavailable) bits.push('out now');
+    if (s.inLineup) bits.push('in your Sleeper lineup with little to show for it');
     if (bench.length > 1 && total === lowest) bits.push(`lowest season points on your bench (${total.toFixed(1)})`);
     else if (bench.length > 1 && recentAverage(s.recent) === lowestRecent) bits.push(`least points lately on your bench (${recentAverage(s.recent).toFixed(1)} a week)`);
     else bits.push(`${total.toFixed(1)} pts this season`);

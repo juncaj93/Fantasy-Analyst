@@ -66,6 +66,7 @@ function line(row: TierRow): string {
   const rivals = row.bid.likely.length
     ? row.bid.likely.map((r) => `${real(r.name)} ${Math.round(r.chance * 100)}%${r.why ? ` (${r.why})` : ''}`).join(', ')
     : 'none likely';
+  const best = row.bestDrops?.length ? `\n      best drops: ${row.bestDrops.map((c, i) => `${i + 1}. ${c.name} ${c.position ?? ''} · ${c.stat ?? ''}`).join('  ')}` : '';
   const drop = row.needsSpot
     ? `none honest: you need a spot first; cheapest: ${row.needsSpot.map((c) => `${c.name} (${c.reason})`).join('; ')}`
     : row.drop
@@ -73,7 +74,7 @@ function line(row: TierRow): string {
       : 'open spot';
   return [
     `  ${row.name.padEnd(22)} ${row.position.padEnd(3)} +${row.gain.toFixed(1)}  ${row.reason}`,
-    `      drop: ${drop}`,
+    `      drop: ${drop}${best}`,
     `      bid: ${bid}; rivals: ${rivals}`,
     `      why the bid: ${row.bid.reason.replace(/Manager \d+/g, (m) => real(m))}`,
     ...(row.alternatives.length ? [`      also fits: ${row.alternatives.join(', ')}`] : []),
@@ -97,7 +98,14 @@ function board(label: string, tiers: WaiverTiersView | null | undefined) {
   if (tiers.excluded?.length) console.log(`NEVER OFFERED: ${tiers.excluded.map((e) => `${e.name} (${e.reason})`).join('; ')}`);
   if (tiers.dropScores?.length) {
     console.log('DROP SCORES (lowest is cut first):');
-    for (const d of tiers.dropScores) console.log(`  ${d.name.padEnd(22)} ${d.score.toFixed(2).padStart(6)}  ${d.protectedAs ? `[${d.protectedAs}] ` : ''}${d.reason}`);
+    tiers.dropScores.forEach((d, i) => console.log(`  ${String(i + 1).padStart(2)}. ${d.name.padEnd(22)} ${d.score.toFixed(2).padStart(6)}  ${d.protectedAs ? `[${d.protectedAs}] ` : ''}${d.reason}`));
+    /* Every factor for the players Alex named, so the ranking can be checked by hand. */
+    for (const name of ["Tre' Harris", 'Brian Robinson', 'Emmett Johnson', 'Emeka Egbuka']) {
+      const d = tiers.dropScores.find((x) => x.name === name);
+      if (!d) continue;
+      const dead = d.deadSpot ? ' DEAD SPOT' : '';
+      console.log(`  FACTORS ${name}:${dead} score ${d.score.toFixed(2)}${d.parts ? ` parts ${JSON.stringify(d.parts)}` : ''}${d.factors ? ` signals ${JSON.stringify(d.factors)}` : ''}`);
+    }
   }
   const drops = doThese.concat(tiers.consider).map((r) => r.drop?.name).filter(Boolean);
   console.log(`distinct drops across Do this and Worth considering: ${new Set(drops).size} of ${drops.length}`);

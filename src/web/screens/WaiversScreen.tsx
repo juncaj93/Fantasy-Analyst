@@ -245,7 +245,13 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 Do this
               </div>
               <section data-testid="waivers-recommended">
-                <WaiverPlanCard plan={advice.claimPlan} />
+                <WaiverPlanCard
+                  plan={advice.claimPlan}
+                  onOpenDrops={(id) => {
+                    const row = [...(tiers.doThese ?? []), ...tiers.consider].find((r) => r.playerId === id);
+                    if (row) setOpenTier(row);
+                  }}
+                />
                 {/* One row per "Do this" move: a QB bye and a TE bye are two, each with its own drop. */}
                 {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).length > 0 ? (
                   (tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).map((row) => (
