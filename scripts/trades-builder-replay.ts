@@ -22,7 +22,7 @@ import { buildRosterViews } from '../src/core/trades/rosterUtility.ts';
 import { TRADE_BOUNDS } from '../src/core/trades/bilateral.ts';
 import { assembleSmartTrades } from '../src/core/trades/assemble.ts';
 import { applySeasonChecks } from '../src/core/trades/seasonCheck.ts';
-import type { BuilderResponse, BuiltPackage } from '../src/core/trades/builderResponse.ts';
+import { topAcrossTeams, type BuilderResponse, type BuiltPackage } from '../src/core/trades/builderResponse.ts';
 import { SmartTradeService } from '../src/server/services/smartTradeService.ts';
 import { seasonChecksFor } from '../src/server/services/tradeIdeaCheck.ts';
 import { TradeService } from '../src/server/services/tradeService.ts';
@@ -89,11 +89,12 @@ async function partA(): Promise<void> {
     pool: new Map(req.inputs.map((i) => [i.player.id, i] as const)),
     shape: req.shape,
     profile: req.profile,
+    ...(req.published ? { published: req.published } : {}),
   });
   const mineRoster = req.rosters.find((r) => r.isMine);
   const me = mineRoster ? views.get(String(mineRoster.rosterId)) : undefined;
   if (me) {
-    console.log('  your roster as the ideas engine sees it (this week’s Start/Sit score; no number = left out of every idea):');
+    console.log('  your roster as the ideas engine sees it (the week\u2019s number: complete Vegas, else Sleeper\u2019s week; no number = left out):');
     for (const id of me.playerIds) {
       const name = me.nameOf.get(id) ?? id;
       const pos = me.positionOf.get(id) ?? '?';
@@ -141,6 +142,15 @@ async function partA(): Promise<void> {
   console.log(`  season check: ${board.offers.length} ideas in, ${after.dropped.length} left off as favouring the other team, ${after.board.offers.length} shown`);
   for (const o of after.board.offers) console.log(`    shown: give ${o.give.map((p) => p.name).join(' + ')} for ${o.get.map((p) => p.name).join(' + ')} (${o.partner.displayName}), ${o.headline}`);
 
+  for (const o of after.board.offers) {
+    console.log(`    why: ${o.reasons.slice(0, 2).join(' | ')}`);
+  }
+
+  /* The same board without Sleeper's week: complete markets only. Shows what the fallback adds. */
+  const noPublished = assembleSmartTrades({ ...gathered.request, published: new Map() });
+  console.log(`  without Sleeper's week (complete markets only): ${noPublished.search.generated} generated, ${noPublished.search.scored} scored, ${noPublished.search.viable} viable, ${noPublished.search.surfaced} surfaced`);
+  console.log(`  Sleeper's week read for ${gathered.request.published?.size ?? 0} players`);
+
   /* What-if: the same search with wider caps. Printed as a what-if; nothing ships from it. */
   const saved = { ...TRADE_BOUNDS };
   const bounds = TRADE_BOUNDS as unknown as Record<string, number>;
@@ -148,7 +158,10 @@ async function partA(): Promise<void> {
   try {
     const wide = assembleSmartTrades(gathered.request);
     console.log(`  what-if, caps widened (targets 12, give 12, scored 60): ${wide.search.generated} generated, ${wide.search.scored} scored, ${wide.search.viable} viable, ${wide.search.surfaced} surfaced`);
-    for (const o of wide.offers) console.log(`    would show: give ${o.give.map((p) => p.name).join(' + ')} for ${o.get.map((p) => p.name).join(' + ')} (${o.partner.displayName}), ${o.headline}`);
+    for (const o of wide.offers) {
+      console.log(`    would show: give ${o.give.map((p) => p.name).join(' + ')} for ${o.get.map((p) => p.name).join(' + ')} (${o.partner.displayName}), ${o.headline}`);
+      console.log(`      why: ${o.reasons.slice(0, 2).join(' | ')}`);
+    }
   } finally {
     Object.assign(bounds, saved);
   }
@@ -157,11 +170,11 @@ async function partA(): Promise<void> {
 /* ------------------------------------------------------------- Part B -- */
 
 function printPackage(p: BuiltPackage, i: number): void {
-  console.log(`    ${i + 1}. [${p.status}] with ${p.partner.label}: give ${p.give.map((g) => `${g.name} (${g.stat})`).join(' + ')}`);
+  console.log(`    ${i + 1}. [${p.status}${p.costsNow ? ', costs you now' : ''}${p.basis === 'sleeper' ? ', mostly Sleeper' : ''}] with ${p.partner.label}: give ${p.give.map((g) => `${g.name} (${g.stat})`).join(' + ')}`);
   console.log(`       get ${p.get.map((g) => `${g.name} (${g.stat})`).join(' + ')}${p.drops.length ? `; drop ${p.drops.map((d) => `${d.name} (${d.reason})`).join(', ')}` : ''}${p.irMoves.length ? `; IR ${p.irMoves.map((d) => d.name).join(', ')}` : ''}`);
   console.log(`       you: this week ${p.alex.thisWeek}, next 3 ${p.alex.next3}, playoffs ${p.alex.playoffs}, rest of season ${p.alex.restOfSeason} (ranking ${p.alex.weighted}); them: next 3 ${p.them.next3}, rest of season ${p.them.restOfSeason}`);
   console.log(`       why for them: ${p.why} · value ${p.balance.label} (give ${p.balance.give}, get ${p.balance.get}) · ${p.statusReason} · confidence ${p.confidence}`);
-  console.log(`       manager: ${p.partner.activity.line}`);
+  console.log(`       manager: ${p.partner.activity.line} · card phrase: ${p.needShort ?? '-'} · sheet: ${p.statusShort ?? ''} / ${(p.whyShort ?? []).join(' / ')}`);
   for (const r of p.reasons) console.log(`       - ${r}`);
   for (const c of p.caveats.slice(0, 4)) console.log(`       ~ ${c}`);
   console.log(`       pitch: ${p.pitch}`);
@@ -200,15 +213,42 @@ async function partB(): Promise<void> {
    * never his elite backs: the closest thing to his first tap.
    */
   const builder = new TradeBuilderService(rest.db, sleeper);
-  let m = rest.mark();
-  let t = Date.now();
-  const all = await builder.build(leagueId, { sell: [], want: new Map(), team: 'all', considerUnmarked: true });
-  printResult('All teams, nothing marked, "also consider unmarked" on', all, rest.since(m), Date.now() - t);
+  const others = (teams.teams ?? []).filter((t) => !t.isMine && t.players.length > 0);
 
-  const picked = [...new Set([...all.packages.map((p) => p.partner.rosterId), ...all.teams.map((x) => x.rosterId)])].slice(0, 2);
+  /*
+   * All teams as the screen now runs it: one request per team (sweep=1), each
+   * on its own database handle so the rows are that request's alone. CPU is
+   * this process's own time for the request: an upper-bound stand-in for the
+   * Worker's, since it includes the REST round trips' JSON handling.
+   */
+  console.log('\n  All teams, one request per team (nothing marked, "also consider unmarked" on):');
+  const all: BuiltPackage[] = [];
+  let worst = { ms: 0, cpu: 0, rows: 0, team: '' };
+  let totalRows = 0;
+  for (const t of others) {
+    const one = await open();
+    const m = one.mark();
+    const started = Date.now();
+    const cpu0 = process.cpuUsage();
+    const r = await new TradeBuilderService(one.db, sleeper).build(leagueId, { sell: [], want: new Map(), team: t.rosterId, considerUnmarked: true, sweep: true });
+    const cpu = process.cpuUsage(cpu0);
+    const cost = one.since(m);
+    const ms = Date.now() - started;
+    const cpuMs = Math.round((cpu.user + cpu.system) / 1000);
+    totalRows += cost.rowsRead;
+    if (cpuMs > worst.cpu) worst = { ms, cpu: cpuMs, rows: cost.rowsRead, team: t.label };
+    console.log(`    ${t.label.padEnd(18)} ${String(r.packages.length).padStart(2)} pkg  ${String(cost.statements).padStart(3)} statements  ${n(cost.rowsRead).padStart(6)} rows  ${String(ms).padStart(5)} ms wall  ${String(cpuMs).padStart(4)} ms CPU`);
+    all.push(...r.packages);
+  }
+  console.log(`    worst request: ${worst.team}, ${worst.cpu} ms CPU, ${worst.ms} ms wall, ${n(worst.rows)} rows; whole sweep ${n(totalRows)} rows`);
+  const top = topAcrossTeams(all);
+  console.log(`  the screen's top ${top.length} across all teams:`);
+  top.forEach(printPackage);
+
+  const picked = [...new Set(top.map((p) => p.partner.rosterId))].slice(0, 2);
   for (const rosterId of picked) {
-    m = rest.mark();
-    t = Date.now();
+    const m = rest.mark();
+    const t = Date.now();
     const one = await builder.build(leagueId, { sell: [], want: new Map(), team: rosterId, considerUnmarked: true });
     printResult(`One team: ${one.teams[0]?.label ?? rosterId}`, one, rest.since(m), Date.now() - t);
   }

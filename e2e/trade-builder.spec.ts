@@ -2,131 +2,166 @@
  * Build a trade, on a phone, at every width the app supports (360, 375, 390,
  * 430 — the projects in `playwright.config.ts`).
  *
- * The endpoints are intercepted: what is measured here is shape and cost, never
- * the engine's judgement (that is `tests/trades.builder.test.ts`):
+ * The endpoints are intercepted: what is measured is shape and cost, never the
+ * engine's judgement (that is `tests/trades.builder.test.ts`).
  *
- *  - **free until it is used.** Opening the fold reads the rosters once;
- *    marking players asks for nothing; `Find trades` is one request.
- *  - **marks live on the phone** and survive a reload; `Clear marks` empties
- *    them.
- *  - **Alex's layout rules.** A card is Give and Get lines (one player per
- *    line), three numbers, one why-line and a status chip; chips stay on one
- *    line; names are normal weight and stats are muted.
- *  - **nothing scrolls sideways** shut, open, with results, or with the sheet
- *    open, even for names longer than the phone has room for.
- *  - **nothing implies the app acts.** Copy pitch copies; it never sends.
+ *  - **One screen** (Alex, 15 October 2026): with a sixteen-player roster on
+ *    each side, the Sell chips, the team picker, the Want chips and Find trades
+ *    all sit above the tab bar on an 844 px tall screen, with no scrolling,
+ *    and each roster wraps to no more than six rows of chips.
+ *  - **Chips stay on one line**, nothing scrolls sideways and no text is
+ *    clipped.
+ *  - **All teams asks one team per request**, shows progress, and retries a
+ *    team that failed on its own.
+ *  - **Short cards and a short sheet**: one row of numbers and one phrase on a
+ *    card; a table and at most two reasons on the sheet, the rest under More.
+ *  - **Free until used, marks on the phone**, and nothing implies the app acts.
  */
 
 import { expect, test, type Page } from '@playwright/test';
 
 const LONG_OWNER = 'Bartholomew the Third of Pittsburgh';
 
-function roster(rosterId: number, label: string, isMine: boolean, names: string[]) {
-  const positions = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'WR', 'RB', 'DEF'];
+const MINE = [
+  ['Joe Burrow', 'QB', 'CIN', 'IR'],
+  ['Jordan Love', 'QB', 'GB', null],
+  ['Bijan Robinson', 'RB', 'ATL', null],
+  ['Kenneth Walker', 'RB', 'SEA', null],
+  ['Braelon Allen', 'RB', 'NYJ', null],
+  ['Brian Robinson', 'RB', 'WAS', 'Questionable'],
+  ['Dameon Pierce', 'RB', 'HOU', null],
+  ['Emmett Johnson', 'RB', 'ATL', null],
+  ['Nico Collins', 'WR', 'HOU', null],
+  ['George Pickens', 'WR', 'DAL', null],
+  ['Garrett Wilson', 'WR', 'NYJ', null],
+  ['Ladd McConkey', 'WR', 'LAC', null],
+  ['Emeka Egbuka', 'WR', 'TB', 'Doubtful'],
+  ['Sam LaPorta', 'TE', 'DET', null],
+  ['Kansas City Chiefs', 'DEF', 'KC', null],
+  ['Minnesota Vikings', 'DEF', 'MIN', null],
+] as const;
+
+const THEIRS = [
+  ['Bo Nix', 'QB', 'DEN', null],
+  ['Josh Allen', 'QB', 'BUF', null],
+  ['Woody Marks', 'RB', 'HOU', null],
+  ['Rhamondre Stevenson', 'RB', 'NE', 'Out'],
+  ['Saquon Barkley', 'RB', 'PHI', null],
+  ['Chase Brown', 'RB', 'CIN', null],
+  ['Jameson Williams', 'WR', 'DET', null],
+  ['Romeo Doubs', 'WR', 'GB', null],
+  ['Xavier Worthy', 'WR', 'KC', null],
+  ['Parker Washington', 'WR', 'JAX', null],
+  ['Marvin Harrison Jr.', 'WR', 'ARI', null],
+  ['Amon-Ra St. Brown', 'WR', 'DET', null],
+  ['Colston Loveland', 'TE', 'CHI', null],
+  ['Dallas Goedert', 'TE', 'PHI', 'Questionable'],
+  ['Pittsburgh Steelers', 'DEF', 'PIT', null],
+  ['Green Bay Packers', 'DEF', 'GB', null],
+] as const;
+
+function roster(rosterId: number, label: string, isMine: boolean, list: readonly (readonly [string, string, string, string | null])[]) {
   return {
     rosterId,
     label,
     isMine,
-    players: names.map((name, i) => ({
+    players: list.map(([name, position, team, status], i) => ({
       playerId: `${rosterId}-${i}`,
       name,
-      position: positions[i % positions.length]!,
-      team: ['KC', 'DAL', 'NE', 'SF'][i % 4]!,
-      status: i === 2 ? 'Questionable' : null,
-      reserve: false,
-      starter: i < 8,
+      position,
+      team,
+      status,
+      reserve: status === 'IR',
+      starter: i < 10,
     })),
   };
 }
 
-const NAMES_A = [
-  'Patrick Mahomes',
-  'Bijan Robinson',
-  'Kenneth Walker',
-  'Amon-Ra St. Brown',
-  'Marvin Harrison Jr.',
-  'Jaxon Smith-Njigba',
-  'Trey McBride',
-  'Christian Kirk',
-  'Tony Pollard',
-  'Kansas City',
-];
-const NAMES_B = ['Josh Allen', 'Breece Hall', 'Rhamondre Stevenson', 'Justin Jefferson', 'Jaylen Waddle', 'Garrett Wilson', 'Sam LaPorta', 'Jakobi Meyers', 'Zamir White', 'Buffalo'];
-
+const OTHERS = [roster(2, LONG_OWNER, false, THEIRS), roster(3, 'NateyDee', false, THEIRS), roster(4, 'zackstephens54', false, THEIRS)];
 const TEAMS = {
   found: true,
   league: { id: 'demo-league', name: 'Tony’s Pizza Fantasy' },
-  horizon: { currentWeek: 7, lastWeek: 17, weeks: 11, playoffWeeks: [15, 16, 17], deadlineWeek: 11, deadlinePassed: false, weeksToDeadline: 5 },
-  teams: [roster(1, 'Alex', true, NAMES_A), roster(2, LONG_OWNER, false, NAMES_B), roster(3, 'Ron', false, NAMES_B.map((n) => `${n} II`))],
+  horizon: { currentWeek: 6, lastWeek: 17, weeks: 12, playoffWeeks: [15, 16, 17], deadlineWeek: 11, deadlinePassed: false, weeksToDeadline: 6 },
+  teams: [roster(1, 'Alex', true, MINE), ...OTHERS],
 };
 
 const player = (playerId: string, name: string, position: string, stat: string) => ({ playerId, name, position, team: 'NE', stat });
 
-function pkg(id: string, status: 'likely' | 'maybe' | 'long_shot', extra: Record<string, unknown> = {}) {
+function pkg(id: string, rosterId: number, label: string, weighted: number, extra: Record<string, unknown> = {}) {
   return {
     id,
-    partner: { rosterId: 2, label: LONG_OWNER, activity: { thisSeason: 4, earlier: 2, line: 'Has made 4 trades this season, 2 before' } },
-    give: [player('1-8', 'Tony Pollard', 'RB', 'RB · 11.0 a game')],
-    get: [player('2-4', 'Jaylen Waddle', 'WR', 'WR · 14.0 a game')],
+    partner: { rosterId, label, activity: { thisSeason: 4, earlier: 2, line: 'Has made 4 trades this season, 2 before' } },
+    give: [player('1-7', 'Emmett Johnson', 'RB', 'RB · 4.2 a game')],
+    get: [player(`${rosterId}-7`, 'Romeo Doubs', 'WR', 'WR · 8.7 a game')],
     drops: [],
     irMoves: [],
-    alex: { thisWeek: 3, next3: 9.1, playoffs: 9, restOfSeason: 31.4, weighted: 47.9, adjustments: [{ label: 'You lean RB-heavy when value is close', points: -1.2 }] },
-    them: { next3: 8.9, restOfSeason: 12.2, weighted: 23.4 },
-    need: 'their RB2 is Out',
-    why: 'Their RB2 is Out',
-    status,
+    alex: { thisWeek: 1.2, next3: 3.1, playoffs: 2.4, restOfSeason: 12.6, weighted, adjustments: [{ label: 'You lean RB-heavy when value is close', points: -1.2 }] },
+    them: { next3: 2.6, restOfSeason: 14.7, weighted: 10 },
+    need: 'their RB2 is on bye in week 8',
+    needShort: 'RB2 bye wk 8',
+    why: 'Their RB2 is on bye in week 8',
+    status: 'likely',
     statusReason: 'About even on value, and it fills a need they have.',
+    statusShort: 'Even value · fills their need',
+    whyShort: ['Doubs starts 11 of 12 wks for you', 'Johnson starts 9 of 12 wks for them'],
     balance: { give: 55, get: 44, label: 'about even' },
     confidence: 'medium',
-    reasons: ['You would start Jaylen Waddle (WR) in 11 of 11 weeks, which lifts the lineup by about 31 pts.', 'For them: their RB2 is Out.'],
-    caveats: ['Jaylen Waddle rests on Sleeper’s projection, with no complete Vegas week.'],
-    pitch: `Hey Bartholomew, saw your RB2 is Out. I could send Tony Pollard for Jaylen Waddle. Open to it?`,
+    reasons: ['You would start Romeo Doubs (WR) in 11 of 12 weeks, which lifts the lineup by about 11 pts.', 'For them: their RB2 is on bye in week 8.', 'A third reason that must not reach the sheet.'],
+    caveats: ['Romeo Doubs rests on Sleeper’s projection, with no complete Vegas week.'],
+    pitch: `Hey ${label.split(' ')[0]}, saw your RB2 is on bye in week 8. I could send Emmett Johnson for Romeo Doubs. Open to it?`,
+    costsNow: false,
+    basis: 'vegas',
     ...extra,
   };
 }
 
-const BUILT = {
-  league: TEAMS.league,
-  status: 'ok',
-  message: null,
-  weeks: { thisWeek: 7, next3: [7, 8, 9], playoffs: [15, 16, 17], last: 17 },
-  deadline: { week: 11, passed: false, weeksLeft: 5, line: 'Trades close after week 11.' },
-  packages: [
-    pkg('a', 'likely'),
-    pkg('b', 'maybe', {
-      give: [player('1-8', 'Tony Pollard', 'RB', 'RB · 11.0 a game'), player('1-7', 'Christian Kirk', 'WR', 'WR · 9.5 a game')],
-      get: [player('2-1', 'Breece Hall', 'RB', 'RB · 15.2 a game · Questionable')],
-      why: 'Thin at WR',
-      need: 'thin at WR',
-    }),
-    pkg('c', 'likely', {
-      get: [player('2-4', 'Jaylen Waddle', 'WR', 'WR · 14.0 a game'), player('2-7', 'Jakobi Meyers', 'WR', 'WR · 11.0 a game')],
-      drops: [{ ...player('1-9', 'Kansas City Practice Squad Receiver', 'WR', 'WR · 4.0 a game'), reason: 'lowest season points on your bench (12.0), held 2 weeks' }],
-      why: 'Jaylen Waddle would start 11 of 11 weeks for them',
-      need: null,
-    }),
-  ],
-  teams: [],
-  audit: { generated: 20, evaluated: 10, shown: 3, hidden: { no_gain_for_them: 6 } },
-  notes: [],
-  willingness: 'Sleeper does not show offers that were turned down or ignored, so whether this manager would say yes is unknown.',
-  advisory: 'Suggestions only. This app never sends, proposes or accepts a trade for you.',
+function answer(packages: unknown[], extra: Record<string, unknown> = {}) {
+  return {
+    league: TEAMS.league,
+    status: 'ok',
+    message: packages.length ? null : 'No package from these marks helps both you and this team right now.',
+    weeks: { thisWeek: 6, next3: [6, 7, 8], playoffs: [15, 16, 17], last: 17 },
+    deadline: { week: 11, passed: false, weeksLeft: 6, line: 'Trades close after week 11.' },
+    packages,
+    teams: [],
+    audit: { generated: 20, evaluated: 10, shown: packages.length, hidden: {} },
+    notes: [],
+    willingness: 'Sleeper does not show offers that were turned down or ignored, so whether this manager would say yes is unknown.',
+    advisory: 'Suggestions only. This app never sends, proposes or accepts a trade for you.',
+    ...extra,
+  };
+}
+
+/** Per team: what the build endpoint answers. Team 3 has a package that costs Alex now; team 4 fails once. */
+const PER_TEAM: Record<string, unknown> = {
+  '2': answer([pkg('a', 2, LONG_OWNER, 20), pkg('b', 2, LONG_OWNER, 18, { give: [player('1-7', 'Emmett Johnson', 'RB', 'RB · 4.2 a game'), player('1-1', 'Jordan Love', 'QB', 'QB · 19.9 a game')], status: 'maybe' })]),
+  '3': answer([pkg('c', 3, 'NateyDee', 30, { costsNow: true, alex: { thisWeek: -1.6, next3: -0.3, playoffs: 1.5, restOfSeason: 6.7, weighted: 30, adjustments: [] }, basis: 'sleeper' })]),
+  '4': answer([pkg('d', 4, 'zackstephens54', 12, { drops: [{ ...player('1-15', 'Minnesota Vikings', 'DEF', 'DEF · 5.0 a game'), reason: 'the least you would miss' }] })]),
 };
 
 const counts = { teams: 0, build: 0 };
-let lastBuild = '';
+let requested: string[] = [];
+let failTeam4 = false;
 
-async function openTrades(page: Page, teams: unknown = TEAMS, built: unknown = BUILT): Promise<void> {
+async function openTrades(page: Page): Promise<void> {
   counts.teams = 0;
   counts.build = 0;
+  requested = [];
   await page.route(/\/trades\/check\/teams/, async (route) => {
     counts.teams++;
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(teams) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(TEAMS) });
   });
   await page.route(/\/trades\/build\?/, async (route) => {
     counts.build++;
-    lastBuild = route.request().url();
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(built) });
+    const url = new URL(route.request().url());
+    requested.push(url.search);
+    const team = url.searchParams.get('team') ?? 'all';
+    if (team === '4' && failTeam4) {
+      failTeam4 = false;
+      await route.fulfill({ status: 500, body: 'boom' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PER_TEAM[team] ?? answer([])) });
   });
   await page.goto('/');
   await page.getByTestId('tab-trades').click();
@@ -140,13 +175,8 @@ async function openFold(page: Page): Promise<void> {
   await expect(page.getByTestId('trade-builder-panel')).toBeVisible();
 }
 
-const mine = (page: Page) => page.getByTestId('trade-builder-mine').getByTestId('trade-builder-player');
-
-async function findTrades(page: Page): Promise<void> {
-  await mine(page).nth(8).click();
-  await page.getByTestId('trade-builder-run').click();
-  await expect(page.getByTestId('trade-builder-results')).toBeVisible();
-}
+const mine = (page: Page) => page.getByTestId('trade-builder-mine').getByTestId('pick-chip');
+const theirs = (page: Page) => page.getByTestId('trade-builder-theirs').getByTestId('pick-chip');
 
 async function horizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -155,16 +185,27 @@ async function horizontalOverflow(page: Page): Promise<number> {
   });
 }
 
-/** How many lines of text an element's own text runs to. */
-async function textLines(page: Page, testId: string, index = 0): Promise<number> {
-  return page.getByTestId(testId).nth(index).evaluate((el) => {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    return new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+/** Distinct rows of chips in a picker. */
+async function chipRows(page: Page, testId: string): Promise<number> {
+  return page.getByTestId(testId).evaluate((el) => new Set(Array.from(el.children).map((c) => Math.round(c.getBoundingClientRect().top))).size);
+}
+
+/** Every chip's text fits on one line inside the chip, nothing cut off. */
+async function chipsWhole(page: Page, testId: string): Promise<{ lines: number; clipped: string[] }> {
+  return page.getByTestId(testId).evaluate((el) => {
+    let lines = 1;
+    const clipped: string[] = [];
+    for (const chip of Array.from(el.children) as HTMLElement[]) {
+      const tops = new Set(Array.from(chip.children).map((c) => Math.round(c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2)));
+      lines = Math.max(lines, tops.size);
+      for (const part of Array.from(chip.children) as HTMLElement[]) if (part.scrollWidth > part.clientWidth + 1) clipped.push(part.textContent ?? '');
+    }
+    return { lines, clipped };
   });
 }
 
 test.beforeEach(async ({ page }) => {
+  failTeam4 = false;
   await page.addInitScript(() => {
     if (!sessionStorage.getItem('fa-test-keep-marks')) {
       for (const key of Object.keys(localStorage)) if (key.startsWith('fa.tradeMarks.')) localStorage.removeItem(key);
@@ -172,128 +213,168 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test.describe('build a trade: one screen', () => {
+  test('a 16-player roster on each side and Find trades fit 844 px with no scrolling', async ({ page }) => {
+    const width = page.viewportSize()!.width;
+    await page.setViewportSize({ width, height: 844 });
+    await openTrades(page);
+    await openFold(page);
+    await page.getByTestId('trade-builder-team').selectOption('2');
+    await expect(theirs(page)).toHaveCount(16);
+    /* Let the fold's scroll to the top settle. */
+    await page.waitForTimeout(500);
+
+    const tabbar = (await page.locator('.tabbar').boundingBox())!;
+    const bottomLimit = tabbar.y;
+    const firstSell = (await mine(page).first().boundingBox())!;
+    const lastWant = (await theirs(page).last().boundingBox())!;
+    const team = (await page.getByTestId('trade-builder-team').boundingBox())!;
+    const run = (await page.getByTestId('trade-builder-run').boundingBox())!;
+
+    expect(firstSell.y, 'the first Sell chip is on screen').toBeGreaterThanOrEqual(0);
+    expect(team.y + team.height).toBeLessThanOrEqual(bottomLimit);
+    /* Above Find trades, not just above the tab bar: nothing sits under the sticky bar. */
+    expect(lastWant.y + lastWant.height, `last Want chip ends at ${Math.round(lastWant.y + lastWant.height)}, Find trades at ${Math.round(run.y)}`).toBeLessThanOrEqual(run.y);
+    expect(run.y + run.height, 'Find trades sits above the tab bar').toBeLessThanOrEqual(bottomLimit);
+    expect(run.y).toBeGreaterThan(0);
+
+    expect(await chipRows(page, 'trade-builder-mine'), 'your roster rows').toBeLessThanOrEqual(6);
+    expect(await chipRows(page, 'trade-builder-theirs'), 'their roster rows').toBeLessThanOrEqual(6);
+  });
+
+  test('chips are one line, with nothing clipped and no sideways scroll', async ({ page }) => {
+    await openTrades(page);
+    await openFold(page);
+    await page.getByTestId('trade-builder-team').selectOption('2');
+    for (const id of ['trade-builder-mine', 'trade-builder-theirs']) {
+      const { lines, clipped } = await chipsWhole(page, id);
+      expect(lines, `${id} chip text runs to ${lines} lines`).toBe(1);
+      expect(clipped, `${id} clipped`).toEqual([]);
+    }
+    await mine(page).nth(5).click();
+    await expect(mine(page).nth(5).getByTestId('pick-chip-tag')).toHaveText('Sell');
+    await theirs(page).nth(7).click();
+    await expect(theirs(page).nth(7).getByTestId('pick-chip-tag')).toHaveText('Want');
+    expect((await chipsWhole(page, 'trade-builder-mine')).lines).toBe(1);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('a chip is POS, short name and club, with an injury letter', async ({ page }) => {
+    await openTrades(page);
+    await openFold(page);
+    const johnson = mine(page).filter({ hasText: 'E. Johnson' });
+    await expect(johnson.locator('.pick-chip-pos')).toHaveText('RB');
+    await expect(johnson.locator('.pick-chip-team')).toHaveText('ATL');
+    await expect(mine(page).filter({ hasText: 'B. Robinson' }).getByTestId('pick-chip-hurt')).toHaveText('Q');
+    await expect(mine(page).filter({ hasText: 'J. Burrow' }).getByTestId('pick-chip-hurt')).toHaveText('IR');
+    await expect(mine(page).filter({ hasText: 'E. Egbuka' }).getByTestId('pick-chip-hurt')).toHaveText('D');
+    /* Grouped by position: quarterbacks first. */
+    await expect(mine(page).first().locator('.pick-chip-pos')).toHaveText('QB');
+  });
+});
+
 test.describe('build a trade: cost', () => {
-  test('costs nothing until opened, one roster read, and one request per Find trades', async ({ page }) => {
+  test('free until opened, marking asks for nothing, one team is one request', async ({ page }) => {
     await openTrades(page);
     expect(counts).toEqual({ teams: 0, build: 0 });
     await openFold(page);
     expect(counts.teams).toBe(1);
-
     await expect(page.getByTestId('trade-builder-run')).toBeDisabled();
-    await expect(page.getByTestId('trade-builder-need-sell')).toBeVisible();
-    await mine(page).nth(8).click();
+    await mine(page).filter({ hasText: 'E. Johnson' }).click();
     await page.getByTestId('trade-builder-team').selectOption('2');
-    await page.getByTestId('trade-builder-theirs').getByTestId('trade-builder-player').nth(4).click();
-    expect(counts.build, 'marking asked the server for something').toBe(0);
-
+    await theirs(page).filter({ hasText: 'R. Doubs' }).click();
+    expect(counts.build).toBe(0);
     await page.getByTestId('trade-builder-run').click();
     await expect(page.getByTestId('builder-card').first()).toBeVisible();
     expect(counts.build).toBe(1);
-    const url = new URL(lastBuild);
-    expect(url.searchParams.get('sell')).toBe('1-8');
-    expect(url.searchParams.get('team')).toBe('2');
-    expect(url.searchParams.get('want')).toBe('2:2-4');
+    const q = new URLSearchParams(requested[0]);
+    expect(q.get('team')).toBe('2');
+    expect(q.get('sell')).toBe('1-7');
+    expect(q.get('want')).toBe('2:2-7');
+    expect(q.get('sweep')).toBeNull();
   });
 
-  test('marks survive a reload and Clear marks empties them', async ({ page }) => {
+  test('All teams asks one team per request, shows progress, and merges the best five', async ({ page }) => {
     await openTrades(page);
     await openFold(page);
-    await mine(page).nth(8).click();
-    await expect(mine(page).nth(8)).toHaveAttribute('aria-pressed', 'true');
-    await expect(mine(page).nth(8).getByTestId('trade-builder-chip')).toHaveText('Sell');
+    await mine(page).filter({ hasText: 'E. Johnson' }).click();
+    await page.getByTestId('trade-builder-run').click();
+    await expect(page.getByTestId('trade-builder-progress')).toHaveText('3 of 3 teams');
+    expect(counts.build).toBe(3);
+    expect(requested.map((r) => new URLSearchParams(r).get('team'))).toEqual(['2', '3', '4']);
+    for (const r of requested) expect(new URLSearchParams(r).get('sweep')).toBe('1');
+    /* Help-now packages ahead of the one that costs Alex now: 20, 18, 12, then the 30 that costs now ((30-5)/1.5 = 16.7 goes between). */
+    const order = await page.getByTestId('builder-card').evaluateAll((cards) => cards.map((c) => c.querySelector('.builder-partner')?.textContent));
+    expect(order).toEqual([LONG_OWNER, LONG_OWNER, 'NateyDee', 'zackstephens54']);
+  });
 
+  test('a team that fails says so in one line and can be retried on its own', async ({ page }) => {
+    failTeam4 = true;
+    await openTrades(page);
+    await openFold(page);
+    await mine(page).filter({ hasText: 'E. Johnson' }).click();
+    await page.getByTestId('trade-builder-run').click();
+    await expect(page.getByTestId('trade-builder-progress')).toContainText('1 didn’t load');
+    await expect(page.getByTestId('builder-card')).toHaveCount(3);
+    await page.getByTestId('trade-builder-retry').click();
+    await expect(page.getByTestId('builder-card')).toHaveCount(4);
+    expect(requested.filter((r) => new URLSearchParams(r).get('team') === '4')).toHaveLength(2);
+    expect(requested.filter((r) => new URLSearchParams(r).get('team') === '2')).toHaveLength(1);
+  });
+
+  test('marks survive a reload and Clear empties them', async ({ page }) => {
+    await openTrades(page);
+    await openFold(page);
+    await mine(page).nth(4).click();
+    await expect(mine(page).nth(4)).toHaveAttribute('aria-pressed', 'true');
     await page.evaluate(() => sessionStorage.setItem('fa-test-keep-marks', '1'));
     await page.reload();
     await page.getByTestId('tab-trades').click();
     await openFold(page);
-    await expect(mine(page).nth(8)).toHaveAttribute('aria-pressed', 'true');
-
+    await expect(mine(page).nth(4)).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('trade-builder-clear').click();
-    await expect(mine(page).nth(8)).toHaveAttribute('aria-pressed', 'false');
+    await expect(mine(page).nth(4)).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByTestId('trade-builder-run')).toBeDisabled();
   });
 });
 
-test.describe('build a trade: layout', () => {
-  test('a card is Give and Get lines, three numbers, a why-line and a status chip', async ({ page }) => {
+test.describe('build a trade: card and sheet', () => {
+  async function findAll(page: Page) {
     await openTrades(page);
     await openFold(page);
-    await findTrades(page);
-    const cards = page.getByTestId('builder-card');
-    await expect(cards).toHaveCount(3);
-
-    const card = cards.nth(1);
-    await expect(card.getByTestId('builder-status')).toHaveText('Maybe');
-    await expect(card.getByTestId('builder-give').locator('.builder-player')).toHaveCount(2);
-    await expect(card.getByTestId('builder-get').locator('.builder-player')).toHaveCount(1);
-    await expect(card.getByTestId('builder-nums').locator('.builder-num')).toHaveCount(3);
-    await expect(card.getByTestId('builder-nums')).toContainText('Week 7');
-    await expect(card.getByTestId('builder-nums')).toContainText('Next 3 weeks');
-    await expect(card.getByTestId('builder-nums')).toContainText('Playoffs');
-    await expect(card.getByTestId('builder-why')).toContainText('Thin at WR');
-
-    /* One player per line: the two Give players sit on different lines. */
-    const players = card.getByTestId('builder-give').locator('.builder-player');
-    const first = (await players.nth(0).boundingBox())!;
-    const second = (await players.nth(1).boundingBox())!;
-    expect(second.y).toBeGreaterThan(first.y + first.height - 2);
-
-    /* Names normal weight, stats muted. */
-    const name = card.locator('.builder-name').first();
-    const stat = card.locator('.builder-stat').first();
-    expect(Number(await name.evaluate((el) => getComputedStyle(el).fontWeight))).toBeLessThan(600);
-    expect(await stat.evaluate((el) => getComputedStyle(el).color)).not.toBe(await name.evaluate((el) => getComputedStyle(el).color));
-
-    /* A drop is its own line on the card that needs one. */
-    await expect(cards.nth(2).getByTestId('builder-drop')).toContainText('Kansas City Practice Squad Receiver');
-  });
-
-  test('chips stay on one line', async ({ page }) => {
-    await openTrades(page);
-    await openFold(page);
-    await mine(page).nth(8).click();
-    expect(await textLines(page, 'trade-builder-chip')).toBe(1);
+    await mine(page).filter({ hasText: 'E. Johnson' }).click();
     await page.getByTestId('trade-builder-run').click();
-    await expect(page.getByTestId('builder-card').first()).toBeVisible();
-    for (let i = 0; i < 3; i++) expect(await textLines(page, 'builder-status', i)).toBe(1);
-  });
+    await expect(page.getByTestId('trade-builder-progress')).toHaveText('3 of 3 teams');
+  }
 
-  test('never scrolls sideways: shut, open, with results, and with the sheet open', async ({ page }) => {
-    await openTrades(page);
-    expect(await horizontalOverflow(page)).toBe(0);
-    await openFold(page);
-    expect(await horizontalOverflow(page)).toBe(0);
-    await page.getByTestId('trade-builder-team').selectOption('2');
-    expect(await horizontalOverflow(page)).toBe(0);
-    await findTrades(page);
-    expect(await horizontalOverflow(page)).toBe(0);
-    for (const card of await page.getByTestId('builder-card').all()) {
-      const box = (await card.boundingBox())!;
-      expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+  test('a card is chips and team, one Give line, one Get line, one row of four numbers, one phrase', async ({ page }) => {
+    await findAll(page);
+    const card = page.getByTestId('builder-card').nth(1);
+    await expect(card.getByTestId('builder-status')).toHaveText('Maybe');
+    await expect(card.getByTestId('builder-give')).toContainText('E. Johnson RB 4.2 + J. Love QB 19.9');
+    await expect(card.getByTestId('builder-get')).toContainText('R. Doubs WR 8.7');
+    await expect(card.locator('.builder-num')).toHaveCount(4);
+    await expect(card.getByTestId('builder-nums')).toContainText('Wk 6');
+    await expect(card.getByTestId('builder-nums')).toContainText('Next 3');
+    await expect(card.getByTestId('builder-nums')).toContainText('Playoffs');
+    await expect(card.getByTestId('builder-nums')).toContainText('Them');
+    await expect(card.getByTestId('builder-why')).toHaveText('RB2 bye wk 8');
+    /* No sentences on a card: nothing ending in a full stop. */
+    expect(await card.textContent()).not.toMatch(/[a-z]\.\s|[a-z]\.$/);
+    for (const id of ['builder-give', 'builder-get']) {
+      const lines = await card.getByTestId(id).locator('.builder-one').evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        return new Set(Array.from(r.getClientRects()).map((x) => Math.round(x.top))).size;
+      });
+      expect(lines, `${id} is one line`).toBe(1);
     }
-    await page.getByTestId('builder-card').nth(2).click();
-    await expect(page.getByTestId('builder-detail-body')).toBeVisible();
+    /* The one that costs Alex now carries the chip. */
+    await expect(page.getByTestId('builder-card').filter({ hasText: 'NateyDee' }).getByTestId('builder-costs-now')).toHaveText('Costs you now');
     expect(await horizontalOverflow(page)).toBe(0);
   });
 
-  test('every control is a thumb of tap target, and the marked state is announced', async ({ page }) => {
-    await openTrades(page);
-    expect((await page.getByTestId('trade-builder-toggle').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await openFold(page);
-    const row = mine(page).first();
-    expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await expect(row).toHaveAttribute('aria-pressed', 'false');
-    await row.click();
-    await expect(row).toHaveAttribute('aria-pressed', 'true');
-    expect((await page.getByTestId('trade-builder-run').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    expect((await page.getByTestId('trade-builder-clear').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await expect(page.getByLabel('Trade with')).toBeVisible();
-  });
-});
-
-test.describe('build a trade: the sheet', () => {
-  test('carries the full case, and Copy pitch copies without sending anything', async ({ page }) => {
+  test('the sheet: status with one reason, a table, at most two reasons, the rest under More', async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { __copied: string[] }).__copied = [];
       Object.defineProperty(navigator, 'clipboard', {
@@ -301,46 +382,58 @@ test.describe('build a trade: the sheet', () => {
         value: { writeText: async (t: string) => void (window as unknown as { __copied: string[] }).__copied.push(t) },
       });
     });
-    await openTrades(page);
-    await openFold(page);
-    await findTrades(page);
-    await page.getByTestId('builder-card').nth(2).click();
+    await findAll(page);
+    await page.getByTestId('builder-card').filter({ hasText: 'NateyDee' }).click();
     const sheet = page.getByTestId('builder-detail-body');
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByTestId('builder-activity')).toHaveText('Has made 4 trades this season, 2 before');
-    await expect(sheet.getByTestId('builder-detail-drops')).toContainText('lowest season points on your bench');
-    await expect(sheet.getByTestId('builder-pitch')).toContainText('I could send Tony Pollard for Jaylen Waddle');
+    await expect(sheet.getByTestId('builder-table').locator('tbody tr')).toHaveCount(3);
+    await expect(sheet.getByTestId('builder-reasons').locator('li')).toHaveCount(2);
+    await expect(sheet.getByTestId('builder-basis')).toHaveText('Built mostly on Sleeper’s projection, not Vegas');
+    await expect(sheet.getByTestId('builder-more-body')).toHaveCount(0);
+    await expect(sheet).not.toContainText('Your habits');
+    await expect(sheet).not.toContainText('A third reason');
+
+    /* The sheet's first view fits the screen, once it has finished rising. */
+    await page.waitForTimeout(600);
+    const actions = (await sheet.getByTestId('builder-copy').boundingBox())!;
+    expect(actions.y + actions.height).toBeLessThanOrEqual(page.viewportSize()!.height);
 
     const requests: string[] = [];
     page.on('request', (r) => requests.push(r.url()));
     await sheet.getByTestId('builder-copy').click();
     await expect(sheet.getByTestId('builder-copy')).toHaveText('Copied');
-    const copied = await page.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
-    expect(copied).toEqual([BUILT.packages[2]!.pitch]);
-    expect(requests.filter((u) => /\/api\//.test(u)), 'copying a pitch reached the server').toEqual([]);
+    expect(await page.evaluate(() => (window as unknown as { __copied: string[] }).__copied)).toEqual([(PER_TEAM['3'] as { packages: { pitch: string }[] }).packages[0]!.pitch]);
+    expect(requests.filter((u) => /\/api\//.test(u))).toEqual([]);
 
-    const words = (await sheet.textContent()) ?? '';
-    expect(words).toMatch(/never sends, proposes or accepts/);
-    expect(words).toMatch(/unknown/);
-    expect(words).not.toMatch(/\d+%/);
+    await sheet.getByTestId('builder-more').click();
+    await expect(sheet.getByTestId('builder-more-body')).toBeVisible();
+    await expect(sheet.getByTestId('builder-activity')).toHaveText('Has made 4 trades this season, 2 before');
+    await expect(sheet.getByTestId('builder-advisory')).toContainText('never sends, proposes or accepts');
+    expect(await sheet.textContent()).not.toMatch(/\d+%/);
+    expect(await horizontalOverflow(page)).toBe(0);
   });
 });
 
 test.describe('build a trade: states', () => {
-  test('after the deadline, Find trades is off and the screen says why', async ({ page }) => {
-    const closed = { ...TEAMS, horizon: { ...TEAMS.horizon, currentWeek: 12, deadlinePassed: true, weeksToDeadline: 0 } };
-    await openTrades(page, closed);
+  test('after the deadline, Find trades is off and one line says why', async ({ page }) => {
+    await page.route(/\/trades\/check\/teams/, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...TEAMS, horizon: { ...TEAMS.horizon, currentWeek: 12, deadlinePassed: true, weeksToDeadline: 0 } }) }),
+    );
+    await page.goto('/');
+    await page.getByTestId('tab-trades').click();
     await openFold(page);
-    await expect(page.getByTestId('trade-builder-deadline')).toContainText('Trades are closed');
-    await mine(page).nth(8).click();
+    await expect(page.getByTestId('trade-builder-deadline')).toContainText('Trades closed after week 11');
+    await mine(page).nth(4).click();
     await expect(page.getByTestId('trade-builder-run')).toBeDisabled();
   });
 
-  test('no package says so in one line', async ({ page }) => {
-    await openTrades(page, TEAMS, { ...BUILT, packages: [], message: 'No package from your Sell marks helps both you and another team right now.' });
+  test('banners are one line, with the detail on tap', async ({ page }) => {
+    await openTrades(page);
     await openFold(page);
-    await findTrades(page);
-    await expect(page.getByTestId('trade-builder-empty')).toHaveText(/helps both you and another team/);
-    await expect(page.getByTestId('builder-card')).toHaveCount(0);
+    const line = page.getByTestId('trade-builder-deadline');
+    const h = (await line.boundingBox())!.height;
+    expect(h).toBeLessThanOrEqual(36);
+    await page.getByTestId('trade-builder-deadline-info').click();
+    await expect(page.getByTestId('trade-builder-deadline-detail')).toBeVisible();
   });
 });

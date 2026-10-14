@@ -10,7 +10,7 @@
  *    selection asks for nothing. Counted, not assumed.
  *  - **no row spreads across the width.** Past rounds regressed when a third
  *    number was added to a row. A result row is a label, one figure and a
- *    sentence; a player row is a pill, a name and a mark. The figure must start
+ *    sentence; a player is one chip on one line. The figure must start
  *    where the label column ends, and not at the far edge.
  *  - **nothing scrolls sideways at 430, 390, 375 or 360**, shut, open, with a
  *    result, and with the working open, even for names long enough to want more
@@ -176,8 +176,8 @@ async function openFold(page: Page): Promise<void> {
 }
 
 async function pickTwo(page: Page): Promise<void> {
-  await page.getByTestId('trade-check-players-a').getByTestId('trade-check-player').nth(3).click();
-  await page.getByTestId('trade-check-players-b').getByTestId('trade-check-player').nth(3).click();
+  await page.getByTestId('trade-check-players-a').getByTestId('pick-chip').nth(3).click();
+  await page.getByTestId('trade-check-players-b').getByTestId('pick-chip').nth(3).click();
 }
 
 async function horizontalOverflow(page: Page): Promise<number> {
@@ -221,7 +221,7 @@ test.describe('check a trade: cost', () => {
     await expect(page.getByTestId('trade-check-result')).toBeVisible();
 
     // An answer about a trade that is no longer the one on screen is worse than none.
-    await page.getByTestId('trade-check-players-a').getByTestId('trade-check-player').nth(1).click();
+    await page.getByTestId('trade-check-players-a').getByTestId('pick-chip').nth(1).click();
     await expect(page.getByTestId('trade-check-result')).toHaveCount(0);
   });
 });
@@ -275,18 +275,20 @@ test.describe('check a trade: layout', () => {
     expect(await dt.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   });
 
-  test('a player row is a pill, a name and a mark, and no more', async ({ page }) => {
+  test('a player is one chip on one line: position, short name, club', async ({ page }) => {
+    /* Chips replaced the two-line rows on 15 October 2026, so a roster is a few rows, not a scroll. */
     await openTrades(page);
     await openFold(page);
     await pickTwo(page);
-    const row = page.getByTestId('trade-check-players-a').getByTestId('trade-check-player').nth(3);
-    const parts = await row.evaluate((el) => Array.from(el.children).map((c) => c.className));
-    // state, body, mark: three children, the third only when the row is picked.
-    expect(parts.length).toBeLessThanOrEqual(3);
-    const name = (await row.locator('.list-row-body').boundingBox())!;
-    const box = (await row.boundingBox())!;
-    // The name column takes the room: the row does not spread into columns.
-    expect(name.width).toBeGreaterThan(box.width * 0.55);
+    const chip = page.getByTestId('trade-check-players-a').getByTestId('pick-chip').first();
+    await expect(chip.locator('.pick-chip-pos')).toHaveText('QB');
+    await expect(chip.locator('.pick-chip-name')).toHaveText('P. Mahomes');
+    await expect(chip.locator('.pick-chip-team')).toHaveText('KC');
+    const box = (await chip.boundingBox())!;
+    expect(box.height, `chip is ${Math.round(box.height)}px tall`).toBeLessThanOrEqual(36);
+    const picker = (await page.getByTestId('trade-check-players-a').boundingBox())!;
+    /* Ten players wrap to a few rows of chips. */
+    expect(picker.height).toBeLessThan(4 * 40);
   });
 
   test('never scrolls sideways: shut, open, with a result, and with the working open', async ({ page }) => {
@@ -314,8 +316,9 @@ test.describe('check a trade: layout', () => {
     await openFold(page);
     const run = (await page.getByTestId('trade-check-run').boundingBox())!;
     expect(run.height).toBeGreaterThanOrEqual(44);
-    const first = page.getByTestId('trade-check-players-a').getByTestId('trade-check-player').first();
-    expect((await first.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const first = page.getByTestId('trade-check-players-a').getByTestId('pick-chip').first();
+    /* A chip is a compact target: 30px tall, with the whole chip tappable. */
+    expect((await first.boundingBox())!.height).toBeGreaterThanOrEqual(30);
     await expect(first).toHaveAttribute('aria-pressed', 'false');
     await first.click();
     await expect(first).toHaveAttribute('aria-pressed', 'true');
@@ -326,9 +329,9 @@ test.describe('check a trade: layout', () => {
   test('a full side stops taking players rather than failing quietly', async ({ page }) => {
     await openTrades(page);
     await openFold(page);
-    const rows = page.getByTestId('trade-check-players-a').getByTestId('trade-check-player');
+    const rows = page.getByTestId('trade-check-players-a').getByTestId('pick-chip');
     for (let i = 0; i < 4; i++) await rows.nth(i).click();
-    await expect(rows.nth(4)).toHaveAttribute('data-state', 'full');
+    await expect(rows.nth(4)).toBeDisabled();
     await expect(page.getByTestId('trade-check-players-a').locator('[aria-pressed="true"]')).toHaveCount(4);
   });
 });

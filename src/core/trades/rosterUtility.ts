@@ -36,6 +36,7 @@
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../startsit/engine.ts';
 import { recommendLineup } from '../startsit/lineup.ts';
 import { marketProjection } from '../startsit/projection.ts';
+import { decisionPoints } from '../startsit/decisionPoints.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 
 /**
@@ -117,6 +118,31 @@ export function tradeExcluded(position: string | null | undefined): boolean {
  */
 export function isPriced(evaluation: StartSitEvaluation | null | undefined): boolean {
   return evaluation != null && evaluation.score != null && marketProjection(evaluation) != null;
+}
+
+/**
+ * The week's number a trade idea values a player on, or null when there is none.
+ *
+ * The same per-week number Waivers, Compare and the Team card decide on
+ * (`decisionPoints`): the betting line when the market is complete, otherwise
+ * Sleeper's published week with the same capped nudges, and **never a partial
+ * line as a price**. Until 15 October 2026 the ideas read {@link isPriced},
+ * which counts a market with one of four lines posted as a price, and on the
+ * 14 October board that put Ladd McConkey, Emeka Egbuka, Braelon Allen and
+ * Dameon Pierce at about two points each: 62 of the 108 checked ideas then
+ * failed the value band, and the board was empty every Tuesday and Wednesday.
+ * A partial market with nothing published is unpriced, exactly as no market is.
+ *
+ * With no `published` map this is the complete market alone, so a caller that
+ * has not read Sleeper's week never prices a fragment either.
+ */
+export function weekValueOf(
+  evaluation: StartSitEvaluation | null | undefined,
+  published?: ReadonlyMap<string, number>,
+): number | null {
+  if (evaluation == null || evaluation.score == null) return null;
+  const decision = decisionPoints(evaluation, published);
+  return decision != null && (decision.basis === 'market' || decision.basis === 'published') ? decision.points : null;
 }
 
 /**
@@ -281,8 +307,12 @@ export function buildRosterViews(opts: {
   pool: ReadonlyMap<string, StartSitInput>;
   shape: RosterShape;
   profile: ScoringProfile;
+  /** Sleeper's published week by player id, for {@link weekValueOf}. Absent: complete markets only. */
+  published?: ReadonlyMap<string, number>;
 }): Map<string, RosterView> {
   const { pool, shape, profile } = opts;
+  const published = opts.published;
+  const priceOf = (evaluation: StartSitEvaluation | null | undefined) => weekValueOf(evaluation, published);
 
   /*
    * One evaluation per player for the whole league.
@@ -332,14 +362,15 @@ export function buildRosterViews(opts: {
     for (const id of roster.playerIds) {
       const evaluation = evaluations.get(id);
       if (!evaluation || evaluation.score == null) continue;
-      if (!isPriced(evaluation)) {
+      const price = priceOf(evaluation);
+      if (price == null) {
         if (evaluation.score > STARTABLE_FLOOR && !evaluation.ruledOut) {
           unpricedHere.set(evaluation.position, (unpricedHere.get(evaluation.position) ?? 0) + 1);
         }
         continue;
       }
       const list = perPosition.get(evaluation.position) ?? [];
-      list.push(evaluation.score);
+      list.push(price);
       perPosition.set(evaluation.position, list);
     }
     for (const list of perPosition.values()) list.sort((a, b) => b - a);
@@ -370,6 +401,7 @@ export function buildRosterViews(opts: {
         scheduleKnown,
         values: rosterValues.get(roster.key) ?? new Map(),
         unpriced: rosterUnpriced.get(roster.key) ?? new Map(),
+        ...(published ? { published } : {}),
       }),
     );
   }
@@ -387,6 +419,7 @@ function buildView(args: {
   values: ReadonlyMap<string, number[]>;
   unpriced: ReadonlyMap<string, number>;
   scheduleKnown: boolean;
+  published?: ReadonlyMap<string, number>;
 }): RosterView {
   const { roster, pool, shape, profile, evaluations } = args;
   const playerIds = [...roster.playerIds];
@@ -408,9 +441,10 @@ function buildView(args: {
     nameOf.set(id, evaluation.name);
     if (evaluation.ruledOut) ruledOut.add(id);
     if (evaluation.ruledOut || (args.scheduleKnown && evaluation.opponent == null)) notPlaying.add(id);
+    const price = weekValueOf(evaluation, args.published);
     if (evaluation.score == null) unscored.add(id);
-    else if (!isPriced(evaluation)) unpriced.add(id);
-    else valueOf.set(id, evaluation.score);
+    else if (price == null) unpriced.add(id);
+    else valueOf.set(id, price);
   }
 
   /*
@@ -428,7 +462,7 @@ function buildView(args: {
     if (hit) return hit;
 
     const inputs = ids.map((id) => pool.get(id)).filter((i): i is StartSitInput => i != null);
-    const lineup = recommendLineup(inputs, shape, profile);
+    const lineup = recommendLineup(inputs, shape, profile, args.published ? { published: args.published } : {});
     const starters = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
     const depth = new Map<string, number>();
     for (const id of ids) {
@@ -450,7 +484,19 @@ function buildView(args: {
       depth.set(position, (depth.get(position) ?? 0) + 1);
     }
     const entry = {
-      points: lineup.recommendedPoints,
+      /*
+       * Totalled on the week's numbers, not on `recommendedPoints`, which sums
+       * the raw score and so still carries a partial market's fragment. A
+       * starter with no week value counts at his score; any trade that moves
+       * him is refused as `unpriced_lineup`, so it cancels in every delta.
+       */
+      points: round2(
+        lineup.slots.reduce((total, slot) => {
+          const id = slot.playerId;
+          if (id == null) return total;
+          return total + (valueOf.get(id) ?? evaluations.get(id)?.score ?? 0);
+        }, 0),
+      ),
       starters,
       empty: lineup.slots.filter((s) => s.playerId == null).length,
       depth,

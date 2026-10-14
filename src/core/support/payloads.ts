@@ -441,6 +441,8 @@ export interface TradeOfferInputs {
    * rule to the same verdicts. Absent on a snapshot taken before it existed.
    */
   seasonChecks?: [string, SeasonCheck][];
+  /** Sleeper's published week by player id, the ideas' fallback number (15 October 2026). Absent on older snapshots. */
+  published?: [string, number][];
   /**
    * The behavioural half, with both of its `Map`s hoisted and keyed by alias.
    *

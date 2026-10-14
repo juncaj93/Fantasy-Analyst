@@ -108,6 +108,12 @@ export interface TradeAssemblyRequest {
    * that shipped yesterday — see `BilateralInput.arbitrage`.
    */
   arbitrage?: ReadonlyMap<string, ArbitrageRead> | undefined;
+  /**
+   * Sleeper's published week by player id: the number a player with no
+   * complete market is valued on (`weekValueOf` in `rosterUtility.ts`). Absent:
+   * complete markets only, and a partial market is never a price.
+   */
+  published?: ReadonlyMap<string, number> | undefined;
   /** Surfaced offers, bounded by the engine at twenty whatever is asked for. */
   limit?: number | undefined;
   /** Carried through rather than discarded; see `warnings` on the result. */
@@ -213,6 +219,7 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
     pool,
     shape: request.shape,
     profile: request.profile,
+    ...(request.published ? { published: request.published } : {}),
   });
 
   const me = views.get(String(mine.rosterId));

@@ -35,6 +35,7 @@ import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
 import { TradeCheckFold } from '../components/tradeCheck.tsx';
 import { TradeBuilderFold } from '../components/tradeBuilder.tsx';
+import { InfoLine } from '../components/chipPicker.tsx';
 import { TradeLadderFold } from '../components/tradeLadder.tsx';
 import { unwindOne } from '../tabReset.ts';
 
@@ -307,21 +308,9 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         actually ran and came back empty — a request still in flight, or one
         that failed, says nothing rather than claiming an empty league.
       */}
+      {/* One line each (Alex, 15 October 2026); the whole sentence opens on tap. */}
       {smart && smart.offers.length === 0 && smart.notes.length > 0 ? (
-        <StatusRow tone="info" data-testid="smart-trades-empty">
-          {smart.notes[0]}
-        </StatusRow>
-      ) : null}
-      {/*
-        The ideas are priced on this week's betting lines alone, which are
-        thinnest early in the week (the 14 October audit: 0 of 108 checked
-        ideas passed). Build a trade judges the rest of the season, so an empty
-        board points to it rather than ending the conversation.
-      */}
-      {smart && smart.offers.length === 0 && (smart.league?.id ?? board.league?.id) ? (
-        <div className="faint trade-builder-hint" data-testid="smart-trades-try-builder">
-          Ideas use this week’s betting lines only. Build a trade below uses the rest of the season.
-        </div>
+        <InfoLine testId="smart-trades-empty" text={smart.notes[0]} detail={smart.notes[0]} />
       ) : null}
 
       {/*
@@ -335,9 +324,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         already says exactly this.
       */}
       {smart?.pricing?.line ? (
-        <StatusRow tone="info" data-testid="smart-trades-unpriced">
-          {smart.pricing.line}
-        </StatusRow>
+        <InfoLine testId="smart-trades-unpriced" text={smart.pricing.line} detail={smart.pricing.line} />
       ) : null}
 
       {/*
@@ -358,9 +345,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         Only the first two are anyone's fault.
       */}
       {smart?.arbitrageOff ? (
-        <StatusRow tone="warn" data-testid="smart-trades-arbitrage-off">
-          {smart.arbitrageOff}
-        </StatusRow>
+        <InfoLine testId="smart-trades-arbitrage-off" text={smart.arbitrageOff} detail={smart.arbitrageOff} />
       ) : null}
 
       {/*

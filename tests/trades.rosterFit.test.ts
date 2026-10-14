@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { candidate } from './helpers/startsit.ts';
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildRosterViews, type RosterView } from '../src/core/trades/rosterUtility.ts';
 import { findBilateralTrades, MIN_USER_GAIN } from '../src/core/trades/bilateral.ts';
@@ -199,10 +199,11 @@ describe('own scarcity: the Kenneth Walker / CeeDee Lamb card', () => {
     const me = leagueOf(PIZZA, WALKER).get('1')!;
 
     const back = scarcityOf({ view: me, give: ['walker'], incoming: [{ position: 'WR', value: 16.1 }] });
-    // RB starters go from walker + rb2 to rb2 + rb3: 16.3 → 12, a loss of about
-    // 4.2 now that the engine's nudges are held to a tenth of the market number.
-    expect(back.costs[0]!.loss).toBeCloseTo(4.18, 1);
-    expect(back.charge).toBeCloseTo(SCARCITY.weight * (4.18 - SCARCITY.freeLoss), 1);
+    // RB starters go from walker + rb2 to rb2 + rb3, a loss of about 4.3. (4.18
+    // until 15 October 2026, when the fixture's players got their whole board:
+    // a single line is a partial market and no longer a price.)
+    expect(back.costs[0]!.loss).toBeCloseTo(4.3, 1);
+    expect(back.charge).toBeCloseTo(SCARCITY.weight * (4.3 - SCARCITY.freeLoss), 1);
     expect(back.costs[0]!.replacement?.name).toBe('rb3');
 
     const receiver = scarcityOf({ view: me, give: ['wr3'], incoming: [{ position: 'RB', value: 13 }] });

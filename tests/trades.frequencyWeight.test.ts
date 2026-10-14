@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { candidate } from './helpers/startsit.ts';
+import { pricedCandidate as candidate } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildRosterViews, type RosterView } from '../src/core/trades/rosterUtility.ts';
 import { OFFERS_BY_ACTIVITY, TRADE_BOUNDS, findBilateralTrades } from '../src/core/trades/bilateral.ts';

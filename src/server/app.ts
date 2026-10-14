@@ -3031,6 +3031,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         want,
         team,
         considerUnmarked: q.get('unmarked') === '1',
+        sweep: q.get('sweep') === '1',
       });
       return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
     } catch (err) {

@@ -115,6 +115,32 @@ A note only: completed trades this season (by roster) and in earlier seasons
 this app has read (mapped through the ledger's roster identities for that
 season). It moves no number.
 
+## Compact layout (15 October 2026)
+
+- Rosters are wrapped chips grouped by position: `RB E. Johnson ATL`, an
+  injury letter (Q, D, O, IR), and a `Sell` or `Want` tag once marked. A
+  16-player roster is 5 rows of chips at 390 px and 6 at 360.
+- The build flow (Sell chips, team picker, Want chips, Find trades) fits an
+  844 px screen; Find trades sticks above the tab bar.
+- Banners are one line, with the rest behind an info button.
+- A card: status chip (and `Costs you now` when it loses points this week or
+  over the next three), the team, one Give and one Get line, one row of four
+  numbers (this week, next 3, playoffs, them), one need phrase.
+- The sheet: status and one short reason, a three-row table, at most two
+  short reasons, a line when it rests mostly on Sleeper's projection, Copy
+  pitch, and `More` for the pitch text, the manager's record, value, habits
+  and caveats.
+- A package that costs Alex now ranks above one that helps now only when its
+  gain is at least 1.5 times as large and 5 points more.
+- An elite back's handcuff is never offered unless marked.
+
+## All teams, one team per request
+
+The screen asks for each team in turn (`sweep=1`), shows `3 of 9 teams`, and
+merges the best five (two per team at most) as answers arrive. A team that
+fails is said in one line with a Retry for that team alone. No single request
+is heavier than one team's.
+
 ## Cost
 
 Nothing until the fold is opened. Opening it reads the rosters (the request
