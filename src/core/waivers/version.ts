@@ -106,6 +106,7 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * `waiver@15`: Alex's live screen (14 October). A recent pickup with nothing
  * to show and no real role is a dead spot: no weeks-held credit, no lineup
  * protection, and the first drop offered, ahead of elite backs' handcuffs and
- * high picks. A move that costs somebody lists its best three drops.
+ * high picks. A move that costs somebody lists its best three drops. "In
+ * your lineup" is the app's best week lineup, not Sleeper's leftover slots.
  */
 export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@15', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

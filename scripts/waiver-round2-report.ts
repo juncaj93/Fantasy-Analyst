@@ -66,7 +66,17 @@ function line(row: TierRow): string {
   const rivals = row.bid.likely.length
     ? row.bid.likely.map((r) => `${real(r.name)} ${Math.round(r.chance * 100)}%${r.why ? ` (${r.why})` : ''}`).join(', ')
     : 'none likely';
-  const best = row.bestDrops?.length ? `\n      best drops: ${row.bestDrops.map((c, i) => `${i + 1}. ${c.name} ${c.position ?? ''} · ${c.stat ?? ''}`).join('  ')}` : '';
+  const best = row.bestDrops?.length
+    ? `\n      best drops: ${row.bestDrops.map((c, i) => `${i + 1}. ${c.name} ${c.position ?? ''} · ${c.stat ?? ''}`).join('  ')}` +
+      row.bestDrops
+        .map((c) => {
+          const l = c.weekOneLoss;
+          if (!l) return '';
+          const who = l.replacedBy ? `${l.replacedBy} starts instead at ${l.replacementPoints?.toFixed(1)}` : 'not in the best lineup, nobody replaces him';
+          return `\n      WEEK-6 COST ${c.name}: ${l.points.toFixed(1)} pts lost; ${who}`;
+        })
+        .join('')
+    : '';
   const drop = row.needsSpot
     ? `none honest: you need a spot first; cheapest: ${row.needsSpot.map((c) => `${c.name} (${c.reason})`).join('; ')}`
     : row.drop

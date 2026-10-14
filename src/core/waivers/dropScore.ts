@@ -190,7 +190,7 @@ export function readDrops(bench: readonly DropSignals[]): Map<string, DropReadin
     const bits: string[] = [];
     const total = s.seasonPoints ?? 0;
     if (s.unavailable) bits.push('out now');
-    if (s.inLineup) bits.push('in your Sleeper lineup with little to show for it');
+    if (s.inLineup) bits.push('in your best lineup with little to show for it');
     if (bench.length > 1 && total === lowest) bits.push(`lowest season points on your bench (${total.toFixed(1)})`);
     else if (bench.length > 1 && recentAverage(s.recent) === lowestRecent) bits.push(`least points lately on your bench (${recentAverage(s.recent).toFixed(1)} a week)`);
     else bits.push(`${total.toFixed(1)} pts this season`);

@@ -150,8 +150,10 @@ describe('two holes at once', () => {
 
   it('lists every bench player’s drop score for the sheet, lowest first', () => {
     expect(plan.dropScores[0]?.name).toBe('Scrub');
-    expect(plan.dropScores.find((d) => d.name === 'Allen')?.protectedAs).toBe('in your lineup');
-    expect(plan.dropScores.find((d) => d.name === 'Shipley')?.protectedAs).toBe('in your lineup');
+    /* "In your lineup" is the app's best week 6 lineup, not Sleeper's slots: Allen and Shipley are not in it. */
+    expect(plan.dropScores.find((d) => d.name === 'Pickens')?.protectedAs).toBe('in your lineup');
+    expect(plan.dropScores.find((d) => d.name === 'Allen')?.protectedAs).toBeNull();
+    expect(plan.dropScores.find((d) => d.name === 'Shipley')?.protectedAs).toBeNull();
   });
 });
 
@@ -347,6 +349,10 @@ describe('two claims, one eligible drop (14 October)', () => {
     ['McConkey', { kind: 'draft_capital' as const, note: 'round 4 pick' }],
     ['Egbuka', { kind: 'draft_capital' as const, note: 'round 6 pick' }],
     ['Walker', { kind: 'draft_capital' as const, note: 'round 2 pick' }],
+    /* Not in the app's week 6 lineup, so protected here the way a high pick is, to keep one eligible drop. */
+    ['Allen', { kind: 'draft_capital' as const, note: 'round 5 pick' }],
+    ['Shipley', { kind: 'draft_capital' as const, note: 'round 3 pick' }],
+    ['Harris', { kind: 'draft_capital' as const, note: 'round 5 pick' }],
   ]);
   const MILLER = fa('Miller', 'RB', 9, { team: 'NO' });
   const CONCEPCION = fa('Concepcion', 'WR', 9, { team: 'CLE' });
@@ -395,6 +401,8 @@ describe('the IR option', () => {
     ['EJohnson', { kind: 'handcuff' as const, note: 'backs up Walker' }],
     ['McConkey', { kind: 'market_hold' as const, note: 'drafted around pick 41' }],
     ['Egbuka', { kind: 'market_hold' as const, note: 'drafted around pick 61' }],
+    ['Allen', { kind: 'draft_capital' as const, note: 'round 5 pick' }],
+    ['Harris', { kind: 'draft_capital' as const, note: 'round 5 pick' }],
   ]);
 
   it('moves an Out player to an open IR slot ahead of any drop', () => {
@@ -492,10 +500,10 @@ describe('a dead spot is the first drop (Tre’ Harris)', () => {
     expect(andrews.drop?.name).toBe('Harris');
     const names = andrews.bestDrops!.map((c) => c.name);
     expect(names[0]).toBe('Harris');
-    expect(names.slice(1).sort()).toEqual(['BRobinson', 'EJohnson']);
+    expect(names).toHaveLength(3);
     expect(names).not.toContain('Egbuka');
+    expect(names).not.toContain('McConkey');
     expect(andrews.bestDrops![0]).toMatchObject({ position: 'WR', stat: '1.2 pts' });
-    expect(andrews.bestDrops![1]!.stat).toMatch(/^handcuff to /);
   });
 
   it('still moves Shipley to IR for Love, and puts no list under Love', () => {
@@ -504,7 +512,19 @@ describe('a dead spot is the first drop (Tre’ Harris)', () => {
     expect(love.bestDrops).toBeUndefined();
   });
 
-  it('keeps a lineup starter who has produced out of the list', () => {
-    for (const m of plan.doThese) expect((m.bestDrops ?? []).map((c) => c.name)).not.toContain('Allen');
+  it('never lists a player in the app\u2019s best week 6 lineup', () => {
+    for (const m of plan.doThese) for (const id of ['Pickens', 'Collins', 'Wilson', 'Bijan', 'Walker']) expect((m.bestDrops ?? []).map((c) => c.name)).not.toContain(id);
+  });
+
+  it('does not protect a player who is in last week\u2019s Sleeper slot but not in the app\u2019s week 6 best lineup', () => {
+    /* Allen sits in a Sleeper slot (inLineup on the signal), but the app starts McConkey and Egbuka at FLEX in week 6. */
+    expect(signals().get('Allen')!.inLineup).toBe(true);
+    const allen = plan.dropScores.find((d) => d.name === 'Allen')!;
+    expect(allen.protectedAs).toBeNull();
+    expect(allen.reason).not.toMatch(/lineup/);
+    /* Harris, also in a Sleeper slot, is no lineup cost at all: the app does not start him. */
+    expect(plan.dropScores.find((d) => d.name === 'Harris')!.factors!.inLineup).toBe(false);
+    expect(plan.doThese.find((m) => m.name === 'Andrews')!.dropCost).toBeLessThanOrEqual(0.5);
+    expect(plan.doThese.find((m) => m.name === 'Andrews')!.bestDrops![0]!.weekOneLoss).toEqual({ points: 0, replacedBy: null, replacementPoints: null });
   });
 });
