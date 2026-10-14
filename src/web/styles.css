@@ -11051,10 +11051,15 @@ div.matchup-result {
   scroll-margin-bottom: calc(var(--toolbar-height) + var(--toolbar-gap) + 72px);
 }
 
-@media (max-width: 370px) {
+/* Up to 375: the padded card leaves 24 px less, so the chips tighten to keep six rows. */
+@media (max-width: 380px) {
+  .chip-picker {
+    gap: 2px;
+  }
   .pick-chip {
-    padding: 0 5px;
-    font-size: 0.71rem;
+    gap: 2px;
+    padding: 0 4px;
+    font-size: 0.7rem;
   }
   .pick-chip-team {
     font-size: 0.6rem;
@@ -11215,18 +11220,32 @@ div.matchup-result {
   scroll-margin-top: calc(var(--safe-top, 0px) + 64px);
 }
 
+/*
+ * The team dropdown gives way to the pill: it shrinks to a sensible minimum
+ * and truncates a long team name, so `+ unmarked on` always fits whole inside
+ * the card's padding (Alex, 15 October 2026: clipped at 390).
+ */
 .tb-select {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 112px;
+  max-width: 240px;
+  margin-bottom: 0;
 }
 
 .tb-select select {
   width: 100%;
   min-height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tb-toggle {
   flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
   min-height: 36px;
   border: 0;
   font: inherit;
@@ -11243,7 +11262,7 @@ div.matchup-result {
   gap: var(--sp-2);
   margin: 4px 0;
   padding: 4px 0;
-  background: var(--bg);
+  background: var(--surface);
 }
 
 .tb-sticky > .btn {
@@ -11291,8 +11310,10 @@ div.matchup-result {
 
 .builder-chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .builder-status {
@@ -11482,4 +11503,34 @@ div.matchup-result {
  */
 .fold[data-testid='trade-builder'] {
   overflow: clip;
+}
+
+/*
+ * Build a trade and Check a trade hold controls, not rows: their bodies take
+ * the card header's inset (and the Team cards' 12 px), so the labels, chips,
+ * dropdowns, pill and buttons line up with the title and nothing touches the
+ * card's edge (Alex, 15 October 2026).
+ */
+.fold[data-testid='trade-builder'] > [data-testid='trade-builder-body'],
+.fold[data-testid='trade-check'] > [data-testid='trade-check-body'] {
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+
+/* The market fold's section titles take the same inset as its header, not 4 px. */
+.fold[data-testid='market-fold'] .section-title {
+  margin-left: var(--sp-3);
+  margin-right: var(--sp-3);
+}
+
+/* `Beta` beside a fold's title: small, quiet, never mistaken for a count. */
+.fold-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }

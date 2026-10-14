@@ -21,6 +21,7 @@ import type { DropSignals } from '../src/core/waivers/dropScore.ts';
 import {
   BUILDER,
   buildTradePackages,
+  followUpAdds,
   givePoolOf,
   needsOf,
   pitchFor,
@@ -30,7 +31,7 @@ import {
   type BuilderInput,
   type BuilderTeam,
 } from '../src/core/trades/builder.ts';
-import { BUILDER_ADVISORY, BUILDER_WILLINGNESS, rankKey, rankPackages, topAcrossTeams } from '../src/core/trades/builderResponse.ts';
+import { BUILDER_ADVISORY, BUILDER_WILLINGNESS, followUpChip, rankKey, rankPackages, topAcrossTeams } from '../src/core/trades/builderResponse.ts';
 
 const POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'];
 const SETTINGS = { playoff_week_start: 15, playoff_teams: 6, playoff_round_type: 0, trade_deadline: 11 };
@@ -451,5 +452,45 @@ describe('short forms for the compact card and sheet', () => {
     expect(pkg.statusShort).toBe('You give more · fills their need');
     expect(pkg.whyShort!.length).toBeLessThanOrEqual(2);
     expect(pkg.whyShort![0]).toMatch(/^Waddle starts \d+ of \d+ wks for you$/);
+  });
+});
+
+describe('a package that needs a follow-up add', () => {
+  const SLOTS = slotsOf(SHAPE);
+  const twoQbs = [withBye(rate('burrow', 'QB', 21), 8), rate('love', 'QB', 18), ...ALEX.filter((p) => p.position !== 'QB')];
+
+  it('trading the backup QB with the starter on a bye says add a QB that week, and names the free agents assumed', () => {
+    const after = [...twoQbs.filter((p) => p.playerId !== 'love'), rate('doubs', 'WR', 9)];
+    const adds = followUpAdds(twoQbs, after, SLOTS, HORIZON, REPLACEMENT);
+    expect(adds).toEqual([{ position: 'QB', weeks: [8], assumes: { rate: 12, names: ['fa-qb0', 'fa-qb1', 'fa-qb2'] } }]);
+    expect(followUpChip(adds)).toBe('Then add a QB');
+  });
+
+  it('a hole the roster already had is not the package’s doing', () => {
+    const before = [withBye(rate('burrow', 'QB', 21), 8), ...ALEX.filter((p) => p.position !== 'QB')];
+    const after = before.filter((p) => p.playerId !== 'wr7');
+    expect(followUpAdds(before, after, SLOTS, HORIZON, REPLACEMENT)).toEqual([]);
+  });
+
+  it('no priced free agent at the position leaves the free agent unnamed', () => {
+    const noQb = new Map([...REPLACEMENT].filter(([position]) => position !== 'QB'));
+    const after = twoQbs.filter((p) => p.playerId !== 'love');
+    expect(followUpAdds(twoQbs, after, SLOTS, HORIZON, noQb)).toEqual([{ position: 'QB', weeks: [8], assumes: null }]);
+  });
+
+  it('the built package carries it, and keeps its status when a free agent is priced', () => {
+    const me = { ...team(1, 'Alex', twoQbs), reserveIds: [] };
+    const result = buildTradePackages(input({ me, sell: ['love', 'rb4'], want: new Map([[2, ['Jaylen Waddle']]]) }));
+    const pkg = result.packages.find((p) => p.give.some((g) => g.playerId === 'love'));
+    expect(pkg, JSON.stringify(result.audit)).toBeDefined();
+    expect(pkg!.followUp).toEqual([{ position: 'QB', weeks: [8], assumes: { rate: 12, names: ['fa-qb0', 'fa-qb1', 'fa-qb2'] } }]);
+    expect(pkg!.status).not.toBe('long_shot');
+    expect(result.packages.filter((p) => !p.give.some((g) => g.playerId === 'love')).every((p) => p.followUp == null)).toBe(true);
+  });
+
+  it('a flex the roster can still fill is no hole', () => {
+    const after = ALEX.filter((p) => p.playerId !== 'rb5' && p.playerId !== 'wr7');
+    expect(followUpAdds(ALEX, after, SLOTS, HORIZON, REPLACEMENT)).toEqual([]);
+    expect(followUpChip([])).toBeNull();
   });
 });

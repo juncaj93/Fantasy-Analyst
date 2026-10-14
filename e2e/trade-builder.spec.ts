@@ -134,7 +134,14 @@ function answer(packages: unknown[], extra: Record<string, unknown> = {}) {
 
 /** Per team: what the build endpoint answers. Team 3 has a package that costs Alex now; team 4 fails once. */
 const PER_TEAM: Record<string, unknown> = {
-  '2': answer([pkg('a', 2, LONG_OWNER, 20), pkg('b', 2, LONG_OWNER, 18, { give: [player('1-7', 'Emmett Johnson', 'RB', 'RB · 4.2 a game'), player('1-1', 'Jordan Love', 'QB', 'QB · 19.9 a game')], status: 'maybe' })]),
+  '2': answer([
+    pkg('a', 2, LONG_OWNER, 20),
+    pkg('b', 2, LONG_OWNER, 18, {
+      give: [player('1-7', 'Emmett Johnson', 'RB', 'RB · 4.2 a game'), player('1-1', 'Jordan Love', 'QB', 'QB · 19.9 a game')],
+      status: 'maybe',
+      followUp: [{ position: 'QB', weeks: [6], assumes: { rate: 14.2, names: ['Joe Flacco', 'Mac Jones', 'Jameis Winston'] } }],
+    }),
+  ]),
   '3': answer([pkg('c', 3, 'NateyDee', 30, { costsNow: true, alex: { thisWeek: -1.6, next3: -0.3, playoffs: 1.5, restOfSeason: 6.7, weighted: 30, adjustments: [] }, basis: 'sleeper' })]),
   '4': answer([pkg('d', 4, 'zackstephens54', 12, { drops: [{ ...player('1-15', 'Minnesota Vikings', 'DEF', 'DEF · 5.0 a game'), reason: 'the least you would miss' }] })]),
 };
@@ -369,6 +376,11 @@ test.describe('build a trade: card and sheet', () => {
       });
       expect(lines, `${id} is one line`).toBe(1);
     }
+    /* Trading Love with Burrow out leaves no QB in week 6: the card says so, and still fits. */
+    await expect(card.getByTestId('builder-add')).toHaveText('Then add a QB');
+    const head = (await card.locator('.builder-card-head').boundingBox())!;
+    const box = (await card.boundingBox())!;
+    expect(head.x + head.width).toBeLessThanOrEqual(box.x + box.width);
     /* The one that costs Alex now carries the chip. */
     await expect(page.getByTestId('builder-card').filter({ hasText: 'NateyDee' }).getByTestId('builder-costs-now')).toHaveText('Costs you now');
     expect(await horizontalOverflow(page)).toBe(0);
@@ -410,6 +422,93 @@ test.describe('build a trade: card and sheet', () => {
     await expect(sheet.getByTestId('builder-activity')).toHaveText('Has made 4 trades this season, 2 before');
     await expect(sheet.getByTestId('builder-advisory')).toContainText('never sends, proposes or accepts');
     expect(await sheet.textContent()).not.toMatch(/\d+%/);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+test.describe('build a trade: a follow-up add', () => {
+  test('the sheet names the free agents the numbers assume', async ({ page }) => {
+    await openTrades(page);
+    await openFold(page);
+    await page.getByTestId('trade-builder-team').selectOption('2');
+    await mine(page).filter({ hasText: 'E. Johnson' }).click();
+    await page.getByTestId('trade-builder-run').click();
+    await page.getByTestId('builder-card').filter({ hasText: 'J. Love' }).click();
+    const line = page.getByTestId('builder-detail-body').getByTestId('builder-detail-add');
+    await expect(line).toContainText('No QB on your roster in week 6.');
+    await expect(line).toContainText('Numbers assume a free agent at 14.2 pts: Joe Flacco, Mac Jones, Jameis Winston (their average)');
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+/**
+ * Inner padding (Alex, 15 October 2026): the label, chips, info line, team
+ * dropdown, pill and buttons start where the card's title starts, 12 px in,
+ * as on the Team cards, and nothing touches the card's edge.
+ */
+test.describe('build a trade and check a trade: inner padding', () => {
+  /** Everything visible in a fold's body that sits closer than 12 px to either edge. */
+  async function touching(page: Page, foldId: string): Promise<string[]> {
+    return page.getByTestId(foldId).evaluate((fold, id) => {
+      const f = fold.getBoundingClientRect();
+      const body = fold.querySelector(`[data-testid='${id}-body']`)!;
+      const out: string[] = [];
+      for (const el of Array.from(body.querySelectorAll('*')) as HTMLElement[]) {
+        const b = el.getBoundingClientRect();
+        if (b.width === 0 || b.height === 0) continue;
+        if (el.closest('.sheet, [role="dialog"], .sr-only')) continue;
+        if (b.left < f.left + 11.5 || b.right > f.right - 11.5) out.push(`${el.dataset.testid ?? el.className ?? el.tagName} ${Math.round(b.left - f.left)}/${Math.round(f.right - b.right)}`);
+      }
+      return out;
+    }, foldId);
+  }
+
+  test('Build a trade: every control is inset like the title, and the pill fits whole beside the dropdown', async ({ page }) => {
+    await openTrades(page);
+    await openFold(page);
+    await page.getByTestId('trade-builder-team').selectOption('2');
+    await page.getByTestId('trade-builder-unmarked').click();
+    await expect(page.getByTestId('trade-builder-unmarked')).toHaveText('+ unmarked on');
+    expect(await touching(page, 'trade-builder')).toEqual([]);
+
+    const title = (await page.getByTestId('trade-builder-toggle').locator('.fold-label').boundingBox())!;
+    const label = (await page.locator('#tb-sell-label').boundingBox())!;
+    const chip = (await mine(page).first().boundingBox())!;
+    expect(Math.abs(label.x - title.x), 'the Sell label lines up with the title').toBeLessThanOrEqual(1);
+    expect(Math.abs(chip.x - title.x), 'the first chip lines up with the title').toBeLessThanOrEqual(1);
+
+    const fold = (await page.getByTestId('trade-builder').boundingBox())!;
+    const select = (await page.getByTestId('trade-builder-team').boundingBox())!;
+    const pill = page.getByTestId('trade-builder-unmarked');
+    const pillBox = (await pill.boundingBox())!;
+    expect(Math.abs(pillBox.y + pillBox.height / 2 - (select.y + select.height / 2)), 'the pill sits on the dropdown row').toBeLessThanOrEqual(2);
+    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(fold.x + fold.width - 11.5);
+    expect(select.width, 'the dropdown keeps a usable width').toBeGreaterThanOrEqual(112);
+    expect(await pill.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'the pill label is whole').toBe(true);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('Build a trade carries a Beta tag beside its title', async ({ page }) => {
+    await openTrades(page);
+    const tag = page.getByTestId('trade-builder-tag');
+    await expect(tag).toHaveText('Beta');
+    const title = (await page.getByTestId('trade-builder-toggle').locator('.fold-label').boundingBox())!;
+    const box = (await tag.boundingBox())!;
+    expect(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2))).toBeLessThanOrEqual(3);
+    expect(box.x).toBeGreaterThan(title.x + title.width);
+  });
+
+  test('Check a trade: both sides and the button are inset like the title', async ({ page }) => {
+    await openTrades(page);
+    await page.getByTestId('trade-check-toggle').click();
+    await expect(page.getByTestId('trade-check-panel')).toBeVisible();
+    await expect(page.getByTestId('trade-check-players-b').getByTestId('pick-chip').first()).toBeVisible();
+    expect(await touching(page, 'trade-check')).toEqual([]);
+    const title = (await page.getByTestId('trade-check-toggle').locator('.fold-label').boundingBox())!;
+    for (const id of ['trade-check-team-a', 'trade-check-team-b', 'trade-check-run']) {
+      const b = (await page.getByTestId(id).boundingBox())!;
+      expect(Math.abs(b.x - title.x), `${id} lines up with the title`).toBeLessThanOrEqual(1);
+    }
     expect(await horizontalOverflow(page)).toBe(0);
   });
 });

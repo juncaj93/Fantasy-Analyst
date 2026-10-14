@@ -134,6 +134,23 @@ season). It moves no number.
   gain is at least 1.5 times as large and 5 points more.
 - An elite back's handcuff is never offered unless marked.
 
+## Phone check follow-ups (15 October 2026)
+
+- **Inner padding.** The bodies of Build a trade and Check a trade take the
+  header's 12 px inset (the Team cards' padding), so labels, chips, the info
+  line, the dropdown, the pill and the buttons line up with the title. The
+  market fold's section titles and its closing note take the same inset.
+- **Dropdown and pill.** The team dropdown shrinks (112 px minimum, long names
+  cut with an ellipsis) so `+ unmarked on` always fits whole. Up to 375 px the
+  chips tighten a little so a 16-player roster still wraps to six rows.
+- **Then add a QB.** When a package leaves a starting slot with nobody on
+  Alex's roster to fill it in some week (Love traded with Burrow on a bye),
+  the card carries `Then add a QB` and the sheet names the free agents the
+  numbers assume (their average and their names). With no priced free agent
+  at that position the package reads Long shot. No scoring changed: the
+  numbers already assumed a free agent there.
+- **Beta** beside the Build a trade title.
+
 ## All teams, one team per request
 
 The screen asks for each team in turn (`sweep=1`), shows `3 of 9 teams`, and
