@@ -87,6 +87,28 @@ export interface BuiltPackage {
   statusShort?: string;
   /** At most two fragments for the sheet: `Waddle starts 11 of 11 wks for you`. */
   whyShort?: string[];
+  /**
+   * Slots the package leaves with nobody on Alex's roster to fill them, by
+   * position (Alex, 15 October 2026: trading Love with Burrow on a bye leaves
+   * no QB in week 6). The numbers assume a free agent there; `assumes` is that
+   * free agent's level and who sets it, or null when none is priced.
+   */
+  followUp?: FollowUpAdd[];
+}
+
+export interface FollowUpAdd {
+  /** `QB`, `TE`, or the best position for a flex slot. */
+  position: string;
+  weeks: number[];
+  assumes: { rate: number; names: string[] } | null;
+}
+
+/** `Then add a QB`, for the card. */
+export function followUpChip(list: readonly FollowUpAdd[] | undefined): string | null {
+  const first = list?.[0];
+  if (!first) return null;
+  const article = /^[AEIOU]/.test(first.position) ? 'an' : 'a';
+  return `Then add ${article} ${first.position}`;
 }
 
 export interface BuilderWeeks {

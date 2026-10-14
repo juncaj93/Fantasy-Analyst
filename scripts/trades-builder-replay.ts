@@ -175,6 +175,9 @@ function printPackage(p: BuiltPackage, i: number): void {
   console.log(`       you: this week ${p.alex.thisWeek}, next 3 ${p.alex.next3}, playoffs ${p.alex.playoffs}, rest of season ${p.alex.restOfSeason} (ranking ${p.alex.weighted}); them: next 3 ${p.them.next3}, rest of season ${p.them.restOfSeason}`);
   console.log(`       why for them: ${p.why} · value ${p.balance.label} (give ${p.balance.give}, get ${p.balance.get}) · ${p.statusReason} · confidence ${p.confidence}`);
   console.log(`       manager: ${p.partner.activity.line} · card phrase: ${p.needShort ?? '-'} · sheet: ${p.statusShort ?? ''} / ${(p.whyShort ?? []).join(' / ')}`);
+  for (const f of p.followUp ?? []) {
+    console.log(`       then add a ${f.position} (weeks ${f.weeks.join(', ')}): ${f.assumes ? `numbers assume ${f.assumes.rate.toFixed(1)} pts, ${f.assumes.names.join(', ')}` : 'no free agent priced, shown as Long shot'}`);
+  }
   for (const r of p.reasons) console.log(`       - ${r}`);
   for (const c of p.caveats.slice(0, 4)) console.log(`       ~ ${c}`);
   console.log(`       pitch: ${p.pitch}`);

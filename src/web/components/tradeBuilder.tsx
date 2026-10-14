@@ -38,6 +38,7 @@ import { ChipPicker, InfoLine, shortName } from './chipPicker.tsx';
 import type { TradeTeamsResponse } from '../../core/tradeValue/response.ts';
 import {
   PACKAGE_STATUS_LABEL,
+  followUpChip,
   topAcrossTeams,
   type BuilderResponse,
   type BuiltPackage,
@@ -160,7 +161,7 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
     (results.kind === 'sweep' && results.runs.some((r) => r.state === 'loading' || r.state === 'waiting'));
 
   return (
-    <Fold label="Build a trade" summary={marksSummary(marks) ?? 'Sell and Want marks'} open={open} onToggle={toggleFold} testId="trade-builder">
+    <Fold label="Build a trade" tag="Beta" summary={marksSummary(marks) ?? 'Sell and Want marks'} open={open} onToggle={toggleFold} testId="trade-builder">
       <div ref={top} className="trade-builder-top" />
       {teams.kind === 'idle' || teams.kind === 'loading' ? (
         <SkeletonRows rows={3} testId="trade-builder-skeleton" />
@@ -355,6 +356,12 @@ function Results({
   );
 }
 
+/** `week 6`, `weeks 6 and 8`, `weeks 6, 8 and 9`. */
+function weeksText(weeks: readonly number[]): string {
+  if (weeks.length === 1) return `week ${weeks[0]}`;
+  return `weeks ${weeks.slice(0, -1).join(', ')} and ${weeks[weeks.length - 1]}`;
+}
+
 /** `T. Pollard RB 11.0`, players joined on one line. */
 function sideText(players: readonly PackagePlayer[]): string {
   return players.map((p) => `${shortName(p.name, p.position, p.team)} ${p.position} ${statNumber(p.stat)}`.trim()).join(' + ');
@@ -377,6 +384,11 @@ function PackageCard({ pkg, week, onOpen }: { pkg: BuiltPackage; week: number | 
           {pkg.costsNow ? (
             <span className="builder-status builder-costs" data-testid="builder-costs-now">
               Costs you now
+            </span>
+          ) : null}
+          {followUpChip(pkg.followUp) ? (
+            <span className="builder-status builder-costs" data-testid="builder-add">
+              {followUpChip(pkg.followUp)}
             </span>
           ) : null}
         </span>
@@ -489,6 +501,19 @@ function PackageSheet({ pkg, meta, onClose }: { pkg: BuiltPackage; meta: Builder
             {names(pkg.irMoves)} to IR <span className="faint">· open IR slot</span>
           </div>
         ) : null}
+        {(pkg.followUp ?? []).map((f) => (
+          <div className="builder-sheet-line" data-testid="builder-detail-add" key={f.position}>
+            No {f.position} on your roster in {weeksText(f.weeks)}.{' '}
+            {f.assumes ? (
+              <span className="faint">
+                Numbers assume a free agent at {f.assumes.rate.toFixed(1)} pts: {f.assumes.names.join(', ')}
+                {f.assumes.names.length > 1 ? ' (their average)' : ''}
+              </span>
+            ) : (
+              <span className="faint">No free-agent {f.position} is priced to fill it.</span>
+            )}
+          </div>
+        ))}
         {pkg.basis === 'sleeper' ? (
           <div className="builder-sheet-line faint" data-testid="builder-basis">
             Built mostly on Sleeper’s projection, not Vegas

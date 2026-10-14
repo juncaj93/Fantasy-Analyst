@@ -452,7 +452,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           would be a footnote to something the reader cannot see.
         */}
         {board.considered > 0 ? (
-          <div className="faint" style={{ margin: '8px 2px' }} data-testid="trades-considered">
+          <div className="faint" style={{ margin: '8px 12px' }} data-testid="trades-considered">
             {board.considered} player{board.considered === 1 ? '' : 's'} with evidence were considered. Players nobody
             has written about recently are left out rather than listed as holds.
           </div>

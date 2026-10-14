@@ -1879,6 +1879,7 @@ export function PullToRefresh({
 export function Fold({
   icon,
   label,
+  tag,
   summary,
   open,
   onToggle,
@@ -1897,6 +1898,8 @@ export function Fold({
   icon?: ReactNode;
   /** The affordance's own words, and its accessible name: `Explore the market`. */
   label: string;
+  /** A small tag beside the label, such as `Beta`. */
+  tag?: string;
   /** One short phrase about what is inside, in the quietest type on the control. */
   summary?: string | null;
   open: boolean;
@@ -1915,6 +1918,11 @@ export function Fold({
       >
         {icon ? <span className="fold-icon">{icon}</span> : null}
         <span className="fold-label">{label}</span>
+        {tag ? (
+          <span className="fold-tag" data-testid={testId ? `${testId}-tag` : undefined}>
+            {tag}
+          </span>
+        ) : null}
         {summary ? <span className="fold-summary">{summary}</span> : null}
         <span className="fold-chevron" aria-hidden="true">
           <DisclosureChevronIcon open={open} />

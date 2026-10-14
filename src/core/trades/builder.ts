@@ -61,6 +61,7 @@ import {
   type BuilderResult,
   type BuilderTeamResult,
   type BuiltPackage,
+  type FollowUpAdd,
   type PackageMove,
   type PackagePlayer,
   type PackageStatus,
@@ -424,7 +425,26 @@ function evaluatePackage(
 
   const sends = new Set(candidate.give.map((id) => input.me.roster.find((p) => p.playerId === id)?.position ?? ''));
   const need = needs.find((n) => sends.has(n.position) || (n.position === 'FLEX' && [...sends].some((s) => ['RB', 'WR', 'TE'].includes(s)))) ?? null;
-  const status = statusOf({ edge, need: need != null, alex: aWeighted, them: bWeighted });
+  let status = statusOf({ edge, need: need != null, alex: aWeighted, them: bWeighted });
+
+  /*
+   * A slot the package leaves with nobody to fill it (Love traded with Burrow
+   * on a bye): no new scoring, only said. The numbers already assume a free
+   * agent there; with none priced at that position it is a Long shot.
+   */
+  const after = [
+    ...roster.filter((p) => !candidate.give.includes(p.playerId)),
+    ...incoming,
+  ];
+  const followUp = followUpAdds(input.me.roster, after, slots, input.horizon, input.replacement);
+  if (followUp.some((f) => f.assumes == null) && status.status !== 'long_shot') {
+    const hole = followUp.find((f) => f.assumes == null)!;
+    status = {
+      status: 'long_shot',
+      reason: `It leaves you no ${hole.position} in week ${hole.weeks[0]}, and no free agent ${hole.position} is priced to fill it.`,
+      short: `No ${hole.position} wk ${hole.weeks[0]} · none on waivers`,
+    };
+  }
 
   const playoffWeeks = new Set(input.horizon.playoffWeeks);
   const sumWhere = (list: number[], keep: (week: number, i: number) => boolean) =>
@@ -483,8 +503,67 @@ function evaluatePackage(
     statusShort: status.short,
     whyShort: whyFragments(a, b, input.horizon.weeks.length, need?.label ?? null),
     basis: basisOf([...candidate.give.map((id) => input.me.roster.find((p) => p.playerId === id)!), ...incoming]),
+    ...(followUp.length > 0 ? { followUp } : {}),
   };
   return { pkg };
+}
+
+/**
+ * Slots that, in some week, no player on the roster after the trade can fill
+ * (on a bye, out, or simply none at the position), where the roster before the
+ * trade could. Counted as a matching of available players to slots, so a flex
+ * is filled by whoever is left. A flex hole is named by the position whose
+ * free agents are best.
+ */
+export function followUpAdds(
+  before: readonly PlayerRate[],
+  after: readonly PlayerRate[],
+  slots: readonly LineupSlotSpec[],
+  horizon: TradeHorizon,
+  replacement: ReplacementLevels,
+): FollowUpAdd[] {
+  const byPosition = new Map<string, number[]>();
+  horizon.weeks.forEach((week, i) => {
+    const was = unfilled(before, slots, i);
+    const now = unfilled(after, slots, i);
+    for (const key of was) {
+      const at = now.indexOf(key);
+      if (at >= 0) now.splice(at, 1);
+    }
+    for (const key of now) {
+      const slot = slots.find((s) => s.key === key)!;
+      const position =
+        slot.eligible.size === 1
+          ? [...slot.eligible][0]!
+          : ([...slot.eligible].sort((x, y) => (replacement.get(y)?.rate ?? -1) - (replacement.get(x)?.rate ?? -1))[0] ?? key);
+      const weeks = byPosition.get(position) ?? [];
+      if (!weeks.includes(week)) weeks.push(week);
+      byPosition.set(position, weeks);
+    }
+  });
+  return [...byPosition].map(([position, weeks]) => {
+    const level = replacement.get(position);
+    return { position, weeks, assumes: level ? { rate: level.rate, names: level.names } : null };
+  });
+}
+
+/** The keys of the slots nobody available in week `index` can fill, after the best assignment. */
+function unfilled(players: readonly PlayerRate[], slots: readonly LineupSlotSpec[], index: number): string[] {
+  const available = players.filter((p) => (p.weekly[index] ?? 0) > 0);
+  const holder: (number | null)[] = slots.map(() => null);
+  const place = (pi: number, seen: Set<number>): boolean => {
+    for (let si = 0; si < slots.length; si++) {
+      if (seen.has(si) || !slots[si]!.eligible.has(available[pi]!.position)) continue;
+      seen.add(si);
+      if (holder[si] == null || place(holder[si]!, seen)) {
+        holder[si] = pi;
+        return true;
+      }
+    }
+    return false;
+  };
+  available.forEach((_, pi) => place(pi, new Set()));
+  return slots.filter((_, si) => holder[si] == null).map((s) => s.key);
 }
 
 /**
