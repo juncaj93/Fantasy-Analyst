@@ -1,32 +1,44 @@
 /**
  * Build a trade: mark who you would sell, pick a team, mark who you want.
  *
- * A fold on Trades, closed and free until it is opened. Opening it reads the
- * rosters (the same small request Check a trade makes); the packages are built
- * on a deliberate tap of `Find trades`, never on a mark.
+ * A fold on Trades, closed and free until opened. Opening it reads the rosters
+ * (the request Check a trade makes); packages are built on a deliberate tap of
+ * `Find trades`, never on a mark.
  *
- * ## Layout, as Alex asked for it
+ * ## Compact, as Alex asked on 15 October 2026
  *
- *  - short ranked lines, one item per line, names in normal weight and stats
- *    muted, chips that stay on one line;
- *  - a card is Give and Get lines, three numbers (this week, next 3 weeks,
- *    playoffs), one line on why it works for them, and the status chip;
- *  - everything else (the full reasons, the drop, the manager's record, the
- *    pitch) is in the sheet a tap opens.
+ *  - rosters are wrapped chips (`chipPicker.tsx`), so a sixteen-player roster
+ *    is five or six rows and the whole build flow (Sell chips, team, Want
+ *    chips, Find trades) fits a 390 by 844 phone without scrolling;
+ *  - `Find trades` sticks above the tab bar; results scroll below;
+ *  - a card is a status chip and the team, one Give line, one Get line, one row
+ *    of numbers (this week, next 3 weeks, playoffs, them) and one short phrase
+ *    for their need. No sentences;
+ *  - the sheet keeps the title, the status with one short reason, a three-row
+ *    table and at most two short reasons on screen; the rest is under `More`.
+ *
+ * ## All teams, one team per request
+ *
+ * All teams asks the server for one team at a time (`sweep=1`) and shows
+ * results as they arrive, so no single request is heavy enough to time out on
+ * the free plan. A progress line says how far it has got; a team that fails
+ * can be retried on its own.
  *
  * Marks live in this phone's browser storage (`tradeMarks.ts`). Nothing here
  * sends, proposes or accepts a trade; `Copy pitch` puts a message on the
  * clipboard for Alex to paste himself.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.ts';
-import { DetailLabel, PositionPill, StatusRow } from './common.tsx';
+import { DetailLabel } from './common.tsx';
 import { ReasonList } from './decisions.tsx';
-import { Fold, ListGroup, ListRow, Sheet, SkeletonRows } from './native.tsx';
-import type { TradeTeam, TradeTeamsResponse } from '../../core/tradeValue/response.ts';
+import { Fold, Sheet, SkeletonRows } from './native.tsx';
+import { ChipPicker, InfoLine, shortName } from './chipPicker.tsx';
+import type { TradeTeamsResponse } from '../../core/tradeValue/response.ts';
 import {
   PACKAGE_STATUS_LABEL,
+  topAcrossTeams,
   type BuilderResponse,
   type BuiltPackage,
   type PackagePlayer,
@@ -35,8 +47,14 @@ import { builderQuery, clearMarks, marksSummary, readMarks, toggle, writeMarks, 
 
 type Load<T> = { kind: 'idle' } | { kind: 'loading' } | { kind: 'ready'; view: T } | { kind: 'failed' };
 
+/** One team's answer in a sweep. */
+type TeamRun = { rosterId: number; label: string; state: 'waiting' | 'loading' | 'done' | 'failed'; view?: BuilderResponse };
+
+/** Results: one team's answer, or an All teams sweep in progress. */
+type Results = { kind: 'idle' } | { kind: 'one'; state: Load<BuilderResponse> } | { kind: 'sweep'; runs: TeamRun[] };
+
 /** A signed number to one decimal, with a real minus sign. */
-function signed(value: number): string {
+export function signed(value: number): string {
   const text = Math.abs(value).toFixed(1);
   if (value > 0) return `+${text}`;
   if (value < 0) return `−${text}`;
@@ -47,16 +65,25 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
   const [open, setOpen] = useState(false);
   const [teams, setTeams] = useState<Load<TradeTeamsResponse>>({ kind: 'idle' });
   const [marks, setMarks] = useState<TradeMarks>(() => readMarks(leagueId));
-  const [result, setResult] = useState<Load<BuilderResponse>>({ kind: 'idle' });
+  const [results, setResults] = useState<Results>({ kind: 'idle' });
   const [openId, setOpenId] = useState<string | null>(null);
+  const top = useRef<HTMLDivElement | null>(null);
+  const sweepId = useRef(0);
 
   useEffect(() => setMarks(readMarks(leagueId)), [leagueId]);
+
+  /* Once the rosters are in, bring the build flow to the top of the screen, so all of it is in view at once. */
+  const ready = open && teams.kind === 'ready';
+  useEffect(() => {
+    if (ready) requestAnimationFrame(() => top.current?.scrollIntoView?.({ block: 'start' }));
+  }, [ready]);
 
   const update = useCallback(
     (next: TradeMarks) => {
       setMarks(next);
       writeMarks(leagueId, next);
-      setResult({ kind: 'idle' });
+      sweepId.current += 1;
+      setResults({ kind: 'idle' });
     },
     [leagueId],
   );
@@ -81,103 +108,143 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
     return (team: string, id: string) => byTeam.get(team)?.has(id) ?? false;
   }, [list]);
   const sellCount = mine ? marks.sell.filter((id) => onRoster(String(mine.rosterId), id)).length : 0;
+  const horizon = teams.kind === 'ready' ? teams.view.horizon : undefined;
+  const closed = horizon?.deadlinePassed === true;
+  const canRun = mine != null && !closed && (sellCount > 0 || marks.unmarked);
 
-  const run = () => {
-    if (!mine) return;
-    setResult({ kind: 'loading' });
-    api
-      .get<BuilderResponse>(`/api/leagues/${encodeURIComponent(leagueId)}/trades/build?${builderQuery(marks, onRoster, String(mine.rosterId))}`)
-      .then((view) => setResult({ kind: 'ready', view }))
-      .catch(() => setResult({ kind: 'failed' }));
+  const ask = (team: number | 'all', sweep: boolean): Promise<BuilderResponse> => {
+    const query = builderQuery({ ...marks, team: String(team) }, onRoster, String(mine!.rosterId));
+    return api.get<BuilderResponse>(`/api/leagues/${encodeURIComponent(leagueId)}/trades/build?${query}${sweep ? '&sweep=1' : ''}`);
   };
 
-  const opened = result.kind === 'ready' ? (result.view.packages.find((p) => p.id === openId) ?? null) : null;
+  /* All teams, one request per team, in order; each answer lands as it arrives. */
+  const sweep = async (runs: TeamRun[]) => {
+    const id = (sweepId.current += 1);
+    let current = runs;
+    setResults({ kind: 'sweep', runs: current });
+    for (const run of runs) {
+      if (run.state === 'done') continue;
+      if (sweepId.current !== id) return;
+      current = current.map((r) => (r.rosterId === run.rosterId ? { ...r, state: 'loading' } : r));
+      setResults({ kind: 'sweep', runs: current });
+      let next: TeamRun;
+      try {
+        next = { ...run, state: 'done', view: await ask(run.rosterId, true) };
+      } catch {
+        next = { ...run, state: 'failed' };
+      }
+      if (sweepId.current !== id) return;
+      current = current.map((r) => (r.rosterId === run.rosterId ? next : r));
+      setResults({ kind: 'sweep', runs: current });
+    }
+  };
+
+  const run = () => {
+    if (!canRun) return;
+    if (picked) {
+      sweepId.current += 1;
+      setResults({ kind: 'one', state: { kind: 'loading' } });
+      ask(picked.rosterId, false)
+        .then((view) => setResults({ kind: 'one', state: { kind: 'ready', view } }))
+        .catch(() => setResults({ kind: 'one', state: { kind: 'failed' } }));
+      return;
+    }
+    void sweep(others.map((t) => ({ rosterId: t.rosterId, label: t.label, state: 'waiting' })));
+  };
+
+  const shown = packagesOf(results);
+  const opened = shown.find((p) => p.id === openId) ?? null;
+  const meta = metaOf(results);
+  const busy =
+    (results.kind === 'one' && results.state.kind === 'loading') ||
+    (results.kind === 'sweep' && results.runs.some((r) => r.state === 'loading' || r.state === 'waiting'));
 
   return (
     <Fold label="Build a trade" summary={marksSummary(marks) ?? 'Sell and Want marks'} open={open} onToggle={toggleFold} testId="trade-builder">
+      <div ref={top} className="trade-builder-top" />
       {teams.kind === 'idle' || teams.kind === 'loading' ? (
         <SkeletonRows rows={3} testId="trade-builder-skeleton" />
       ) : teams.kind === 'failed' ? (
-        <StatusRow tone="info" data-testid="trade-builder-error">
-          Could not read the rosters just now.
-        </StatusRow>
+        <InfoLine text="Could not read the rosters just now." testId="trade-builder-error" />
       ) : !teams.view.found || !mine ? (
-        <StatusRow tone="info" data-testid="trade-builder-absent">
-          {teams.view.reason ?? 'No trade can be built yet.'}
-        </StatusRow>
+        <InfoLine text={teams.view.reason ?? 'No trade can be built yet.'} testId="trade-builder-absent" />
       ) : (
         <div data-testid="trade-builder-panel">
-          {teams.view.horizon?.deadlineWeek != null ? (
-            <StatusRow tone={teams.view.horizon.deadlinePassed ? 'warn' : 'info'} data-testid="trade-builder-deadline">
-              {deadlineText(teams.view.horizon)}
-            </StatusRow>
+          {horizon?.deadlineWeek != null ? (
+            <InfoLine
+              testId="trade-builder-deadline"
+              text={closed ? `Trades closed after week ${horizon.deadlineWeek}` : `Trades close after week ${horizon.deadlineWeek} · ${horizon.weeksToDeadline ?? 0} wks left`}
+              detail={`Read from your league's settings. Packages count week ${horizon.currentWeek} to week ${horizon.lastWeek}, playoffs included.`}
+            />
           ) : null}
 
-          <MarkList
-            title="Your players: tap to mark Sell"
-            team={mine}
+          <div className="tb-label" id="tb-sell-label">
+            Sell <span className="tb-hint">tap yours</span>
+          </div>
+          <ChipPicker
+            players={mine.players}
             marked={marks.sell}
-            chip="Sell"
+            tag="Sell"
+            label="Your players to sell"
             testId="trade-builder-mine"
             onToggle={(id) => update({ ...marks, sell: toggle(marks.sell, id) })}
           />
-          <ListGroup testId="trade-builder-options">
-            <ListRow
-              label="Also consider unmarked players"
-              detail="Never your elite backs"
-              mark={<span className="mark-chip" data-on={marks.unmarked ? 'yes' : 'no'}>{marks.unmarked ? 'On' : 'Off'}</span>}
-              pressed={marks.unmarked}
-              onClick={() => update({ ...marks, unmarked: !marks.unmarked })}
-              testId="trade-builder-unmarked"
-            />
-          </ListGroup>
 
-          <div className="field">
-            <label className="field-label" htmlFor="trade-builder-team">
-              Trade with
+          <div className="tb-row">
+            <label className="tb-select">
+              <span className="sr-only">Trade with</span>
+              <select
+                aria-label="Trade with"
+                data-testid="trade-builder-team"
+                value={picked ? String(picked.rosterId) : 'all'}
+                onChange={(e) => update({ ...marks, team: e.target.value })}
+              >
+                <option value="all">All teams</option>
+                {others.map((t) => (
+                  <option key={t.rosterId} value={String(t.rosterId)}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
             </label>
-            <select
-              id="trade-builder-team"
-              data-testid="trade-builder-team"
-              value={picked ? String(picked.rosterId) : 'all'}
-              onChange={(e) => update({ ...marks, team: e.target.value })}
+            <button
+              type="button"
+              className="mark-chip tb-toggle"
+              data-on={marks.unmarked ? 'yes' : 'no'}
+              aria-pressed={marks.unmarked}
+              data-testid="trade-builder-unmarked"
+              title="Also offer players you did not mark (never your elite backs or their handcuffs)"
+              onClick={() => update({ ...marks, unmarked: !marks.unmarked })}
             >
-              <option value="all">All teams</option>
-              {others.map((t) => (
-                <option key={t.rosterId} value={String(t.rosterId)}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+              + unmarked {marks.unmarked ? 'on' : 'off'}
+            </button>
           </div>
 
           {picked ? (
-            <MarkList
-              title="Their players: tap to mark Want"
-              team={picked}
-              marked={marks.want[String(picked.rosterId)] ?? []}
-              chip="Want"
-              hint="Mark nobody and the app suggests who would help you most."
-              testId="trade-builder-theirs"
-              onToggle={(id) => {
-                const key = String(picked.rosterId);
-                const next = toggle(marks.want[key] ?? [], id);
-                const want = { ...marks.want, [key]: next };
-                if (next.length === 0) delete want[key];
-                update({ ...marks, want });
-              }}
-            />
+            <>
+              <div className="tb-label">
+                Want <span className="tb-hint">none marked: we suggest</span>
+              </div>
+              <ChipPicker
+                players={picked.players}
+                marked={marks.want[String(picked.rosterId)] ?? []}
+                tag="Want"
+                label={`${picked.label}'s players to want`}
+                testId="trade-builder-theirs"
+                onToggle={(id) => {
+                  const key = String(picked.rosterId);
+                  const next = toggle(marks.want[key] ?? [], id);
+                  const want = { ...marks.want, [key]: next };
+                  if (next.length === 0) delete want[key];
+                  update({ ...marks, want });
+                }}
+              />
+            </>
           ) : null}
 
-          <div className="field trade-builder-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              data-testid="trade-builder-run"
-              disabled={(sellCount === 0 && !marks.unmarked) || result.kind === 'loading' || teams.view.horizon?.deadlinePassed === true}
-              onClick={run}
-            >
-              {result.kind === 'loading' ? 'Finding trades' : 'Find trades'}
+          <div className="tb-sticky" data-testid="trade-builder-sticky">
+            <button type="button" className="btn btn-primary" data-testid="trade-builder-run" disabled={!canRun || busy} onClick={run}>
+              {busy ? 'Finding trades' : canRun || closed ? 'Find trades' : 'Mark a Sell first'}
             </button>
             <button
               type="button"
@@ -186,161 +253,161 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
               disabled={marksSummary(marks) == null && !marks.unmarked}
               onClick={() => {
                 clearMarks(leagueId);
-                const next = { ...marks, sell: [], want: {}, unmarked: false };
-                setMarks(next);
-                setResult({ kind: 'idle' });
+                sweepId.current += 1;
+                setMarks({ ...marks, sell: [], want: {}, unmarked: false });
+                setResults({ kind: 'idle' });
               }}
             >
-              Clear marks
+              Clear
             </button>
           </div>
-          {sellCount === 0 && !marks.unmarked ? (
-            <div className="faint trade-builder-hint" data-testid="trade-builder-need-sell">
-              Mark at least one of your players Sell to find trades.
-            </div>
-          ) : null}
 
-          <BuilderResults state={result} onOpen={setOpenId} />
+          <Results
+            results={results}
+            packages={shown}
+            meta={meta}
+            onOpen={setOpenId}
+            onRetry={() => results.kind === 'sweep' && void sweep(results.runs.map((r) => (r.state === 'failed' ? { ...r, state: 'waiting' } : r)))}
+          />
         </div>
       )}
 
-      {opened ? <PackageSheet pkg={opened} result={(result as { view: BuilderResponse }).view} onClose={() => setOpenId(null)} /> : null}
+      {opened && meta ? <PackageSheet pkg={opened} meta={meta} onClose={() => setOpenId(null)} /> : null}
     </Fold>
   );
 }
 
-function deadlineText(h: NonNullable<TradeTeamsResponse['horizon']>): string {
-  if (h.deadlineWeek == null) return '';
-  if (h.deadlinePassed) return `The trade deadline was after week ${h.deadlineWeek}. Trades are closed.`;
-  const left = h.weeksToDeadline ?? 0;
-  if (left <= 1) return `Last week to trade: the deadline is after week ${h.deadlineWeek}.`;
-  return `Trades close after week ${h.deadlineWeek} (${left} weeks left).`;
+/** The packages to show: one team's, or the merged best of a sweep. */
+function packagesOf(results: Results): BuiltPackage[] {
+  if (results.kind === 'one') return results.state.kind === 'ready' ? results.state.view.packages : [];
+  if (results.kind === 'sweep') return topAcrossTeams(results.runs.flatMap((r) => r.view?.packages ?? []));
+  return [];
 }
 
-/** A roster as a list of tappable rows, each with its mark chip on the trailing edge. */
-function MarkList({
-  title,
-  team,
-  marked,
-  chip,
-  hint,
-  testId,
-  onToggle,
+/** What every answer shares: the weeks, the willingness line, the advisory. */
+function metaOf(results: Results): BuilderResponse | null {
+  if (results.kind === 'one') return results.state.kind === 'ready' ? results.state.view : null;
+  if (results.kind === 'sweep') return results.runs.find((r) => r.view)?.view ?? null;
+  return null;
+}
+
+function Results({
+  results,
+  packages,
+  meta,
+  onOpen,
+  onRetry,
 }: {
-  title: string;
-  team: TradeTeam;
-  marked: readonly string[];
-  chip: 'Sell' | 'Want';
-  hint?: string;
-  testId: string;
-  onToggle: (playerId: string) => void;
+  results: Results;
+  packages: BuiltPackage[];
+  meta: BuilderResponse | null;
+  onOpen: (id: string) => void;
+  onRetry: () => void;
 }) {
-  return (
-    <ListGroup header={title} footer={hint} testId={testId}>
-      {team.players.map((p) => {
-        const on = marked.includes(p.playerId);
-        return (
-          <ListRow
-            key={p.playerId}
-            state={<PositionPill position={p.position} />}
-            label={p.name}
-            detail={[p.team || null, p.reserve ? 'IR slot' : null, p.status].filter(Boolean).join(' · ') || undefined}
-            mark={on ? <span className="mark-chip" data-kind={chip.toLowerCase()} data-testid="trade-builder-chip">{chip}</span> : undefined}
-            onClick={() => onToggle(p.playerId)}
-            dataState={on ? 'marked' : 'idle'}
-            pressed={on}
-            testId="trade-builder-player"
-          />
-        );
-      })}
-    </ListGroup>
-  );
-}
-
-function BuilderResults({ state, onOpen }: { state: Load<BuilderResponse>; onOpen: (id: string) => void }) {
-  if (state.kind === 'idle') return null;
-  if (state.kind === 'loading') return <SkeletonRows rows={3} testId="trade-builder-result-skeleton" />;
-  if (state.kind === 'failed') {
-    return (
-      <StatusRow tone="info" data-testid="trade-builder-result-error">
-        Could not build trades just now.
-      </StatusRow>
-    );
+  if (results.kind === 'idle') return null;
+  if (results.kind === 'one' && results.state.kind === 'loading') return <SkeletonRows rows={3} testId="trade-builder-result-skeleton" />;
+  if (results.kind === 'one' && results.state.kind === 'failed') {
+    return <InfoLine text="Could not build trades just now. Try again." testId="trade-builder-result-error" />;
   }
-  const view = state.view;
+
+  const sweep = results.kind === 'sweep' ? results.runs : null;
+  const done = sweep ? sweep.filter((r) => r.state === 'done' || r.state === 'failed').length : 0;
+  const failed = sweep ? sweep.filter((r) => r.state === 'failed') : [];
+  const finished = sweep ? done === sweep.length : true;
+  const message = results.kind === 'one' && results.state.kind === 'ready' ? results.state.view.message : null;
+  const notes = results.kind === 'one' && results.state.kind === 'ready' ? results.state.view.notes : [];
+
   return (
     <div data-testid="trade-builder-results">
-      {view.notes.map((n) => (
-        <StatusRow key={n} tone="info" data-testid="trade-builder-note">
-          {n}
-        </StatusRow>
+      {sweep ? (
+        <div className="tb-progress" data-testid="trade-builder-progress" aria-live="polite">
+          {finished ? `${sweep.length} of ${sweep.length} teams` : `${done} of ${sweep.length} teams`}
+          {failed.length > 0 && finished ? (
+            <>
+              {' · '}
+              {failed.length} didn’t load{' '}
+              <button type="button" className="tb-retry" data-testid="trade-builder-retry" onClick={onRetry}>
+                Retry
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {notes.map((n) => (
+        <InfoLine key={n} text={n} testId="trade-builder-note" />
       ))}
-      {view.packages.length === 0 ? (
-        <StatusRow tone="info" data-testid="trade-builder-empty">
-          {view.message ?? 'No package helps both sides right now.'}
-        </StatusRow>
+      {packages.length === 0 && (finished || !sweep) ? (
+        <InfoLine
+          testId="trade-builder-empty"
+          text={message ?? 'No package helps both sides right now.'}
+        />
       ) : (
-        <>
-          <div className="section-title section-title-row">
-            <span>Packages</span>
-            <span className="section-title-meta">
-              <span className="section-count">{view.packages.length}</span>
-            </span>
-          </div>
-          <div className="smart-trade-group" role="list" aria-label="Trade packages">
-            {view.packages.map((p) => (
-              <div role="listitem" key={p.id}>
-                <PackageCard pkg={p} weeks={view.weeks} onOpen={() => onOpen(p.id)} />
-              </div>
-            ))}
-          </div>
-        </>
+        <div className="smart-trade-group" role="list" aria-label="Trade packages">
+          {packages.map((p) => (
+            <div role="listitem" key={p.id}>
+              <PackageCard pkg={p} week={meta?.weeks?.thisWeek ?? null} onOpen={() => onOpen(p.id)} />
+            </div>
+          ))}
+        </div>
       )}
-      <div className="faint trade-builder-hint" data-testid="trade-builder-willingness">
-        {view.willingness}
-      </div>
+      {meta ? <InfoLine testId="trade-builder-willingness" text="Willingness unknown" detail={meta.willingness} /> : null}
     </div>
   );
 }
 
-/** Give and Get lines, three numbers, why it works for them, and the status chip. */
-function PackageCard({ pkg, weeks, onOpen }: { pkg: BuiltPackage; weeks: BuilderResponse['weeks']; onOpen: () => void }) {
+/** `T. Pollard RB 11.0`, players joined on one line. */
+function sideText(players: readonly PackagePlayer[]): string {
+  return players.map((p) => `${shortName(p.name, p.position, p.team)} ${p.position} ${statNumber(p.stat)}`.trim()).join(' + ');
+}
+
+/** The one stat: the points a game from `RB · 11.0 a game · Questionable`. */
+function statNumber(stat: string): string {
+  return /(\d+(?:\.\d+)?) a game/.exec(stat)?.[1] ?? '';
+}
+
+/** Status chip and team; Give; Get; one row of numbers; one phrase for their need. */
+function PackageCard({ pkg, week, onOpen }: { pkg: BuiltPackage; week: number | null; onOpen: () => void }) {
   return (
     <button type="button" className="smart-trade builder-card" data-testid="builder-card" data-status={pkg.status} onClick={onOpen}>
       <span className="builder-card-head">
-        <span className="builder-status" data-status={pkg.status} data-testid="builder-status">
-          {PACKAGE_STATUS_LABEL[pkg.status]}
-        </span>
-        <span className="builder-partner faint">with {pkg.partner.label}</span>
-      </span>
-      <PlayerLines label="Give" players={pkg.give} testId="builder-give" />
-      <PlayerLines label="Get" players={pkg.get} testId="builder-get" />
-      {pkg.drops.length > 0 ? <PlayerLines label="Drop" players={pkg.drops} testId="builder-drop" /> : null}
-      <span className="builder-nums" data-testid="builder-nums">
-        <Num label={weeks ? `Week ${weeks.thisWeek}` : 'This week'} value={pkg.alex.thisWeek} />
-        <Num label="Next 3 weeks" value={pkg.alex.next3} />
-        <Num label="Playoffs" value={pkg.alex.playoffs} />
-      </span>
-      <span className="builder-why" data-testid="builder-why">
-        <span className="builder-them">Them {signed(pkg.them.next3)}</span>
-        <span className="builder-why-text">{pkg.why}</span>
-      </span>
-    </button>
-  );
-}
-
-function PlayerLines({ label, players, testId }: { label: string; players: readonly PackagePlayer[]; testId: string }) {
-  return (
-    <span className="builder-line" data-testid={testId}>
-      <span className="builder-label">{label}</span>
-      <span className="builder-players">
-        {players.map((p) => (
-          <span className="builder-player" key={p.playerId}>
-            <span className="builder-name">{p.name}</span> <span className="builder-stat">{p.stat}</span>
+        <span className="builder-chips">
+          <span className="builder-status" data-status={pkg.status} data-testid="builder-status">
+            {PACKAGE_STATUS_LABEL[pkg.status]}
           </span>
-        ))}
+          {pkg.costsNow ? (
+            <span className="builder-status builder-costs" data-testid="builder-costs-now">
+              Costs you now
+            </span>
+          ) : null}
+        </span>
+        <span className="builder-partner">{pkg.partner.label}</span>
       </span>
-    </span>
+      <span className="builder-line" data-testid="builder-give">
+        <span className="builder-label">Give</span>
+        <span className="builder-one">{sideText(pkg.give)}</span>
+      </span>
+      <span className="builder-line" data-testid="builder-get">
+        <span className="builder-label">Get</span>
+        <span className="builder-one">{sideText(pkg.get)}</span>
+      </span>
+      {pkg.drops.length > 0 ? (
+        <span className="builder-line" data-testid="builder-drop">
+          <span className="builder-label">Drop</span>
+          <span className="builder-one">{sideText(pkg.drops)}</span>
+        </span>
+      ) : null}
+      <span className="builder-nums" data-testid="builder-nums">
+        <Num label={week != null ? `Wk ${week}` : 'Now'} value={pkg.alex.thisWeek} />
+        <Num label="Next 3" value={pkg.alex.next3} />
+        <Num label="Playoffs" value={pkg.alex.playoffs} />
+        <Num label="Them" value={pkg.them.next3} />
+      </span>
+      {pkg.needShort ?? pkg.need ? (
+        <span className="builder-need" data-testid="builder-why">
+          {pkg.needShort ?? pkg.need}
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -353,98 +420,82 @@ function Num({ label, value }: { label: string; value: number }) {
   );
 }
 
-/** The whole case, in the sheet grammar every other detail uses. */
-function PackageSheet({ pkg, result, onClose }: { pkg: BuiltPackage; result: BuilderResponse; onClose: () => void }) {
+/** The title, the status with one reason, a three-row table, two reasons; the rest under More. */
+function PackageSheet({ pkg, meta, onClose }: { pkg: BuiltPackage; meta: BuilderResponse; onClose: () => void }) {
   const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
-  const names = (list: readonly PackagePlayer[]) => list.map((p) => p.name).join(' + ');
-  const weeks = result.weeks;
+  const [more, setMore] = useState(false);
+  const names = (list: readonly PackagePlayer[]) => list.map((p) => shortName(p.name, p.position, p.team)).join(' + ');
+  const week = meta.weeks?.thisWeek;
+  const why = (pkg.whyShort ?? pkg.reasons).slice(0, 2);
   return (
     <Sheet title={`${names(pkg.give)} → ${names(pkg.get)}`} accessibleLabel={`Trade with ${pkg.partner.label}`} onClose={onClose} testId="builder-detail">
       <div className="weekly" data-testid="builder-detail-body" data-package-id={pkg.id}>
-        <div className="trade-case-head">
+        <div className="builder-sheet-status">
           <span className="builder-status" data-status={pkg.status}>
             {PACKAGE_STATUS_LABEL[pkg.status]}
           </span>
-          <span className="faint">{pkg.statusReason}</span>
+          {pkg.costsNow ? <span className="builder-status builder-costs">Costs you now</span> : null}
+          <span className="builder-sheet-reason">{pkg.statusShort ?? pkg.statusReason}</span>
         </div>
-        <dl className="weekly-lines">
-          <div className="weekly-line">
-            <dt>Your lineup</dt>
-            <dd>
-              {signed(pkg.alex.thisWeek)}{' '}
-              <span className="faint">
-                week {weeks?.thisWeek ?? ''}, {signed(pkg.alex.next3)} next 3 weeks, {signed(pkg.alex.playoffs)} playoffs, {signed(pkg.alex.restOfSeason)} rest of season
-              </span>
-            </dd>
-          </div>
-          <div className="weekly-line">
-            <dt>{pkg.partner.label}</dt>
-            <dd>
-              {signed(pkg.them.next3)}{' '}
-              <span className="faint">next 3 weeks, {signed(pkg.them.restOfSeason)} rest of season</span>
-            </dd>
-          </div>
-          <div className="weekly-line">
-            <dt>Their need</dt>
-            <dd>{pkg.need ? pkg.need.charAt(0).toUpperCase() + pkg.need.slice(1) : 'None named'}</dd>
-          </div>
-          <div className="weekly-line">
-            <dt>Value</dt>
-            <dd>
-              {pkg.balance.label.charAt(0).toUpperCase() + pkg.balance.label.slice(1)}{' '}
-              <span className="faint">
-                you give {Math.round(pkg.balance.give)}, get {Math.round(pkg.balance.get)} pts over a free agent
-              </span>
-            </dd>
-          </div>
-          <div className="weekly-line">
-            <dt>This manager</dt>
-            <dd data-testid="builder-activity">{pkg.partner.activity.line}</dd>
-          </div>
-        </dl>
 
-        {pkg.drops.length > 0 || pkg.irMoves.length > 0 ? (
-          <>
-            <DetailLabel>Roster spot</DetailLabel>
-            <ol className="best-drops-why" data-testid="builder-detail-drops">
-              {pkg.irMoves.map((p) => (
-                <li key={p.playerId}>
-                  <span className="best-drops-name">Move {p.name} to IR</span> <span className="best-drops-stat">{p.stat}</span>
-                  <span className="best-drops-reason faint">{p.reason}</span>
-                </li>
-              ))}
-              {pkg.drops.map((p) => (
-                <li key={p.playerId}>
-                  <span className="best-drops-name">Drop {p.name}</span> <span className="best-drops-stat">{p.stat}</span>
-                  <span className="best-drops-reason faint">{p.reason}</span>
-                </li>
-              ))}
-            </ol>
-          </>
+        <table className="builder-table" data-testid="builder-table">
+          <thead>
+            <tr>
+              <th scope="col">
+                <span className="sr-only">Who</span>
+              </th>
+              <th scope="col">{week != null ? `Wk ${week}` : 'Now'}</th>
+              <th scope="col">Next 3</th>
+              <th scope="col">Playoffs</th>
+              <th scope="col">Season</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Your lineup</th>
+              <Cell value={pkg.alex.thisWeek} />
+              <Cell value={pkg.alex.next3} />
+              <Cell value={pkg.alex.playoffs} />
+              <Cell value={pkg.alex.restOfSeason} />
+            </tr>
+            <tr>
+              <th scope="row">Them</th>
+              <td className="builder-table-dim">·</td>
+              <Cell value={pkg.them.next3} />
+              <td className="builder-table-dim">·</td>
+              <Cell value={pkg.them.restOfSeason} />
+            </tr>
+            <tr>
+              <th scope="row">Their need</th>
+              <td colSpan={4} className="builder-table-text" data-testid="builder-need">
+                {pkg.needShort ?? pkg.need ?? 'None named'}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {why.length > 0 ? (
+          <div data-testid="builder-reasons">
+            <ReasonList items={why} />
+          </div>
+        ) : null}
+        {pkg.drops.length > 0 ? (
+          <div className="builder-sheet-line" data-testid="builder-detail-drops">
+            Drop {names(pkg.drops)} <span className="faint">· {pkg.drops[0]!.reason}</span>
+          </div>
+        ) : null}
+        {pkg.irMoves.length > 0 ? (
+          <div className="builder-sheet-line">
+            {names(pkg.irMoves)} to IR <span className="faint">· open IR slot</span>
+          </div>
+        ) : null}
+        {pkg.basis === 'sleeper' ? (
+          <div className="builder-sheet-line faint" data-testid="builder-basis">
+            Built mostly on Sleeper’s projection, not Vegas
+          </div>
         ) : null}
 
-        <DetailLabel>Why it works</DetailLabel>
-        <div data-testid="builder-reasons">
-          <ReasonList items={pkg.reasons} />
-        </div>
-        {pkg.alex.adjustments.length > 0 ? (
-          <>
-            <DetailLabel>Your habits</DetailLabel>
-            <ReasonList muted items={pkg.alex.adjustments.map((a) => `${signed(a.points)} ${a.label}`)} />
-          </>
-        ) : null}
-        {pkg.caveats.length > 0 ? (
-          <>
-            <DetailLabel>{pkg.caveats.length === 1 ? 'Caveat' : 'Caveats'}</DetailLabel>
-            <ReasonList muted items={pkg.caveats} />
-          </>
-        ) : null}
-
-        <DetailLabel>Pitch</DetailLabel>
-        <p className="builder-pitch" data-testid="builder-pitch">
-          {pkg.pitch}
-        </p>
-        <div className="field">
+        <div className="field builder-sheet-actions">
           <button
             type="button"
             className="btn btn-primary"
@@ -458,15 +509,50 @@ function PackageSheet({ pkg, result, onClose }: { pkg: BuiltPackage; result: Bui
           >
             {copied === 'done' ? 'Copied' : 'Copy pitch'}
           </button>
+          <button type="button" className="btn" aria-expanded={more} data-testid="builder-more" onClick={() => setMore((m) => !m)}>
+            {more ? 'Less' : 'More'}
+          </button>
         </div>
-        {copied === 'failed' ? <div className="faint">Could not copy. Press and hold the message above to copy it.</div> : null}
+        {copied === 'failed' ? <div className="faint">Could not copy. Open More and press and hold the message.</div> : null}
 
-        <div className="faint" style={{ marginTop: 8 }} data-testid="builder-advisory">
-          {result.willingness} {result.advisory} You paste the pitch into Sleeper yourself.
-        </div>
+        {more ? (
+          <div data-testid="builder-more-body">
+            <DetailLabel>Pitch</DetailLabel>
+            <p className="builder-pitch" data-testid="builder-pitch">
+              {pkg.pitch}
+            </p>
+            <DetailLabel>This manager</DetailLabel>
+            <div className="builder-sheet-line" data-testid="builder-activity">
+              {pkg.partner.activity.line}
+            </div>
+            <DetailLabel>Value</DetailLabel>
+            <div className="builder-sheet-line">
+              {pkg.balance.label} <span className="faint">· give {Math.round(pkg.balance.give)}, get {Math.round(pkg.balance.get)} over a free agent</span>
+            </div>
+            {pkg.alex.adjustments.length > 0 ? (
+              <>
+                <DetailLabel>Your habits</DetailLabel>
+                <ReasonList muted items={pkg.alex.adjustments.map((a) => `${signed(a.points)} ${a.label}`)} />
+              </>
+            ) : null}
+            {pkg.caveats.length > 0 ? (
+              <>
+                <DetailLabel>{pkg.caveats.length === 1 ? 'Caveat' : 'Caveats'}</DetailLabel>
+                <ReasonList muted items={pkg.caveats} />
+              </>
+            ) : null}
+            <div className="faint" style={{ marginTop: 8 }} data-testid="builder-advisory">
+              {meta.willingness} {meta.advisory}
+            </div>
+          </div>
+        ) : null}
       </div>
     </Sheet>
   );
+}
+
+function Cell({ value }: { value: number }) {
+  return <td className={`tally tally-${value > 0 ? 'pos' : value < 0 ? 'neg' : 'none'}`}>{signed(value)}</td>;
 }
 
 /** The clipboard, with the old select-and-copy route for a browser that refuses it. */

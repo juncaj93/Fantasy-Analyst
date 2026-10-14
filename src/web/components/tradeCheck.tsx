@@ -33,10 +33,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.ts';
-import { PositionPill, StatusRow, DetailLabel, Confidence } from './common.tsx';
+import { StatusRow, DetailLabel, Confidence } from './common.tsx';
+import { ChipPicker } from './chipPicker.tsx';
 import { ReasonList } from './decisions.tsx';
-import { CheckIcon } from './icons.tsx';
-import { Fold, ListGroup, ListRow, SkeletonRows } from './native.tsx';
+import { Fold, SkeletonRows } from './native.tsx';
 import type { SideResult, TradeEvaluation } from '../../core/tradeValue/evaluate.ts';
 import type {
   TradeCheckResponse,
@@ -279,26 +279,17 @@ function TeamPicker({
           ))}
         </select>
       </div>
+      {/* Wrapped chips, as on Build a trade (15 October 2026): a roster in a few rows, not a scrolling list. */}
       {team ? (
-        <ListGroup testId={`trade-check-players-${side}`}>
-          {team.players.map((p) => {
-            const on = selected.includes(p.playerId);
-            const full = !on && selected.length >= MAX_PER_SIDE;
-            return (
-              <ListRow
-                key={p.playerId}
-                state={<PositionPill position={p.position} />}
-                label={p.name}
-                detail={[p.team || null, p.reserve ? 'IR slot' : null, p.status].filter(Boolean).join(' · ') || undefined}
-                mark={on ? <CheckIcon size={16} /> : undefined}
-                onClick={full ? undefined : () => onToggle(p.playerId)}
-                dataState={on ? 'selected' : full ? 'full' : 'idle'}
-                pressed={on}
-                testId="trade-check-player"
-              />
-            );
-          })}
-        </ListGroup>
+        <ChipPicker
+          players={team.players}
+          marked={selected}
+          tag="Pick"
+          full={selected.length >= MAX_PER_SIDE}
+          label={`Players on the ${side === 'a' ? 'first' : 'second'} side`}
+          testId={`trade-check-players-${side}`}
+          onToggle={onToggle}
+        />
       ) : null}
     </div>
   );
