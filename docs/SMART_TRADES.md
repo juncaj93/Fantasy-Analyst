@@ -611,7 +611,10 @@ has seen fail is a gate nobody knows the shape of.
 - **Automated WebKit does not prove real-finger gesture arbitration**, per the
   standing note in `sheet-vs-pull.spec.ts`. The sheet added here is checked the
   same way and inherits the same caveat.
-- **The trade deadline is not read.** A league past its deadline can still be
+- **Build a trade** (`docs/TRADE_BUILDER.md`) is the marks-driven tool beside
+  these ideas: Alex chooses who he would sell and want, and packages are scored
+  on both rosters over the rest of the season. It reads the deadline.
+- **The trade deadline is not read** by the ideas board. A league past its deadline can still be
   offered trades. `settings.trade_deadline` is a week number and the check needs
   a clock `tradeCapabilityOf` deliberately does not take; it belongs with the
   capability gate when it is added.

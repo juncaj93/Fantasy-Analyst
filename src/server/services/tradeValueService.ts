@@ -83,7 +83,7 @@ export class TradeCheckError extends Error {
   }
 }
 
-interface Prepared {
+export interface Prepared {
   league: LeagueRecord;
   rosters: RosterRecord[];
   horizon: TradeHorizon;
@@ -92,6 +92,8 @@ interface Prepared {
   replacement: ReplacementLevels;
   /** How many players were evaluated, for the cost report. */
   evaluated: number;
+  /** The Start/Sit evaluation each rate was built from, for the trade builder's drop score. */
+  evaluations?: Map<string, StartSitEvaluation>;
 }
 
 function labelOf(roster: RosterRecord): string {
@@ -383,6 +385,31 @@ export class TradeValueService {
       );
     }
     return out;
+  }
+
+  /**
+   * The rates for some rosters of one league, read exactly as a check reads
+   * them, for the trade builder (`tradeBuilderService.ts`).
+   *
+   * The same preparation, so a package the builder shows and the same deal typed
+   * into Check a trade get the same numbers. `pick` absent means every roster
+   * in the league.
+   */
+  async prepareRosters(
+    leagueId: string,
+    pick?: (roster: RosterRecord) => boolean,
+  ): Promise<{ prepared: Prepared; state: NflState | null; rosterLimit: number }> {
+    const { league, rosters, state } = await this.leagueOf(leagueId);
+    const involved = pick ? rosters.filter(pick) : rosters;
+    const prepared = await this.prepare({
+      league,
+      rosters,
+      state,
+      playerIds: [...new Set(involved.flatMap((r) => r.playerIds))],
+      reserveIds: [...new Set(involved.flatMap((r) => r.reserveIds))],
+      movedIds: [],
+    });
+    return { prepared, state, rosterLimit: rosterLimitOf(league, prepared.shape) };
   }
 
   /**
@@ -701,7 +728,7 @@ export class TradeValueService {
     }
 
     const freeAgents = freeAgentIds.map((id) => rates.get(id)).filter((p): p is PlayerRate => p != null);
-    return { league, rosters, horizon, shape, rates, replacement: replacementLevels(freeAgents), evaluated: inputs.length };
+    return { league, rosters, horizon, shape, rates, replacement: replacementLevels(freeAgents), evaluated: inputs.length, evaluations };
   }
 }
 

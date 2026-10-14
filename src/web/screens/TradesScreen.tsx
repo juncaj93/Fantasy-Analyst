@@ -34,6 +34,7 @@ import { PlayerPage, PlayerSheet } from '../components/playerPage.tsx';
 import { ReasonList, withoutRepeats } from '../components/decisions.tsx';
 import { SmartTradeRow, SmartTradeSheet } from '../components/smartTrades.tsx';
 import { TradeCheckFold } from '../components/tradeCheck.tsx';
+import { TradeBuilderFold } from '../components/tradeBuilder.tsx';
 import { TradeLadderFold } from '../components/tradeLadder.tsx';
 import { unwindOne } from '../tabReset.ts';
 
@@ -311,6 +312,17 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           {smart.notes[0]}
         </StatusRow>
       ) : null}
+      {/*
+        The ideas are priced on this week's betting lines alone, which are
+        thinnest early in the week (the 14 October audit: 0 of 108 checked
+        ideas passed). Build a trade judges the rest of the season, so an empty
+        board points to it rather than ending the conversation.
+      */}
+      {smart && smart.offers.length === 0 && (smart.league?.id ?? board.league?.id) ? (
+        <div className="faint trade-builder-hint" data-testid="smart-trades-try-builder">
+          Ideas use this week’s betting lines only. Build a trade below uses the rest of the season.
+        </div>
+      ) : null}
 
       {/*
         Who the search could not look at, and why.
@@ -360,6 +372,15 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         is the tool for the idea the reader brought. Absent when no league is
         resolved, which is the one case with nothing to check.
       */}
+      {/*
+        Build a trade: Alex marks who he would sell and who he wants, and the
+        builder finds packages that help both lineups. Closed and free until it
+        is opened, like Check a trade below it; its marks live on this phone.
+      */}
+      {(smart?.league?.id ?? board.league?.id) ? (
+        <TradeBuilderFold leagueId={(smart?.league?.id ?? board.league?.id)!} />
+      ) : null}
+
       {(smart?.league?.id ?? board.league?.id) ? (
         <TradeCheckFold leagueId={(smart?.league?.id ?? board.league?.id)!} />
       ) : null}
