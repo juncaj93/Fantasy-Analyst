@@ -29,7 +29,7 @@ import type { PickupState } from './clearWindow.ts';
 import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
 import { weekNumbers, type AheadNumbers } from './aheadWeeks.ts';
-import { eliteBacks, eliteHandcuffs, type DropSignals } from './dropScore.ts';
+import { DROP_RULES, eliteBacks, eliteHandcuffs, type DropSignals } from './dropScore.ts';
 import { stashVerdict, type InjuryNote, type StashVerdict } from './stash.ts';
 
 export interface TierWindow {
@@ -99,6 +99,10 @@ export interface TierInputRequest {
   injuryNotes?: ReadonlyMap<string, InjuryNote> | undefined;
   /** Sleeper's own depth-chart order per player, preferred over the stored chart for handcuffs. */
   depthOrder?: ReadonlyMap<string, number> | undefined;
+  /** The round this league drafted each player in. */
+  draftRounds?: ReadonlyMap<string, number> | undefined;
+  /** Which statuses this league's IR slots take beyond IR itself. Absent: no IR moves are suggested. */
+  reserveAllows?: { out: boolean; doubtful: boolean; sus: boolean } | undefined;
 }
 
 export interface TierInputs {
@@ -213,6 +217,13 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
   }
   const protections = new Map<string, TierProtection>();
   for (const [id, starter] of handcuffs) protections.set(id, { kind: 'handcuff', note: `backs up ${starter.name}` });
+  /*
+   * Draft capital: round 6 or earlier in this league's own draft is never the
+   * automatic drop, unless Sleeper's injury note says he is out for the season.
+   */
+  for (const [id, note] of draftCapital(roster, input.draftRounds, input.injuryNotes, input.week)) {
+    if (!protections.has(id)) protections.set(id, { kind: 'draft_capital', note });
+  }
   for (const [id, note] of input.held) if (!protections.has(id)) protections.set(id, { kind: 'market_hold', note });
 
   /* The drop score's inputs, when this season's points are on record. */
@@ -240,9 +251,13 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
         role: trend?.startsWith('rising') ? 'rising' : trend?.startsWith('falling') ? 'falling' : trend === 'stable' ? 'stable' : null,
         heldWeeks: held ? Math.max(0, input.week - held.week) : null,
         drafted: held == null && (input.draftedIds?.has(p.playerId) ?? false),
+        weeksSinceDraft: Math.max(0, input.week - 1),
+        draftRound: input.draftRounds?.get(p.playerId) ?? null,
         handcuffOf: handcuffs.get(p.playerId)?.name ?? null,
         inLineup: lineup.has(p.playerId),
         unavailable: ['out', 'ir', 'pup', 'suspended'].includes(p.designation),
+        injured: !['healthy', 'unknown', 'active', ''].includes(p.designation),
+        healthyRate: p.rate,
       });
     }
   }
@@ -274,6 +289,7 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       excludedPositions: input.excludedPositions,
       replacement,
       ...(dropSignals.size > 0 ? { dropSignals } : {}),
+      ...(input.reserveAllows ? { reserveEligible: reserveEligibleOf(roster, input.reserveAllows) } : {}),
       ...(input.injuryNotes ? { stash } : {}),
     },
     window,
@@ -290,4 +306,31 @@ function addableBefore(input: StartSitInput, pickup: PickupState | undefined, no
   if (!pickup || pickup.state === 'free') return true;
   const until = pickup.until ? Date.parse(pickup.until) : Number.NaN;
   return Number.isFinite(until) && until < kickoff;
+}
+
+/** Rostered players this league's IR slots would take today. */
+function reserveEligibleOf(roster: readonly TierPlayer[], allows: { out: boolean; doubtful: boolean; sus: boolean }): Set<string> {
+  const ok = (d: string) => d === 'ir' || (d === 'out' && allows.out) || (d === 'doubtful' && allows.doubtful) || (d === 'suspended' && allows.sus);
+  return new Set(roster.filter((p) => !p.onReserve && ok(p.designation)).map((p) => p.playerId));
+}
+
+/**
+ * Rostered players this league drafted in round {@link DROP_RULES.protectedRound}
+ * or earlier, with `round N pick`, unless Sleeper's injury note says he is out
+ * for the season.
+ */
+export function draftCapital(
+  roster: readonly Pick<TierPlayer, 'playerId' | 'designation'>[],
+  rounds: ReadonlyMap<string, number> | undefined,
+  notes: ReadonlyMap<string, InjuryNote> | undefined,
+  week: number,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of roster) {
+    const round = rounds?.get(p.playerId);
+    if (round == null || round > DROP_RULES.protectedRound) continue;
+    const lost = stashVerdict({ designation: p.designation, note: notes?.get(p.playerId) ?? null, week }).kind === 'season_ending';
+    if (!lost) out.set(p.playerId, `round ${round} pick`);
+  }
+  return out;
 }

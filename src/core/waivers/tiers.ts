@@ -154,7 +154,7 @@ export interface TierCandidate extends TierPlayer {
 }
 
 export interface TierProtection {
-  kind: 'handcuff' | 'market_hold';
+  kind: 'handcuff' | 'market_hold' | 'draft_capital';
   /** `backs up Kenneth Walker`, `drafted around pick 41`. */
   note: string;
 }
@@ -193,6 +193,12 @@ export interface TierRequest {
    * old rule (Out or IR, good when healthy).
    */
   stash?: ReadonlyMap<string, StashVerdict> | undefined;
+  /**
+   * Rostered players who may go to an open injured-reserve slot under this
+   * league's rules (IR always; Out, Doubtful, suspended where the league allows
+   * them). Moving one there frees a bench spot with no drop. Absent: none.
+   */
+  reserveEligible?: ReadonlySet<string> | undefined;
 }
 
 export interface TierPreference {
@@ -228,7 +234,22 @@ export interface TierMove {
    * this player is the drop, `score` is his drop score, when the drop score
    * was read.
    */
-  drop: { playerId: string; name: string; position: string; reason?: string | null; score?: number | null; handcuff?: boolean } | null;
+  drop: {
+    playerId: string;
+    name: string;
+    position: string;
+    reason?: string | null;
+    score?: number | null;
+    handcuff?: boolean;
+    /** Not a drop: he moves to an open IR slot, which frees the spot. */
+    viaReserve?: boolean;
+  } | null;
+  /**
+   * Set when no honest drop is left for this move: every remaining bench
+   * player is protected. The cheapest few to free a spot with, each with a
+   * one-line reason; Alex picks.
+   */
+  needsSpot?: { playerId: string; name: string; reason: string }[];
   /** What cutting the drop costs on its own, weighted (lineup and depth). */
   dropCost: number | null;
   /** Other moves on this list that want the same roster spot. */
@@ -352,6 +373,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
 
   interface Option {
     drop: TierPlayer | null;
+    /** The drop goes to an open IR slot instead of being cut. */
+    viaReserve?: boolean;
     lineup: number;
     insurance: number;
     after: Valuation;
@@ -368,28 +391,37 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   if (signals) {
     const all = cuttable.map((p) => signals.get(p.playerId)).filter((x): x is DropSignals => x != null);
     /* "Lowest on your bench" compares the bench: a lineup player is scored but not compared. */
-    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup || x.unavailable))) readings.set(id, r);
+    for (const [id, r] of readDrops(all.filter((x) => !x.inLineup))) readings.set(id, r);
     for (const x of all) if (!readings.has(x.playerId)) readings.set(x.playerId, { ...dropScore(x), reason: 'in your Sleeper lineup' });
   }
   const scoreOf = (id: string): number | null => readings.get(id)?.score ?? null;
   const lineupLocked = (p: TierPlayer, c: TierCandidate): boolean => {
     const sig = signals?.get(p.playerId);
-    if (!sig || !sig.inLineup || sig.unavailable) return false;
+    if (!sig || !sig.inLineup) return false;
+    /* An injured starter is still a starter: an injury never makes him cheaper to cut. */
     return !(p.position === c.position && (c.rate ?? 0) >= (p.rate ?? 0) + DROP_RULES.clearlyBetter);
   };
   const optionsFor = (c: TierCandidate, roster: readonly TierPlayer[], spots: number): Option[] => {
     const before = value(roster);
     const out: Option[] = [];
-    const tryDrop = (drop: TierPlayer | null) => {
+    const tryDrop = (drop: TierPlayer | null, viaReserve = false) => {
       const after = value([...roster.filter((p) => p.playerId !== drop?.playerId), c]);
       out.push({
         drop,
+        ...(viaReserve ? { viaReserve: true } : {}),
         lineup: round2(after.lineup - before.lineup),
         insurance: round2(after.insurance - before.insurance),
         after,
       });
     };
     if (spots > 0) tryDrop(null);
+    /*
+     * An injured player who can go to an open IR slot frees a spot with no
+     * drop. Valued as if he were gone, which is what IR means while he is
+     * there; he stays on the roster.
+     */
+    const reserveIds = request.openReserve > 0 ? (request.reserveEligible ?? new Set<string>()) : new Set<string>();
+    for (const p of roster) if (reserveIds.has(p.playerId) && !p.onReserve && !excluded.has(p.position)) tryDrop(p, true);
     const cOver = overReplacement(c) ?? 0;
     const allowed = roster.filter(
       (p) =>
@@ -399,27 +431,40 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         !lineupLocked(p, c) &&
         /*
          * Never cut a better player for a worse one because of a short-term bye
-         * or injury: with the drop score, nobody whose score is above the add's
-         * own points a game; without it, nobody further above a free agent.
+         * or injury: nobody further above a free agent at his position than the
+         * add is at his, and with the drop score, nobody scoring above the
+         * add's own points a game. Both, because points are not comparable
+         * across positions (a quarterback's 21 is not a back's 21).
          */
-        (signals && readings.has(p.playerId) ? (scoreOf(p.playerId) ?? 0) < (c.rate ?? 0) : (overReplacement(p) ?? 0) < cOver),
+        (overReplacement(p) ?? 0) < cOver &&
+        (!signals || !readings.has(p.playerId) || (scoreOf(p.playerId) ?? 0) < (c.rate ?? 0)),
     );
+    /*
+     * With the drop score (round 2), a protected player (a high pick held as a
+     * market hold, an elite back's handcuff) is never cut: when only protected
+     * players are left, the move says it needs a spot first and lists the
+     * cheapest candidates instead. Without it, as before: protected players
+     * only when nobody else can be.
+     */
     const open = allowed.filter((p) => !request.protections.has(p.playerId));
-    for (const p of open.length > 0 ? open : allowed) tryDrop(p);
+    for (const p of signals ? open : open.length > 0 ? open : allowed) tryDrop(p);
     const gainOf = (o: Option) => o.lineup + o.insurance;
-    if (!signals) {
-      return out.sort((a, b) => gainOf(b) - gainOf(a) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
-    }
-    /* About as good for the lineup, then the lowest drop score; an open spot first. */
-    const top = out.reduce((m, o) => Math.max(m, gainOf(o)), -Infinity);
-    const near = (o: Option) => gainOf(o) >= top - DROP_RULES.gainSlack;
-    return out.sort(
-      (a, b) =>
-        Number(near(b)) - Number(near(a)) ||
-        (near(a) ? (a.drop ? (scoreOf(a.drop.playerId) ?? 99) : -1) - (b.drop ? (scoreOf(b.drop.playerId) ?? 99) : -1) : 0) ||
-        gainOf(b) - gainOf(a) ||
-        (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''),
-    );
+    const order = (list: Option[]): Option[] => {
+      if (!signals) return list.sort((a, b) => gainOf(b) - gainOf(a) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
+      /* About as good for the lineup, then the lowest drop score; an open spot first. */
+      const top = list.reduce((m, o) => Math.max(m, gainOf(o)), -Infinity);
+      const near = (o: Option) => gainOf(o) >= top - DROP_RULES.gainSlack;
+      return list.sort(
+        (a, b) =>
+          Number(near(b)) - Number(near(a)) ||
+          (near(a) ? (a.drop ? (scoreOf(a.drop.playerId) ?? 99) : -1) - (b.drop ? (scoreOf(b.drop.playerId) ?? 99) : -1) : 0) ||
+          gainOf(b) - gainOf(a) ||
+          (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''),
+      );
+    };
+    /* An open spot or an IR move costs nobody: those first, then the drops. */
+    const free = out.filter((o) => o.drop == null || o.viaReserve);
+    return [...order(free), ...order(out.filter((o) => o.drop != null && !o.viaReserve))];
   };
 
   const prefsFor = (c: TierCandidate, option: Option): TierPreference[] => {
@@ -464,6 +509,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
             reason: readings.get(option.drop.playerId)?.reason ?? null,
             score: scoreOf(option.drop.playerId),
             handcuff: request.protections.get(option.drop.playerId)?.kind === 'handcuff',
+            ...(option.viaReserve
+              ? { viaReserve: true, reason: `${injuryWord(option.drop.designation)}; your open IR slot holds him, so no drop` }
+              : {}),
           }
         : null,
       dropCost: option.drop ? (dropCost.get(option.drop.playerId) ?? null) : null,
@@ -599,12 +647,16 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       options: (options.get(m.playerId) ?? []).slice(0, 8).map((o) => ({
         dropId: o.drop?.playerId ?? null,
         gain: round2(o.lineup + o.insurance),
-        score: o.drop ? (scoreOf(o.drop.playerId) ?? 0) : -1,
+        score: o.drop == null || o.viaReserve ? -1 : (scoreOf(o.drop.playerId) ?? 0),
+        held: o.drop && !o.viaReserve ? (request.protections.get(o.drop.playerId)?.kind === 'handcuff' ? 2 : request.protections.has(o.drop.playerId) ? 1 : 0) : 0,
+        ...(o.viaReserve ? { reserve: true } : {}),
       })),
     })),
     request.openSpots,
+    request.openReserve,
   );
   const used = new Map<string, string>();
+  let openUsed = 0;
   const apply = (m: TierMove, index: number | null) => {
     const list = options.get(m.playerId) ?? [];
     const option = index == null ? null : list[index];
@@ -622,6 +674,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       });
     }
     if (option.drop) used.set(option.drop.playerId, m.name);
+    else openUsed += 1;
     return true;
   };
   const firstChoice = new Map(shown.map((m) => [m.playerId, (options.get(m.playerId) ?? [])[0]?.drop?.playerId ?? null]));
@@ -633,22 +686,62 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const holder = want ? used.get(want) : undefined;
     if (holder && holder !== m.name && !m.competesWith.includes(holder)) m.competesWith.push(holder);
   }
+  /*
+   * No honest drop left. A move that fills a real starting hole stays "Do
+   * this" with "Pick your drop:" and the cheapest few players to free a spot
+   * with, high draft picks last; Alex picks (Alex, 14 October: Andrews for
+   * LaPorta's bye). Any other move goes to the Watch list.
+   */
+  const spotCandidates = (taken: ReadonlySet<string>) =>
+    [...readings.entries()]
+      .filter(([id]) => !taken.has(id))
+      .map(([id, r]) => {
+        const p = valued.find((x) => x.playerId === id);
+        const sig = signals?.get(id);
+        if (!p || p.onReserve || excluded.has(p.position) || sig?.inLineup) return null;
+        const kind = request.protections.get(id);
+        const label = kind?.kind === 'handcuff' ? 'handcuff' : kind?.kind === 'draft_capital' ? kind.note : kind ? 'kept as a high pick' : null;
+        const why = label ? `${label}; ${r.reason}` : r.reason;
+        /* High draft capital last: offered only when the cheaper options run out. */
+        return { playerId: id, name: p.name, reason: why, score: r.score + (kind?.kind === 'draft_capital' ? 100 : 0) };
+      })
+      .filter((x): x is NonNullable<typeof x> => x != null)
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 3)
+      .map(({ playerId, name, reason }) => ({ playerId, name, reason }));
   for (const m of unplaced) {
+    if (signals && isHole(m)) {
+      m.drop = null;
+      m.dropCost = null;
+      m.needsSpot = spotCandidates(new Set(used.keys()));
+      continue;
+    }
     if (m.tier === 'consider' && !isHole(m)) {
       consider.splice(consider.indexOf(m), 1);
       m.tier = 'watch';
       watch.unshift(m);
     }
   }
-  /* The Watch list: each name on a spot nobody above is using, where one exists. */
+  /*
+   * The Watch list: never two rows on one drop, anywhere on the screen. Each
+   * name takes a spot nobody above (or above it on this list) is using: an
+   * open spot, else an honest drop. With none left it says it needs a roster
+   * spot rather than naming somebody else's.
+   */
   for (const m of watch) {
     const list = options.get(m.playerId) ?? [];
-    const free = list.findIndex((o) => o.drop == null || !used.has(o.drop.playerId));
-    if (free > 0) apply(m, free);
-    else if (free < 0 && list[0]?.drop) {
-      const holder = used.get(list[0].drop.playerId);
-      if (holder && !m.competesWith.includes(holder)) m.competesWith.push(holder);
+    const free = list.findIndex((o) =>
+      o.drop == null ? openUsed < request.openSpots : !o.viaReserve && !used.has(o.drop.playerId) && !request.protections.has(o.drop.playerId),
+    );
+    if (free >= 0) {
+      apply(m, free);
+      continue;
     }
+    const want = list[0]?.drop ? used.get(list[0].drop.playerId) : undefined;
+    if (want && !m.competesWith.includes(want)) m.competesWith.push(want);
+    m.drop = null;
+    m.dropCost = null;
+    m.needsSpot = [];
   }
 
   /*
@@ -679,7 +772,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     .map(([id, r]) => {
       const p = valued.find((x) => x.playerId === id);
       const sig = signals?.get(id);
-      const protectedAs = sig?.inLineup && !sig.unavailable ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
+      const protectedAs = sig?.inLineup ? 'in your lineup' : (request.protections.get(id)?.kind ?? null);
       return { playerId: id, name: p?.name ?? id, score: r.score, reason: r.reason, protectedAs };
     })
     .sort((a, b) => a.score - b.score);
@@ -706,12 +799,23 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
  *
  * Small and exact: at most five moves and eight options each, searched
  * depth-first. The objective, in order: place as many priority moves ("Do
- * this", or a hole) as possible; then as many moves; then the most total gain;
- * then the lowest total drop score. Returns each placed move's option index.
+ * this", or a hole) as possible; then as many moves; then the most total
+ * gain, less {@link PROTECTED_CUT_COST} points for each protected player cut
+ * (a handcuff counts double); then the lowest total drop score. Returns each
+ * placed move's option index.
  */
+/** What cutting a protected player costs the joint assignment, in lineup points (a handcuff twice). */
+export const PROTECTED_CUT_COST = 2;
+
 export function assignDrops(
-  moves: readonly { id: string; priority: number; options: readonly { dropId: string | null; gain: number; score: number }[] }[],
+  moves: readonly {
+    id: string;
+    priority: number;
+    options: readonly { dropId: string | null; gain: number; score: number; held?: number; reserve?: boolean }[];
+  }[],
   openSpots: number,
+  /** Open IR slots: an option with `reserve` moves its player there instead of cutting him. */
+  openReserve = 0,
 ): Map<string, number> {
   let bestKey: number[] | null = null;
   let bestPick: (number | null)[] = [];
@@ -721,9 +825,9 @@ export function assignDrops(
     for (let i = 0; i < a.length; i++) if (Math.abs(a[i]! - b[i]!) > 1e-9) return a[i]! > b[i]!;
     return false;
   };
-  const walk = (i: number, open: number, prio: number, count: number, gain: number, score: number) => {
+  const walk = (i: number, open: number, prio: number, count: number, gain: number, score: number, held = 0, ir = openReserve) => {
     if (i === moves.length) {
-      const key = [prio, count, Math.round(gain * 100) / 100, -score];
+      const key = [prio, count, Math.round((gain - PROTECTED_CUT_COST * held) * 100) / 100, -score];
       if (bestKey == null || better(key, bestKey)) {
         bestKey = key;
         bestPick = [...pick];
@@ -735,17 +839,18 @@ export function assignDrops(
       if (o.dropId == null) {
         if (open <= 0) return;
         pick[i] = k;
-        walk(i + 1, open - 1, prio + m.priority, count + 1, gain + o.gain, score + Math.max(0, o.score));
+        walk(i + 1, open - 1, prio + m.priority, count + 1, gain + o.gain, score + Math.max(0, o.score), held, ir);
         return;
       }
       if (taken.has(o.dropId)) return;
+      if (o.reserve && ir <= 0) return;
       taken.add(o.dropId);
       pick[i] = k;
-      walk(i + 1, open, prio + m.priority, count + 1, gain + o.gain, score + o.score);
+      walk(i + 1, open, prio + m.priority, count + 1, gain + o.gain, score + Math.max(0, o.score), held + (o.held ?? 0), ir - (o.reserve ? 1 : 0));
       taken.delete(o.dropId);
     });
     pick[i] = null;
-    walk(i + 1, open, prio, count, gain, score);
+    walk(i + 1, open, prio, count, gain, score, held, ir);
   };
   walk(0, openSpots, 0, 0, 0, 0);
   const out = new Map<string, number>();

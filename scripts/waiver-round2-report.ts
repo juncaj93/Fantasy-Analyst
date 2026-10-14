@@ -31,7 +31,7 @@ import { playerNotesOf, readPlayerNotes } from '../src/core/sleeper/playerNotes.
 import { eliteBacks } from '../src/core/waivers/dropScore.ts';
 import type { WaiverTiersView, TierRow } from '../src/core/waivers/tierPlan.ts';
 
-const [snapshotFile, dir, oldDir] = process.argv.slice(2);
+const [snapshotFile, dir, ...oldDirs] = process.argv.slice(2);
 if (!snapshotFile || !dir) {
   console.error('usage: waiver-round2-report.ts <snapshot.json> <sleeperDir> [oldCodeDir]');
   process.exit(1);
@@ -66,7 +66,11 @@ function line(row: TierRow): string {
   const rivals = row.bid.likely.length
     ? row.bid.likely.map((r) => `${real(r.name)} ${Math.round(r.chance * 100)}%${r.why ? ` (${r.why})` : ''}`).join(', ')
     : 'none likely';
-  const drop = row.drop ? `${row.drop.name}${row.drop.reason ? ` [${row.drop.reason}]` : ''}` : 'open spot';
+  const drop = row.needsSpot
+    ? `none honest: you need a spot first; cheapest: ${row.needsSpot.map((c) => `${c.name} (${c.reason})`).join('; ')}`
+    : row.drop
+      ? `${row.drop.viaReserve ? 'move to IR: ' : ''}${row.drop.name}${row.drop.reason ? ` [${row.drop.reason}]` : ''}`
+      : 'open spot';
   return [
     `  ${row.name.padEnd(22)} ${row.position.padEnd(3)} +${row.gain.toFixed(1)}  ${row.reason}`,
     `      drop: ${drop}`,
@@ -97,6 +101,15 @@ function board(label: string, tiers: WaiverTiersView | null | undefined) {
   }
   const drops = doThese.concat(tiers.consider).map((r) => r.drop?.name).filter(Boolean);
   console.log(`distinct drops across Do this and Worth considering: ${new Set(drops).size} of ${drops.length}`);
+  /* The two cases Alex named, checked on every board. */
+  const everyRow = [...doThese, ...tiers.consider, ...tiers.watch];
+  const named = everyRow.filter((r) => r.drop && !r.drop.viaReserve).map((r) => r.drop!.name);
+  const shared = [...new Set(named.filter((n, i) => named.indexOf(n) !== i))];
+  console.log(`SAME-DROP CHECK (every row): ${shared.length === 0 ? 'no player is named as the drop on two rows' : `shared: ${shared.map((n) => `${n} on ${everyRow.filter((r) => r.drop?.name === n).map((r) => r.name).join(' and ')}`).join('; ')}`}`);
+  const mc = everyRow.filter((r) => r.drop?.name === 'Ladd McConkey').map((r) => r.name);
+  console.log(`MCCONKEY CHECK: ${mc.length === 0 ? 'Ladd McConkey is nobody\'s drop' : `Ladd McConkey is the drop for ${mc.join(', ')}`}`);
+  for (const r of doThese) console.log(`SPOT: ${r.name} uses ${r.drop?.viaReserve ? `an IR move (${r.drop.name} to IR)` : r.drop ? `a drop (${r.drop.name})` : 'an open spot'}`);
+  for (const r of tiers.consider.filter((x) => x.needsSpot)) console.log(`SPOT: ${r.name} needs a spot first`);
 }
 
 // ---------------------------------------------------------------- inputs --
@@ -182,11 +195,12 @@ for (const n of ['Bijan Robinson', 'Kenneth Walker', 'Braelon Allen', 'Will Ship
 }
 
 // ---------------------------------------------------------------- boards --
-if (oldDir) {
+/* Each earlier build, oldest first, on the same request: `label=dir`, or a bare dir. */
+for (const arg of oldDirs) {
+  const [label, oldDir] = arg.includes('=') ? (arg.split('=') as [string, string]) : ['the code before this round', arg];
   const old = (await import(pathToFileURL(join(oldDir, 'src/core/waivers/assemble.ts')).href)) as { assembleWaiverPlan: (r: WaiverAssemblyRequest) => Promise<{ tiers: WaiverTiersView | null }> };
-  const { round2: _r2, ...withoutRound2 } = request;
-  const before = await old.assembleWaiverPlan(withoutRound2 as WaiverAssemblyRequest);
-  board('BEFORE: the code before this round, same inputs', before.tiers);
+  const before = await old.assembleWaiverPlan({ ...request, round2: full } as WaiverAssemblyRequest);
+  board(`BEFORE: ${label}, same inputs`, before.tiers);
 }
 board('PRODUCTION: what the deployed Waivers screen drew', snapshot.decision.output.tiers);
 const after = await assembleWaiverPlan({ ...request, round2: full });

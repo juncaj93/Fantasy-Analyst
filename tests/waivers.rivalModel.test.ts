@@ -185,3 +185,14 @@ describe('the need-aware bid', () => {
     expect(advice.rivals.find((r) => r.name === 'MattLee04')!.why).toBeUndefined();
   });
 });
+
+describe('a hole the week after next counts for less', () => {
+  it('reads a lone QB on bye in the second week as "soon", between a hole and no spare', () => {
+    const soon = positionNeed({ starters: STARTERS, weeks: [6, 7], roster: [qb('Allen', 'BUF')], onBye: byeIn('BUF', 7) }, 'QB');
+    const now = positionNeed({ starters: STARTERS, weeks: [6, 7], roster: [qb('Allen', 'BUF')], onBye: byeIn('BUF', 6) }, 'QB');
+    expect(soon.state).toBe('soon');
+    expect(soon.reason).toBe('QB on bye in week 7, no backup');
+    expect(soon.factor).toBeLessThan(now.factor);
+    expect(soon.factor).toBeGreaterThan(1.1);
+  });
+});

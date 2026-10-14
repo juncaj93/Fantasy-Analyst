@@ -16,7 +16,8 @@
  *           + 0.40 × projection (the Start/Sit number over the window,
  *                    with byes and injuries counted as missed weeks)
  *           + role: +0.5 rising, −0.5 falling (snaps and touches trend)
- *           + held: +0.75 drafted, +0.5 held four weeks or more, 0 just added
+ *           + held: +0.2 a week on the roster, up to +2.5 (a drafted player
+ *                   counts every week since the draft), 0 just added
  *           + handcuff to one of your elite backs: +3
  *
  * Every number is one the app already has: last week's points store
@@ -30,8 +31,18 @@
  *
  * - **Your Sleeper lineup.** A player in Alex's current starting lineup is
  *   not offered as a drop unless the add plays the same position and is
- *   clearly better ({@link DROP_RULES.clearlyBetter} points a game). A starter
- *   marked Out or on IR is not protected: his slot is stale.
+ *   clearly better ({@link DROP_RULES.clearlyBetter} points a game), injured
+ *   or not.
+ * - **Draft capital.** A player this league drafted in round
+ *   {@link DROP_RULES.protectedRound} or earlier is never the automatic drop
+ *   unless he is out for the season.
+ *
+ * ## An injury does not make a player cheaper to cut
+ *
+ * A player who is Questionable, Doubtful, Out or on IR is scored on his
+ * healthy Start/Sit number, and his recent weeks on his season average a
+ * game when that is higher: missed games are not evidence he is worse. Only a
+ * season-ending injury lifts his protection.
  * - **Handcuffs to elite backs.** A bench back who is the direct depth-chart
  *   backup to an elite back on this roster gets the +3 and the label
  *   `handcuff`, and is cut only when nobody else can be. Elite is measured:
@@ -45,10 +56,9 @@ export const DROP_WEIGHTS = { season: 0.25, recent: 0.35, projection: 0.4 } as c
 export const DROP_BONUS = {
   rising: 0.5,
   falling: -0.5,
-  drafted: 0.75,
-  heldLong: 0.5,
-  /** Weeks on the roster that count as "held a while". */
-  heldLongWeeks: 4,
+  /** Per week on the roster, up to {@link DROP_BONUS.heldCap}. */
+  heldPerWeek: 0.2,
+  heldCap: 2.5,
   handcuff: 3,
 } as const;
 
@@ -57,6 +67,8 @@ export const DROP_RULES = {
   clearlyBetter: 3,
   /** A drop whose move gains within this many points of the move's best drop is "as good" for the lineup. */
   gainSlack: 1,
+  /** Drafted in this round or earlier: never the automatic drop. */
+  protectedRound: 6,
 } as const;
 
 export const ELITE_RB = { rank: 12, minGames: 2, minRate: 12 } as const;
@@ -80,8 +92,16 @@ export interface DropSignals {
   handcuffOf: string | null;
   /** In Alex's current Sleeper starting lineup. */
   inLineup: boolean;
-  /** Out, IR, PUP or suspended: a lineup slot he holds is stale. */
+  /** Out, IR, PUP or suspended. Said in the reason; never makes him cheaper to cut. */
   unavailable: boolean;
+  /** Questionable or worse this week: scored on his healthy number. */
+  injured?: boolean;
+  /** His healthy Start/Sit number, used in place of `projection` while injured. */
+  healthyRate?: number | null;
+  /** The round this league drafted him in, when it did. */
+  draftRound?: number | null;
+  /** Weeks since the draft, for a drafted player's weeks held. */
+  weeksSinceDraft?: number;
 }
 
 export interface DropReading {
@@ -105,14 +125,17 @@ export function recentAverage(recent: readonly number[]): number {
 
 export function dropScore(s: DropSignals): DropReading {
   const season = s.seasonPoints != null && s.weeksPlayed > 0 ? s.seasonPoints / s.weeksPlayed : 0;
-  const recent = recentAverage(s.recent);
+  /* Injured: recent weeks are no worse than his season, and the projection is his healthy number. */
+  const recent = s.injured ? Math.max(recentAverage(s.recent), season) : recentAverage(s.recent);
+  const projection = s.injured && s.healthyRate != null ? Math.max(s.projection, s.healthyRate) : s.projection;
   const role = s.role === 'rising' ? DROP_BONUS.rising : s.role === 'falling' ? DROP_BONUS.falling : 0;
-  const held = s.drafted ? DROP_BONUS.drafted : s.heldWeeks != null && s.heldWeeks >= DROP_BONUS.heldLongWeeks ? DROP_BONUS.heldLong : 0;
+  const weeksHeld = s.drafted ? (s.weeksSinceDraft ?? 0) : (s.heldWeeks ?? 0);
+  const held = Math.min(DROP_BONUS.heldCap, DROP_BONUS.heldPerWeek * Math.max(0, weeksHeld));
   const handcuff = s.handcuffOf ? DROP_BONUS.handcuff : 0;
   const parts = {
     season: round2(DROP_WEIGHTS.season * season),
     recent: round2(DROP_WEIGHTS.recent * recent),
-    projection: round2(DROP_WEIGHTS.projection * s.projection),
+    projection: round2(DROP_WEIGHTS.projection * projection),
     role,
     held,
     handcuff,
@@ -147,7 +170,7 @@ export function readDrops(bench: readonly DropSignals[]): Map<string, DropReadin
 }
 
 function heldWords(s: DropSignals): string {
-  if (s.drafted) return 'drafted';
+  if (s.drafted) return s.draftRound ? `round ${s.draftRound} pick` : 'drafted';
   if (s.heldWeeks == null) return '';
   if (s.heldWeeks <= 0) return 'added this week';
   return `held ${s.heldWeeks} week${s.heldWeeks === 1 ? '' : 's'}`;

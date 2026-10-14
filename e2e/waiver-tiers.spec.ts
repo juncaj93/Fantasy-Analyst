@@ -479,3 +479,67 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     await noSidewaysScroll(page);
   });
 });
+
+/* One honest spot (Shipley to IR) and a second hole with none left. */
+test.describe('round 2 follow-up: an IR move, and a hole where Alex picks the drop', () => {
+  test.beforeEach(async ({ page }) => {
+    const base = round2Fixture();
+    const love = { ...base.doThese[0]!, drop: { playerId: 'd-ship', name: 'Will Shipley', position: 'RB', reason: 'Out; your open IR slot holds him, so no drop', score: null, handcuff: false, viaReserve: true } };
+    const andrews = {
+      ...base.doThese[1]!,
+      tier: 'do_this',
+      drop: null,
+      needsSpot: [
+        { playerId: 'd-br', name: 'Brian Robinson', reason: 'handcuff; 10.8 pts this season, held 2 weeks, handcuff to Bijan Robinson' },
+        { playerId: 'd-ej', name: 'Emmett Johnson', reason: 'handcuff; 12.3 pts this season, held 4 weeks, handcuff to Kenneth Walker' },
+        { playerId: 'd-mc', name: 'Ladd McConkey', reason: 'kept as a high pick; 21.7 pts this season, drafted' },
+      ],
+      bid: { ...(base.doThese[1]!.bid as Record<string, unknown>), posture: 'do_this' },
+    };
+    const miller = move({ playerId: 'r5', name: 'Kendre Miller', position: 'RB', team: 'NO', tier: 'watch', gain: 2.2, reason: 'Starts over Braelon Allen, +2.2 pts in week 6', drop: null, needsSpot: [] });
+    const tiers = { ...base, doThis: love, doThese: [love, andrews], consider: [], watch: [...base.watch, miller] };
+    const plan = {
+      ...ROUND2_PLAN,
+      groups: [
+        { ...ROUND2_PLAN.groups[0], drop: null, headline: 'Move Will Shipley to IR, then claim Jordan Love' },
+        { ...ROUND2_PLAN.groups[1], drop: null, headline: 'Pick your drop: Brian Robinson (handcuff); Emmett Johnson (handcuff); Ladd McConkey (round 4 pick)' },
+      ],
+      claims: [
+        { ...ROUND2_PLAN.claims[0], dropPlayerId: null, dropName: null },
+        { ...ROUND2_PLAN.claims[1], dropPlayerId: null, dropName: null },
+      ],
+    };
+    await inSeason(page);
+    await serve(page, { tiers, claimPlan: plan });
+    await openWaivers(page);
+  });
+
+  test('says "Shipley to IR" for Love and "pick your drop" for Andrews, both under Do this', async ({ page }) => {
+    const doRows = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
+    await expect(doRows).toHaveCount(2);
+    await expect(doRows.nth(0).getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
+    await expect(page.getByTestId('waiver-plan')).toContainText('Pick your drop: Brian Robinson');
+    await expect(page.getByTestId('waiver-plan')).toContainText('Move Will Shipley to IR, then claim Jordan Love');
+    /* A Watch list name never borrows a spot another row uses. */
+    const watchRow = page.locator('[data-testid="waiver-tier-row"][data-player-id="r5"]');
+    await expect(watchRow.getByTestId('tier-drop')).toContainText('needs a roster spot');
+    await expect(watchRow.getByTestId('tier-drop')).not.toContainText('Will Shipley');
+    const second = page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]');
+    await expect(second).toHaveAttribute('data-tier', 'do_this');
+    await expect(second.getByTestId('tier-drop')).toContainText('you pick the spot');
+    await noSidewaysScroll(page);
+    await noTransactionControl(page);
+  });
+
+  test('lists the cheapest spots with a reason each, inside the phone', async ({ page }) => {
+    await page.locator('[data-testid="waiver-tier-row"][data-player-id="r2"]').click();
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet.getByTestId('tier-detail-drop')).toContainText('Pick your drop:');
+    const list = sheet.getByTestId('tier-detail-needs-spot');
+    await expect(list).toContainText('Brian Robinson (handcuff;');
+    await expect(list).toContainText('Ladd McConkey (kept as a high pick;');
+    const box = (await sheet.getByTestId('tier-detail-drop').boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await noSidewaysScroll(page);
+  });
+});

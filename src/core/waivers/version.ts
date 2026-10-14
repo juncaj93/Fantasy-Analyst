@@ -94,5 +94,13 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * upgrade, a stash); drops follow a drop score and protect the Sleeper lineup
  * and elite backs' handcuffs; a season-ending or late stash is never offered;
  * every starting hole gets its own "Do this" and every move its own drop.
+ *
+ * `waiver@14`: from the first live run of round 2 (14 October). A protected
+ * player (a high pick kept as a market hold, an elite back's handcuff) is
+ * never cut: when no honest drop is left, the move is Worth considering with
+ * "you need a spot first" and the cheapest few candidates. An injured player
+ * the league's IR slots take moves there instead of being cut. A drop must
+ * pass both cut rules (over replacement and drop score). A rival's hole the
+ * week after next counts about half as much as one this week.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@13', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@14', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

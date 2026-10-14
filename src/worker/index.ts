@@ -51,6 +51,7 @@ import { stepOutcomeFrom, type StepOutcome } from '../core/health/model.ts';
 import { CRON_LABELS } from '../core/health/policy.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { ManagerIntelService } from '../server/services/managerIntelService.ts';
+import { ensureDraftRounds } from '../server/services/waiverRound2.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
 import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
 import { MatchupService } from '../server/services/matchupService.ts';
@@ -415,9 +416,13 @@ export default {
             await weekPoints.refreshAheadWeeks(weekOpts);
             /*
              * The season's points, one row, for the drop score: one row read on most
-             * runs, a rebuild every twelve hours, at most two missing weeks fetched.
+             * runs, a rebuild every twelve hours, at most four missing weeks fetched.
              */
             await weekPoints.refreshSeasonPoints(weekOpts).catch((err: unknown) => console.error('season points failed', err));
+            /* The rivals' earlier seasons, once, from the stored ledger: one row read on every later run. */
+            await new ManagerIntelService(env.DB).ensureRivalHistory(selected.id).catch((err: unknown) => console.error('rival history failed', err));
+            /* This league's draft rounds, cached once for the draft-capital protection. */
+            await ensureDraftRounds(env.DB, selected.id).catch((err: unknown) => console.error('draft rounds failed', err));
           }
         } catch (err) {
           console.error('league read failed', err);

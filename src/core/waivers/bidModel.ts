@@ -396,7 +396,7 @@ export const NEED_MODEL = {
 /** The few words beside a rival's percent. Need first, then money, then record. */
 function rivalWhy(context: RivalContext, interest: number, pos: string, t: RivalTendency): string {
   const need = context.need;
-  if (need && (need.state === 'hole' || need.state === 'surplus')) return need.reason;
+  if (need && (need.state === 'hole' || need.state === 'soon' || need.state === 'surplus')) return need.reason;
   if (context.remaining != null && context.remaining < 1) return 'no FAAB left, $0 bids only';
   if (context.remaining != null && context.remaining <= 5) return `only $${context.remaining} left`;
   if (interest <= 0.5 && pos) return `rarely bids on ${pos === 'DEF' ? 'defences' : `${pos}s`}`;

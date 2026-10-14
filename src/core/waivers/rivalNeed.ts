@@ -25,11 +25,11 @@
 
 /** The need multiplier by state and position. 1 is the league's typical bidder. */
 export const NEED_FACTORS = {
-  QB: { hole: 3, thin: 1.1, backup: 0.4, surplus: 0.25 },
-  TE: { hole: 3, thin: 1, backup: 1, surplus: 0.5 },
-  DEF: { hole: 2, thin: 0.8, backup: 0.7, surplus: 0.7 },
-  RB: { hole: 1.5, thin: 1.3, backup: 0.75, surplus: 1 },
-  WR: { hole: 2.5, thin: 1.2, backup: 1.2, surplus: 0.9 },
+  QB: { hole: 3, soon: 1.7, thin: 1.1, backup: 0.4, surplus: 0.25 },
+  TE: { hole: 3, soon: 1.7, thin: 1, backup: 1, surplus: 0.5 },
+  DEF: { hole: 2, soon: 1.4, thin: 0.8, backup: 0.7, surplus: 0.7 },
+  RB: { hole: 1.5, soon: 1.2, thin: 1.3, backup: 0.75, surplus: 1 },
+  WR: { hole: 2.5, soon: 1.6, thin: 1.2, backup: 1.2, surplus: 0.9 },
 } as const;
 
 /**
@@ -42,7 +42,13 @@ export const STARTABLE_FLOOR: Readonly<Record<string, number>> = { QB: 12, RB: 6
 /** Designations that keep a player out of a week. */
 const OUT = new Set(['out', 'ir', 'pup', 'sus', 'suspended', 'na', 'nfi', 'doubtful', 'inactive', 'cov']);
 
-export type NeedState = 'hole' | 'thin' | 'backup' | 'surplus';
+/**
+ * `hole`: nobody to start in the coming week. `soon`: the hole is the week
+ * after, so he is as likely to wait for next week's run (about the square root
+ * of a hole's pull: 13 October, jfletcher433 read 90% on Jordan Love for Josh
+ * Allen's week-7 bye, as if it were this week's).
+ */
+export type NeedState = 'hole' | 'soon' | 'thin' | 'backup' | 'surplus';
 
 export interface NeedRosterPlayer {
   playerId: string;
@@ -82,7 +88,7 @@ export interface NeedRequest {
 export function positionNeed(request: NeedRequest, position: string): PositionNeed {
   const pos = position.toUpperCase();
   const slots = request.starters[pos] ?? 0;
-  const table = NEED_FACTORS[pos as keyof typeof NEED_FACTORS] ?? { hole: 1.5, thin: 1, backup: 1, surplus: 0.8 };
+  const table = NEED_FACTORS[pos as keyof typeof NEED_FACTORS] ?? { hole: 1.5, soon: 1.2, thin: 1, backup: 1, surplus: 0.8 };
   const players = request.roster.filter((p) => p.position.toUpperCase() === pos && !p.onReserve);
   const floor = STARTABLE_FLOOR[pos];
   const healthy = (p: NeedRosterPlayer) => !OUT.has((p.status ?? '').toLowerCase());
@@ -96,7 +102,8 @@ export function positionNeed(request: NeedRequest, position: string): PositionNe
   const holeWeek = request.weeks[startable.findIndex((n) => n < slots)] ?? null;
 
   let state: NeedState;
-  if (slots > 0 && spare < 0) state = 'hole';
+  if (slots > 0 && (startable[0] ?? players.length) < slots) state = 'hole';
+  else if (slots > 0 && spare < 0) state = 'soon';
   else if (spare < 1) state = 'thin';
   else if (spare < 2 || (pos !== 'QB' && pos !== 'TE' && pos !== 'DEF' && spare < 4)) state = 'backup';
   else state = 'surplus';
@@ -115,7 +122,7 @@ function needReason(
   holeWeek: number | null,
 ): string {
   const count = players.length;
-  if (state === 'hole') {
+  if (state === 'hole' || state === 'soon') {
     if (count === 0) return `no ${pos} on his roster`;
     const byes = holeWeek == null ? [] : players.filter((p) => request.onBye(p.team, holeWeek) === true);
     const hurt = players.filter((p) => OUT.has((p.status ?? '').toLowerCase()));
