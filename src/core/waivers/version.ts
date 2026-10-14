@@ -94,5 +94,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * upgrade, a stash); drops follow a drop score and protect the Sleeper lineup
  * and elite backs' handcuffs; a season-ending or late stash is never offered;
  * every starting hole gets its own "Do this" and every move its own drop.
+ *
+ * `waiver@14`: from the first live run of round 2 (14 October). A protected
+ * player (a market hold, then a handcuff) is a last-resort drop, so two holes
+ * still get two drops when only one bench spot is open; a drop must pass both
+ * cut rules (over replacement and drop score); a rival's hole the week after
+ * next counts about half as much as one this week.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@13', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@14', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

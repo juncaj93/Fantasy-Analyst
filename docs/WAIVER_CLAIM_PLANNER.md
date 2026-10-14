@@ -39,6 +39,9 @@ Measured on 2,394 manager-and-player pairs from 2024 to 2026 (Alex excluded):
 | RB | ×1.5 | ×1.3 | ×0.75 | ×1 |
 | WR | ×2.5 | ×1.2 | ×1.2 | ×0.9 |
 
+A hole only in the second of the two weeks is "soon" (QB and TE ×1.7, WR ×1.6,
+DEF ×1.4, RB ×1.2): he is as likely to wait for next week's run (waiver@14).
+
 **Money**: his FAAB left caps his likely bid; with nothing left he can only bid $0.
 
 **History**: Sleeper's documented transactions along the `previous_league_id`
@@ -87,8 +90,13 @@ rebuilt by the three-hourly league read from the weekly rows. Weeks held: the
 latest completed transaction that brought him in, else the draft.
 
 Every move shown gets a different drop, assigned together (`assignDrops`):
-"Do this" moves first, then the most total lineup gain, then the lowest total
-drop score.
+"Do this" moves first, then the most total lineup gain less 2 points for each
+protected player cut (a market hold; a handcuff counts double), then the lowest
+total drop score. A protected player is a last-resort drop, never a Watch list
+row's spot. A drop also has to pass the over-replacement rule: nobody further
+above a free agent at his position than the add is at his, because points are
+not comparable across positions (waiver@14; on 14 October the live board gave
+both Love and Andrews Will Shipley, the one open spot).
 
 ### Stashes (`stash.ts`)
 

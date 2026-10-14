@@ -315,3 +315,43 @@ describe('stashes and season-ending injuries', () => {
     expect([...plan.doThese, ...plan.consider, ...plan.watch].map((m) => m.name)).toContain('Soon');
   });
 });
+
+/*
+ * The live board of 14 October 2026: every bench player but Will Shipley was
+ * protected (two drafted receivers as market holds, two elite backs' handcuffs),
+ * and both "Do this" moves were handed Shipley.
+ */
+describe('one open drop and two holes (14 October)', () => {
+  const protections = new Map([
+    ['BRobinson', { kind: 'handcuff' as const, note: 'backs up Bijan' }],
+    ['EJohnson', { kind: 'handcuff' as const, note: 'backs up Walker' }],
+    ['McConkey', { kind: 'market_hold' as const, note: 'drafted around pick 41' }],
+    ['Egbuka', { kind: 'market_hold' as const, note: 'drafted around pick 61' }],
+  ]);
+  const plan = planWaiverTiers(request({ candidates: [LOVE, ANDREWS], protections }));
+
+  it('still gives each "Do this" move its own drop', () => {
+    const drops = plan.doThese.map((m) => m.drop?.name);
+    expect(plan.doThese.map((m) => m.name).sort()).toEqual(['Andrews', 'Love']);
+    expect(new Set(drops).size).toBe(2);
+  });
+
+  it('reaches for a market hold before an elite back’s handcuff', () => {
+    const drops = plan.doThese.map((m) => m.drop?.name);
+    expect(drops).toContain('Shipley');
+    expect(drops.some((d) => d === 'McConkey' || d === 'Egbuka')).toBe(true);
+    expect(drops).not.toContain('BRobinson');
+    expect(drops).not.toContain('EJohnson');
+  });
+
+  it('never offers Kenneth Walker as a drop for a quarterback', () => {
+    for (const m of [...plan.doThese, ...plan.consider, ...plan.watch]) expect(m.drop?.name).not.toBe('Walker');
+  });
+
+  it('prefers an open drop unless the protected one keeps clearly more points', () => {
+    const near = assignDrops([{ id: 'A', priority: 1, options: [{ dropId: 'open', gain: 5, score: 2, held: 0 }, { dropId: 'cuff', gain: 8, score: 8, held: 2 }] }], 0);
+    expect(near.get('A')).toBe(0);
+    const far = assignDrops([{ id: 'A', priority: 1, options: [{ dropId: 'open', gain: 1, score: 2, held: 0 }, { dropId: 'hold', gain: 9, score: 8, held: 1 }] }], 0);
+    expect(far.get('A')).toBe(1);
+  });
+});
