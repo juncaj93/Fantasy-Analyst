@@ -102,6 +102,17 @@ nothing under it supports.
 
 ---
 
+### The week's number, not a partial line (15 October 2026)
+
+A player is valued on `decisionPoints`, the number Waivers, Compare and the
+Team card use: the betting line when the market is complete, otherwise
+Sleeper's published week with the same capped nudges. A partial market with
+nothing published is unpriced. Before this, a market with one of four lines
+posted counted as a price, which on 14 October put four of Alex's players at
+about two points and emptied the board every Tuesday and Wednesday. Lineup
+totals in the ideas use the same numbers. The price ladder fold still reads
+the older rule.
+
 ## Roster need and surplus
 
 `core/trades/rosterUtility.ts`. The brief's rule is that raw position counts must
