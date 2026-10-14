@@ -65,6 +65,8 @@ import {
   type PackagePlayer,
   type PackageStatus,
   type TradeActivity,
+  rankPackages,
+  topAcrossTeams,
 } from './builderResponse.ts';
 
 export const BUILDER = {
@@ -132,6 +134,18 @@ export interface BuilderInput {
   considerUnmarked: boolean;
   /** Alex's elite backs: never offered unless marked. */
   eliteRbs: ReadonlySet<string>;
+  /**
+   * Alex's handcuffs to elite backs: never offered unless marked, like the
+   * backs themselves (Alex, 14 October: an unmarked package gave away Emmett
+   * Johnson, one of his two).
+   */
+  handcuffs?: ReadonlySet<string>;
+  /**
+   * One team of an All teams sweep (the screen asks team by team, so no single
+   * request is heavy): the All teams rules (only suggestions some deal could
+   * bring back, no Long shots), with one team's evaluation budget.
+   */
+  sweep?: boolean;
   /** Protections from the waiver planner, for a forced drop: id to the note. */
   protections: ReadonlyMap<string, string>;
   /** The waiver planner's drop score inputs, when this season's points are on record. */
@@ -217,6 +231,8 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
   }
 
   const all = input.team === 'all';
+  /* The All teams rules, whether every team is asked at once or one per request. */
+  const allLike = all || input.sweep === true;
   const teamResults: BuilderTeamResult[] = [];
   const shown: BuiltPackage[] = [];
   let generated = 0;
@@ -255,7 +271,7 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
           return { id: p.playerId, gain, pair };
         })
         /* Asking every team at once, only players some deal could bring back: the budget is too small for the rest. */
-        .filter((x) => x.gain > 0.05 && (!all || x.pair > -Infinity))
+        .filter((x) => x.gain > 0.05 && (!allLike || x.pair > -Infinity))
         .sort((a, b) => Number(b.pair > -Infinity) - Number(a.pair > -Infinity) || (b.pair > -Infinity ? b.pair - a.pair : b.gain - a.gain) || a.id.localeCompare(b.id))
         .slice(0, all ? BUILDER.suggestionsAllTeams : BUILDER.suggestionsPerTeam)
         .map((x) => x.id);
@@ -299,7 +315,7 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
     /* At least Maybe, ranked by Alex's gain; a Long shot only when a named team has nothing better. */
     const ranked = rankPackages(built);
     const good = ranked.filter((p) => p.status !== 'long_shot');
-    const list = distinctGets(good.length > 0 || all ? good : ranked).slice(0, BUILDER.shownPerTeam);
+    const list = distinctGets(good.length > 0 || allLike ? good : ranked).slice(0, BUILDER.shownPerTeam);
     for (const p of ranked) if (!list.includes(p)) hide(p.status === 'long_shot' ? 'long_shot' : 'below_top');
     teamResults.push({
       rosterId: team.rosterId,
@@ -314,15 +330,7 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
 
   let packages: BuiltPackage[];
   if (all) {
-    const perTeam = new Map<number, number>();
-    packages = [];
-    for (const p of rankPackages(shown)) {
-      if (packages.length >= BUILDER.shownAll) break;
-      const n = perTeam.get(p.partner.rosterId) ?? 0;
-      if (n >= BUILDER.perTeamInAll) continue;
-      perTeam.set(p.partner.rosterId, n + 1);
-      packages.push(p);
-    }
+    packages = topAcrossTeams(shown);
   } else {
     packages = teamResults[0]?.packages ?? [];
   }
@@ -470,6 +478,11 @@ function evaluatePackage(
     reasons: dedupe(reasons),
     caveats: dedupe(caveats),
     pitch: pitchFor({ partner: team.label, need: need?.label ?? null, give: give.map((p) => p.name), get: get.map((p) => p.name) }),
+    costsNow: round1(aWeekly[0] ?? 0) < 0 || sumWhere(aWeekly, (_, i) => i < 3) < 0,
+    needShort: need ? shortNeed(need.label) : null,
+    statusShort: status.short,
+    whyShort: whyFragments(a, b, input.horizon.weeks.length, need?.label ?? null),
+    basis: basisOf([...candidate.give.map((id) => input.me.roster.find((p) => p.playerId === id)!), ...incoming]),
   };
   return { pkg };
 }
@@ -482,7 +495,7 @@ function evaluatePackage(
  * need. Long shot: Alex gets clearly more. A package that helps them only a
  * little next to what it does for Alex drops one level.
  */
-export function statusOf(args: { edge: number; need: boolean; alex: number; them: number }): { status: PackageStatus; reason: string } {
+export function statusOf(args: { edge: number; need: boolean; alex: number; them: number }): { status: PackageStatus; reason: string; short: string } {
   let status: PackageStatus = args.edge <= BUILDER.band.even ? 'likely' : args.edge <= BUILDER.band.maybe ? 'maybe' : 'long_shot';
   if (status === 'likely' && !args.need) status = 'maybe';
   if (status !== 'long_shot' && args.them < args.alex * 0.25) status = status === 'likely' ? 'maybe' : 'long_shot';
@@ -502,7 +515,49 @@ export function statusOf(args: { edge: number; need: boolean; alex: number; them
         : args.edge > BUILDER.band.maybe
           ? 'You get clearly more value, so they would have to really want it.'
           : 'It helps them only a little next to what it does for you.';
-  return { status, reason };
+  const short =
+    status === 'likely'
+      ? args.edge < -BUILDER.band.even
+        ? 'You give more · fills their need'
+        : 'Even value · fills their need'
+      : status === 'maybe'
+        ? args.edge > BUILDER.band.even
+          ? 'Tilts your way'
+          : args.them < args.alex * 0.25
+            ? 'Helps them less'
+            : 'No clear need of theirs'
+        : args.edge > BUILDER.band.maybe
+          ? 'You get much more'
+          : 'Small gain for them';
+  return { status, reason, short };
+}
+
+/** `their RB2 is Out` -> `RB2 Out`; `their TE is on bye in week 8` -> `TE bye wk 8`; `thin at WR` -> `Thin at WR`. */
+export function shortNeed(label: string): string {
+  const bye = /^their (\S+) is on bye in week (\d+)$/.exec(label);
+  if (bye) return `${bye[1]} bye wk ${bye[2]}`;
+  const hurt = /^their (\S+) is (.+?)(?: in week (\d+))?$/.exec(label);
+  if (hurt) return `${hurt[1]} ${hurt[2]}${hurt[3] ? ` wk ${hurt[3]}` : ''}`;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** `Jaylen Waddle` -> `Waddle`; a defence or one-word name stays whole. */
+function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  const suffix = /^(jr\.?|sr\.?|ii|iii|iv)$/i.test(parts[parts.length - 1]!) ? parts.length - 2 : parts.length - 1;
+  return parts[Math.max(1, suffix)]!;
+}
+
+/** At most two fragments: who starts for Alex, and what it does for them. */
+function whyFragments(a: SideResult, b: SideResult, weeks: number, need: string | null): string[] {
+  const out: string[] = [];
+  const mine = [...a.incoming].sort((x, y) => y.startsWeeks - x.startsWeeks)[0];
+  if (mine && mine.startsWeeks > 0) out.push(`${lastName(mine.name)} starts ${mine.startsWeeks} of ${weeks} wks for you`);
+  const theirs = [...b.incoming].sort((x, y) => y.startsWeeks - x.startsWeeks)[0];
+  if (theirs && theirs.startsWeeks > 0) out.push(`${lastName(theirs.name)} starts ${theirs.startsWeeks} of ${weeks} wks for them`);
+  else if (need) out.push(`Covers ${shortNeed(need)}`);
+  return out.slice(0, 2);
 }
 
 /* --------------------------------------------------------- roster limits -- */
@@ -692,7 +747,7 @@ export function givePoolOf(input: BuilderInput, slots: readonly LineupSlotSpec[]
   if (!input.considerUnmarked) return give;
   const base = quickValue(slots, input.replacement, input.me.roster, input.horizon);
   const extra = input.me.roster
-    .filter((p) => tradeable(p) && !give.includes(p.playerId) && !input.eliteRbs.has(p.playerId))
+    .filter((p) => tradeable(p) && !give.includes(p.playerId) && !input.eliteRbs.has(p.playerId) && !(input.handcuffs?.has(p.playerId) ?? false))
     .map((p) => ({
       id: p.playerId,
       loss: base - quickValue(slots, input.replacement, input.me.roster.filter((q) => q.playerId !== p.playerId), input.horizon),
@@ -722,12 +777,6 @@ function weeklyDelta(side: SideResult): number[] {
 
 function sumWeighted(deltas: readonly number[], weights: readonly number[]): number {
   return deltas.reduce((s, d, i) => s + d * (weights[i] ?? 1), 0);
-}
-
-/** Highest Alex gain first; ties to the likelier status, then the id, so one request gives one answer. */
-function rankPackages(list: readonly BuiltPackage[]): BuiltPackage[] {
-  const order: Record<PackageStatus, number> = { likely: 0, maybe: 1, long_shot: 2 };
-  return [...list].sort((a, b) => b.alex.weighted - a.alex.weighted || order[a.status] - order[b.status] || a.id.localeCompare(b.id));
 }
 
 /** One package per set of players received: the same target with a different filler is one idea. */
@@ -801,6 +850,12 @@ export function pitchFor(args: { partner: string; need: string | null; give: rea
       : `Saw ${args.need.replace(/^their /, 'your ')}.`
     : 'Had an idea that could help your lineup.';
   return `Hey ${first}, ${hook.charAt(0).toLowerCase()}${hook.slice(1)} I could send ${listNames(args.give)} for ${listNames(args.get)}. Open to it?`;
+}
+
+/** `sleeper` when most of the moved players are valued on Sleeper's projection rather than a complete Vegas week. */
+function basisOf(players: readonly PlayerRate[]): 'vegas' | 'sleeper' {
+  const sleeper = players.filter((p) => p.basis === 'published' || p.basis === 'recent_week').length;
+  return sleeper * 2 > players.length ? 'sleeper' : 'vegas';
 }
 
 function key(c: { give: readonly string[]; get: readonly string[] }): string {

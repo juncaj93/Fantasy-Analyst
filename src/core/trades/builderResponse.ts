@@ -77,6 +77,16 @@ export interface BuiltPackage {
   caveats: string[];
   /** A short, friendly message Alex can paste into Sleeper. The app never sends it. */
   pitch: string;
+  /** True when it loses Alex points this week or over the next three weeks. Optional: older bodies lack it. */
+  costsNow?: boolean;
+  /** Where most of the moved players' numbers come from. `sleeper` when most rest on Sleeper's projection. */
+  basis?: 'vegas' | 'sleeper';
+  /** Their need as a card phrase: `RB2 Out`, `TE bye wk 8`, `Thin at WR`. */
+  needShort?: string | null;
+  /** The status reason as a fragment: `Even value · fills their need`. */
+  statusShort?: string;
+  /** At most two fragments for the sheet: `Waddle starts 11 of 11 wks for you`. */
+  whyShort?: string[];
 }
 
 export interface BuilderWeeks {
@@ -132,3 +142,43 @@ export const BUILDER_WILLINGNESS =
   'Sleeper does not show offers that were turned down or ignored, so whether this manager would say yes is unknown.';
 
 export const BUILDER_ADVISORY = 'Suggestions only. This app never sends, proposes or accepts a trade for you.';
+
+/**
+ * What a package that costs Alex now is ranked on.
+ *
+ * A package that loses points this week or over the next three weeks may rank
+ * above one that helps now only when its own gain is clearly larger: at least
+ * {@link COSTS_NOW.factor} times as large and {@link COSTS_NOW.margin} points
+ * more. A key rather than a pairwise rule, so the ordering stays transitive.
+ */
+export const COSTS_NOW = { factor: 1.5, margin: 5 } as const;
+
+export function rankKey(p: Pick<BuiltPackage, 'costsNow' | 'alex'>): number {
+  return p.costsNow ? (p.alex.weighted - COSTS_NOW.margin) / COSTS_NOW.factor : p.alex.weighted;
+}
+
+/**
+ * The packages in ranked order: helps-now first by gain, then the rest, and
+ * ties to the likelier status, then the id, so one request gives one answer.
+ * Shared by the engine and by the screen, which merges a sweep of teams.
+ */
+export function rankPackages<T extends Pick<BuiltPackage, 'costsNow' | 'alex' | 'status' | 'id'>>(list: readonly T[]): T[] {
+  const order: Record<PackageStatus, number> = { likely: 0, maybe: 1, long_shot: 2 };
+  return [...list].sort((a, b) => rankKey(b) - rankKey(a) || order[a.status] - order[b.status] || a.id.localeCompare(b.id));
+}
+
+/** All teams: the top five, at most two per team. */
+export const ACROSS_TEAMS = { shown: 5, perTeam: 2 } as const;
+
+export function topAcrossTeams<T extends Pick<BuiltPackage, 'costsNow' | 'alex' | 'status' | 'id' | 'partner'>>(list: readonly T[]): T[] {
+  const perTeam = new Map<number, number>();
+  const out: T[] = [];
+  for (const p of rankPackages(list)) {
+    if (out.length >= ACROSS_TEAMS.shown) break;
+    const n = perTeam.get(p.partner.rosterId) ?? 0;
+    if (n >= ACROSS_TEAMS.perTeam) continue;
+    perTeam.set(p.partner.rosterId, n + 1);
+    out.push(p);
+  }
+  return out;
+}

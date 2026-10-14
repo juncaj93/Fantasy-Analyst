@@ -47,6 +47,8 @@ export interface BuilderRequest {
   want: Map<number, string[]>;
   team: number | 'all';
   considerUnmarked: boolean;
+  /** One team of an All teams sweep; see `BuilderInput.sweep`. */
+  sweep?: boolean;
 }
 
 export class TradeBuilderService {
@@ -188,6 +190,8 @@ export class TradeBuilderService {
       team: request.team,
       considerUnmarked: request.considerUnmarked,
       eliteRbs,
+      handcuffs: new Set(handcuffs.keys()),
+      ...(request.sweep && request.team !== 'all' ? { sweep: true } : {}),
       protections,
       dropSignals: dropSignals.size > 0 ? dropSignals : null,
     });

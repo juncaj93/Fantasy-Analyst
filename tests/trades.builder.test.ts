@@ -25,11 +25,12 @@ import {
   needsOf,
   pitchFor,
   shapes,
+  shortNeed,
   statusOf,
   type BuilderInput,
   type BuilderTeam,
 } from '../src/core/trades/builder.ts';
-import { BUILDER_ADVISORY, BUILDER_WILLINGNESS } from '../src/core/trades/builderResponse.ts';
+import { BUILDER_ADVISORY, BUILDER_WILLINGNESS, rankKey, rankPackages, topAcrossTeams } from '../src/core/trades/builderResponse.ts';
 
 const POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'];
 const SETTINGS = { playoff_week_start: 15, playoff_teams: 6, playoff_round_type: 0, trade_deadline: 11 };
@@ -389,5 +390,66 @@ describe('shapes and status', () => {
     expect(pitchFor({ partner: 'Kim', need: null, give: ['A', 'C'], get: ['B'] })).toBe(
       'Hey Kim, had an idea that could help your lineup. I could send A and C for B. Open to it?',
     );
+  });
+});
+
+describe('the 15 October follow-ups', () => {
+  const pkgOf = (id: string, weighted: number, costsNow: boolean, rosterId = 2) =>
+    ({ id, alex: { weighted } as never, costsNow, status: 'maybe' as const, partner: { rosterId } as never });
+
+  it('a package that costs Alex now ranks above one that helps now only when clearly larger', () => {
+    /* 1.5 times and 5 more: 20 helps now; 34 costs now ((34-5)/1.5 = 19.3) stays below it, 36 ((36-5)/1.5 = 20.7) goes above. */
+    expect(rankPackages([pkgOf('a', 34, true), pkgOf('b', 20, false)]).map((p) => p.id)).toEqual(['b', 'a']);
+    expect(rankPackages([pkgOf('a', 36, true), pkgOf('b', 20, false)]).map((p) => p.id)).toEqual(['a', 'b']);
+    expect(rankKey({ alex: { weighted: 20 } as never, costsNow: false })).toBe(20);
+  });
+
+  it('All teams keeps five, at most two per team, across a sweep merged on the phone', () => {
+    const list = [pkgOf('a', 9, false, 2), pkgOf('b', 8, false, 2), pkgOf('c', 7, false, 2), pkgOf('d', 6, false, 3), pkgOf('e', 5, false, 4), pkgOf('f', 4, false, 5), pkgOf('g', 3, false, 6)];
+    expect(topAcrossTeams(list).map((p) => p.id)).toEqual(['a', 'b', 'd', 'e', 'f']);
+  });
+
+  it('flags a package that loses points this week or over the next three', () => {
+    const r = buildTradePackages(input({ want: new Map([[2, ['Jaylen Waddle']]]) }));
+    expect(r.packages[0]!.costsNow).toBe(false);
+    const me = ALEX.map((p) => (p.playerId === 'Tony Pollard' ? { ...p, rate: 13 } : p));
+    /* Pollard at 13 now starts at flex over a free agent, so swapping him for Waddle (14) is about even now. */
+    const cost = buildTradePackages(input({ me: { ...team(1, 'Alex', me), reserveIds: [] }, want: new Map([[2, ['Jaylen Waddle']]]) }));
+    for (const p of cost.packages) expect(p.costsNow).toBe(p.alex.thisWeek < 0 || p.alex.next3 < 0);
+  });
+
+  it('never offers a handcuff to an elite back unless he is marked', () => {
+    const pool = givePoolOf(input({ sell: [], considerUnmarked: true, handcuffs: new Set(['rb5']) }), slotsOf(SHAPE));
+    expect(pool).not.toContain('rb5');
+    expect(givePoolOf(input({ sell: ['rb5'], handcuffs: new Set(['rb5']) }), slotsOf(SHAPE))).toEqual(['rb5']);
+  });
+
+  it('says when a package rests mostly on Sleeper’s projection', () => {
+    const ron = RON.map((p) => (p.playerId === 'Jaylen Waddle' ? { ...p, basis: 'published' as const } : p));
+    const me = ALEX.map((p) => (p.playerId === 'Tony Pollard' ? { ...p, basis: 'published' as const } : p));
+    const r = buildTradePackages(input({ me: { ...team(1, 'Alex', me), reserveIds: [] }, teams: [team(2, 'Ron', ron)], want: new Map([[2, ['Jaylen Waddle']]]) }));
+    expect(r.packages[0]!.basis).toBe('sleeper');
+    expect(buildTradePackages(input({ want: new Map([[2, ['Jaylen Waddle']]]) })).packages[0]!.basis).toBe('vegas');
+  });
+
+  it('a sweep request asks one team, with the All teams rules', () => {
+    const r = buildTradePackages(input({ team: 2, sweep: true, sell: ['Tony Pollard'] }));
+    expect(r.teams).toHaveLength(1);
+    for (const p of r.packages) expect(p.status).not.toBe('long_shot');
+    expect(r.teams[0]!.suggested).not.toContain('ron-wrA');
+  });
+});
+
+describe('short forms for the compact card and sheet', () => {
+  it('needs, status and why in a few words', () => {
+    expect(shortNeed('their RB2 is Out')).toBe('RB2 Out');
+    expect(shortNeed('their TE is on bye in week 8')).toBe('TE bye wk 8');
+    expect(shortNeed('their WR1 is on IR in week 9')).toBe('WR1 on IR wk 9');
+    expect(shortNeed('thin at WR')).toBe('Thin at WR');
+    const pkg = buildTradePackages(input({ want: new Map([[2, ['Jaylen Waddle']]]) })).packages[0]!;
+    expect(pkg.needShort).toBe('RB2 Out');
+    expect(pkg.statusShort).toBe('You give more · fills their need');
+    expect(pkg.whyShort!.length).toBeLessThanOrEqual(2);
+    expect(pkg.whyShort![0]).toMatch(/^Waddle starts \d+ of \d+ wks for you$/);
   });
 });
