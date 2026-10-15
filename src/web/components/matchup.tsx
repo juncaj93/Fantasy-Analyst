@@ -32,7 +32,8 @@
 
 import { useState, type ReactNode } from 'react';
 import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
-import { TeamLogo } from './common.tsx';
+import { SleeperTag, TeamLogo } from './common.tsx';
+import { SLEEPER_NUM_CLASS } from '../sleeperFallback.ts';
 import { Estimated } from './estimate.tsx';
 import { ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
 
@@ -500,9 +501,11 @@ function PlayerHalf({
         </span>
       ) : (player.projectionBorrowed || player.projectionEstimated) && player.projectedFinal != null ? (
         <span
-          className={`matchup-player-proj matchup-player-proj-borrowed${
-            player.projectionEstimated ? ' matchup-player-proj-estimated' : ''
-          }`}
+          className={
+            player.projectionEstimated
+              ? 'matchup-player-proj matchup-player-proj-borrowed matchup-player-proj-estimated'
+              : `matchup-player-proj ${SLEEPER_NUM_CLASS}`
+          }
           data-testid="matchup-player-proj"
           data-projection-source={player.projectionEstimated ? 'preseason' : 'sleeper'}
           title={
@@ -519,7 +522,9 @@ function PlayerHalf({
           {player.projectionEstimated ? (
             <Estimated value={player.projectedFinal} digits={0} />
           ) : (
-            player.projectedFinal.toFixed(1)
+            <>
+              {player.projectedFinal.toFixed(1)} <SleeperTag />
+            </>
           )}
         </span>
       ) : (

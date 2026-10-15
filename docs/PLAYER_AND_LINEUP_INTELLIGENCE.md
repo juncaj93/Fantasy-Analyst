@@ -393,3 +393,33 @@ fails if two of them disagree.
   week; tapping it lists each priced line and its points in words.
 - **Lists** sort strictly by the number, priced and published mixed, with
   nobody's number and Out last.
+
+### 15 October 2026: Vegas lines in Compare, grey Sleeper numbers, no Uncertainty
+
+- **Compare table.** Base, then the lines Vegas posted (Yards = rushing plus
+  receiving, or passing for a QB; Catches; TD %), then Recent news, Opponent,
+  Score. A group of only QBs gets Pass yds, Pass TD, Rush yds. The lines are
+  read, not summed; the number rows still add up to Score. No taps and no
+  paragraph. Rows are 34px, so two to four players fit one phone screen with
+  nothing scrolling sideways (`e2e/compare-vegas-lines.spec.ts`, all widths).
+- **Grey Sleeper numbers.** One rule, `src/web/sleeperFallback.ts`, and one
+  label, `SleeperTag`: a number on Sleeper's week (basis `published`) is drawn
+  in `--text-faint` with a small "Sleeper" under or beside it. Compare (cards,
+  chips, picker, table), Team rows and the "instead" figure, Best move,
+  Matchup and the weekly card. A posted line keeps its colour; a missing line,
+  or a partial yards total, is grey. Waivers, Trades and Players print no
+  per-player Start/Sit number on their face (Waivers' tier sheet shows the
+  planner's rate, which the planner owns), so they are unchanged.
+- **Uncertainty out of the score (`startsit@6`).** Text only, players and
+  defences. Backtest (`scripts/probe-compare-vegas.mjs`, weeks 1 to 5, 673
+  fully priced player-weeks, league-scored actual points):
+
+  | | average miss | bias | higher-scored won |
+  | --- | --- | --- | --- |
+  | `startsit@5`, with it | 4.917 | −0.95 | 71.2% |
+  | `startsit@6`, without it | 4.927 | −0.71 | 71.1% |
+
+  +0.010, inside the "no worse than 0.01" rule, so it shipped. The 4.840 of
+  13 October was weeks 1 to 4; week 5 raised both. On Alex's roster the
+  largest moves were +0.50 (Love, Bijan), +0.45 (Walker), +0.36 (Collins),
+  +0.33 (Pickens); Best move did not change.

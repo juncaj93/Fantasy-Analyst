@@ -29,14 +29,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type PillReading, type StartSitComparison, type StartSitEvaluation } from '../api.ts';
-import { CompactFace, InjuryTag, PositionPill } from './common.tsx';
+import { CompactFace, InjuryTag, PositionPill, SleeperTag } from './common.tsx';
 import { SearchField, SegmentedControl, Sheet } from './native.tsx';
 import { CheckIcon } from './icons.tsx';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
-import { baseExplanation, compareTable } from '../compareTable.ts';
+import { compareTable } from '../compareTable.ts';
+import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 
 /** Two or three fit a 360px phone; four scroll sideways. Matched by the server. */
 export const MAX_COMPARE = 4;
@@ -227,7 +228,10 @@ export function CompareSheet({
           {ids.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
               <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>
-              <span className="cmp2-chip-pts">{weekText(weekOf(id))}</span>
+              <span className={sleeperClass('cmp2-chip-pts', weekIsSleeper(weekOf(id)))}>
+                {weekText(weekOf(id))}
+                {weekIsSleeper(weekOf(id)) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
+              </span>
               <button
                 type="button"
                 className="cmp2-chip-x"
@@ -364,7 +368,7 @@ function Picker({
                   data-player-id={row.id}
                   data-chosen={on ? 'true' : 'false'}
                   aria-pressed={on}
-                  aria-label={`${row.name}, ${row.position} ${row.team}, ${row.week.out ? 'out' : row.week.points == null ? 'no projection' : `${pts(row.week.points)} projected`}${row.week.lowerConfidence && row.week.points != null ? ', lower confidence' : ''}${on ? ', in the comparison' : ''}`}
+                  aria-label={`${row.name}, ${row.position} ${row.team}, ${row.week.out ? 'out' : row.week.points == null ? 'no projection' : `${pts(row.week.points)} projected`}${weekIsSleeper(row.week) ? `, ${SLEEPER_SPOKEN}` : ''}${on ? ', in the comparison' : ''}`}
                   onClick={() => onToggle(row)}
                 >
                   <span className="cmp2-row-check" aria-hidden="true">
@@ -396,12 +400,8 @@ function Picker({
                     </span>
                   </span>
                   <span className="cmp2-row-pts" data-testid="compare-points">
-                    <span className={row.week.lowerConfidence ? 'cmp2-num cmp2-num-soft' : 'cmp2-num'}>{weekText(row.week)}</span>
-                    {row.week.lowerConfidence && row.week.points != null ? (
-                      <span className="cmp2-soft" data-testid="lower-confidence">
-                        lower confidence
-                      </span>
-                    ) : null}
+                    <span className={sleeperClass('cmp2-num', weekIsSleeper(row.week))}>{weekText(row.week)}</span>
+                    {weekIsSleeper(row.week) ? <SleeperTag /> : null}
                   </span>
                 </button>
               </li>
@@ -457,10 +457,11 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
     <section className="cmp2-verdict" aria-label="Verdict" data-testid="comparison" data-columns={columns.length}>
       <ul
         className={columns.length > 3 ? 'cmp2-cols cmp2-cols-wide' : 'cmp2-cols'}
-        style={{ gridTemplateColumns: `repeat(${columns.length}, ${columns.length > 3 ? 'minmax(88px, 1fr)' : 'minmax(0, 1fr)'})` }}
+        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
       >
         {columns.map((e) => {
           const week = weekPointsOf(e);
+          const sleeper = weekIsSleeper(week);
           const lead = e.playerId === pick;
           return (
             <li
@@ -476,15 +477,16 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               </span>
               {/* The face sits in the empty space beside the score, never in the name's width. */}
               <span className="cmp2-col-scoreline">
-                <span className="cmp2-col-score" data-testid="compare-score">
+                <span className={sleeperClass('cmp2-col-score', sleeper)} data-testid="compare-score">
                   {weekText(week)}
+                  {sleeper ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
                 </span>
                 <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} />
               </span>
               {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
               <span className="cmp2-col-slot" data-testid="compare-slot-pill">
-                {week.lowerConfidence && week.points != null ? (
-                  <span className="cmp2-soft">lower confidence</span>
+                {sleeper ? (
+                  <SleeperTag />
                 ) : (
                   <PillChip pill={e.pill} />
                 )}
@@ -511,25 +513,20 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
 /* --------------------------------------------------------- the score table */
 
 /**
- * The table: Base, Recent news, Opponent, Uncertainty, Score, and they add up.
- * The arithmetic lives in `compareTable.ts`. A tap on Base says where it came
- * from in words; a tap on any other row shows the engine's sentence for it.
+ * The table: Base, the Vegas lines under it, Recent news, Opponent, Score.
+ * The arithmetic lives in `compareTable.ts`. One line per row, no taps and no
+ * paragraphs (15 October 2026): the lines say what Vegas thinks, and a grey
+ * cell is a number on Sleeper's week or a line nobody has posted.
  */
 function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
   const { rows, score } = compareTable(columns);
-  const [open, setOpen] = useState<string | null>(null);
   const wide = columns.length > 3;
-  /* Four columns get a fixed width each and the table scrolls; the labels stay pinned. */
+  /* Every column fits the phone, four included: the label column is fixed and the players share the rest. */
   const grid = {
     gridTemplateColumns: wide
-      ? `92px repeat(${columns.length}, 64px)`
+      ? `minmax(64px, 1.1fr) repeat(${columns.length}, minmax(0, 1fr))`
       : `minmax(0, 1.2fr) repeat(${columns.length}, minmax(0, 1fr))`,
-  };
-  const detail = (key: string, e: StartSitEvaluation): string => {
-    if (key === 'base') return baseExplanation(e);
-    const c = e.components.find((x) => x.key === key);
-    return c == null || c.unknown ? 'Nothing to read yet.' : c.display;
   };
   return (
     <section
@@ -550,35 +547,29 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
           ))}
         </div>
         {rows.map((row) => (
-          <div key={row.key} role="rowgroup">
-            <button
-              type="button"
-              className="cmp2-tr cmp2-factor"
-              role="row"
-              style={grid}
-              data-testid="compare-factor"
-              data-factor={row.key}
-              aria-expanded={open === row.key}
-              onClick={() => setOpen((k) => (k === row.key ? null : row.key))}
-            >
-              <span role="rowheader" className="cmp2-factor-label cmp2-pin">
-                {row.label}
+          <div
+            key={row.key}
+            className={row.kind === 'line' ? 'cmp2-tr cmp2-factor cmp2-line' : 'cmp2-tr cmp2-factor'}
+            role="row"
+            style={grid}
+            data-testid="compare-factor"
+            data-factor={row.key}
+            data-kind={row.kind}
+          >
+            <span role="rowheader" className="cmp2-factor-label cmp2-pin">
+              {row.label}
+            </span>
+            {row.cells.map((cell, i) => (
+              <span
+                role="cell"
+                key={columns[i]!.playerId}
+                className={sleeperClass('cmp2-num', cell.muted === true)}
+                data-testid="compare-cell"
+                data-muted={cell.muted ? 'true' : undefined}
+              >
+                {cell.text}
               </span>
-              {row.cells.map((cell, i) => (
-                <span role="cell" key={columns[i]!.playerId} className="cmp2-num" data-testid="compare-cell">
-                  {cell.text}
-                </span>
-              ))}
-            </button>
-            {open === row.key ? (
-              <div className="cmp2-detail" data-testid="compare-factor-detail">
-                {columns.map((e) => (
-                  <p key={e.playerId}>
-                    <strong>{shortName(e.name)}:</strong> {detail(row.key, e)}
-                  </p>
-                ))}
-              </div>
-            ) : null}
+            ))}
           </div>
         ))}
         <div className="cmp2-tr cmp2-total" role="row" style={grid} data-testid="compare-total">
@@ -586,7 +577,12 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
             Score
           </span>
           {score.map((cell, i) => (
-            <span role="cell" key={columns[i]!.playerId} className="cmp2-num">
+            <span
+              role="cell"
+              key={columns[i]!.playerId}
+              className={sleeperClass('cmp2-num', cell.muted === true)}
+              data-muted={cell.muted ? 'true' : undefined}
+            >
               {cell.text}
             </span>
           ))}

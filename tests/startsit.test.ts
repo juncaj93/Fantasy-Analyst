@@ -143,7 +143,12 @@ describe('evaluatePlayer', () => {
     expect(evaluation.confidenceReasons).toContain('no Vegas data');
   });
 
-  it('penalises stale prop data and says so', () => {
+  /*
+   * `startsit@6`: stale props still say so, and no longer cost points. The
+   * uncertainty penalty is text only (Alex, 15 October 2026); it used to take
+   * 0.75 here, capped to 3% of the market number.
+   */
+  it('says stale prop data is stale, without charging points for it', () => {
     const fresh = evaluatePlayer(
       { player: NACUA, props: [prop('receiving_yards', 70), prop('receptions', 5), prop('anytime_td', null, { impliedProbability: 0.3 })], signal: null },
       HALF_PPR,
@@ -157,8 +162,9 @@ describe('evaluatePlayer', () => {
       },
       HALF_PPR,
     );
-    expect(stale.score!).toBeLessThan(fresh.score!);
+    expect(stale.score!).toBe(fresh.score!);
     expect(stale.confidenceReasons).toContain('prop data is stale');
+    expect(stale.components.find((c) => c.key === 'uncertainty')).toMatchObject({ value: 0, textOnly: true });
   });
 
   it('returns a null score when there is nothing at all to go on', () => {

@@ -10,6 +10,7 @@ import type { ScoringProfile } from '../sleeper/scoring.ts';
 import type { MarketKey, PlayerProp } from '../vegas/types.ts';
 import { convertLine, touchdownRate, type ConversionRules } from './propConversion.ts';
 import { SCORING_RULES } from './scoringRules.ts';
+import { EXPECTED_MARKETS } from './expectedMarkets.ts';
 
 export interface MarketContribution {
   market: MarketKey;
@@ -85,13 +86,8 @@ const MISSING_WORDS: Record<MarketKey, string> = {
   anytime_td: 'touchdown',
 };
 
-/** Markets we expect to exist for each position. */
-export const EXPECTED_MARKETS: Record<string, MarketKey[]> = {
-  QB: ['pass_yards', 'pass_tds', 'rush_yards'],
-  RB: ['rush_yards', 'receiving_yards', 'receptions', 'anytime_td'],
-  WR: ['receiving_yards', 'receptions', 'anytime_td'],
-  TE: ['receiving_yards', 'receptions', 'anytime_td'],
-};
+/** Markets we expect to exist for each position; a leaf of its own so Compare can read it without this module. */
+export { EXPECTED_MARKETS };
 
 /**
  * Build the expectation for one player.
