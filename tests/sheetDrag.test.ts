@@ -14,8 +14,6 @@ import {
   FLICK_VELOCITY,
   INTENT_SLOP,
   LIFT_MAX,
-  RESIST_AFTER,
-  RESIST_SLOPE,
   dismissDistance,
   dragDecision,
   scrimOpacity,
@@ -73,11 +71,12 @@ describe('where the card is drawn for how far the finger went', () => {
   it('follows the finger one for one', () => {
     expect(sheetOffset(0)).toBe(0);
     expect(sheetOffset(50)).toBe(50);
-    expect(sheetOffset(RESIST_AFTER)).toBe(RESIST_AFTER);
+    expect(sheetOffset(160)).toBe(160);
   });
 
-  it('gets heavier past the resistance point', () => {
-    expect(sheetOffset(RESIST_AFTER + 100)).toBeCloseTo(RESIST_AFTER + 100 * RESIST_SLOPE, 6);
+  it('never damps a downward drag, so a slow finger is never left behind', () => {
+    // Hungry damped past 160px; on a phone that read as the card sliding away.
+    for (const dy of [161, 260, 600, 1200]) expect(sheetOffset(dy)).toBe(dy);
   });
 
   it('only rubber-bands a few pixels on an upward drag, however far', () => {

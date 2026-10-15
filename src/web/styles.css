@@ -6932,6 +6932,8 @@ table.compact tr:last-child td {
    */
   touch-action: none;
   overscroll-behavior: contain;
+  /* Only its opacity ever changes, on a layer of its own. */
+  will-change: opacity;
 }
 
 /*
@@ -6955,6 +6957,13 @@ table.compact tr:last-child td {
   flex-direction: column;
   overscroll-behavior: contain;
   animation: sheet-rise var(--dur-slow) var(--ease);
+  /*
+   * Its own layer for as long as it is open. Promoting it only while a finger
+   * was down made the phone re-raster the whole card at the start of every
+   * drag and again after every spring back: a hitch on the way in and a grey
+   * moment on the way out.
+   */
+  will-change: transform;
 }
 
 /*
@@ -6964,10 +6973,6 @@ table.compact tr:last-child td {
  */
 .sheet.sheet-held {
   animation: none;
-}
-
-.sheet.sheet-moving {
-  will-change: transform;
 }
 
 /*

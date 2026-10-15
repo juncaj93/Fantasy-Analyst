@@ -9,13 +9,15 @@
  * screen-tall invisible layer:
  *
  *  - **Raw touch events, with one non-passive `touchmove`.** The card follows
- *    the finger 1:1 by `transform`, so there is nothing to tune between the
- *    thumb and the card. `preventDefault` is called only once this drag has
- *    been claimed, which is what keeps it from costing anyone their scroll.
+ *    the finger 1:1 by `transform`, counted from where the finger first
+ *    touched, written once per frame and never through React. `preventDefault`
+ *    is called only once this drag has been claimed, which is what keeps it
+ *    from costing anyone their scroll.
  *  - **Where a drag may start.** The grip and the header always. The body only
  *    when everything between the finger and the card is scrolled to its top
- *    and the first clear movement is downward; anything else is a scroll and
- *    is left to the browser for the whole of the gesture.
+ *    and the first clear movement is downward. A body scrolled off its top
+ *    hands over once the finger has brought it back to the top, if the browser
+ *    still lets the page have the touch; anything else is the browser's.
  *  - **Decided when the hand lifts**, from where the finger is and how fast it
  *    was going, with no timers and no waiting for momentum.
  *
@@ -36,12 +38,6 @@ export const DISMISS_FRACTION = 0.28;
 
 /** …or past this many pixels, whichever is less, so a tall card is not a trek. Hungry: 140. */
 export const DISMISS_MAX = 140;
-
-/** The card follows the finger 1:1 up to here… Hungry: 160. */
-export const RESIST_AFTER = 160;
-
-/** …and takes this much of the movement past it. Hungry: 0.35. */
-export const RESIST_SLOPE = 0.35;
 
 /** Finger travel that clears the dim layer completely. Hungry: 400. */
 export const SCRIM_SPAN = 400;
@@ -68,6 +64,13 @@ export const CLOSE_MS = 240;
 /** How long it takes to come back when the push was not enough. */
 export const SPRING_MS = 240;
 
+/**
+ * How much recent movement a flick is judged on, in ms.
+ *
+ * Short, so a slow drag that ends with a pause reads as still at the lift.
+ */
+export const FLICK_WINDOW = 100;
+
 /* ---------------------------------------------------------------- the math */
 
 /** How far the finger has to bring the card down before letting go dismisses it. */
@@ -78,12 +81,14 @@ export function dismissDistance(sheetHeight: number): number {
 /**
  * Where the card is drawn, in px below its resting place, for this much finger.
  *
- * Downward: 1:1, then heavier past {@link RESIST_AFTER}. Upward: a rubber band
- * that approaches {@link LIFT_MAX} and never reaches it, so the card can say
- * "this is as high as I go" without ever leaving the bottom edge.
+ * Downward: 1:1, all the way. Hungry damps past 160px, and on a phone that read
+ * as the card sliding away from a slow finger: measured, a 260px drag left the
+ * card 66px behind. Upward: a rubber band that approaches {@link LIFT_MAX} and
+ * never reaches it, so the card can say "this is as high as I go" without ever
+ * leaving the bottom edge.
  */
 export function sheetOffset(dy: number): number {
-  if (dy >= 0) return dy <= RESIST_AFTER ? dy : RESIST_AFTER + (dy - RESIST_AFTER) * RESIST_SLOPE;
+  if (dy >= 0) return dy;
   const up = -dy;
   return -(LIFT_MAX * up) / (up + LIFT_MAX * 4);
 }
@@ -167,13 +172,20 @@ interface Drag {
   startY: number;
   zone: DragZone;
   atTop: boolean;
+  /**
+   * A body drag that began as a scroll, waiting for the content to reach its
+   * top so the card can take over from wherever the finger is then.
+   */
+  awaitingTop: boolean;
   /** Where the card was drawn when the drag engaged, so a springing card can be caught. */
   base: number;
   engaged: boolean;
-  /** Finger travel since the drag engaged. */
+  /** Finger travel counted from `startY`. */
   dy: number;
   /** Where the finger last was, for the reading taken at the lift. */
   lastY: number;
+  /** The card's height, read once at the touch so a move never forces a layout. */
+  height: number;
   samples: Sample[];
 }
 
@@ -223,6 +235,8 @@ export function useSheetDrag({
       back.style.transition = `opacity ${ease}`;
       back.style.opacity = '0';
     }
+    // A timer, not `transitionend`: the card unmounts on time whatever the
+    // browser does with the transition.
     timer.current = window.setTimeout(() => closedRef.current(), CLOSE_MS);
   }, [card, scrim]);
 
@@ -232,16 +246,32 @@ export function useSheetDrag({
     const el = card.current;
     if (!el) return;
     let drag: Drag | null = null;
+    /** The offset waiting for the next frame, and the frame that will draw it. */
+    let pending: number | null = null;
+    let frame = 0;
+    let settle: number | undefined;
 
-    const height = () => el.getBoundingClientRect().height || 1;
-
-    const paint = (offset: number) => {
+    /** The card and the dim, from one number. Only ever called in a frame. */
+    const draw = (offset: number, height: number) => {
       el.style.transform = `translate3d(0, ${offset}px, 0)`;
       const back = scrim.current;
-      if (back) back.style.opacity = String(scrimOpacity(offset, height()));
+      if (back) back.style.opacity = String(scrimOpacity(offset, height));
     };
 
-    let settle: number | undefined;
+    const flush = () => {
+      frame = 0;
+      if (pending == null || !drag?.engaged) return;
+      draw(pending, drag.height);
+      pending = null;
+    };
+
+    /** Drop a frame still waiting to draw, so nothing paints over the release. */
+    const cancelFrame = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      pending = null;
+    };
+
     /** Clear what the spring left behind once it has finished, unless a new drag caught it. */
     const settled = () => {
       if (closing.current || drag?.engaged) return;
@@ -249,16 +279,16 @@ export function useSheetDrag({
       el.style.transition = '';
       el.style.transform = '';
       const back = scrim.current;
-      if (back) back.style.transition = '';
+      if (back) {
+        back.style.transition = '';
+        back.style.opacity = '';
+      }
     };
 
     const springBack = () => {
       const back = scrim.current;
       if (prefersReducedMotion()) {
-        el.classList.remove('sheet-moving');
-        el.style.transition = '';
-        el.style.transform = '';
-        if (back) back.style.opacity = '';
+        settled();
         return;
       }
       const ease = `${SPRING_MS}ms var(--ease-sheet-back)`;
@@ -266,11 +296,22 @@ export function useSheetDrag({
       el.style.transform = 'translate3d(0, 0, 0)';
       if (back) {
         back.style.transition = `opacity ${ease}`;
-        back.style.opacity = '';
+        back.style.opacity = '1';
       }
       // A timer rather than `transitionend`, which never fires for a card let
       // go exactly where it rests.
       settle = window.setTimeout(settled, SPRING_MS + 20);
+    };
+
+    /** Take the drag: no transition while a finger is down, and the card caught where it is. */
+    const engage = (state: Drag) => {
+      state.engaged = true;
+      state.base = drawnOffset(el);
+      window.clearTimeout(settle);
+      el.classList.add('sheet-held', 'sheet-moving');
+      el.style.transition = 'none';
+      const back = scrim.current;
+      if (back) back.style.transition = 'none';
     };
 
     const onStart = (e: TouchEvent) => {
@@ -287,10 +328,12 @@ export function useSheetDrag({
         startY: touch.clientY,
         zone,
         atTop: !scrolledAbove(target, el),
+        awaitingTop: false,
         base: 0,
         engaged: false,
         dy: 0,
         lastY: touch.clientY,
+        height: el.getBoundingClientRect().height || 1,
         samples: [],
       };
     };
@@ -300,30 +343,49 @@ export function useSheetDrag({
       if (!state || closing.current) return;
       const touch = e.touches[0];
       if (!touch) return;
-      if (!state.engaged) {
-        const decision = dragDecision(touch.clientX - state.startX, touch.clientY - state.startY, state.zone, state.atTop);
-        if (decision === 'wait') return;
-        if (decision === 'release') {
+      if (state.awaitingTop) {
+        // The content is still the finger's to scroll until it is at its top.
+        const target = e.target instanceof Element ? e.target : null;
+        if (touch.clientY <= state.lastY || scrolledAbove(target, el)) {
+          state.lastY = touch.clientY;
+          return;
+        }
+        // At the top and still moving down. Only if the browser still lets the
+        // page have this touch: once it is scrolling natively it will not stop,
+        // and two things moving the card at once is the bounce.
+        if (!e.cancelable) {
           drag = null;
           return;
         }
-        // Counted from here, not from where the finger landed, so the card does
-        // not jump by the slop the moment it starts to move.
-        state.engaged = true;
+        state.awaitingTop = false;
         state.startY = touch.clientY;
-        state.base = drawnOffset(el);
-        window.clearTimeout(settle);
-        el.classList.add('sheet-held', 'sheet-moving');
-        el.style.transition = 'none';
-        const back = scrim.current;
-        if (back) back.style.transition = 'none';
+        engage(state);
+      } else if (!state.engaged) {
+        const dx = touch.clientX - state.startX;
+        const dy = touch.clientY - state.startY;
+        const decision = dragDecision(dx, dy, state.zone, state.atTop);
+        if (decision === 'wait') return;
+        if (decision === 'release') {
+          // A downward scroll of content off its top may yet reach the top.
+          if (state.zone === 'body' && !state.atTop && dy > 0 && Math.abs(dy) >= Math.abs(dx)) {
+            state.awaitingTop = true;
+            state.lastY = touch.clientY;
+            return;
+          }
+          drag = null;
+          return;
+        }
+        engage(state);
       }
       if (e.cancelable) e.preventDefault();
       state.dy = touch.clientY - state.startY;
       state.lastY = touch.clientY;
       state.samples.push({ x: touch.clientY, t: performance.now() });
       if (state.samples.length > SAMPLE_LIMIT) state.samples.shift();
-      paint(sheetOffset(state.base + state.dy));
+      // Counted from where the finger first touched, so the card never trails
+      // it by the slop. Drawn in the next frame, once, however many moves land.
+      pending = sheetOffset(state.base + state.dy);
+      if (!frame) frame = requestAnimationFrame(flush);
     };
 
     const onEnd = (e: TouchEvent) => {
@@ -331,11 +393,12 @@ export function useSheetDrag({
       if (!state || e.touches.length > 0) return;
       drag = null;
       if (!state.engaged || closing.current) return;
+      cancelFrame();
       const travel = state.base + state.dy;
       // The finger at the lift, so a drag that paused before letting go reads as still.
       state.samples.push({ x: state.lastY, t: performance.now() });
-      const velocity = velocityOver(state.samples);
-      if (e.type !== 'touchcancel' && shouldDismiss(travel, velocity, height())) dismiss();
+      const velocity = velocityOver(state.samples, FLICK_WINDOW);
+      if (e.type !== 'touchcancel' && shouldDismiss(travel, velocity, state.height)) dismiss();
       else springBack();
     };
 
@@ -349,6 +412,7 @@ export function useSheetDrag({
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
       window.clearTimeout(settle);
+      cancelFrame();
     };
   }, [card, scrim, dismiss]);
 

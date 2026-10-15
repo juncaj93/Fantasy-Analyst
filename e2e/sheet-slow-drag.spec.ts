@@ -1,6 +1,12 @@
 /**
  * Slow drags on a sheet, measured frame by frame.
  *
+ * Before the fix (4 px steps at 67 px/s, Chromium 390): the card trailed the
+ * finger by the 4 px slop throughout, fell behind past 180 px of finger (194 px
+ * of card for 260 px of finger, the old 0.35 damping), 24 frames per drag
+ * moved the card by a different amount than the finger, and a body scrolled
+ * back to its top mid-gesture never moved the card at all.
+ *
  * Alex's phone check of the first swipe round: fast flicks were right, slow
  * drags were not. The card seemed to lag the finger, bounced while he held a
  * steady drag, and the screen sometimes stayed grey after a close or a spring
@@ -10,10 +16,13 @@
  *
  * The finger is dispatched touch events (see `touchDrag` in `helpers.ts` for
  * why), sent with real time between them; the card's position is read with
- * `getBoundingClientRect`, which includes its transform.
+ * `getBoundingClientRect`, which includes its transform, once per frame just
+ * after that frame's callbacks have run. Each gesture prints one `SLOWDRAG`
+ * line with its numbers, then asserts them.
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { CLOSE_MS, SPRING_MS } from '../src/web/sheetDrag.ts';
 
 /** One step of a scripted gesture. */
 type Step =
@@ -123,15 +132,26 @@ async function record(page: Page, steps: Step[]): Promise<{ frames: Frame[]; mar
       const b = body();
       frames.push({
         t: now(),
-        finger: finger.y,
+        finger: fingerAtFrame,
         card: c ? c.getBoundingClientRect().top : null,
         scrim: s ? Number(getComputedStyle(s).opacity) : null,
         down,
         bodyTop: b ? b.scrollTop : null,
       });
-      if (running) requestAnimationFrame(sample);
+      if (running) requestAnimationFrame(afterFrame);
     };
-    requestAnimationFrame(sample);
+    /*
+     * Read just after the frame's own callbacks, which is what the frame shows.
+     * Reading inside one would see the card before the sheet's own frame
+     * callback has drawn it, and report a lag that never reaches the screen.
+     */
+    let fingerAtFrame = 0;
+    const afterFrame = () => {
+      // The finger as this frame began: what the card in this frame can show.
+      fingerAtFrame = finger.y;
+      setTimeout(sample, 0);
+    };
+    requestAnimationFrame(afterFrame);
     const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     for (const step of script) {
@@ -202,6 +222,8 @@ function analyse(frames: Frame[], marks: { t: number; what: string }[]) {
   let engagedAt: number | null = null;
   let engageJump = 0;
   let resistanceAt: number | null = null;
+  /** How far the finger was ahead of the card when the card began to move. */
+  let lagAtEngage = 0;
   for (let i = 1; i < live.length; i += 1) {
     const a = live[i - 1]!;
     const b = live[i]!;
@@ -210,6 +232,7 @@ function analyse(frames: Frame[], marks: { t: number; what: string }[]) {
     if (engagedAt == null && Math.abs(b.card! - rest) > 0.5) {
       engagedAt = b.finger - fingerStart;
       engageJump = Math.round((dCard - dFinger) * 10) / 10;
+      lagAtEngage = b.finger - fingerStart - (b.card! - rest);
       continue;
     }
     if (engagedAt == null) continue;
@@ -217,7 +240,8 @@ function analyse(frames: Frame[], marks: { t: number; what: string }[]) {
     maxFrameDiff = Math.max(maxFrameDiff, diff);
     if (diff > 2) jumps += 1;
     if (dCard < -0.5 && dFinger >= 0) bounces += 1;
-    const lag = b.finger - fingerStart - (b.card! - rest);
+    // Falling behind the finger, relative to where the card picked it up.
+    const lag = b.finger - fingerStart - (b.card! - rest) - lagAtEngage;
     if (resistanceAt == null && lag > 8) resistanceAt = Math.round(b.finger - fingerStart);
   }
   const fingerTravel = live.length ? live[live.length - 1]!.finger - fingerStart : 0;
@@ -228,6 +252,7 @@ function analyse(frames: Frame[], marks: { t: number; what: string }[]) {
     jumpsOver2px: jumps,
     engagedAtFingerPx: engagedAt == null ? null : Math.round(engagedAt),
     jumpAtEngage: engageJump,
+    lagAtEngage: Math.round(lagAtEngage),
     resistanceFromFingerPx: resistanceAt,
     fingerTravel: Math.round(fingerTravel),
     cardTravel: Math.round(cardTravel),
@@ -255,6 +280,15 @@ function report(name: string, data: unknown) {
 
 const slow = (times: number) => ({ kind: 'move', times, dy: 4, every: 60 }) as const;
 
+/** What following the finger 1:1 means, frame by frame. */
+function expectTracking(n: ReturnType<typeof analyse>) {
+  expect(n.maxFrameDiff, 'a frame where the card and the finger moved different amounts').toBeLessThanOrEqual(2);
+  expect(n.jumpsOver2px, 'frames where the card jumped or stalled by more than 2 px').toBe(0);
+  expect(n.bounces, 'frames where the card went up while the finger went down or held').toBe(0);
+  expect(n.jumpAtEngage, 'the card jumped when the drag began').toBeLessThanOrEqual(2);
+  expect(n.resistanceFromFingerPx, 'the card fell behind a slow finger').toBeNull();
+}
+
 test.describe('a slow drag on a sheet, frame by frame', () => {
   for (const at of ['grip', 'header', 'body'] as const) {
     test(`from the ${at}`, async ({ page }) => {
@@ -262,7 +296,10 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
       const { frames, marks } = await record(page, [{ kind: 'start', at }, slow(65), { kind: 'hold', ms: 150 }, { kind: 'end' }, { kind: 'watch', ms: 600 }]);
       const numbers = analyse(frames, marks);
       report(at, numbers);
-      expect(numbers.frames).toBeGreaterThan(20);
+      expectTracking(numbers);
+      // Counted from the touch, so the card never trails the finger by the slop.
+      expect(numbers.lagAtEngage).toBeLessThanOrEqual(1);
+      expect(Math.abs(numbers.cardTravel - numbers.fingerTravel)).toBeLessThanOrEqual(1);
     });
   }
 
@@ -282,7 +319,11 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
     ]);
     const numbers = analyse(frames, marks);
     report('handoff', { ...numbers, bodyTopAtEnd: frames.at(-1)?.bodyTop });
-    expect(numbers.frames).toBeGreaterThan(20);
+    expectTracking(numbers);
+    // Picked up from the finger the moment the content reached its top (40 px
+    // of scroll), and every pixel of finger after that.
+    expect(numbers.engagedAtFingerPx).toBeLessThanOrEqual(48);
+    expect(Math.abs(numbers.cardTravel - (numbers.fingerTravel - numbers.lagAtEngage))).toBeLessThanOrEqual(1);
   });
 
   test('held still for 300 ms in the middle, then continued', async ({ page }) => {
@@ -302,7 +343,8 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
     const drift = still.length ? Math.max(...still) - Math.min(...still) : 0;
     const numbers = analyse(frames, marks);
     report('hold', { ...numbers, driftWhileStill: Math.round(drift * 10) / 10 });
-    expect(numbers.frames).toBeGreaterThan(20);
+    expect(drift, 'the card moved while the finger held still').toBeLessThanOrEqual(0.5);
+    expectTracking(numbers);
   });
 
   test('released short of the line, springs back and the dim comes back', async ({ page }) => {
@@ -316,8 +358,14 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
     ]);
     const numbers = analyse(frames, marks);
     const last = frames.at(-1)!;
-    report('below', { ...numbers, scrimFullAfterMs: scrimSettledAfterLift(frames, marks, 1), cardAtEnd: last.card, scrimAtEnd: last.scrim });
+    const full = scrimSettledAfterLift(frames, marks, 1);
+    report('below', { ...numbers, scrimFullAfterMs: full, cardAtEnd: last.card, scrimAtEnd: last.scrim });
+    expectTracking(numbers);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
+    expect(full, 'the dim did not come back to full after the spring').not.toBeNull();
+    expect(full!).toBeLessThanOrEqual(SPRING_MS + 300);
+    expect(last.scrim).toBe(1);
+    expect(last.card).toBe(frames.find((f) => f.card != null)!.card);
   });
 
   test('released past the line, closes and the dim goes', async ({ page }) => {
@@ -330,8 +378,12 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
       { kind: 'watch', ms: 800 },
     ]);
     const numbers = analyse(frames, marks);
-    report('past', { ...numbers, scrimGoneAfterMs: scrimSettledAfterLift(frames, marks, 0) });
+    const gone = scrimSettledAfterLift(frames, marks, 0);
+    report('past', { ...numbers, scrimGoneAfterMs: gone });
+    expectTracking(numbers);
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
+    expect(gone, 'the dim stayed after the card closed').not.toBeNull();
+    expect(gone!).toBeLessThanOrEqual(CLOSE_MS + 300);
   });
 
   test('interrupted by a second finger', async ({ page }) => {
@@ -349,6 +401,7 @@ test.describe('a slow drag on a sheet, frame by frame', () => {
     ]);
     const numbers = analyse(frames, marks);
     report('second', numbers);
-    expect(numbers.frames).toBeGreaterThan(20);
+    expectTracking(numbers);
+    expect(Math.abs(numbers.cardTravel - numbers.fingerTravel)).toBeLessThanOrEqual(1);
   });
 });

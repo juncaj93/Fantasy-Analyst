@@ -250,10 +250,10 @@ touch in `e2e/sheet-swipe.spec.ts` at all four widths, with
 | Rule | Value | From |
 | --- | --- | --- |
 | Movement before a touch is judged | 4px | Hungry |
-| Card follows the finger | 1:1, measured from where the drag engaged | Hungry |
-| Past 160px of finger | the card takes 0.35 of each further pixel | Hungry |
+| Card follows the finger | 1:1 all the way down, counted from where the finger touched | changed: Hungry damps past 160px, which left a slow drag 66px behind |
+| Drawn | once per frame, by `transform`, never through React; the card and the dim stay on their own layers while open | added |
 | Release closes it | past 28% of the card's height or 140px, whichever is less | Hungry |
-| …or a flick | 0.5 px/ms downward over the last 120ms, once past 16px | added |
+| …or a flick | 0.5 px/ms downward over the last 100ms, once past 16px | added |
 | An upward flick | keeps the card, even past the line | added |
 | Upward drag | rubber-bands, never more than 6px | added |
 | Dim layer | clears in step with the card, fully at 400px or the card's height | Hungry |
@@ -263,9 +263,14 @@ touch in `e2e/sheet-swipe.spec.ts` at all four widths, with
 **Where a drag may start.** The grip and the header always (`touch-action:
 none` on both). The body only when it, and everything between the finger and
 the card, is scrolled to the top and the first clear movement is downward. A
-sideways first movement, an upward one, a scrolled body or a text field all
-leave the gesture to the browser for the rest of the touch, so reading a card
-never closes it.
+sideways first movement, an upward one or a text field leave the gesture to
+the browser for the rest of the touch, so reading a card never closes it. A
+body scrolled off its top that the finger brings back to the top hands over
+to the card from the finger's position at that moment, but only while the
+browser still lets the page cancel the touch; once Safari is scrolling
+natively it keeps the gesture, and the next swipe closes the card.
+
+Slow drags are measured frame by frame in `e2e/sheet-slow-drag.spec.ts`.
 
 **Why touch events.** iOS Safari lets a page claim a drag only by calling
 `preventDefault` on a non-passive `touchmove`. Pointer events are cancelled the
