@@ -59,8 +59,9 @@ export const ALWAYS_TEXT_ONLY = ['news_raw', 'role_trend', 'td_dependency', 'gam
  *
  * 15 October 2026 (`startsit@6`): the uncertainty penalty is text only too, on
  * Alex's decision. It charged a market for how many books posted it, which is a
- * fact about the sportsbook, not the player. Shipped on the rule "no worse
- * than the 4.840 above by more than 0.01"; the measured numbers are in
+ * fact about the sportsbook, not the player. Backtested on weeks 1 to 5
+ * (673 fully priced player-weeks): average miss 4.917 with it, 4.927
+ * without, inside the "no worse by more than 0.01" rule it shipped on. See
  * docs/PLAYER_AND_LINEUP_INTELLIGENCE.md.
  */
 export const SCORING_RULES: ScoringRules = {
