@@ -122,261 +122,148 @@ export async function openReview(page: Page): Promise<void> {
 }
 
 /**
- * Wait long enough for a dismissal or a navigation that was going to happen to
- * have happened.
+ * Wait long enough for a dismissal or a spring-back that was going to happen
+ * to have happened.
  *
- * **For the assertions that say a gesture did *nothing*, and they are worthless
- * without it.** Neither of this app's two gestures acts when the finger lifts:
- * a dismissed sheet and a completed back-swipe both animate off the screen
- * first and call their handler on `transitionend`, with a 400ms fallback behind
- * it for the case where the transition never fires. So for something like half a
- * second after a gesture that *did* fire, the thing it is taking away is still
- * in the document — and `expect(surface).toBeVisible()` asserted at that moment
- * is true whether the gesture fired or not.
- *
- * That is not hypothetical. Three tests across two suites — the ones holding the
- * line that a *scrolled* card keeps its drag, which is the half of that rule
- * that protects a reader from having the thing they are reading thrown away —
- * were passing against a build with the rule deliberately removed. They were
- * measuring the settle animation.
- *
- * The positive assertions never needed this: `toHaveCount(0)` and `toBeVisible`
- * on the screen behind both retry until the animation has resolved. It is only
- * "nothing happened" that has to wait to be sure.
+ * For the assertions that say a gesture did *nothing*: a dismissed sheet
+ * animates off for `CLOSE_MS` before it unmounts, so `toBeVisible()` asserted
+ * straight after a release is true whether the gesture fired or not. So this
+ * waits past the exit, then until no card is still moving.
  */
 export async function pastTheSettle(page: Page): Promise<void> {
-  /*
-   * The fixed floor this has always had, and then patience for a slow runner.
-   *
-   * 700ms is comfortably past the settle on any machine a person develops on,
-   * and it is not always past it on a loaded CI runner. Measured on
-   * `webkit-small-360`, which shares three shards with eleven other jobs: the
-   * card was back and visible, the assertion that the scrim had come back with
-   * it read 0.699 against a floor of 0.9, and the same commit's gesture code
-   * had been green on the shard before. The animation was still running.
-   *
-   * Additive on purpose: nothing gets *faster* than it was, because a shorter
-   * wait is a new race in every test that calls this, and a slow runner simply
-   * gets the time it needs.
-   */
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(400);
+  await page
+    .waitForFunction(() => !document.querySelector('.sheet.sheet-moving'), undefined, { timeout: 5_000 })
+    .catch(() => {
+      // eslint-disable-next-line no-console
+      console.warn('[pastTheSettle] a sheet was still moving');
+    });
+}
 
-  /*
-   * And then until the layer has *arrived*, which is not the same as until it
-   * has stopped moving.
-   *
-   * This used to wait for three consecutive frames of an unchanged `scrollTop`.
-   * That is a stillness heuristic, and a stillness heuristic cannot tell a
-   * finished animation from a starved one: when the runner drops frames, `rAF`
-   * fires with the compositor not having advanced the scroll, three times in a
-   * row, and the wait returns in the middle of the settle. Its 4-second cap
-   * then hid the other half of the problem, because the `.catch` swallowed a
-   * genuine timeout and returned as if all was well.
-   *
-   * It cost `sheet-interaction.spec.ts:222` on `webkit-iphone-430` on 16
-   * September, on a tree byte-identical to one that had passed the same shard
-   * fourteen minutes earlier — and that failure stood down a deploy, which is
-   * the second time in one day a frame-timing proxy in this file has done so.
-   *
-   * So the condition is now a *position*, which a dropped frame cannot forge.
-   * The settle has exactly three ends and each one is a fact about where the
-   * layer is rather than about how recently it moved:
-   *
-   *   - **gone** — the layer unmounted, which is what a dismissal does;
-   *   - **home** — `scrollTop` is at the detent, which is where a card that was
-   *     pulled and released comes to rest;
-   *   - **away** — `scrollTop` is at nought, the dismissed end, for the instant
-   *     before the unmount.
-   *
-   * A layer with no travel in it has not arrived anywhere and is still being
-   * laid out, so it waits rather than reading its `0` as the dismissed end —
-   * the same distinction `native.tsx` draws for the same reason.
-   *
-   * The comment this replaces also said the scrim is "painted from React state
-   * fed by the scroll handler". It is not: `paint()` writes `style.opacity`
-   * straight onto the node inside the scroll handler, so there is no React
-   * scheduling behind the reading, and a caller that sees the layer home sees
-   * the opacity that went with it.
-   */
-  const arrived = await page
-    .waitForFunction(
-      () => {
-        const layer = document.querySelector('.sheet-scroller') as HTMLElement | null;
-        if (!layer) return true;
-        const detent = layer.scrollHeight - layer.clientHeight;
-        if (detent <= 0) return false;
-        const top = layer.scrollTop;
-        return top >= detent - 1 || top < 1;
-      },
-      undefined,
-      { timeout: 5_000, polling: 'raf' },
-    )
-    .then(() => true)
-    .catch(() => false);
-
-  /*
-   * A layer that never arrives is a real failure and it is still not this
-   * helper's to report — the assertion the caller is about to make says what
-   * was wrong far better than a timeout here would. But it is no longer
-   * swallowed in silence: a run that hits this is a run whose next assertion is
-   * being made against a half-finished animation, and the reason belongs in the
-   * log beside it rather than nowhere.
-   */
-  if (!arrived) {
-    // eslint-disable-next-line no-console
-    console.warn('[pastTheSettle] the layer never reached the detent or the dismissed end');
-  }
+/** What a synthetic touch drag did. */
+export interface TouchDragResult {
+  /** Whether the page claimed any of the moves (`preventDefault`), which is a sheet taking the drag. */
+  claimed: boolean;
+  /** The backdrop's opacity just before the finger lifted, or null with no sheet open. */
+  scrimBeforeLift: number | null;
+  /** The card's drawn offset just before the finger lifted, in px. */
+  offsetBeforeLift: number | null;
 }
 
 /**
- * Push an open sheet away, the way a thumb does — with a scroll.
+ * Drag a finger from a point, as a run of real-time touch events.
  *
- * **A mouse drag cannot do this any more, and that is the point.** A sheet's
- * layer is a scroller whose two ends are the card in place and the card gone, so
- * dismissing one *is* scrolling it; `page.mouse.down()` and a series of moves is
- * not a scroll and never was, so the drags these specs used to use now express
- * nothing. A wheel is a real scroll, which means it exercises the same mechanism
- * a finger does, in every engine — where the old pointer gesture was visible
- * only to a synthetic mouse, and passed twelve green WebKit shards while doing
- * nothing at all under a thumb.
+ * **Why dispatched rather than driven.** Playwright can tap with a touchscreen
+ * but cannot drag with one in WebKit, and a mouse is not a finger: the sheet
+ * listens to touch events, because that is what iOS Safari lets an app claim.
+ * So the events are built in the page — a `TouchEvent` where the engine can
+ * construct one, an `Event` carrying the same fields where it cannot — and sent
+ * to whatever is under the point, with real time between them so the release
+ * speed is the one asked for. Each is preceded by the touch-typed pointer event
+ * a phone sends with it, so the gestures that listen for pointers hear it too.
  *
- * `over` is where to put the pointer first: the middle of the card by default,
- * which is the case worth checking most often, because it is the one the old
- * gesture could not do.
+ * `ms` is how long the movement takes; `hold` is how long the finger then rests
+ * before lifting, which is what makes a slow release slow.
  */
-export async function swipeSheetAway(
+export async function touchDrag(
   page: Page,
-  { over = '.sheet', ticks }: { over?: string; ticks?: number } = {},
-): Promise<void> {
-  if (ticks !== undefined) {
-    // A push of a stated size, for the specs whose subject is the size.
-    await wheelOverSheet(page, over, -ticks);
-    return;
-  }
-  /*
-   * Otherwise: one continuous push, delivered as a run of wheels close together.
-   *
-   * Not a single large one, and the reason is a measurement rather than caution.
-   * How far a synthetic wheel actually scrolls depends on what else the page is
-   * doing: with the per-frame `requestAnimationFrame` watcher the
-   * pull-to-refresh specs install before they swipe, the *same* wheel that moves
-   * this layer 675px moves it 50 — WebKit's wheel scrolling is starved by the
-   * style recalculation it forces. Fifty pixels is a nudge, and a nudge
-   * correctly springs back, so the spec was reporting the settle working as a
-   * dismissal failing.
-   *
-   * Repeating them further apart does not help either: the settle returns each
-   * abandoned nudge to the card's position, so nothing accumulates. They have to
-   * arrive closer together than the settle waits — which is also what a finger
-   * does, a drag being many small movements rather than one large one — and then
-   * the settle sees where the whole push got to.
-   */
-  const at = await aimAt(page, over);
-  if (!at) return;
-  await page.mouse.move(at.x, at.y);
-  for (let i = 0; i < 10; i++) {
-    if ((await page.locator('.sheet-scroller').count()) === 0) return;
-    await page.mouse.wheel(0, -400);
-    await page.waitForTimeout(30);
-  }
-  await page.waitForTimeout(700);
+  at: { x: number; y: number },
+  { dy, dx = 0, ms = 300, steps = 12, hold = 0 }: { dy: number; dx?: number; ms?: number; steps?: number; hold?: number },
+): Promise<TouchDragResult> {
+  return page.evaluate(
+    async ({ x, y, dx, dy, ms, steps, hold }) => {
+      const target = document.elementFromPoint(x, y) ?? document.body;
+      const send = (type: string, cx: number, cy: number): boolean => {
+        const lifted = type === 'touchend' || type === 'touchcancel';
+        let event: Event;
+        try {
+          const touch = new Touch({ identifier: 1, target, clientX: cx, clientY: cy, pageX: cx, pageY: cy });
+          const on = lifted ? [] : [touch];
+          event = new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            touches: on,
+            targetTouches: on,
+            changedTouches: [touch],
+          });
+          // WebKit wants a `TouchList` and may build an empty one from an array.
+          if ((event as TouchEvent).changedTouches.length !== 1) throw new Error('no touches');
+        } catch {
+          const touch = { identifier: 1, target, clientX: cx, clientY: cy, pageX: cx, pageY: cy };
+          const on = lifted ? [] : [touch];
+          event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+          Object.defineProperty(event, 'touches', { value: on });
+          Object.defineProperty(event, 'targetTouches', { value: on });
+          Object.defineProperty(event, 'changedTouches', { value: [touch] });
+        }
+        // A finger sends pointer events too, and the pull surface and the back
+        // swipe listen for those: sent first, touch-typed, as a phone does.
+        const pointer = { touchstart: 'pointerdown', touchmove: 'pointermove', touchend: 'pointerup', touchcancel: 'pointercancel' }[type]!;
+        target.dispatchEvent(
+          new PointerEvent(pointer, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId: 7,
+            pointerType: 'touch',
+            isPrimary: true,
+            clientX: cx,
+            clientY: cy,
+            buttons: lifted ? 0 : 1,
+          }),
+        );
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const pause = (n: number) => new Promise((resolve) => setTimeout(resolve, n));
+      send('touchstart', x, y);
+      let claimed = false;
+      for (let i = 1; i <= steps; i += 1) {
+        await pause(ms / steps);
+        claimed = send('touchmove', x + (dx * i) / steps, y + (dy * i) / steps) || claimed;
+      }
+      if (hold > 0) await pause(hold);
+      const scrim = document.querySelector('.sheet-backdrop') as HTMLElement | null;
+      const card = document.querySelector('.sheet') as HTMLElement | null;
+      const offset = card ? new DOMMatrix(getComputedStyle(card).transform).m42 : null;
+      const result = {
+        claimed,
+        scrimBeforeLift: scrim ? Number(getComputedStyle(scrim).opacity) : null,
+        offsetBeforeLift: offset,
+      };
+      send('touchend', x + dx, y + dy);
+      return result;
+    },
+    { x: at.x, y: at.y, dx, dy, ms, steps, hold },
+  );
+}
+
+/** The middle of the first element matching `selector`. */
+export async function centreOf(page: Page, selector: string): Promise<{ x: number; y: number }> {
+  const box = (await page.locator(selector).first().boundingBox())!;
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
 }
 
 /**
- * Put the pointer somewhere on the open sheet and turn the wheel.
- *
- * The aim is clamped into the scrollport, and that is not defensive tidiness: a
- * card taller than the screen has its top *above* the viewport once the reader
- * has scrolled into it, so a point measured from the card's own box lands off
- * screen and the wheel is delivered to nothing at all. Which looks exactly like
- * the app ignoring the gesture.
+ * Swipe an open sheet away, the way a thumb does: a quick drag down from the
+ * grip, or from `over` when the spec is about where the drag starts.
  */
-async function wheelOverSheet(page: Page, over: string, by: number): Promise<void> {
-  const at = await aimAt(page, over);
-  if (!at) return;
+export async function swipeSheetAway(page: Page, { over = '.sheet-grip' }: { over?: string } = {}): Promise<TouchDragResult> {
+  const result = await touchDrag(page, await centreOf(page, over), { dy: 320, ms: 180 });
+  await pastTheSettle(page);
+  return result;
+}
+
+/** Scroll the content of an open sheet with the wheel, which moves only `.sheet-body`. */
+export async function scrollSheetContent(page: Page, by: number): Promise<void> {
+  const at = await centreOf(page, '.sheet-body');
   await page.mouse.move(at.x, at.y);
   await page.mouse.wheel(0, by);
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(300);
 }
 
-/** The point on `over` to deliver a scroll to, clamped into the scrollport. */
-async function aimAt(page: Page, over: string): Promise<{ x: number; y: number } | null> {
-  const target = await page.locator(over).first().boundingBox();
-  const port = await page.locator('.sheet-scroller').boundingBox();
-  if (!target || !port) return null;
-  const wanted = target.y + Math.min(target.height / 2, 120);
-  return {
-    x: target.x + target.width / 2,
-    y: Math.min(Math.max(wanted, port.y + 8), port.y + port.height - 8),
-  };
-}
-
-/**
- * Scroll the content of an open sheet, without going near either end of it.
- *
- * The same wheel, over the same place, as the one that pushes the card away —
- * and which of the two happens is decided by the browser rather than by this
- * helper. A card whose content has somewhere to go scrolls its content; a card
- * whose content is already at its top has nowhere to put the scroll, so it
- * chains outward to the layer and the card moves instead. Telling those two
- * apart is the whole of what the sheet specs are for, so the aim deliberately
- * does not differ between them.
- */
-export async function scrollSheetContent(page: Page, by: number): Promise<void> {
-  await wheelOverSheet(page, '.sheet', by);
-}
-
-/**
- * Put a hand on the open card and keep it there, so that what the test does to
- * the layer next counts as the reader doing it.
- *
- * **For the specs whose subject is a *stated* push.** A wheel is the honest
- * gesture and `swipeSheetAway` is how most of this suite pushes a card, but how
- * far one wheel scrolls is the browser's business and varies with what else the
- * page is doing — no use to a spec that means "exactly seven tenths of the way
- * out, and read the scrim there". Those set `scrollTop` directly, and the layer
- * no longer treats a scroll as a dismissal unless a hand made it: a scroll with
- * no pointer behind it is put back at the card's position, which is the whole
- * point of that rule and would otherwise make these specs measure it instead of
- * their own subject.
- *
- * So the pointer is real — Playwright's mouse, not a dispatched event — and the
- * drag is real; only the push's *distance* is delivered by the test. Aimed at
- * the grip, which is decorative and has nothing under it to press, and moved far
- * enough to be a drag rather than a tap.
- */
-export async function handOnCard(page: Page): Promise<void> {
-  const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
-  const x = Math.round(grip.x + grip.width / 2);
-  const y = Math.round(grip.y + grip.height / 2);
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x, y + 24);
-}
-
-/** Take the hand off again. Tolerant, because the card may already have gone. */
-export async function handOffCard(page: Page): Promise<void> {
-  await page.mouse.up().catch(() => {});
-}
-
-/** How far the open sheet's layer is scrolled, and how far it could be. */
-export async function sheetScroll(page: Page): Promise<{ top: number; max: number }> {
-  return page.evaluate(() => {
-    const el = document.querySelector('.sheet-scroller') as HTMLElement;
-    return { top: Math.round(el.scrollTop), max: Math.round(el.scrollHeight - el.clientHeight) };
-  });
-}
-
-/**
- * How far the open card's own content is scrolled, and how far it could be.
- *
- * Distinct from `sheetScroll`, and the distinction is the fix for the defect
- * that took the sheet apart twice. The layer moves between two positions only —
- * the card in place and the card gone — and everything a reader does *inside* a
- * long card moves this instead. A spec that means "the reader read further down
- * the card" must read this one; a spec that means "the card was pushed away"
- * must read the layer.
- */
+/** How far the open card's own content is scrolled, and how far it could be. */
 export async function sheetBodyScroll(page: Page): Promise<{ top: number; max: number }> {
   return page.evaluate(() => {
     const el = document.querySelector('.sheet-body') as HTMLElement;
@@ -384,39 +271,11 @@ export async function sheetBodyScroll(page: Page): Promise<{ top: number; max: n
   });
 }
 
-/**
- * Tap the see-through gap above an open card, which is how a sheet is closed
- * from outside it.
- *
- * Aimed at a *viewport* point inside the gap rather than at a position on
- * `.sheet-dismiss`, and the difference is not cosmetic. That element is a whole
- * screen tall and all but its last inch is scrolled up out of view, so asking
- * for a point near its top makes Playwright scroll the layer to reveal it —
- * and scrolling this layer to its top is precisely what dismisses the sheet.
- * The card then vanishes mid-click and the click fails on a detached element,
- * which is a test dismissing a sheet by accident and then reporting that it
- * could not be dismissed. Four specs did exactly that.
- *
- * The gap is what the reader can see of the backdrop, so a point near the top
- * of the screen is both inside it and the honest description of the gesture.
- */
+/** Tap the dimmed gap above an open card, which closes it. */
 export async function tapAboveCard(page: Page): Promise<void> {
-  /*
-   * Halfway between the top of the screen and the top of the card.
-   *
-   * This used to tap twenty pixels down, and twenty pixels was the problem: the
-   * `.sheet-dismiss` zone ends about a hundred pixels from the top once the
-   * layer has scrolled to the card's detent, so the old point was inside the
-   * one strip that worked while the six hundred pixels below it — the whole of
-   * what a reader would actually point at — answered nothing. Every caller of
-   * this helper passed, and cards could still only be dismissed by swiping.
-   *
-   * Measured against the card rather than the viewport so it stays honest for a
-   * tall sheet and a short one alike.
-   */
-  const port = (await page.locator('.sheet-scroller').boundingBox())!;
   const card = (await page.locator('.sheet').boundingBox())!;
-  await page.mouse.click(port.x + port.width / 2, (port.y + card.y) / 2);
+  const width = page.viewportSize()!.width;
+  await page.mouse.click(width / 2, Math.max(4, card.y / 2));
 }
 
 /**

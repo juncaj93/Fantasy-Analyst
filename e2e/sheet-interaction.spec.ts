@@ -1,63 +1,15 @@
 /**
- * Pushing a sheet away, and everything that must survive it.
+ * Everything a sheet must get right besides the swipe itself: closing from
+ * outside it, focus, the page behind, and the draft board on the same layer
+ * primitive.
  *
- * Three complaints across as many releases, pulling in opposite directions, and
- * the line between them is what this suite pins.
- *
- * Cards were hard to swipe away, so the app claimed a downward drag on content
- * at its top with a non-passive `touchmove`. That made the same cards hard to
- * *scroll*, which is the worse of the two — a card you cannot dismiss can still
- * be read — so the claim moved to `touch-action`, published ahead of the finger.
- * That failed for a different reason: a card does not know how tall it is while
- * its requests are in flight, so it refused the reader the scroll they had
- * already started. Both were withdrawn, and dismissal shrank to the chrome.
- *
- * The measurement that ended the argument: `.sheet-body` was a scroll container
- * declaring `pan-y`, so a vertical touch on it belonged to the engine after a
- * single `pointermove`. No threshold could have helped. The app was not being
- * outvoted; it was not being asked.
- *
- * **So the sheet stopped asking.** Its layer is a scroller whose two ends are
- * the card in place and the card gone, its dismissal is a scroll, and the card's
- * content is a scroller nested inside it. What that buys, and what this suite
- * checks:
- *
- *  - a card is pushed away from *anywhere* on it, including the middle of what
- *    you are reading — the thing three attempts could not deliver;
- *  - content that has been scrolled keeps the gesture, for free, because a
- *    scroll only passes outward once the inner box has nowhere to put it —
- *    which is scroll chaining, and not a rule anybody wrote;
- *  - the tracking, the momentum, the spring back from a push too small and the
- *    ability to catch it halfway all belong to the engine.
- *
- * The one thing the layer must never do is let a snap area outgrow it. WebKit
- * stops scrolling a snapping scroller entirely once that happens, which is how
- * an earlier version of this design made long cards unreadable in Safari at
- * every width. `.sheet-snap` is bounded for that reason and `navigation.spec.ts`
- * holds it there.
- *
- * **The drags in this file are wheels now, and that is a real improvement.** A
- * wheel is a scroll, so these tests exercise the same mechanism a thumb does, in
- * every engine — where the pointer gesture they replaced was visible only to a
- * synthetic mouse, and passed twelve green WebKit shards while doing nothing at
- * all under a finger. A mouse *drag* now expresses nothing a scroller can hear,
- * which is why the few that remain below are the ones about something else: a
- * sideways swipe, and a drag inside a text field.
+ * The swipe — finger-following, thresholds, flicks, the scroll-top rule — is in
+ * `sheet-swipe.spec.ts`, beside the one hook every sheet uses for it
+ * (`useSheetDrag`, `src/web/sheetDrag.ts`).
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import {
-  handOffCard,
-  handOnCard,
-  openReview,
-  openSetupGroup,
-  pastTheSettle,
-  scrollSheetContent,
-  sheetBodyScroll,
-  sheetScroll,
-  swipeSheetAway,
-  tapAboveCard,
-} from './helpers.ts';
+import { openReview, openSetupGroup, pastTheSettle, swipeSheetAway, tapAboveCard, touchDrag } from './helpers.ts';
 
 /** Wait until an element has stopped moving — two frames in the same place. */
 async function settled(locator: Locator, tries = 20) {
@@ -69,30 +21,6 @@ async function settled(locator: Locator, tries = 20) {
     previous = here;
     await locator.page().waitForTimeout(50);
   }
-}
-
-/**
- * Drag, in steps, the way a thumb does.
- *
- * `hold` is a pause before letting go, and it is how a test says "this was a
- * deliberate placement, not a flick". The sheet judges a flick over a window of
- * recent movement, so a hold longer than that window leaves nothing in it and
- * the release is decided on distance alone — which is exactly what a reader who
- * pulls a sheet part-way and stops to think is asking for.
- */
-async function drag(
-  page: Page,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  { steps = 12, hold = 0 }: { steps?: number; hold?: number } = {},
-) {
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  for (let i = 1; i <= steps; i++) {
-    await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
-  }
-  if (hold > 0) await page.waitForTimeout(hold);
-  await page.mouse.up();
 }
 
 /**
@@ -126,358 +54,7 @@ async function openPlayerCard(page: Page) {
   await settled(page.getByTestId('sheet-grip'));
 }
 
-test.describe('pushing a sheet away', () => {
-  /**
-   * The headline, and the thing three earlier attempts could not deliver: **a
-   * card is pushed away from the middle of what you are reading.**
-   *
-   * Driven by a wheel rather than a drag, and that is not a convenience. The
-   * dismissal is a scroll now, so a wheel exercises the very mechanism a thumb
-   * does — in every engine, including the one this behaviour has only ever
-   * failed on. The drags these tests used to use expressed nothing a scroller
-   * can hear, which is the same lesson as before with the sign flipped: a
-   * synthetic mouse is not a finger, and where they differ it is the mouse that
-   * is wrong.
-   */
-  test('is pushed away by a scroll that starts in the middle of the card', async ({ page }) => {
-    await openPlayerCard(page);
-    const opened = await sheetScroll(page);
-    expect(opened.top, 'the card did not come up to its detent').toBeGreaterThan(0);
-
-    await swipeSheetAway(page);
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-  });
-
-  /**
-   * And the other half of the same rule, which is the half that protects the
-   * reader: **content that has been scrolled keeps the gesture.**
-   *
-   * Nobody wrote this rule either. The card's content is a scroller inside the
-   * layer, so a pull on content that has somewhere to go scrolls the content,
-   * and the scroll only passes outward — to the layer, and so to the
-   * dismissal — once the content has nowhere left to put it. The browser
-   * decides that, at the moment it becomes true, and it is the same decision it
-   * makes for every nested scroller on the web.
-   *
-   * Getting both halves out of one mechanism is the argument for the rebuild:
-   * they cannot drift apart, because neither is a rule this repository states.
-   */
-  test('scrolls back to the top of the card and stops, rather than dismissing', async ({ page }) => {
-    await openPlayerCard(page);
-    const detent = (await sheetScroll(page)).top;
-
-    // Read further into the card. Only a card with more in it than fits can
-    // show this, so it is made to have more rather than hoped to.
-    await page.evaluate(() => {
-      const body = document.querySelector('.sheet-body') as HTMLElement;
-      const filler = document.createElement('div');
-      filler.style.height = '1400px';
-      body.append(filler);
-    });
-    await scrollSheetContent(page, 600);
-    expect((await sheetBodyScroll(page)).top, 'the card would not scroll to set the case up').toBeGreaterThan(0);
-
-    /*
-     * Now pull back down, hard, from the middle of the card.
-     *
-     * Deliberately more than enough to reach the top and carry on, because the
-     * claim is that it *cannot* carry on: measured, a pull of any size that
-     * starts with the content off its top spends itself returning the content
-     * to the top and stops there. Reaching the layer takes a fresh gesture. So
-     * the reader who is halfway through a card and pulls down to re-read the
-     * start of it never loses the card, however hard they pull — and that is
-     * the whole of the protection, drawn by the browser rather than by a
-     * threshold in this repository.
-     */
-    await swipeSheetAway(page, { ticks: 700 });
-    await pastTheSettle(page);
-    await expect(
-      page.getByTestId('player-sheet'),
-      'a card the reader was part-way through was thrown away by one pull',
-    ).toBeVisible();
-    expect(
-      (await sheetBodyScroll(page)).top,
-      'the content did not come to rest at its own top',
-    ).toBe(0);
-    expect(
-      (await sheetScroll(page)).top,
-      'the card moved while its content was being pulled back',
-    ).toBe(detent);
-  });
-
-  /**
-   * The screen behind comes back *as* the card goes, not after it.
-   *
-   * The complaint this holds: dismissing a card left almost a second of grey
-   * with nothing on it. Two causes, and this covers both ends of them. The scrim
-   * held full strength for the whole of a dismissal and vanished only when the
-   * sheet unmounted, so once the card had slid past there was nothing to look at
-   * but a grey screen; and the layer waited for every last scroll to stop before
-   * it would even decide, so the grey outlasted the gesture.
-   *
-   * Asserted as a relationship rather than a duration, because a duration here
-   * would be measuring the harness: the scrim's strength tracks how far the card
-   * has been pushed, so a card halfway out has a screen half back.
-   */
-  test('lets the screen behind back as the card is pushed away', async ({ page }) => {
-    await openPlayerCard(page);
-    const scrim = async () =>
-      Number(await page.evaluate(() => getComputedStyle(document.querySelector('.sheet-backdrop')!).opacity));
-    expect(await scrim(), 'the card is up and the screen behind is not covered').toBeGreaterThan(0.9);
-
-    /*
-     * Pushed part of the way out and read in the same breath.
-     *
-     * Deliberately short of the point of no return, so what is measured is the
-     * push rather than the dismissal — which also means the settle is about to
-     * pull the card back, and the reading has to happen before it does. Taken
-     * inside the page, two frames after the push, rather than over a round trip
-     * whose latency is not bounded by anything this test controls.
-     */
-    await handOnCard(page);
-    const part = await page.evaluate(async () => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      const back = document.querySelector('.sheet-backdrop') as HTMLElement;
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.7;
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return Number(getComputedStyle(back).opacity);
-    });
-    expect(part, 'the screen behind stayed covered while the card was pushed out').toBeLessThan(0.85);
-    expect(part, 'the screen behind was uncovered faster than the card moved').toBeGreaterThan(0.5);
-
-    // Let go: it comes back, and so does the scrim.
-    await handOffCard(page);
-    await pastTheSettle(page);
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    expect(await scrim(), 'the card came back and the screen behind stayed uncovered').toBeGreaterThan(0.9);
-  });
-
-  /**
-   * And a push that has won finishes as an exit, rather than as a disappearance.
-   *
-   * The other half of the same complaint, and the half a stopwatch cannot hold.
-   * The card used to leave by *scrolling*, so how long it took belonged to the
-   * reader's flick — a gentle push past the point of no return has almost no
-   * momentum behind it and drifted the rest of a screen's height at walking
-   * pace, with the outcome already decided. Taking it over means the card
-   * covers whatever distance is left on a clock of its own.
-   *
-   * What is asserted is that the card **moves** after the push has won: sampled
-   * while it leaves, its top edge is further down the screen than where the push
-   * left it, and lower again after that. A dismissal that simply unmounted the
-   * card — which is what this looked like before, and what a shortened timeout
-   * would also produce — never places the card anywhere in between, so it
-   * cannot satisfy this.
-   */
-  test('finishes a won push as an exit the reader can see', async ({ page }) => {
-    await openPlayerCard(page);
-    const card = page.getByTestId('player-sheet');
-
-    await handOnCard(page);
-    /*
-     * Sampled inside the page, on every frame, from the moment of the push.
-     *
-     * This used to read `boundingBox()` from the test every 25ms. Each read is a
-     * round trip to the browser, and on a loaded WebKit runner the first one
-     * could land after most of the exit had already happened: at 430px on
-     * 24 September 2026 every sample read 901, twice on one PR and again on the
-     * next, and the test reported "did not travel" about a card that had. A
-     * frame callback cannot miss the frames it runs in, so what is asserted is
-     * the motion itself, not how quickly the harness could look at it.
-     *
-     * The push and the first sample are in the same task, so frame zero is
-     * where the push left the card; the recorder stops when the card leaves the
-     * DOM or after 1.5s, whichever is first.
-     */
-    const run = await page.evaluate(
-      () =>
-        new Promise<{ tops: number[]; goneAfterMs: number | null }>((resolve) => {
-          const el = document.querySelector('.sheet-scroller') as HTMLElement;
-          const tops: number[] = [];
-          const started = performance.now();
-          el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.35;
-          const frame = () => {
-            const sheet = document.querySelector('[data-testid="player-sheet"]');
-            const elapsed = performance.now() - started;
-            if (!sheet) return resolve({ tops, goneAfterMs: elapsed });
-            tops.push(Math.round(sheet.getBoundingClientRect().top));
-            if (elapsed > 1500) return resolve({ tops, goneAfterMs: null });
-            requestAnimationFrame(frame);
-          };
-          frame();
-        }),
-    );
-
-    await expect(card, 'the card never left').toHaveCount(0);
-    await expect(page.getByTestId('sheet-backdrop'), 'the screen behind stayed covered').toHaveCount(0);
-    expect(
-      run.tops.length,
-      'the card was never observed on its way out — it disappeared rather than left',
-    ).toBeGreaterThan(1);
-    expect(Math.max(...run.tops), 'the card did not travel downwards on its way out').toBeGreaterThan(run.tops[0]!);
-    expect(run.goneAfterMs, 'the card was still on screen 1.5s after the push had won').not.toBeNull();
-    expect(
-      run.goneAfterMs!,
-      'the card took too long to finish leaving after the push had already won',
-    ).toBeLessThan(900);
-    await handOffCard(page);
-  });
-
-  test('is pushed away from the grip, as it always was', async ({ page }) => {
-    await openScoringKey(page);
-    await swipeSheetAway(page, { over: '.sheet-grip' });
-    await expect(page.getByTestId('scoring-key')).toHaveCount(0);
-  });
-
-  /**
-   * **A scroll nobody made is not a push, and the card comes straight back.**
-   *
-   * The dismissal is a scroll, and the browser scrolls things for its own
-   * reasons: revealing a control it has just focused, satisfying a
-   * `scrollIntoView` on something deep in a card, re-laying the layer out under
-   * an opening keyboard. Each of those moves the *nearest* ancestor that can
-   * satisfy it, and when the card's body is already at its top that ancestor is
-   * this layer — so the card could be parked most of the way out with nobody
-   * having touched it, and whether it survived was then a race between the
-   * settle timer and whatever scrolled it back next.
-   *
-   * Measured rather than supposed: on the compare sheet, one click on a
-   * candidate row moved this layer from its detent at 704 to 369 — past the
-   * threshold — on four clicks in ten, and the sheet died in the middle of the
-   * click on nine of twelve WebKit shards. The layer now asks who moved it.
-   *
-   * The push here is delivered the same way the two scrim tests above deliver
-   * theirs, and the only difference is the missing hand. That is the whole
-   * subject: identical movement, opposite outcome.
-   */
-  test('is not thrown away by a scroll nobody made', async ({ page }) => {
-    await openPlayerCard(page);
-    const detent = (await sheetScroll(page)).top;
-    expect(detent, 'the layer has nowhere to be pushed, so this proves nothing').toBeGreaterThan(0);
-
-    const parked = await page.evaluate(() => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      // A fifth of the way from gone: well past `HOLD`, and a dismissal under
-      // any hand at all.
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
-      return Math.round(el.scrollTop);
-    });
-    expect(parked, 'the layer would not move, so the case under test never happened').toBeLessThan(detent * 0.6);
-
-    await pastTheSettle(page);
-    await expect(
-      page.getByTestId('player-sheet'),
-      'a scroll with no hand behind it threw the card away',
-    ).toBeVisible();
-    expect(
-      (await sheetScroll(page)).top,
-      'the card was left parked where the stray scroll put it',
-    ).toBe(detent);
-  });
-
-  /**
-   * A push the engine is slow to deliver is still the reader's push.
-   *
-   * The regression this exists for, and the mirror of the one above. The first
-   * version of this rule sized the reader's window at a frame and asked whether
-   * a scroll fell inside it — which is a question about the *engine's*
-   * promptness rather than about who pushed. WebKit's wheel scrolling is
-   * starved by a page doing per-frame work: the pull-to-refresh specs install a
-   * watcher before they swipe, and `swipeSheetAway`'s own note records the same
-   * wheel moving this layer 675px in one case and 50 in the other. Under that,
-   * the push arrived after its own window had closed, the layer read the
-   * reader's own movement as a stray and put the card back, and two dismissal
-   * specs failed on the widest phone — the one with the furthest to scroll, and
-   * only there.
-   *
-   * The window covers delivery lag now, so: asked for by a wheel, delivered in
-   * one lump the better part of a second later, and still a dismissal.
-   */
-  test('honours a push the engine delivers late', async ({ page }) => {
-    await openPlayerCard(page);
-    expect((await sheetScroll(page)).top, 'the layer has nowhere to be pushed').toBeGreaterThan(0);
-    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
-
-    await page.mouse.move(Math.round(grip.x + grip.width / 2), Math.round(grip.y + grip.height / 2));
-    await page.mouse.wheel(0, -20);
-    // Far longer than the window this replaced, and far longer than a starved
-    // engine has ever taken to deliver a push: slow, not absent.
-    await page.waitForTimeout(900);
-    await page.evaluate(() => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
-    });
-
-    await expect(
-      page.getByTestId('player-sheet'),
-      'a push the engine was slow to deliver was disowned, and the card came back',
-    ).toHaveCount(0);
-  });
-
-  /**
-   * And a tap is not a hand for this purpose either.
-   *
-   * The real-reader version of the case above, and the reason the rule is
-   * "a pointer that has *moved*" rather than "a pointer": the browser's
-   * scroll-to-reveal on focus arrives on the heels of the tap that caused it,
-   * so a rule satisfied by a bare `pointerdown` would hand the stray scroll the
-   * credentials of the tap. Tapping a field near the top of a long card would
-   * then throw the card away, which is the same defect wearing a different hat.
-   */
-  test('does not lend a tap to the scroll that follows it', async ({ page }) => {
-    await openPlayerCard(page);
-    const detent = (await sheetScroll(page)).top;
-    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
-
-    await page.mouse.click(Math.round(grip.x + grip.width / 2), Math.round(grip.y + grip.height / 2));
-    await page.evaluate(() => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.2;
-    });
-
-    await pastTheSettle(page);
-    await expect(
-      page.getByTestId('player-sheet'),
-      'a tap lent its authority to a scroll it did not make, and the card went',
-    ).toBeVisible();
-    expect((await sheetScroll(page)).top).toBe(detent);
-  });
-
-  /**
-   * A short push comes back, and the engine decides that rather than a constant.
-   *
-   * There used to be two numbers here — 28% of the sheet's height, or half a
-   * pixel per millisecond — and a hand-written spring back when neither was
-   * met. Scroll-snap answers the same question with the reader's actual
-   * momentum, so what is checked is the outcome: a small push leaves the card
-   * exactly where it was.
-   */
-  test('comes back from a small push, and rests where it started', async ({ page }) => {
-    await openScoringKey(page);
-    const detent = (await sheetScroll(page)).top;
-
-    await swipeSheetAway(page, { ticks: 40 });
-    await pastTheSettle(page);
-    await expect(page.getByTestId('scoring-key')).toBeVisible();
-    expect((await sheetScroll(page)).top, 'the card was left resting between its two positions').toBe(detent);
-  });
-
-  /**
-   * A sideways swipe is not a dismissal, and now cannot be one.
-   *
-   * The sheet used to ask "has this moved eight pixels, and not upwards", which
-   * is true of almost every horizontal gesture on a phone, and a swipe across a
-   * card threw it away. The layer only scrolls on one axis, so a sideways
-   * movement has nowhere to go — the rule is the geometry rather than a ratio.
-   */
-  test('ignores a sideways swipe that drifts downwards', async ({ page }) => {
-    await openPlayerCard(page);
-    const box = (await page.getByTestId('player-sheet').boundingBox())!;
-    await drag(page, { x: box.x + 24, y: box.y + 140 }, { x: box.x + box.width - 24, y: box.y + 160 });
-    await pastTheSettle(page);
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-  });
-
+test.describe('closing a sheet from outside it', () => {
   /** A tap on what you can see through above the card closes it. */
   test('closes on a tap above it, where the backdrop shows through', async ({ page }) => {
     await openScoringKey(page);
@@ -485,35 +62,15 @@ test.describe('pushing a sheet away', () => {
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
   });
 
-  /**
-   * Anywhere above the card, and not just the strip at the top.
-   *
-   * Reported as cards that could only be dismissed by swiping, and the report
-   * was right. `.sheet-dismiss` carried the tap handler and it is the layer's
-   * *scrollable* content, so once the layer has scrolled to the card's detent
-   * only its last hundred pixels are on screen. Measured at 390×844 with a
-   * player card open: the card's top edge at y≈733, the dismiss zone ending at
-   * y≈101, and six hundred and thirty pixels between them belonging to
-   * `.sheet-snap`, which answered nothing.
-   *
-   * The helper above used to tap twenty pixels down — inside the strip that
-   * worked — which is why every existing test passed through all of it. This
-   * walks the whole gap instead, so a handler that ever narrows again fails
-   * here rather than in somebody's hand.
-   */
+  /** Anywhere in the dimmed gap, not only near the top of the screen. */
   test('closes on a tap anywhere in the gap above the card', async ({ page }) => {
-    // Quarter, half and three-quarters of the way down the visible backdrop.
-    // The old handler answered only the first of these.
     for (const fraction of [0.25, 0.5, 0.75]) {
       await openPlayerCard(page);
-      await expect(page.getByTestId('player-sheet')).toBeVisible();
-
-      const scroller = (await page.locator('.sheet-scroller').boundingBox())!;
       const card = (await page.locator('.sheet').boundingBox())!;
-      const gap = card.y - scroller.y;
-      expect(gap, 'the card must leave something above it to tap').toBeGreaterThan(80);
+      const width = page.viewportSize()!.width;
+      expect(card.y, 'the card must leave something above it to tap').toBeGreaterThan(80);
 
-      await page.mouse.click(scroller.x + scroller.width / 2, scroller.y + gap * fraction);
+      await page.mouse.click(width / 2, card.y * fraction);
       await expect(
         page.getByTestId('player-sheet'),
         `a tap ${Math.round(fraction * 100)}% down the backdrop must close the card`,
@@ -521,40 +78,7 @@ test.describe('pushing a sheet away', () => {
     }
   });
 
-  /**
-   * A push that started on the card and lifted off it is not a tap outside.
-   *
-   * The delegated handler's real edge, and it was got wrong first time round.
-   * A press that begins on the card and ends past it still produces a `click`,
-   * and the browser reports that click against the *common ancestor* of where
-   * it went down and where it came up — the scroller, which is outside the
-   * card. A rule reading only the target dismissed on it, which turned every
-   * push too small to commit into a dismissal, and that is the one thing the
-   * settle exists to prevent.
-   *
-   * So the card must still be here after a push that springs back.
-   */
-  test('is not dismissed by a push that started on it and sprang back', async ({ page }) => {
-    await openPlayerCard(page);
-    await handOnCard(page);
-    await page.evaluate(async () => {
-      const el = document.querySelector('.sheet-scroller') as HTMLElement;
-      el.scrollTop = (el.scrollHeight - el.clientHeight) * 0.7;
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    });
-    await handOffCard(page);
-    await pastTheSettle(page);
-
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-  });
-
-  /**
-   * …and a tap on the card itself never closes it.
-   *
-   * The other half of the rule, and the one that a delegated handler could
-   * plausibly get wrong: the scroller hears every tap in the layer now, so it
-   * has to be able to tell the card from the space around it.
-   */
+  /** …and a tap on the card itself never closes it. */
   test('stays open when the tap lands on the card', async ({ page }) => {
     await openPlayerCard(page);
     const card = (await page.locator('.sheet').boundingBox())!;
@@ -578,7 +102,6 @@ test.describe('pushing a sheet away', () => {
     await swipeSheetAway(page);
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     await expect(page.getByTestId('sheet-backdrop')).toHaveCount(0);
-    await expect(page.getByTestId('sheet-scroller')).toHaveCount(0);
 
     // The list underneath takes the very next tap, with nothing in between.
     const rows = page.getByTestId('player-search-row');
@@ -589,10 +112,8 @@ test.describe('pushing a sheet away', () => {
   /**
    * A drag inside a text field still belongs to the text field.
    *
-   * Setup's two paste boxes are the case: dragging in one moves the caret and
-   * selects, and must not move the card. Nothing arbitrates this any more and
-   * nothing needs to — a field inside a scroller keeps its own gestures the way
-   * a field anywhere else does.
+   * Setup's paste boxes are the case: dragging in one moves the caret and
+   * selects, and must not move the card.
    */
   test('leaves a drag inside a text field to the text field', async ({ page }) => {
     await page.goto('/');
@@ -607,12 +128,12 @@ test.describe('pushing a sheet away', () => {
     await settled(page.getByTestId('sheet-grip'));
 
     const box = (await page.getByTestId('projection-paste-input').boundingBox())!;
-    const x = box.x + box.width / 2;
-    await drag(page, { x, y: box.y + 8 }, { x, y: box.y + 8 + 400 });
+    const result = await touchDrag(page, { x: box.x + box.width / 2, y: box.y + 8 }, { dy: 300, ms: 200 });
+    expect(result.claimed).toBe(false);
     await pastTheSettle(page);
     await expect(page.getByTestId('projection-paste-sheet')).toBeVisible();
 
-    // And it is still a sheet: a scroll on it still takes it away.
+    // And it is still a sheet: a swipe from the grip still takes it away.
     await swipeSheetAway(page, { over: '.sheet-grip' });
     await expect(page.getByTestId('projection-paste-sheet')).toHaveCount(0);
   });
@@ -622,165 +143,6 @@ test.describe('pushing a sheet away', () => {
     await openScoringKey(page);
     await swipeSheetAway(page);
     await expect(page.getByTestId('scoring-key')).toHaveCount(0);
-  });
-});
-
-/**
- * The card waits for the hand, which is the defect two rounds of complaints
- * were both about.
- *
- * The dismissal is decided by a debounce — seventy milliseconds of stillness
- * and the layer calls the movement over — and that debounce had no way to ask
- * whether a finger was still on the glass. It could not: on a touch drag WebKit
- * sends a single `pointercancel` at the *start* of the push, when the engine
- * takes the pan for itself, and no pointer event after it, so the layer's
- * pointer bookkeeping goes quiet a tenth of a second into a gesture that runs
- * for two seconds. Touch events keep arriving throughout, and counting those is
- * the fix.
- *
- * A deliberate push breaks the debounce's bet twice, and each break is one of
- * the two complaints:
- *
- *  - **paused past the threshold, the card left under the thumb.** Traced on
- *    Chromium with real touch points: the drag's last scroll at +1700ms, the
- *    exit armed at +1771ms — one debounce later, to the millisecond — the card
- *    unmounted by +1958ms, and the finger not off the glass until +2734ms. The
- *    card was taken away 963ms before the hand that was holding it left. That is
- *    the jitter at the bottom of a close;
- *
- *  - **paused short of the threshold, the card sprang home under the thumb**,
- *    arriving back at its detent at +1655ms while the reader was still pushing
- *    it. They then went on pushing a card that had quietly reset, so 616 pixels
- *    of travel counted as 336, and a 3.3-second gesture dismissed nothing. That
- *    is the close that takes about a second.
- *
- * **Real touch points through the DevTools protocol, so Chromium only** — the
- * protocol is Chromium's. That is a real limit and it is stated rather than
- * worked around: what these hold is the decision logic, under an input that is
- * genuinely a finger rather than a wheel or a synthetic mouse, and the WebKit
- * shards and the phone remain the gate for whether iOS agrees. A wheel cannot
- * express this defect at all, because a wheel has no finger to still be down.
- */
-test.describe('a deliberate push, with the finger still on the card', () => {
-  test.skip(({ browserName }) => browserName !== 'chromium', 'real touch injection is a Chromium DevTools protocol capability');
-
-  /** A thumb on the grip, moved down in steps, with the pauses a real one has. */
-  async function thumb(page: Page) {
-    const grip = (await page.locator('.sheet-grip').first().boundingBox())!;
-    const port = (await page.locator('.sheet-scroller').boundingBox())!;
-    const x = Math.round(port.x + port.width / 2);
-    const from = Math.round(grip.y + grip.height / 2);
-    const at = (y: number) => [{ x, y: Math.round(y), id: 1, radiusX: 14, radiusY: 14, force: 1 }];
-    const cdp = await page.context().newCDPSession(page);
-    let step = 0;
-    return {
-      down: () => cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(from) }),
-      /*
-       * `px` further down the screen, in 14px notches 50ms apart.
-       *
-       * About 0.28px/ms, which is an unhurried push rather than a flick, and
-       * the distance is asked for in pixels rather than notches because the
-       * thresholds it has to straddle are fractions of a detent — and the
-       * detent is a different number on each of the four widths this runs at.
-       */
-      push: async (px: number) => {
-        const notches = Math.ceil(px / 14);
-        for (let i = 0; i < notches; i++) {
-          step += 1;
-          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(from + step * 14) });
-          await page.waitForTimeout(50);
-        }
-      },
-      /** Still, with the finger down — which is all it takes to trip the debounce. */
-      hold: (ms: number) => page.waitForTimeout(ms),
-      up: () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }).catch(() => {}),
-    };
-  }
-
-  /**
-   * Past the point of no return, then a pause — and the card stays put until
-   * the hand goes.
-   *
-   * The assertion is made *during* the pause, which is the only place it can
-   * be: the whole defect lasts as long as a thumb rests, and by the time the
-   * finger lifts the card is supposed to be leaving anyway.
-   */
-  test('does not take the card away while the thumb is still on it', async ({ page }) => {
-    await openPlayerCard(page);
-    const opened = await sheetScroll(page);
-    const hand = await thumb(page);
-
-    await hand.down();
-    // Four fifths of the layer, which is well past `DISMISS_HOLD` — the one
-    // line the outcome turns on, whatever speed the push was released at.
-    await hand.push(opened.max * 0.8);
-    const pushed = await sheetScroll(page);
-    expect(pushed.top, 'the thumb did not move the card past its commit threshold').toBeLessThan(opened.max * 0.25);
-
-    // Three and a half debounces of stillness, finger down throughout.
-    await hand.hold(250);
-    expect(
-      await page.getByTestId('player-sheet').count(),
-      'the card left while a thumb was still on it — the exit fired on the debounce, not on the lift',
-    ).toBe(1);
-    expect(
-      (await sheetScroll(page)).top,
-      'the card moved under the thumb during the pause',
-    ).toBe(pushed.top);
-
-    // And the lift is what finishes it.
-    await hand.up();
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-  });
-
-  /**
-   * Short of the threshold, then a pause — and the card does not spring home
-   * out from under the push that is still happening.
-   *
-   * This is the one that cost the reader a whole gesture. The spring is the
-   * right answer to a push that has *ended* short; making it to a push that has
-   * merely paused resets the travel, and the reader's second half is spent
-   * re-covering ground they had already covered.
-   */
-  test('does not spring the card home while the push is still going', async ({ page }) => {
-    await openPlayerCard(page);
-    const opened = await sheetScroll(page);
-    const hand = await thumb(page);
-
-    await hand.down();
-    // Just past `DISMISS_HOLD`, which is where a pause used to be answered by
-    // springing the card home out from under the thumb that was still pushing.
-    await hand.push(opened.max * 0.45);
-    const paused = await sheetScroll(page);
-    expect(paused.top, 'the first half of the push moved nothing').toBeLessThan(opened.top);
-    expect(paused.top, 'the first half of the push already passed the commit threshold').toBeGreaterThan(opened.max * 0.25);
-
-    await hand.hold(300);
-    /*
-     * Exactly where it was left, which is the assertion that holds whichever
-     * way the old debounce fell. A pause in this band was answered either by a
-     * spring home — the layer running *up* to its detent under the finger — or,
-     * where the push read as quick enough, by the exit; a card that has neither
-     * moved nor gone is the only reading that means the layer waited.
-     */
-    expect(
-      await page.getByTestId('player-sheet').count(),
-      'the card left during a pause it should have sat through',
-    ).toBe(1);
-    expect(
-      (await sheetScroll(page)).top,
-      'the card sprang back toward its detent while the reader was still pushing it',
-    ).toBe(paused.top);
-
-    // The second half of the same push, from where the first half left off —
-    // which is the whole point: it has to still count, rather than being spent
-    // re-covering ground a spring-back had quietly taken away.
-    await hand.push(opened.max * 0.4);
-    await hand.up();
-    await expect(
-      page.getByTestId('player-sheet'),
-      'the two halves of one deliberate push did not add up to a dismissal',
-    ).toHaveCount(0);
   });
 });
 
