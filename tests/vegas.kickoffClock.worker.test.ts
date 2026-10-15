@@ -85,7 +85,11 @@ beforeEach(async () => {
 
   // Learn the week through the ordinary path, then pin it to fixed instants so
   // the test does not depend on the day it is run.
-  const mock = new MockVegasProvider(MOCK_GAMES);
+  // `MOCK_GAMES` dates itself from the real clock when it loads, before the
+  // clock above is pinned, so its games are moved to this test's own kickoff.
+  // Left alone, they drifted out of the week the job plans once the real date
+  // passed 14 October.
+  const mock = new MockVegasProvider(MOCK_GAMES.map((game) => ({ ...game, startTime: KICKOFF })));
   const service = new VegasRefreshService(db, mock);
   await service.refresh({ manual: true });
   const preview = await service.preview();
