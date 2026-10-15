@@ -871,18 +871,15 @@ test.describe('the comparison tool', () => {
     await expect(sheet.getByRole('group', { name: 'Filter by position' }).getByRole('button', { name: 'ALL' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('builds the score in one table, with a tap for the working', async ({ page }) => {
+  test('builds the score in one table, with the Vegas lines under Base and no paragraph', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
     await showComparison(page);
     const vegas = page.locator('[data-testid="compare-factor"][data-factor="base"]');
-    await expect(vegas).toHaveAttribute('aria-expanded', 'false');
+    // Read-only rows since 15 October 2026: no tap, no paragraph under Base.
     await vegas.click();
-    await expect(vegas).toHaveAttribute('aria-expanded', 'true');
-    // Base says where it came from in words: the priced lines and what each is worth.
-    await expect(page.getByTestId('compare-factor-detail')).toBeVisible();
-    await expect(page.getByTestId('compare-factor-detail')).toContainText(/Vegas: .*= \d+\.\d pts|Sleeper projection: \d+\.\d pts/);
+    await expect(page.getByTestId('compare-factor-detail')).toHaveCount(0);
     // No heading, no footer, no availability row: the card's chip says that.
     const grid = page.getByTestId('compare-grid');
     await expect(grid).not.toContainText('How the score is built');
@@ -892,11 +889,12 @@ test.describe('the comparison tool', () => {
     await expect(vegas.locator('.cmp2-factor-label')).toHaveText('Base');
     await expect(grid.locator('.cmp2-total .cmp2-pin')).toHaveText('Score');
     const labels = await grid.locator('.cmp2-factor-label').allInnerTexts();
-    expect(labels.slice(0, 4)).toEqual(['Base', 'Recent news', 'Opponent', 'Uncertainty']);
-    for (const label of labels.slice(4)) expect(label, 'only a row that moved somebody').toMatch(/^(Weather|Availability)$/);
-    // Every column adds up to its Score.
+    expect(labels.slice(0, 6)).toEqual(['Base', 'Yards', 'Catches', 'TD %', 'Recent news', 'Opponent']);
+    for (const label of labels.slice(6)) expect(label, 'only a row that moved somebody').toMatch(/^(Weather|Availability)$/);
+    await expect(grid).not.toContainText('Uncertainty');
+    // Every column adds up to its Score; the Vegas lines are lines, not points, and sit outside the sum.
     const columns = await page.getByTestId('compare-column').count();
-    const cells = await grid.locator('[data-testid="compare-factor"]').evaluateAll((rows) =>
+    const cells = await grid.locator('[data-testid="compare-factor"]:not([data-kind="line"])').evaluateAll((rows) =>
       rows.map((r) => [...r.querySelectorAll('[data-testid="compare-cell"]')].map((c) => c.textContent ?? '')),
     );
     const totals = await grid.locator('[data-testid="compare-total"] [role="cell"]').allInnerTexts();
@@ -935,16 +933,13 @@ test.describe('the comparison tool', () => {
       expect(lastRow.y + lastRow.height, 'the score row is on screen without scrolling').toBeLessThanOrEqual(viewport.height);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(0);
-      if (count === 4) {
-        // Four scroll sideways inside the table, and the row labels stay put.
-        const table = page.getByTestId('compare-table-scroll');
-        const label = page.locator('[data-testid="compare-factor"][data-factor="base"] .cmp2-pin');
-        const before = (await label.boundingBox())!;
-        await table.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
-        await page.waitForTimeout(150);
-        const after = (await label.boundingBox())!;
-        expect(Math.abs(after.x - before.x), 'the label column is pinned').toBeLessThanOrEqual(1);
-        await expect(label).toBeInViewport();
+      // Four fit too (15 October 2026): nothing scrolls sideways, the table or the cards.
+      for (const id of ['compare-table-scroll', 'comparison']) {
+        const sideways = await page.getByTestId(id).evaluate((el) => {
+          const box = el.querySelector('ul') ?? el;
+          return Math.max(el.scrollWidth - el.clientWidth, box.scrollWidth - box.clientWidth);
+        });
+        expect(sideways, `${id} does not scroll sideways`).toBeLessThanOrEqual(0);
       }
     });
   }
@@ -1329,12 +1324,15 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(borrowed).toHaveCount(1);
     await expect(borrowed).toHaveText(BORROWED.toFixed(1));
 
-    // A dotted rule under the digits, and nothing under anybody else's.
-    const decoration = await borrowed.evaluate((el) => getComputedStyle(el).textDecorationStyle);
-    expect(decoration).toBe('dotted');
+    // The app-wide mark since 15 October 2026: grey, with `Sleeper` under it, and on nobody else's.
+    await expect(borrowed).toHaveClass(/num-sleeper/);
+    const stack = page.locator('[data-figure="sleeper"]', { has: borrowed });
+    await expect(stack.getByTestId('sleeper-tag')).toHaveText('Sleeper');
     const ours = page.locator('[data-testid="starter-proj"][data-projection-source="market"]').first();
     if (await ours.count()) {
-      expect(await ours.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('none');
+      await expect(ours).not.toHaveClass(/num-sleeper/);
+      const color = (sel: typeof ours) => sel.evaluate((el) => getComputedStyle(el).color);
+      expect(await color(borrowed), 'grey, not the normal number colour').not.toBe(await color(ours));
     }
   });
 

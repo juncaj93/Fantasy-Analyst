@@ -61,6 +61,19 @@ export function Disclose({ open, children }: { open: boolean; children: ReactNod
 }
 
 /**
+ * The tiny grey `Sleeper` under a number built on Sleeper's week instead of a
+ * full betting market. The one label every screen uses; see
+ * `sleeperFallback.ts` for the rule and the grey that goes with it.
+ */
+export function SleeperTag({ className }: { className?: string }) {
+  return (
+    <span className={className ? `sleeper-tag ${className}` : 'sleeper-tag'} data-testid="sleeper-tag">
+      Sleeper
+    </span>
+  );
+}
+
+/**
  * `Q`, `D`, `OUT`, `IR` — current availability, beside the name.
  *
  * The one fact about a player that can change a decision before any of the

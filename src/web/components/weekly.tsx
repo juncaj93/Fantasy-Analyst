@@ -15,7 +15,8 @@
 
 import { useState } from 'react';
 import type { WeeklyCard } from '../../core/startsit/weekCard.ts';
-import { Confidence, PlayerSheetTitle } from './common.tsx';
+import { Confidence, PlayerSheetTitle, SleeperTag } from './common.tsx';
+import { SLEEPER_NUM_CLASS, isSleeperSource } from '../sleeperFallback.ts';
 import { Sheet } from './native.tsx';
 import {
   InjuryDetail,
@@ -80,7 +81,14 @@ export function WeeklyCardSheet({
           <Confidence level={card.confidence} />
           {card.score == null ? null : (
             <span className="metric" data-testid="weekly-score" data-projection-source={card.projectionSource ?? 'none'}>
-              Proj <strong>{card.score.toFixed(1)}</strong>
+              Proj{' '}
+              <strong className={isSleeperSource(card.projectionSource) ? SLEEPER_NUM_CLASS : undefined}>{card.score.toFixed(1)}</strong>
+              {isSleeperSource(card.projectionSource) ? (
+                <>
+                  {' '}
+                  <SleeperTag />
+                </>
+              ) : null}
             </span>
           )}
         </div>

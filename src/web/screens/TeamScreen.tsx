@@ -40,9 +40,11 @@ import {
   InjuryTag,
   Notice,
   PlayerIdentity,
+  SleeperTag,
   TeamLogo,
   positionAccentClass,
 } from '../components/common.tsx';
+import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN, isSleeperSource, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
 import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
@@ -1021,13 +1023,16 @@ function VerdictCard({
             */}
           {borrowed != null ? (
             <span className="row-value">
-              <span
-                className="proj"
-                data-testid="vacancy-proj"
-                data-projection-source="sleeper"
-                title={projectionTitle(borrowed, 'sleeper')}
-              >
-                {borrowed.toFixed(1)}
+              <span className="proj-stack" data-figure="sleeper">
+                <span
+                  className={sleeperClass('proj', true)}
+                  data-testid="vacancy-proj"
+                  data-projection-source="sleeper"
+                  title={projectionTitle(borrowed, 'sleeper')}
+                >
+                  {borrowed.toFixed(1)}
+                </span>
+                <SleeperTag />
               </span>
             </span>
           ) : null}
@@ -1149,7 +1154,18 @@ function VerdictCard({
         <div className="verdict-line" data-testid="verdict-swap">
           <span className="verdict-arrow" aria-hidden="true">→</span> Start{' '}
           <span className="verdict-name">{row.recommendedName}</span> instead
-          {challenger.kind === 'plain' ? <span className="faint"> · {challenger.points.toFixed(1)}</span> : null}
+          {challenger.kind === 'plain' ? (
+            <span className="faint">
+              {' · '}
+              {challenger.points.toFixed(1)}
+              {isSleeperSource(recommendedProjection.source) ? (
+                <>
+                  {' '}
+                  <SleeperTag />
+                </>
+              ) : null}
+            </span>
+          ) : null}
           {challenger.kind === 'risk' ? (
             <span className="faint">
               {' · '}
@@ -1253,15 +1269,23 @@ function RowFigureValue({
     );
   }
   const points = figure.kind === 'plain' ? figure.points : null;
-  return (
+  const value = (
     <span
-      className="proj"
+      className={sleeperClass('proj', points != null && isSleeperSource(source))}
       data-testid={testId}
       data-figure={figure.kind}
       data-projection-source={source ?? 'none'}
       title={projectionTitle(points, source)}
     >
       {points == null ? '—' : points.toFixed(1)}
+    </span>
+  );
+  /* Sleeper's week: grey, with the word under it (`sleeperFallback.ts`). */
+  if (points == null || !isSleeperSource(source)) return value;
+  return (
+    <span className="proj-stack" data-figure="sleeper">
+      {value}
+      <SleeperTag />
     </span>
   );
 }
@@ -1780,6 +1804,16 @@ function LineupCard({
     const week = weekOf(id);
     return week.out ? 'Out' : fmt(week.points);
   };
+  const spoken = (id: string) => `${pts(id)}${weekIsSleeper(weekOf(id)) ? ` (${SLEEPER_SPOKEN})` : ''}`;
+  /* The same figure on the card, grey with `Sleeper` beside it when it is Sleeper's week. */
+  const num = (id: string) =>
+    weekIsSleeper(weekOf(id)) ? (
+      <span className="best-move-num">
+        <span className={SLEEPER_NUM_CLASS}>{pts(id)}</span> <SleeperTag />
+      </span>
+    ) : (
+      pts(id)
+    );
   const outgoingOut = best != null && weekOf(best.outPlayerId).out;
   /* Questionable costs nothing in the score, so it is said here instead. */
   const warning = useFill
@@ -1808,7 +1842,7 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-fill"
           data-seed={fill.inPlayerId}
-          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${pts(fill.inPlayerId)} projected.${warning ? ` ${warning}.` : ''} Compare.`}
+          aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${spoken(fill.inPlayerId)} projected.${warning ? ` ${warning}.` : ''} Compare.`}
           onClick={() => onOpen(fill.slot, [fill.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1818,7 +1852,7 @@ function LineupCard({
               <span className="matchup-best-move-slot">{fill.slot}</span>
             </span>
             <span className="matchup-best-move-metrics">
-              {pts(fill.inPlayerId)} projected · {fill.slot} is empty in Sleeper
+              {num(fill.inPlayerId)} projected · {fill.slot} is empty in Sleeper
             </span>
             {warningLine}
           </span>
@@ -1831,7 +1865,7 @@ function LineupCard({
           data-testid="lineup-swap"
           data-seed={`${best.outPlayerId},${best.inPlayerId}`}
           data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
-          aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${pts(best.inPlayerId)} projected` : `${pts(best.inPlayerId)} against ${pts(best.outPlayerId)} projected`}.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
+          aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${spoken(best.inPlayerId)} projected` : `${spoken(best.inPlayerId)} against ${spoken(best.outPlayerId)} projected`}.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
           onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId])}
         >
           <span className="matchup-best-move-body">
@@ -1844,7 +1878,13 @@ function LineupCard({
               <span className="matchup-best-move-slot">{best.slot}</span>
             </span>
             <span className="matchup-best-move-metrics" data-testid="best-move-points">
-              {outgoingOut ? `${pts(best.inPlayerId)} projected` : `${pts(best.inPlayerId)} vs ${pts(best.outPlayerId)} projected`}
+              {outgoingOut ? (
+                <>{num(best.inPlayerId)} projected</>
+              ) : (
+                <>
+                  {num(best.inPlayerId)} vs {num(best.outPlayerId)} projected
+                </>
+              )}
               <PillChip pill={pillOf(best.inPlayerId)} />
             </span>
             {best.tiebreak ? (

@@ -205,7 +205,9 @@ describe('recommendLineup', () => {
     const swap = result.swaps.find((s) => s.inName === 'Catcher Three');
     expect(swap).toBeDefined();
     expect(swap!.outName).toBe('Catcher Two');
-    expect(swap!.gain).toBeCloseTo(2.91, 2);
+    // 13 against 10, nothing else: 2.91 until `startsit@6`, when each side's
+    // single-book uncertainty charge (3% of its market number) stopped counting.
+    expect(swap!.gain).toBeCloseTo(3, 2);
     expect(swap!.reason).toBeTruthy();
   });
 

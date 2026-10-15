@@ -1686,9 +1686,9 @@ test.describe('team, ADP import and start/sit', () => {
     const base = page.locator('[data-testid="compare-factor"][data-factor="base"] [data-testid="compare-cell"]');
     await expect(base).toHaveCount(2);
     const column = page.locator('[data-testid="compare-column"][data-player-id="1011"]');
-    const score = (await column.getByTestId('compare-score').innerText()).trim();
-    // ...and his score is either a dash or a fallback marked as lower confidence.
-    if (score !== '–') await expect(column).toContainText('lower confidence');
+    const score = (await column.getByTestId('compare-score').textContent())!.split(',')[0]!.trim();
+    // ...and his score is either a dash or a Sleeper fallback, grey and labelled.
+    if (score !== '–') await expect(column.getByTestId('sleeper-tag')).toHaveText('Sleeper');
     await expect(page.getByTestId('comparison')).not.toContainText('unknown');
   });
 });

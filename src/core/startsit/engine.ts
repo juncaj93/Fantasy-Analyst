@@ -816,12 +816,19 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
       confidenceReasons.push('the game line behind this defense is stale');
     }
   }
-  push({
+  /*
+   * Text only since `startsit@6` (15 October 2026), as for every other player:
+   * the reasons still feed the confidence read, the points no longer count.
+   */
+  components.push({
     key: 'uncertainty',
     label: 'Uncertainty penalty',
     display: uncertainty === 0 ? 'none' : `${uncertainty.toFixed(2)} pts`,
-    value: round2(uncertainty),
+    value: 0,
+    baseValue: 0,
+    modeWeight: 1,
     unknown: false,
+    textOnly: true,
   });
 
   confidenceReasons.push(...dst.reasons);

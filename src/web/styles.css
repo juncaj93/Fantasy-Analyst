@@ -6511,25 +6511,11 @@ table.compact tr:last-child td {
 }
 
 /*
- * A number this app did not compute, marked and not shouted.
- *
- * Where no betting market has priced a player the figure is Rotowire's, by way
- * of Sleeper, and it may not be drawn as though it were ours. But eight rows
- * each carrying a source chip would be eight rows about provenance rather than
- * about football, so the face of the row gets one thing: a dotted rule under
- * the figure, the typographic convention for "there is more to this than the
- * glyph". The words are in the tooltip, the accessible name, the sheet the row
- * opens and the note above the list.
- *
- * `text-decoration` rather than a border, so it hugs the digits at whatever
- * width they are instead of the fixed field they sit in — and so a `—`, which
- * never carries this attribute, cannot pick up a rule under a dash.
+ * A number this app did not compute: Rotowire's week, by way of Sleeper. It
+ * wears the app-wide mark since 15 October 2026, the figure in grey with
+ * `Sleeper` under it (`.num-sleeper`, `.sleeper-tag` at the end of this file),
+ * where it used to wear a dotted rule.
  */
-.proj[data-projection-source='sleeper'] {
-  text-decoration: underline dotted var(--text-faint);
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
-}
 
 /*
  * A figure for a player who may not play. See `src/web/rowFigure.ts`.
@@ -10577,15 +10563,23 @@ div.matchup-result {
 .cmp2-row-pts { display: grid; justify-items: end; gap: 1px; }
 .cmp2-num { font-variant-numeric: tabular-nums; font-weight: 600; }
 .cmp2-row-pts .cmp2-num { font-size: 0.95rem; }
-.cmp2-num-soft { color: var(--paper-dim); }
-.cmp2-soft { font-size: 0.62rem; color: var(--paper-faint); white-space: nowrap; }
 
 /* Compare: the verdict. */
 .cmp2-verdict { padding-top: var(--sp-2); }
 .cmp2-cols { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-/* Four cards scroll sideways rather than squeeze a chip below its word. */
-.cmp2-cols-wide { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-.cmp2-cols-wide::-webkit-scrollbar { display: none; }
+/*
+ * Four cards share the width (15 October 2026): no sideways scroll. The name
+ * may take two lines rather than be cut, and the score steps down a size.
+ */
+.cmp2-cols-wide { gap: 4px; }
+.cmp2-cols-wide .cmp2-col { padding: 6px 6px; }
+.cmp2-cols-wide .cmp2-col-name {
+  font-size: 0.78rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+.cmp2-cols-wide .cmp2-col-score { font-size: 1.25rem; }
 .cmp2-col {
   display: grid;
   justify-items: start;
@@ -10656,22 +10650,10 @@ div.matchup-result {
 }
 .cmp2-th > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmp2-factor-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Four columns: the table scrolls sideways, the labels stay pinned. */
-.cmp2-table-wide .cmp2-rows { overflow-x: auto; overscroll-behavior-x: contain; }
-.cmp2-table-wide .cmp2-tr { width: max-content; min-width: 100%; }
-.cmp2-table-wide .cmp2-pin {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  margin-left: calc(-1 * var(--sp-3));
-  padding-left: var(--sp-3);
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  background: var(--paper-card);
-  box-shadow: 1px 0 0 var(--paper-line-soft);
-}
-.cmp2-table-wide .cmp2-factor[aria-expanded='true'] .cmp2-pin { background: var(--paper-head); }
+/* Four columns share the width too: tighter gaps, and a head may wrap rather than be cut. */
+.cmp2-table-wide .cmp2-tr { gap: 4px; padding: 0 var(--sp-2); }
+.cmp2-table-wide .cmp2-th > span,
+.cmp2-table-wide .cmp2-factor-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.15; }
 .cmp2-tr {
   display: grid;
   align-items: center;
@@ -10688,12 +10670,19 @@ div.matchup-result {
 }
 .cmp2-tr > :first-child { text-align: left; }
 .cmp2-th { min-height: 32px; font-size: 0.72rem; font-weight: 650; color: var(--paper-label); }
-.cmp2-factor { border-top: 1px solid var(--paper-line-soft); cursor: pointer; }
+.cmp2-factor { border-top: 1px solid var(--paper-line-soft); }
 .cmp2-factor-label { color: var(--paper-label); }
-.cmp2-factor[aria-expanded='true'] { background: var(--paper-head); }
+/*
+ * Read-only rows since 15 October 2026, so they need no thumb-sized height:
+ * 34px keeps four players, the Vegas lines and the score on one phone screen.
+ */
+.cmp2-table .cmp2-factor,
+.cmp2-table .cmp2-total { min-height: 34px; }
+/* The Vegas lines sit under Base as its breakdown: a step in, on a faint band. */
+.cmp2-line { background: var(--paper-head); border-top-color: transparent; }
+.cmp2-line .cmp2-factor-label { padding-left: var(--sp-2); }
+.cmp2-line .cmp2-num { font-weight: 500; }
 .cmp2-total { border-top: 1px solid var(--paper-line); font-weight: 700; }
-.cmp2-detail { padding: 4px var(--sp-3) 8px; background: var(--paper-head); font-size: 0.75rem; color: var(--paper-dim); }
-.cmp2-detail p { margin: 2px 0; }
 .cmp-busy {
   opacity: 0.6;
   transition: opacity var(--dur-fast) var(--ease);
@@ -11295,4 +11284,25 @@ div.matchup-result {
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+/*
+ * A number built on Sleeper's week instead of a full betting market
+ * (15 October 2026). One look on every screen: the figure in the muted grey,
+ * and the word `Sleeper` under it in small grey type. The word carries the
+ * meaning; the grey agrees with it. `--text-faint` holds 4.5:1 on the card
+ * colour in both themes. See `src/web/sleeperFallback.ts`.
+ */
+.num-sleeper,
+.sheet-compare .num-sleeper {
+  color: var(--text-faint);
+}
+.sleeper-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+  white-space: nowrap;
 }

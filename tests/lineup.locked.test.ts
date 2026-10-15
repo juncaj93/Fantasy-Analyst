@@ -202,7 +202,9 @@ describe('late swap in a head-to-head comparison', () => {
     // The projection still prefers the better player — the risk is named, not
     // silently applied.
     expect(comparison.recommendedPlayerId).toBe('night');
-    expect(comparison.margin).toBeCloseTo(0.64, 2);
+    // 11.76 against 11.1. Was 0.64 while the single-book uncertainty charge
+    // (3% of each market number) counted; text only since `startsit@6`.
+    expect(comparison.margin).toBeCloseTo(0.66, 2);
     expect(comparison.lateSwap.verdict).toBe('consider_early_option');
     expect(comparison.warnings.join(' ')).toContain('Consider starting Early WR');
   });

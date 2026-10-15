@@ -51,8 +51,12 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * `startsit@5`, 13 October 2026: Questionable, and any status that is not
  * Out, Doubtful or a bye, costs nothing and is shown as a warning instead.
  * Weights are unchanged; a Questionable player's score rises, hence the bump.
+ *
+ * `startsit@6`, 15 October 2026: the uncertainty penalty is text only, for
+ * players and defences alike (Alex's decision). A thinly or singly booked
+ * market no longer loses points for it, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@5';
+export const STARTSIT_ENGINE_VERSION = 'startsit@6';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
