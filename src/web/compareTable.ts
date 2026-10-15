@@ -23,7 +23,7 @@
  * Score less the tenths above it, so the column always sums on screen.
  */
 
-import { EXPECTED_MARKETS } from '../core/startsit/expectation.ts';
+import { EXPECTED_MARKETS } from '../core/startsit/expectedMarkets.ts';
 import { weekPointsOf } from '../core/startsit/weekPoints.ts';
 import type { StartSitEvaluation } from './api.ts';
 import { weekIsSleeper } from './sleeperFallback.ts';
