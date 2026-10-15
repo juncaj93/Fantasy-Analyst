@@ -171,7 +171,7 @@ test.describe('a retap returns the screen home', () => {
       const hit = document.elementFromPoint(tab.left + tab.width / 2, tab.top + tab.height / 2);
       return {
         isTab: hit?.closest('[data-testid="tab-trades"]') != null,
-        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-scroller"]') != null,
+        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-backdrop"]') != null,
       };
     });
     expect(overBar.isTab, 'the tab bar is tappable through an open sheet').toBe(false);

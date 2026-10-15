@@ -234,190 +234,53 @@ There is deliberately **no swipe between the bottom tabs**: they sit above
 horizontal controls (the position filter, the metric rows) and an accidental
 sideways drag would navigate. Tabs are tapped.
 
-## 10. Sheets: dismissal, arbitration, and why the body is the browser's
+## 10. Sheets: swipe to dismiss
 
-A modal sheet is pulled down to dismiss. The rules live in `useSheetDrag`
-([`src/web/gestures.ts`](../src/web/gestures.ts)), the thresholds are unit-tested
-in `tests/gestures.test.ts`, and the behaviour is covered by
+Every sheet in the app is the one `Sheet` component
+([`src/web/components/native.tsx`](../src/web/components/native.tsx)), and
+every one gets its swipe from one hook, `useSheetDrag`
+([`src/web/sheetDrag.ts`](../src/web/sheetDrag.ts)). The approach and the
+numbers are ported from Hungry (`juncaj93/Hungry`, `src/ui/sheet.js` and
+`assets/tokens.css`), whose sheet the owner rates as the one to match. The
+math is unit-tested in `tests/sheetDrag.test.ts`; the gesture is covered under
+touch in `e2e/sheet-swipe.spec.ts` at all four widths, with
 `e2e/sheet-interaction.spec.ts`, `e2e/sheet-vs-pull.spec.ts` and
-`e2e/player-card-scroll.spec.ts`.
+`e2e/player-card-scroll.spec.ts` around it.
 
-| Rule | Value |
-| --- | --- |
-| Before any decision is made | 8px of movement |
-| To count as a dismissal rather than a scroll | downward > horizontal × 1.4 |
-| To complete the dismissal | 28% of the sheet's height, **or** 0.5 px/ms |
-| Speed is measured over | the last 120ms of movement |
-| Otherwise | springs back |
+| Rule | Value | From |
+| --- | --- | --- |
+| Movement before a touch is judged | 4px | Hungry |
+| Card follows the finger | 1:1, measured from where the drag engaged | Hungry |
+| Past 160px of finger | the card takes 0.35 of each further pixel | Hungry |
+| Release closes it | past 28% of the card's height or 140px, whichever is less | Hungry |
+| …or a flick | 0.5 px/ms downward over the last 120ms, once past 16px | added |
+| An upward flick | keeps the card, even past the line | added |
+| Upward drag | rubber-bands, never more than 6px | added |
+| Dim layer | clears in step with the card, fully at 400px or the card's height | Hungry |
+| Close | 240ms from where the card is, `cubic-bezier(0.22, 0.61, 0.36, 1)` | Hungry |
+| Spring back | 240ms, `cubic-bezier(0.34, 1.12, 0.64, 1)` (a couple of px of overshoot) | milder Hungry spring |
 
-**Where a drag may start.** On the sheet's chrome — the grip and the header —
-and nowhere else. The body is the browser's, whatever it happens to be holding.
-The backdrop, Done and Escape close a sheet from outside the gesture entirely,
-so a card is never short of a way out.
+**Where a drag may start.** The grip and the header always (`touch-action:
+none` on both). The body only when it, and everything between the finger and
+the card, is scrolled to the top and the first clear movement is downward. A
+sideways first movement, an upward one, a scrolled body or a text field all
+leave the gesture to the browser for the rest of the touch, so reading a card
+never closes it.
 
-Two more things are refused outright even on the chrome: a drag that begins
-inside a text field — where dragging moves the caret and selects, which is what
-Setup's two paste boxes are for — and a drag that starts inside a control
-carrying `data-no-sheet-drag`, which is how a control the primitive cannot guess
-at claims its own gesture.
+**Why touch events.** iOS Safari lets a page claim a drag only by calling
+`preventDefault` on a non-passive `touchmove`. Pointer events are cancelled the
+moment Safari decides the movement is a scroll. The sheet listens to touches
+and calls `preventDefault` only once a drag is its own; the movements under
+4px are never cancelled, so a pixel of drift before a flick up still scrolls.
 
-**Why the body is the browser's, and what it cost to learn.** Three times.
+**The page behind.** `useOverlay` pins it. The backdrop declares `touch-action:
+none`, and the body `overscroll-behavior: contain`, so nothing rubber-bands
+the page or starts a pull-to-refresh under a sheet. The app's own
+pull-to-refresh and back swipe stand down while any layer is open.
 
-*First*, the rule was *the content owns the gesture until the content is at its
-top*, so a downward drag at `scrollTop: 0` became a dismissal — sound reasoning
-the browser cannot act on. A sheet taller than the screen declares `touch-action:
-pan-y` on its body, and WebKit collects on that promise before the first
-`pointermove` arrives, so cards felt impossible to swipe away with the grip the
-only place the gesture worked. (`pan-up` was tried and is the wrong answer:
-WebKit does not implement the directional values, discards the declaration, and
-the mechanism is inert on the one browser that has the problem. Chromium honours
-it, so nothing local catches that.) The answer was a non-passive `touchmove` on
-the sheet, claiming the gesture when the drag looked downward.
-
-*Second*, that broke scrolling, which is worse. WebKit decides whether a touch
-sequence may scroll *once*, from its first `touchmove`, and never revisits it, so
-the claim had to be staked on one or two pixels — and one or two pixels of a
-thumb landing is noise. An upward flick that began with a pixel of downward
-drift was refused its scroll for the whole swipe. The listener also took WebKit
-off its fast scrolling path for every sheet in the app. Both are gone, and
-**there is no `preventDefault` on a touch anywhere in this app**.
-
-*Third*, and this is the one that shipped twice, the question was moved to a
-place where it could be answered honestly — `useSheetDrag` measured the body and
-published the answer as `touch-action` on it, `none` while there was nothing to
-scroll so that a short sheet could still be dragged shut from its content. The
-measurement is honest. The moment it is published is not. **A card does not know
-how tall it is when it opens**: it opens on skeletons and fills in from two
-requests, and for as long as those are in flight the body correctly reports
-*nothing to scroll* and takes `none`. The engine reads that once, when the
-finger lands. So the reader's first flick — the one they start while the card is
-still arriving — is refused its scroll for the whole gesture, and the content
-landing halfway through changes nothing; they lift, flick again, and it works.
-*Locks up, then unlocks, and feels delayed.* Against localhost that window is a
-few milliseconds, which is why twelve green WebKit shards and a reproduction of
-the previous latch all missed it; on a phone it is the length of two requests.
-
-An earlier form of the same fault was a *permanent* version of it — the body
-pinned at the sheet's `88dvh` cap stopped changing size while its content grew,
-so a `ResizeObserver` watching only the box went quiet with the answer stuck at
-`false`. That was fixed by observing the content too. It was the same mistake:
-the fix made the measurement more accurate rather than asking whether it could
-be published in time. It cannot.
-
-So there is no measurement. `touch-action: pan-y` is unconditional on the body,
-declared once for its whole life; there is nothing left to be stale at the
-instant the engine reads it, and no state in which a card cannot be scrolled.
-The `data-scrollable` attribute, the `ResizeObserver`, the `scroll` listener and
-the wrapper element they measured are all deleted. What that costs is real and
-deliberate: **a short sheet can no longer be dismissed by dragging its content.**
-That affordance only ever worked when a guess about content that had not arrived
-happened to be right, and the price of the guess being wrong was the card.
-`touch-action: none` also moved off `.sheet` and onto `.sheet-grip` /
-`.sheet-header`, so that no ancestor of a scroller declares it — the spec has
-the engine stop intersecting at the scroller that would handle the pan, and
-WebKit has done that since Safari 17, but nothing here needs to depend on which
-version is running. Covered by `e2e/player-card-scroll.spec.ts`.
-
-**A fourth attempt was made and withdrawn, and this is what it measured.** The
-ask was the native affordance: dismiss the card from anywhere on it, treating a
-downward drag as a dismissal only while the content is at its top — which is the
-rule iOS uses, and the answer to a real complaint, because the grip on an `88dvh`
-sheet is out of a thumb's reach one-handed. It was written to avoid both
-withdrawn mechanisms: no `preventDefault`, no `touch-action` written from
-JavaScript, and the scroller's *position* (`scrollTop === 0`) read at the instant
-the drag is classified rather than its *capacity* published ahead of the finger.
-Mouse-driven, it worked and its tests were green.
-
-Under real touch points it cannot work at all, and the reason is one measurement.
-The sequence the engine delivers to the sheet for a downward flick on the body
-is:
-
-```
-pointerdown → pointermove (one) → pointercancel
-```
-
-One move, then the touch is gone — on a card that overflows and on one that does
-not alike, because `.sheet-body` declares `pan-y` and *is* a scroll container, so
-a vertical touch on it belongs to the engine before the app has enough of the
-gesture to have an opinion. There is no threshold that helps: the app is not
-being outvoted, it is not being asked. And that single `pointermove` carries the
-finger's accumulated travel, so a rule that acted on it moved the card by
-hundreds of pixels and then sprang it back when the cancel arrived — **351px on a
-card at its top, 743px on the full attempt, against 0px shipped.** Every flick on
-a card the reader is reading, for an affordance that never once completed.
-
-So the price of that affordance was exactly the two mechanisms already withdrawn,
-and it was not available at any other price. **The answer was a different sheet
-primitive**, and it is what ships now: the sheet's *layer* is a scroller a screen
-taller than the card, so dismissing the card is scrolling that layer, and the
-engine's decision costs nothing because the engine was going to make it anyway.
-
-Two things had to be true for that to work on WebKit, and both were found the
-hard way:
-
-- **No `scroll-snap` anywhere on the layer.** Snapping is the obvious way to give
-  it two resting places and it is wrong here three separate ways, each measured
-  in Safari at the four widths this app runs at. While the card was itself a snap
-  area taller than the scrollport, *either* setting stopped the layer scrolling
-  at all — the "a snap area larger than the scrollport may rest anywhere covering
-  it" rule is not implemented, so a long player card could not be read past its
-  own top. With that bounded, `mandatory` advances a whole snap step however
-  small the scroll was, so a ten-pixel nudge threw the card away; and `proximity`
-  moves proportionally and then never settles, parking the card partway down the
-  screen. The layer free-scrolls instead, and where it comes to rest is decided
-  once, when the reader stops moving, in `Sheet`.
-- **The card's content is a scroller of its own, and it must not say
-  `overscroll-behavior: contain`.** That is what makes "push it away from
-  anywhere" and "content you have scrolled keeps the gesture" the same rule
-  rather than two: a drag on content that has somewhere to go scrolls the
-  content, and a drag on content already at its top has nowhere to put the
-  scroll, so it chains outward to the layer and the card moves. `contain` on that
-  inner box is an instruction not to chain, and it is precisely what made the
-  earlier sheet feel like it was ignoring a thumb. The layer *does* say
-  `contain`, so the chain stops at the sheet and never reaches the page behind:
-  one box out, and no further.
-
-Measured in Safari: a pull of any size that starts with the content off its top
-spends itself returning the content to the top and stops there — reaching the
-layer takes a fresh gesture — so a reader part-way through a card cannot lose it
-however hard they pull.
-
-**What a sheet owes the app while it is up** — the page behind held still, the
-app behind out of the reading order, focus in and focus back, Escape reaching
-the topmost layer only — belongs to `useOverlay`
-([`src/web/overlay.ts`](../src/web/overlay.ts)) and is identical for every
-covering layer, the draft board included. Two points there are iOS-specific:
-
-- The page is held still by **pinning the body** (`position: fixed` at a
-  negative offset), not by `overflow: hidden`, which iOS Safari does not honour.
-  The consequence is that `window.scrollY` reports zero while a layer is open —
-  anything recording "where to come back to" must ask `pageScrollTop()` instead.
-- A sheet **lifts above the software keyboard**. iOS shrinks the visual viewport
-  and not the layout one, so a sheet pinned to the bottom of the layout viewport
-  is pinned underneath the keyboard. `--sheet-keyboard` carries the measured
-  occlusion; it is nought in every browser without a software keyboard, which is
-  every browser in CI.
-
-**And the page is told it is covered.** `useOverlay` raises a counted signal —
-`appIsCovered()` / `useAppIsCovered()` — for as long as any layer is up, and
-`usePullToRefresh` refuses the gesture outright while it is raised (rule 6).
-
-This is the fix for a defect that only showed on a physical iPhone: on Trades
-and on Team, a sheet could not be swiped away, and the page underneath behaved
-as though pull-to-refresh were trying to win. It was. React's portals move a
-layer's *elements* to the end of the document but leave its *events* propagating
-up the component tree, and every screen with pull-to-refresh renders its sheets
-inside the wrapper that gesture is attached to — so a finger on an open sheet
-arrived at `usePullToRefresh` as if it had landed on the list behind it, and the
-pull surface captured the pointer out from under the dismissal. Players looked
-correct only because Players has no pull-to-refresh for a sheet's events to
-reach.
-
-The arbitration is therefore at the ownership boundary rather than on the two
-screens that showed it: a layer announces itself by *being* a layer, and nothing
-screen-specific has to opt in. `pageScrollTop()` was the earlier attempt and
-cannot do this job — a sheet opened from the top of a list pins the page at
-zero, which is honestly "at the top".
+**Other ways out.** Done, a tap on the backdrop and Escape all close the card
+with the same 240ms exit. Reduced motion closes and springs back without
+animating.
 
 ## 7. What is deliberately absent
 
@@ -436,7 +299,7 @@ zero, which is honestly "at the top".
 | A grey bar under the nav **in a Safari tab** | Expected. It is Safari's. See §1. |
 | A grey bar under the nav **in standalone mode** | A real bug if it is taller than the gap the toolbar floats by. Open Setup → Install on iPhone → Layout diagnostics and read "Below the toolbar" — it says which it is. |
 | Light-mode flash when launching | The manifest's `background_color` is the dark page colour; a light-theme user sees one dark frame. The alternative is a white flash into a dark app, which is worse. |
-| A sheet will not swipe away, and the page behind it moves instead | Pull-to-refresh is taking the gesture. The overlay's covered signal is not reaching `usePullToRefresh` — see §10, rule 6. |
+| A sheet will not swipe away, and the page behind it moves instead | Pull-to-refresh is taking the gesture. The overlay's covered signal is not reaching `usePullToRefresh` — see rule 6 on that hook in `src/web/gestures.ts`. |
 
 `node scripts/probe-pwa.mjs <url>` checks every install prerequisite against a
 running deployment — page metadata, manifest, content types, icon sizes,

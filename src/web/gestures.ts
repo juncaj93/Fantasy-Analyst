@@ -20,19 +20,9 @@
  *     pan-y` on the layer is what makes that arbitration the browser's rather
  *     than ours: no `preventDefault` is called on any touch region anywhere.
  *
- *     The sheet used to be the exception, and is now the strongest case for the
- *     rule. It held a non-passive `touchmove` so it could claim a downward drag
- *     on content at its top; then it published the same claim ahead of the
- *     finger as `touch-action`. Both were withdrawn for costing the reader their
- *     scroll, and the third attempt measured why no version of that could work:
- *     the body was a scroll container, so the engine took every vertical touch
- *     on it after a single `pointermove`. The app was not outvoted — it was not
- *     asked.
- *
- *     So the sheet stopped asking, and left this file entirely. A sheet is a
- *     scroller whose two ends are the card in place and the card gone, its
- *     dismissal is a scroll, and there is no sheet gesture here to read. See
- *     `.sheet-scroller` in the stylesheet, and `Sheet` in `components/native`.
+ *     Sheets are the one exception, and they live in `sheetDrag.ts`: a
+ *     non-passive `touchmove` that claims a drag only from the grip and
+ *     header, or from content already at its top moving down.
  *
  *  3. **Back is navigation, never undo.** The gesture calls exactly the same
  *     function the Back control calls. It cannot reach a draft pick, a My Guy
@@ -64,135 +54,6 @@ export const COMPLETE_FRACTION = 0.32;
 
 /** …or how fast it must be travelling, in px/ms, to navigate on a flick. */
 export const COMPLETE_VELOCITY = 0.45;
-
-/* --------------------------------------------------------- sheet dismissal */
-
-/** How much of the push has to be given before a sheet counts it at all. */
-export const DISMISS_HOLD = 0.4;
-
-/**
- * How far a *flick* has to have gone before its speed is allowed to count.
- *
- * Half the hold line, and it exists so that "a nudge comes back however fast it
- * was" survives the decision moving to the lift. While the outcome was read
- * after the coast, a real flick had already been carried most of the way down
- * the layer by the time anybody asked, so distance alone could separate a flick
- * from a nudge. Read *at* the lift there is no coast in the number yet, and a
- * genuine flick is a short distance and a large speed — indistinguishable, on
- * distance, from the nudge this floor is here to refuse.
- */
-export const DISMISS_FLICK = 0.2;
-
-/**
- * The speed, in px/ms, that settles the band between those two.
- *
- * Where the number came from, measured on the sheet's own layer at 430×932: a
- * crawl peaked at 0.17, an unhurried pull at 0.30, a deliberate one at 0.40, a
- * brisk one at 1.06, a flick at 2.68. It sits below the deliberate pull with
- * room to spare rather than splitting the close pair, because the two mistakes
- * do not cost the same: a dismissal wrongly withheld springs back and can be
- * made again, and a card wrongly thrown away cannot be.
- */
-export const DISMISS_VELOCITY = 0.25;
-
-/**
- * How much of a push past the commit point the card actually takes.
- *
- * Under one, so the card gets heavier the further it is pulled — the same
- * damping {@link PULL_RESISTANCE} gives the pull-to-refresh, and the same thing
- * iOS does to every scroll view that reaches its end. A card that tracks a
- * finger one-for-one all the way off the screen never tells the reader they
- * have done enough, which is most of what "it dismisses when I did not mean it
- * to" is: not a threshold in the wrong place, but no answer from the card while
- * the threshold went past.
- */
-export const DISMISS_RESISTANCE = 0.35;
-
-/**
- * How far the card has moved, given how far the layer has scrolled.
- *
- * Both are fractions of the whole journey from the card in place to the card
- * gone, which keeps this independent of how tall the phone is. One-for-one up
- * to the knee, damped after it.
- *
- * **The knee is {@link DISMISS_HOLD}, and sharing that number is the point.**
- * The card gets heavy at exactly the moment letting go would dismiss it, so the
- * threshold stops being invisible: a reader feels where it is instead of
- * discovering it afterwards. Below the knee nothing is damped, because
- * everything down there is still a scroll that might yet be scrolled back.
- *
- * The card can no longer be dragged fully off the screen, and that is the same
- * bargain every rubber-banded surface makes: past the knee the pull stops
- * buying distance and starts only confirming intent. What covers the rest is
- * the exit, which is a better-looking way to travel it anyway.
- */
-export function resistedTravel(
-  given: number,
-  knee = DISMISS_HOLD,
-  slope = DISMISS_RESISTANCE,
-): number {
-  if (given <= knee) return given;
-  return knee + (given - knee) * slope;
-}
-
-/**
- * Far enough, or fast enough, to let a sheet go.
- *
- * `given` is the fraction of the way to dismissed the push reached; `velocity`
- * is how fast it ever travelled, in px/ms. `measured` is whether a speed was
- * ever readable at all — a movement delivered as a single jump has a distance
- * and no speed, and withholding a dismissal on evidence that was never
- * collected would be a guess rather than a judgement. So an unmeasured push is
- * answered on distance, the way every push was answered before speed was asked.
- *
- * `velocity` is the speed the movement had when the hand came off it, over
- * {@link VELOCITY_WINDOW} — the same reading {@link completesBack} takes, with
- * one difference forced by the mechanism. A back swipe samples a finger, which
- * stops when the hand does; a sheet samples a scroller, which carries on. So
- * the sheet freezes its reading at the lift rather than at the settle, because
- * by the settle the momentum has decayed and there is nothing left to read.
- *
- * It is deliberately not the *fastest* moment of the movement, which is what
- * this asked for first and what made a slow push dismiss: a deliberate hand
- * sets off at an ordinary pace and eases into where it means to stop, so a peak
- * reads the setting-off and never the deciding. Measured, a three-second drag
- * easing to a halt peaked at 0.41px/ms — well clear of a threshold meant to
- * catch exactly that push.
- */
-export function dismissesSheet(given: number, velocity: number, measured: boolean): boolean {
-  /*
-   * **One line, and past it the card goes.** This used to have three bands: a
-   * distance that refused, a distance that committed, and between them a
-   * verdict handed to the speed. That middle band is gone, and losing it is the
-   * point rather than a simplification.
-   *
-   * The band only ever worked because the answer was read *after* the layer had
-   * finished coasting. A deliberate push released at rest sat inside it — 0.532
-   * given at 0.02px/ms, measured — so the rule refused it, and what actually
-   * dismissed the card was the momentum carrying it past the commit line while
-   * nobody was looking. The reader's word for that: "if I swipe down but not
-   * quickly it spazzes and takes long to go down." They were watching the card
-   * drift the rest of the way to a threshold, and then be answered.
-   *
-   * Now that the outcome is settled the moment the hand leaves, that drift is
-   * not available to carry anything, and a rule that needs it would refuse every
-   * unhurried push. So the distance is the whole answer, and it is the same
-   * distance the card starts resisting at — the reader is told where the line is
-   * by the card getting heavier as they cross it, which is the only honest way
-   * to publish a threshold you cannot draw.
-   */
-  if (given >= DISMISS_HOLD) return true;
-  /*
-   * …and a flick that plainly meant it still goes, short of the line.
-   *
-   * Speed can only ever *grant* a dismissal here, never withhold one, which is
-   * the reverse of what it did before and the safer direction: the two mistakes
-   * do not cost the same. A card wrongly kept springs back and the reader tries
-   * again; a card wrongly thrown away is gone. The floor is what keeps a nudge a
-   * nudge — no amount of speed dismisses a card that never really moved.
-   */
-  return measured && given >= DISMISS_FLICK && velocity >= DISMISS_VELOCITY;
-}
 
 /* ------------------------------------------------------- pull to refresh */
 
@@ -314,10 +175,6 @@ export const VELOCITY_WINDOW = 120;
  * the sheet and the back swipe judge a flick the same way, and the edge swipe
  * spent a while not doing so — see {@link useEdgeSwipeBack}.
  *
- * The sheet reads positions of its scrolling layer rather than of a finger,
- * which changes nothing here and one thing there: a scroller keeps moving after
- * the hand is off it, so the sheet stops feeding this once the finger lifts.
- * See {@link dismissesSheet}.
  */
 const SAMPLE_LIMIT = 12;
 
@@ -657,7 +514,7 @@ export function useEdgeSwipeBack({
          * This layer's own transform, and nothing else. `transitionend` bubbles,
          * and a pushed screen is full of things that transition — one of them
          * settling mid-flight would otherwise navigate from wherever the layer
-         * had got to. The same guard the sheet's own settle carries.
+         * had got to.
          */
         const onSettled = (event: TransitionEvent) => {
           if (event.target !== el || event.propertyName !== 'transform') return;
@@ -723,12 +580,10 @@ export function useEdgeSwipeBack({
  * boxes are exactly this case. Asked of the element rather than declared on it,
  * because it is true of every field in every screen and always will be.
  *
- * The sheet used to ask this too, of a drag that might have dismissed a card.
- * It no longer has a drag to ask about: a sheet is a scroller now, and a field
- * inside one keeps its own gestures the way a field anywhere else does, with
- * nobody arbitrating. {@link swipeIsClaimed} is the last caller.
+ * Asked by {@link swipeIsClaimed} here and by the sheet's drag in
+ * `sheetDrag.ts`, which never starts a dismissal from inside a field.
  */
-function ownsItsOwnDrag(el: HTMLElement): boolean {
+export function ownsItsOwnDrag(el: HTMLElement): boolean {
   if (el.isContentEditable) return true;
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
 }

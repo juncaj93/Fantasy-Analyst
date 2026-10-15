@@ -24,17 +24,15 @@
  *    it. The arbitration itself is engine-independent and is what broke.
  *
  *  - **Not checked, and cannot be.** Whether iOS Safari hands the gesture to
- *    the sheet. Every drag below is synthesised from pointer events, which are
- *    not touches: a dispatched `touchmove` produces no pointer event in any
- *    engine, so no synthetic sequence exercises `touch-action` or the browser's
- *    own arbitration. The last test in this file uses a pointer sequence typed
- *    as `touch` — which is a different code path through the app, and still not
- *    a finger. **Automated WebKit does not prove real-finger arbitration**, and
- *    the physical-iPhone retest in the handoff is not optional.
+ *    the sheet. The sheet swipes below are dispatched touch events with
+ *    touch-typed pointer events beside them (see `touchDrag`), which reach
+ *    both the sheet and the pull surface the way a finger's would, but do not
+ *    exercise the browser's own arbitration. **Automated WebKit does not prove
+ *    real-finger arbitration**, and the phone check is not optional.
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, inSeason, pastTheSettle, swipeSheetAway } from './helpers.ts';
+import { centreOf, exploreMarket, inSeason, pastTheSettle, swipeSheetAway, touchDrag } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -321,47 +319,23 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     await expect(page.getByTestId('player-sheet')).toBeVisible();
     await settled(page, 'sheet-grip');
 
-    /*
-     * A card with more in it than fits, scrolled into — so that the pull below
-     * is the content's rather than the card's. Made rather than hoped for.
-     *
-     * The layer and the content are two scrollers, and it matters which one this
-     * reads. The layer only ever holds two positions, the card in place and the
-     * card gone; reading further down a long card moves `.sheet-body`. So what
-     * is set up here is the *body* off its top, which is the state that decides
-     * where the pull below goes.
-     */
-    const layer = await page.evaluate(() => {
+    // A card with more in it than fits, scrolled into, so the drag below is the content's.
+    await page.evaluate(() => {
       const body = document.querySelector('.sheet-body') as HTMLElement;
       const filler = document.createElement('div');
       filler.style.height = '1200px';
       body.append(filler);
-      return Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop);
+      body.scrollTop = 300;
     });
-    await page.mouse.move(195, 400);
-    await page.mouse.wheel(0, 400);
-    await page.waitForTimeout(400);
-    await expect
-      .poll(async () => page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop)))
-      .toBeGreaterThan(0);
-    // And the card itself did not move while its content did.
-    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-scroller') as HTMLElement).scrollTop))).toBe(layer);
 
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
-    await swipeSheetAway(page, { ticks: 500 });
+    const result = await touchDrag(page, await centreOf(page, '.sheet-body'), { dy: 320, ms: 180 });
+    expect(result.claimed, 'the sheet took a drag from content that was not at its top').toBe(false);
 
     // A dismissal that fired would still be on screen right now. See the helper.
     await pastTheSettle(page);
     await expect(page.getByTestId('player-sheet')).toBeVisible();
-    /*
-     * And the pull spent itself returning the content to its top, rather than
-     * carrying on into the card. Measured: a pull of any size from content that
-     * is not at its top stops at the top and goes no further — the scroll only
-     * passes outward to the layer on a *fresh* gesture, which is why reading a
-     * card and dismissing it can never be the same movement.
-     */
-    expect(await page.evaluate(() => Math.round((document.querySelector('.sheet-body') as HTMLElement).scrollTop))).toBe(0);
     expectNothingPulled(await pullsSeen(page), requests);
   });
 
@@ -510,12 +484,10 @@ test.describe('and gives it straight back', () => {
 /**
  * The same arbitration, driven by pointers that say they are touches.
  *
- * Distinct from every drag above, which Playwright's mouse produces as
- * `pointerType: 'mouse'` — a type both hooks branch on, and the type a physical
- * iPhone never sends. These are dispatched directly so the pointer type can be
- * set, which is the only part of a touch that can be synthesised at all: a
- * dispatched `TouchEvent` generates no pointer event in any engine, so a real
- * touch sequence cannot reach these handlers from a test.
+ * A dispatched `TouchEvent` generates no pointer event in any engine, so
+ * `touchDrag` sends touch-typed pointer events beside its touches: the type a
+ * physical iPhone sends, and the one the pull surface listens for. Started on
+ * the card's content, which is where a pull and a dismissal look most alike.
  *
  * So this proves the app's own arbitration under touch-typed input, and
  * nothing about the browser's. The physical-iPhone retest remains the only
@@ -531,17 +503,8 @@ test.describe('under touch-typed pointers', () => {
     const requests = watchRequests(page, '/api/trades');
     await watchPulls(page);
 
-    /*
-     * A real scroll, where this used to synthesise a pointer sequence by hand.
-     *
-     * The point of the test is unchanged and is the half that matters: pushing a
-     * card away must not arm the pull on the screen underneath it. What has
-     * changed is that there is no longer a pointer gesture to forge — the
-     * dismissal is a scroll, and the layer that takes it covers the screen, so
-     * the events never reach the pull surface at all rather than reaching it and
-     * being refused. The assertion below is the same either way.
-     */
-    await swipeSheetAway(page);
+    // Touches, with touch-typed pointer events beside them, from the middle of the card.
+    await swipeSheetAway(page, { over: '.sheet-body' });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     expectNothingPulled(await pullsSeen(page), requests);
