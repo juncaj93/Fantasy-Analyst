@@ -205,6 +205,27 @@ export function CompareSheet({
     return evaluation ? weekPointsOf(evaluation) : null;
   };
 
+  /*
+   * The chips follow the cards once the comparison shows (16 October 2026):
+   * the pick first, then the rest in ranked order. Reopening the list keeps
+   * that order and puts anyone newly added at the end, so nothing jumps under
+   * his thumb. Only the drawing changes; `ids` keeps its order, so no new
+   * request is sent.
+   */
+  const [rankedOrder, setRankedOrder] = useState<string[]>([]);
+  useEffect(() => {
+    if (pickerOpen || !comparison) return;
+    const ranked = rankedColumns(comparison).map((e) => e.playerId);
+    if (ranked.length === ids.length && ids.every((id) => ranked.includes(id))) setRankedOrder(ranked);
+  }, [ids, comparison, pickerOpen]);
+  const chipIds = useMemo(() => {
+    const place = (id: string) => {
+      const at = rankedOrder.indexOf(id);
+      return at === -1 ? rankedOrder.length + ids.indexOf(id) : at;
+    };
+    return [...ids].sort((a, b) => place(a) - place(b));
+  }, [ids, rankedOrder]);
+
   const subtitle = [comparison?.week != null ? `Week ${comparison.week}` : null, slot ? `${slot} slot` : null]
     .filter(Boolean)
     .join(' · ');
@@ -248,7 +269,7 @@ export function CompareSheet({
           aria-label="Players being compared"
           data-testid="compare-chips"
         >
-          {ids.map((id) => (
+          {chipIds.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
               <span className="cmp2-chip-text">
               <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>

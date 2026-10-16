@@ -189,3 +189,34 @@ test('the × on every chip is centred top to bottom, at its right edge, at one s
   }
   expect(new Set(xSizes).size, 'one × size whatever the count').toBe(1);
 });
+
+/* Alex's phone check after round 2: once Compare shows, the chips read in the cards' order. */
+test('after Compare the chips follow the ranking, however they were chosen', async ({ page }) => {
+  await openCompare(page);
+  await page.getByTestId('compare-tab-all').click();
+  await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+  await page.waitForTimeout(250);
+  // Choose three lowest first, so the order chosen is not the ranked order.
+  const ids = (await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(2, 5).map((e) => e.getAttribute('data-player-id')!))).reverse();
+  for (const id of ids) {
+    const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${id}"]`);
+    await row.click();
+    await expect(row).toHaveAttribute('data-chosen', 'true');
+  }
+  const chips = () => page.getByTestId('compare-chosen').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+  const cards = () => page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+  // While choosing, the chips stay in the order he tapped them.
+  expect(await chips()).toEqual(ids);
+
+  await page.getByTestId('compare-add').click();
+  await expect(page.getByTestId('comparison')).toBeVisible();
+  await page.waitForTimeout(400);
+  const ranked = await cards();
+  expect(ranked).not.toEqual(ids);
+  await expect.poll(chips).toEqual(ranked);
+  await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveAttribute('data-player-id', ranked[0]!);
+
+  // Reopening the list keeps that order.
+  await page.getByTestId('compare-add').click();
+  expect(await chips()).toEqual(ranked);
+});
