@@ -1323,7 +1323,9 @@ test.describe('a borrowed projection says whose it is', () => {
   test('marks the figure, and only the borrowed one', async ({ page }) => {
     const borrowed = page.locator('[data-testid="starter-proj"][data-projection-source="sleeper"]');
     await expect(borrowed).toHaveCount(1);
-    await expect(borrowed).toHaveText(BORROWED.toFixed(1));
+    // The visible number, then the words only a screen reader hears.
+    await expect(borrowed).toHaveText(`${BORROWED.toFixed(1)}, Sleeper projection`);
+    await expect(borrowed.locator('.sr-only')).toHaveText(', Sleeper projection');
 
     // The app-wide marker since 16 October 2026: italic, dotted underline, no word, and on nobody else's.
     await expect(borrowed).toHaveClass(/num-sleeper/);
