@@ -15,8 +15,8 @@
 
 import { useState } from 'react';
 import type { WeeklyCard } from '../../core/startsit/weekCard.ts';
-import { Confidence, PlayerSheetTitle, SleeperTag } from './common.tsx';
-import { SLEEPER_NUM_CLASS, isSleeperSource } from '../sleeperFallback.ts';
+import { Confidence, PlayerSheetTitle } from './common.tsx';
+import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN, isSleeperSource } from '../sleeperFallback.ts';
 import { Sheet } from './native.tsx';
 import {
   InjuryDetail,
@@ -83,12 +83,7 @@ export function WeeklyCardSheet({
             <span className="metric" data-testid="weekly-score" data-projection-source={card.projectionSource ?? 'none'}>
               Proj{' '}
               <strong className={isSleeperSource(card.projectionSource) ? SLEEPER_NUM_CLASS : undefined}>{card.score.toFixed(1)}</strong>
-              {isSleeperSource(card.projectionSource) ? (
-                <>
-                  {' '}
-                  <SleeperTag />
-                </>
-              ) : null}
+              {isSleeperSource(card.projectionSource) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
             </span>
           )}
         </div>
@@ -104,8 +99,8 @@ export function WeeklyCardSheet({
         */}
         {card.projectionSource === 'sleeper' ? (
           <p className="weekly-provenance" data-testid="weekly-projection-source">
-            Projection published by Rotowire, via Sleeper — shown because no betting market has priced him. It is
-            ranked a little below a number this app worked out itself, because the two come from different models.
+            Projection published by Rotowire, via Sleeper — shown because no betting market has priced him. The
+            lineup only starts him where no player with Vegas lines can.
           </p>
         ) : null}
 

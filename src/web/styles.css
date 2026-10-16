@@ -1861,18 +1861,6 @@ body,
  * for a player's key figures and for anything else that is genuinely a
  * headline figure rather than a row of metadata.
  */
-.statusbar {
-  display: flex;
-  gap: var(--sp-2);
-  overflow-x: auto;
-  padding: 2px 0 var(--sp-2);
-  scrollbar-width: none;
-}
-
-.statusbar::-webkit-scrollbar {
-  display: none;
-}
-
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3909,8 +3897,7 @@ body,
 }
 
 .disclosure > summary,
-.link-button,
-.link-summary {
+.link-button {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--accent-text);
@@ -3923,8 +3910,7 @@ body,
   gap: var(--sp-1);
 }
 
-.disclosure > summary::-webkit-details-marker,
-.link-summary::-webkit-details-marker {
+.disclosure > summary::-webkit-details-marker {
   display: none;
 }
 
@@ -3941,8 +3927,7 @@ body,
   opacity: 0.5;
 }
 
-.disclosure > summary::after,
-.link-summary::after {
+.disclosure > summary::after {
   content: '';
   width: 6px;
   height: 6px;
@@ -3970,20 +3955,6 @@ body,
   font-size: 0.78rem;
   padding: 3px 0;
   border-bottom: 1px solid var(--separator-soft);
-}
-
-.component-label {
-  color: var(--text-dim);
-}
-
-.component-value {
-  font-weight: 620;
-}
-
-.component-detail {
-  grid-column: 1 / -1;
-  color: var(--text-faint);
-  font-size: 0.72rem;
 }
 
 /* ----------------------------------------------------- the player's own page */
@@ -4481,11 +4452,6 @@ button:disabled {
 .icon-btn:disabled {
   opacity: 0.5;
   cursor: progress;
-}
-
-.icon-spin {
-  display: inline-block;
-  animation: spin 700ms linear infinite;
 }
 
 @keyframes spin {
@@ -5201,13 +5167,6 @@ table.compact tr:last-child td {
   font-weight: 680;
 }
 
-.tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
-  margin-top: var(--sp-1);
-}
-
 .tag {
   display: inline-flex;
   align-items: center;
@@ -5239,20 +5198,6 @@ table.compact tr:last-child td {
 .tag-take {
   background: var(--pos);
   color: var(--on-accent);
-}
-
-/*
- * Positional urgency: tinted, loud enough to see, quieter than an action.
- *
- * `.tag-avoid` used to sit above this — the filled red twin of `.tag-take` —
- * and went with the `AVOID` badge that was the only thing wearing it. Its
- * partner stayed: the defence planner marks `Add`, `Stream` and `Stream + stash`
- * with `.tag-take`, which is the one decision in the app loud enough to earn a
- * fill.
- */
-.tag-urgent {
-  background: var(--warn-tint);
-  color: var(--warn);
 }
 
 /*
@@ -5296,23 +5241,11 @@ table.compact tr:last-child td {
   opacity: 0.75;
 }
 
-/* Moderate caution: outline only. */
-.tag-warn {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 40%, transparent);
-  color: var(--text-dim);
-}
-
 /* Calm guidance: barely there, on purpose. */
 .tag-calm {
   background: var(--surface-sunken);
   color: var(--text-faint);
   font-weight: 550;
-}
-
-.tag-star {
-  background: var(--accent-tint);
-  color: var(--accent-text);
 }
 
 /*
@@ -5864,35 +5797,6 @@ table.compact tr:last-child td {
   color: var(--pos);
 }
 
-.roster-alert {
-  padding: var(--sp-1) 0;
-  border-bottom: 1px solid var(--separator-soft);
-  font-size: 0.8rem;
-}
-
-.roster-alert strong {
-  font-weight: 620;
-  color: var(--text);
-}
-
-.roster-alert:last-child {
-  border-bottom: none;
-}
-
-.roster-alert-urgent strong {
-  color: var(--warn);
-}
-
-.decision-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 0.8rem;
-  padding-bottom: var(--sp-2);
-  margin-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--separator-soft);
-}
-
 /* ================================================================= trades */
 /*
  * Three windows of the same tally, labelled.
@@ -5936,22 +5840,6 @@ table.compact tr:last-child td {
 .window-value {
   font-size: 0.86rem;
   font-weight: 700;
-}
-
-.trade-trend {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin-top: var(--sp-1);
-  font-size: 0.78rem;
-  color: var(--text-dim);
-}
-
-/* The reason is the point of the row, so it wraps rather than truncates. */
-.trade-trend .trade-line {
-  min-width: 0;
-  flex: 1;
 }
 
 /* ================================================================== team */
@@ -6089,36 +5977,11 @@ table.compact tr:last-child td {
   white-space: nowrap;
 }
 
-.live-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.72rem;
-  font-weight: 680;
-  color: var(--live);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.live-dot::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: var(--live);
-}
-
 .header-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-2);
-}
-
-/* Wide content must scroll inside itself rather than widen the page. */
-.scroll-x {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 
 /* ============================================================ weekly card */
@@ -6582,22 +6445,6 @@ table.compact tr:last-child td {
   gap: var(--sp-1);
   flex: none;
   margin-left: auto;
-}
-
-/*
- * The one sentence a collapsed card is still allowed.
- *
- * A conflict, and only when there is one — see the note where it is chosen. One
- * line, clipped rather than wrapped, because a card that grows a second line
- * for a long sentence is the thing this pass removed.
- */
-.player-row-consequence {
-  margin-top: 2px;
-  font-size: 0.73rem;
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /*
@@ -7819,47 +7666,11 @@ table.compact tr:last-child td {
   }
 }
 
-/*
- * The glyph beside a navigation title.
- *
- * Sized to the line it sits on rather than to a tap target, because the whole
- * point is that it costs the bar no height. The touch area is widened back out
- * with padding that does not affect layout height, so it is still comfortably
- * tappable on a phone.
- */
-.nav-title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  min-width: 0;
-}
-
 .nav-title-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.title-icon-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 20px;
-  margin: -6px 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent-text);
-  line-height: 0;
-  cursor: pointer;
-  transition: opacity var(--dur-fast) ease;
-}
-
-.title-icon-btn:active {
-  opacity: 0.4;
 }
 
 /*
@@ -8186,7 +7997,6 @@ div.matchup-result {
   opacity: 0.6;
 }
 
-.matchup-confidence,
 .matchup-degraded {
   font-size: 0.72rem;
   color: var(--text-faint);
@@ -8216,6 +8026,7 @@ div.matchup-result {
   color: var(--text-dim);
 }
 
+/* One insight in the sheet the card opens. */
 /* ------------------------------------------------------------ hero card */
 /*
  * The differentiator, and the only element on this screen given room to
@@ -8236,60 +8047,6 @@ div.matchup-result {
  * text rather than under it — the same shape as every other thing in the app
  * that leads somewhere.
  */
-/*
- * The way into the live insights: one quiet line, not a headline.
- *
- * It replaced a card that carried the insight's own sentence above the lineup.
- * On the one screen whose stated purpose is fitting a starting lineup onto a
- * phone, the most volatile sentence in the app was taking the space the rows
- * needed. This is a control the width of its own label.
- */
-.insight-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  width: 100%;
-  min-height: 36px;
-  margin: 0 0 var(--sp-2);
-  padding: var(--sp-1) var(--sp-3);
-  background: var(--surface);
-  border: 0;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-1);
-  color: var(--accent-text);
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 620;
-  text-align: left;
-  cursor: pointer;
-}
-
-.insight-entry:active {
-  background: var(--pressed);
-}
-
-.insight-entry-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hero-chevron {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-faint);
-  opacity: 0.75;
-}
-
-.hero-chevron svg {
-  width: 15px;
-  height: 15px;
-}
-
-/* One insight in the sheet the card opens. */
 .insight-row {
   width: 100%;
   display: flex;
@@ -8427,14 +8184,6 @@ div.matchup-result {
   letter-spacing: -0.01em;
 }
 
-.matchup-best-move-name {
-  white-space: nowrap;
-}
-
-.matchup-best-move-name > .matchup-status {
-  margin-left: 3px;
-}
-
 .matchup-best-move-slot {
   flex: 0 0 auto;
   margin-left: auto;
@@ -8471,25 +8220,11 @@ div.matchup-result {
   flex: 0 0 auto;
 }
 
-.matchup-best-move-note {
-  font-weight: 500;
-  letter-spacing: 0;
-  color: var(--text-faint);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ---------------------------------------------------- best-move sheet */
 
 /* The two men the swap names, as the way through to their evidence. */
 
-
-
 /* One of the moves that did not win, in the order the engine ranked it. */
-
-
 
 /* ---------------------------------------------------------- starter rows */
 .matchup-rows {
@@ -8652,8 +8387,7 @@ div.matchup-result {
   text-decoration: none;
 }
 
-.matchup-player-proj-estimated .est-value,
-.compare-proj-preseason .est-value {
+.matchup-player-proj-estimated .est-value {
   text-decoration: underline dashed var(--text-faint);
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
@@ -9197,20 +8931,6 @@ div.matchup-result {
   padding-top: calc(var(--sp-1) + 2px);
 }
 
-/* ------------------------------------------------------- the scenario picker */
-.demo-group {
-  margin-top: var(--sp-3);
-}
-
-.demo-group-title {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin-bottom: var(--sp-1);
-}
-
 .demo-list {
   list-style: none;
   margin: 0;
@@ -9270,25 +8990,9 @@ div.matchup-result {
   text-transform: uppercase;
 }
 
-.demo-row-waiting {
-  background: var(--status-neutral);
-  color: var(--on-status-neutral);
-}
-
 .demo-row-detail {
   font-size: 0.78rem;
   line-height: 1.35;
-}
-
-.demo-progression {
-  display: flex;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
-}
-
-.demo-progression .btn {
-  flex: 1;
-  min-height: var(--tap);
 }
 
 /*
@@ -10074,137 +9778,6 @@ div.matchup-result {
   color: var(--text-dim);
 }
 
-/* ------------------------------------------------- the lineup change row */
-
-/*
- * One change, said the way a settings row says a value.
- *
- * The card this belongs to used to run a third of the screen: the swap, the
- * engine's own phrasing of why ("a positive recent signal (+1 net over 1
- * item(s))"), a count of the smaller changes, the promise that the app never
- * edits a lineup, and a disclosure headed `Recommended lineup in full`. All
- * true, none of it the answer, and stacked as five left-aligned paragraphs it
- * read as a wall rather than as a recommendation.
- *
- * So it is a row now, in the shape the rest of the app already uses and the
- * shape a reader's own phone uses everywhere else: the sentence on the left,
- * the number and the slot pinned right, one baseline, one line. The gain is the
- * only thing on the card with colour, because it is the only thing on the card
- * that is a quantity.
- */
-.lineup-change {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-1) 0;
-  min-height: 44px;
-  /* A button since it opens Compare; drawn exactly as the line it was. */
-  width: 100%;
-  border: 0;
-  background: none;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.lineup-change:active {
-  opacity: 0.6;
-}
-
-.lineup-change-chevron {
-  color: var(--text-faint);
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
-/*
- * `Compare N players` and `My roster` in the Compare picker: one row.
- *
- * They used to be two rows under the position filter; the owner wanted the
- * room for the list (30 September 2026). The button leads because it is the
- * action; the chip follows it as a filter on what the list shows.
- *
- * `My roster` is a 44px target with a pill face, the reader's own list in the
- * accent colour the Draft queue filter uses for the same idea. The pressed
- * state says so in a tick as well as a fill, so it never depends on colour
- * alone.
- */
-
-
-
-/*
- * The names run out of room before the number does.
- *
- * `minmax(0, 1fr)` against `auto` rather than two equal columns: `+1.37 FLEX`
- * is four or five characters and is never the thing worth truncating, and a
- * layout that shared the shortfall would clip the slot before the sentence had
- * used its width.
- */
-.lineup-change-names {
-  min-width: 0;
-  /*
-   * Two lines before an ellipsis. The chevron that marks the line as a way
-   * into Compare costs a few points, and "over Mark And…" was the result.
-   */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  font-size: 0.94rem;
-  letter-spacing: -0.01em;
-  color: var(--text-dim);
-}
-
-.lineup-change-names > strong {
-  color: var(--text);
-  font-weight: 640;
-}
-
-.lineup-change-meta {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  flex: 0 0 auto;
-}
-
-.lineup-change-gain {
-  font-size: 0.94rem;
-  font-weight: 660;
-  color: var(--accent-text);
-  font-variant-numeric: tabular-nums;
-}
-
-.lineup-change-slot {
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-faint);
-}
-
-/*
- * A disclosure that is provenance rather than a second copy of the screen.
- *
- * Quieter than the ordinary one: what is behind it is why the numbers are what
- * they are, which a reader wants available and almost never wants open. The
- * rule above it goes, because the card is three lines now and a divider across
- * two of them is furniture.
- */
-.disclosure-quiet {
-  margin-top: var(--sp-2);
-  border-top: 0;
-  padding-top: 0;
-}
-
-.disclosure-quiet > summary {
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--text-faint);
-  min-height: 28px;
-}
-
 /* ============================================== the compare sheet (Team → Compare) */
 /*
  * Since 13 October 2026 the sheet wears the app's own look: the cool gray page
@@ -10240,7 +9813,6 @@ div.matchup-result {
   --surface: var(--bg);
 }
 
-
 .cmp-title {
   display: flex;
   align-items: baseline;
@@ -10265,7 +9837,6 @@ div.matchup-result {
   letter-spacing: 0;
   color: var(--paper-faint);
 }
-
 
 /* ======================================================== check a trade */
 /*
@@ -10569,65 +10140,46 @@ div.matchup-result {
 .cmp2-num { font-variant-numeric: tabular-nums; font-weight: 600; }
 .cmp2-row-pts .cmp2-num { font-size: 0.95rem; }
 
-/* Compare: the verdict. */
+/*
+ * Compare: the cards (16 October 2026). One centred column each: name,
+ * position and team logo, photo, score, Start. Height follows the content;
+ * Start sits at the foot of the pick's card.
+ */
 .cmp2-verdict { padding-top: var(--sp-2); }
 .cmp2-cols { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-/*
- * Four cards share the width (15 October 2026): no sideways scroll. The name
- * may take two lines rather than be cut, and the score steps down a size.
- */
 .cmp2-cols-wide { gap: 4px; }
-.cmp2-cols-wide .cmp2-col { padding: 6px 6px; }
-.cmp2-cols-wide .cmp2-col-name {
-  font-size: 0.78rem;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.2;
-}
-.cmp2-cols-wide .cmp2-col-score { font-size: 1.25rem; }
+/* Five shared rows (name, team, photo, score, foot), so every card's lines sit level. */
 .cmp2-col {
   display: grid;
-  justify-items: start;
-  align-content: start;
-  gap: 1px;
+  grid-row: span 5;
+  grid-template-rows: subgrid;
+  justify-items: center;
+  align-items: center;
+  row-gap: 4px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: var(--sp-3) var(--sp-2);
   border-radius: var(--radius);
   background: var(--paper-card);
   border: 1px solid var(--paper-line);
+  text-align: center;
 }
+.cmp2-cols-wide .cmp2-col { padding: var(--sp-2) 4px; }
 .cmp2-col-lead { border-color: var(--paper-teal); box-shadow: inset 0 0 0 1px var(--paper-teal); }
 .cmp2-col .pill-chip { margin-left: 0; }
-/* The two reserved chip slots: one line each, drawn empty when there is nothing to say. */
-.cmp2-col-slot {
-  display: flex;
-  align-items: center;
-  max-width: 100%;
-  height: 18px;
-  overflow: hidden;
-}
-.cmp2-col-scoreline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  width: 100%;
-  min-width: 0;
-}
-/* Four cards are too narrow to spare the room: no face there, the name and score win. */
-/* Four cards: the photo sits above the score, since the score needs the whole width. */
-.cmp2-cols-wide .cmp2-col-scoreline { flex-direction: column-reverse; align-items: flex-start; gap: 4px; }
-.cmp2-col-meta { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.cmp2-col-foot { min-height: 18px; }
 .cmp2-col-name {
+  align-self: start;
   max-width: 100%;
   font-size: 0.86rem;
   font-weight: 650;
+  line-height: 1.2;
   color: var(--paper-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
-.cmp2-col-meta { font-size: 0.7rem; color: var(--paper-dim); }
+.cmp2-cols-wide .cmp2-col-name { font-size: 0.78rem; }
+.cmp2-col-meta { align-self: start; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; }
+.cmp2-col-meta .team-logo { width: 20px; height: 20px; }
+.cmp2-col-meta .team-code { font-size: 0.7rem; color: var(--paper-dim); }
 .cmp2-col-score {
   font-family: var(--cmp-display);
   font-size: 1.5rem;
@@ -10636,6 +10188,7 @@ div.matchup-result {
   font-variant-numeric: tabular-nums;
   color: var(--paper-ink);
 }
+.cmp2-cols-wide .cmp2-col-score { font-size: 1.25rem; }
 .cmp2-start {
   display: inline-flex;
   align-items: center;
@@ -10644,7 +10197,6 @@ div.matchup-result {
   font-weight: 700;
   color: var(--paper-teal);
 }
-.cmp2-why { margin: 6px 2px 0; font-size: 0.84rem; line-height: 1.35; color: var(--paper-ink); }
 
 /* Compare: one table for how the score is built, straight under the verdict. */
 .cmp2-table { padding-top: var(--sp-2); }
@@ -11293,16 +10845,20 @@ div.matchup-result {
 }
 
 /*
- * A number built on Sleeper's week instead of a full betting market
- * (15 October 2026). One look on every screen: the figure in the muted grey,
- * and the word `Sleeper` under it in small grey type. The word carries the
- * meaning; the grey agrees with it. `--text-faint` holds 4.5:1 on the card
- * colour in both themes. See `src/web/sleeperFallback.ts`.
+ * A number built on Sleeper's week instead of a full betting market. One look
+ * on every screen (16 October 2026): italic with a thin dotted underline, the
+ * treatment Matchup's borrowed figures had first. The colour is the surface's
+ * own, so Matchup stays grey and Team stays ink; Compare greys it too. The
+ * number keeps its place and size. See `src/web/sleeperFallback.ts`.
  */
-.num-sleeper,
-.sheet-compare .num-sleeper {
-  color: var(--text-faint);
+.num-sleeper {
+  font-style: italic;
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
 }
+.sheet-compare .num-sleeper,
+.cmp2-muted { color: var(--text-faint); }
 .sleeper-tag {
   display: inline-block;
   font-size: 0.62rem;

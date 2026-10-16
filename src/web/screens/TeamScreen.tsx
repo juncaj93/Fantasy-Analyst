@@ -1023,16 +1023,14 @@ function VerdictCard({
             */}
           {borrowed != null ? (
             <span className="row-value">
-              <span className="proj-stack" data-figure="sleeper">
-                <span
-                  className={sleeperClass('proj', true)}
-                  data-testid="vacancy-proj"
-                  data-projection-source="sleeper"
-                  title={projectionTitle(borrowed, 'sleeper')}
-                >
-                  {borrowed.toFixed(1)}
-                </span>
-                <SleeperTag />
+              <span
+                className={sleeperClass('proj', true)}
+                data-testid="vacancy-proj"
+                data-projection-source="sleeper"
+                title={projectionTitle(borrowed, 'sleeper')}
+              >
+                {borrowed.toFixed(1)}
+                <span className="sr-only">, {SLEEPER_SPOKEN}</span>
               </span>
             </span>
           ) : null}
@@ -1157,13 +1155,10 @@ function VerdictCard({
           {challenger.kind === 'plain' ? (
             <span className="faint">
               {' · '}
-              {challenger.points.toFixed(1)}
-              {isSleeperSource(recommendedProjection.source) ? (
-                <>
-                  {' '}
-                  <SleeperTag />
-                </>
-              ) : null}
+              <span className={isSleeperSource(recommendedProjection.source) ? SLEEPER_NUM_CLASS : undefined}>
+                {challenger.points.toFixed(1)}
+              </span>
+              {isSleeperSource(recommendedProjection.source) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
             </span>
           ) : null}
           {challenger.kind === 'risk' ? (
@@ -1278,16 +1273,11 @@ function RowFigureValue({
       title={projectionTitle(points, source)}
     >
       {points == null ? '—' : points.toFixed(1)}
+      {points != null && isSleeperSource(source) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
     </span>
   );
-  /* Sleeper's week: grey, with the word under it (`sleeperFallback.ts`). */
-  if (points == null || !isSleeperSource(source)) return value;
-  return (
-    <span className="proj-stack" data-figure="sleeper">
-      {value}
-      <SleeperTag />
-    </span>
-  );
+  /* Sleeper's week: the shared fallback marker on the number itself, same place and size (`sleeperFallback.ts`). */
+  return value;
 }
 
 /**

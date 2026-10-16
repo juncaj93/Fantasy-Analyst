@@ -38,6 +38,8 @@ export interface TableCell {
    * a partial yards total, or a line nobody posted. See `sleeperFallback.ts`.
    */
   muted?: boolean;
+  /** Built on Sleeper's week: drawn with the fallback marker as well as grey. */
+  sleeper?: boolean;
 }
 
 export interface TableRow {
@@ -95,7 +97,8 @@ export function compareTable(columns: StartSitEvaluation[]): { rows: TableRow[];
     // Score less the tenths shown above it, so the column adds up on screen.
     const shownNudges = nudgeRows.reduce((total, row) => total + (row.cells[i]!.value == null ? 0 : tenth(row.cells[i]!.value!)), 0);
     const value = tenth(week.points) - shownNudges;
-    return { value: e.decision.base, text: tenth(value).toFixed(1), muted: weekIsSleeper(week) };
+    const sleeper = weekIsSleeper(week);
+    return { value: e.decision.base, text: tenth(value).toFixed(1), muted: sleeper, sleeper };
   });
 
   const score: TableCell[] = weeks.map((w) =>
@@ -103,7 +106,7 @@ export function compareTable(columns: StartSitEvaluation[]): { rows: TableRow[];
       ? { value: null, text: 'Out' }
       : w.points == null
         ? { value: null, text: '–' }
-        : { value: w.points, text: w.points.toFixed(1), muted: weekIsSleeper(w) },
+        : { value: w.points, text: w.points.toFixed(1), muted: weekIsSleeper(w), sleeper: weekIsSleeper(w) },
   );
 
   return { rows: [{ key: 'base', label: 'Base', kind: 'base', cells: base }, ...lineRows(columns), ...nudgeRows], score };

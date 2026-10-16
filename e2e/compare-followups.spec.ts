@@ -73,7 +73,8 @@ async function expectChipsFit(page: Page, count: number) {
   expect(await clipped(page, ['compare-chips']), 'no chip text cut off').toEqual([]);
 }
 
-const FACE: Record<number, number> = { 2: 60, 3: 46, 4: 36 };
+/* 16 October 2026, round 2: bigger again, centred, using the room the removed lines freed. */
+const FACE: Record<number, number> = { 2: 96, 3: 76, 4: 56 };
 
 for (const count of [2, 3, 4] as const) {
   test(`${count} players: bigger photos, one screen, chips and cards whole`, async ({ page }) => {
@@ -109,7 +110,9 @@ test('no preview of the answer while choosing: it shows only after Compare', asy
   await expect(page.getByTestId('comparison')).toHaveCount(0);
   await expect(page.getByTestId('compare-add')).toHaveText('Compare');
   await showComparison(page);
-  await expect(page.getByTestId('comparison-verdict')).toBeVisible();
+  await expect(page.getByTestId('compare-column').first()).toBeVisible();
+  // No verdict sentence under the cards since 16 October 2026.
+  await expect(page.getByTestId('comparison-verdict')).toHaveCount(0);
 });
 
 test('an X closes Compare, the header is one row, and the picker is tight', async ({ page }) => {
@@ -191,10 +194,13 @@ test('a Sleeper-only player ahead is a marked second choice, never a second Star
 
   const second = page.locator('[data-testid="compare-column"][data-second="true"]');
   await expect(second).toHaveCount(1);
-  await expect(second.getByTestId('compare-sleeper-only')).toHaveText('Sleeper only');
-  // The grey number and "Sleeper only" are enough: no extra line about the gap.
+  // No words on the card (16 October 2026): the dashed outline and the marked grey number carry it.
+  await expect(second.getByTestId('compare-sleeper-only')).toHaveCount(0);
   await expect(second.getByTestId('compare-second-choice')).toHaveCount(0);
+  await expect(second).not.toContainText(/Sleeper only|\+1\.6/);
   await expect(second.locator('.cmp2-col-score.num-sleeper')).toHaveCount(1);
+  // A screen reader still hears what it is.
+  await expect(second).toContainText('second choice, Sleeper projection only');
   // Not a Start: no Start badge, no check, a dashed grey outline, not the pick's green one.
   await expect(second).toHaveAttribute('data-pick', 'false');
   await expect(second.locator('.cmp2-start')).toHaveCount(0);
@@ -210,5 +216,5 @@ test('a Sleeper-only player ahead is a marked second choice, never a second Star
   // Second in line, beside the pick.
   const order = await page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-second') ?? e.getAttribute('data-pick')));
   expect(order.slice(0, 2)).toEqual(['true', 'true']);
-  await expect(page.getByTestId('comparison-verdict')).toHaveText(/^Start .+\. .+ projects higher on Sleeper only \(no Vegas lines yet\)\.$/);
+  await expect(page.getByTestId('comparison-verdict')).toHaveCount(0);
 });

@@ -70,5 +70,11 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * status, news, usage and matchup reads `score` carries, not bare, through
  * `decisionPoints`, which the Compare sheet now ranks on too. `score` itself
  * is unchanged, so `startsit@1` still is.
+ *
+ * `lineup@5`, 16 October 2026: Vegas first on the Team screen. A player ranked
+ * on Sleeper's week is never started or suggested over a healthy, fully priced
+ * one; he takes a slot only when no priced player can. Replaces the 2-point
+ * discount there (`assembleLineup` turns it on; the waiver planner and trade
+ * engine still use the discount). Scores are unchanged, so `startsit@6` is.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@4', STARTSIT_ENGINE_VERSION);
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@5', STARTSIT_ENGINE_VERSION);

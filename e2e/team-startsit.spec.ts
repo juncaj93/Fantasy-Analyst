@@ -849,7 +849,7 @@ test.describe('the comparison tool', () => {
     await expect(page.getByTestId('compare-column')).toHaveCount(2);
   });
 
-  test('says so when the players are not the same lineup decision', async ({ page }) => {
+  test('starts nobody when the players are not the same lineup decision', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await allPlayers(page);
     await page.getByTestId('compare-search').fill('Halloran');
@@ -857,7 +857,10 @@ test.describe('the comparison tool', () => {
     await page.getByTestId('compare-search').fill('Brennan');
     await choose(page, '1005');
     await showComparison(page);
-    await expect(page.getByTestId('comparison-verdict')).toContainText('Not the same lineup decision');
+    // No verdict sentence since 16 October 2026: no card wears Start when no slot takes both.
+    await expect(page.getByTestId('comparison-verdict')).toHaveCount(0);
+    await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveCount(0);
+    await expect(page.locator('.cmp2-start')).toHaveCount(0);
   });
 
   test('opens from a slot with that player chosen and every position listed', async ({ page }) => {
@@ -905,19 +908,17 @@ test.describe('the comparison tool', () => {
     }
   });
 
-  test('reserves the pill and availability slots on every card, filled or not', async ({ page }) => {
+  test('lines the cards up: same height, scores level, Start at the foot of the pick', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await choose(page, '1001');
     await choose(page, '1004');
     await showComparison(page);
     const columns = page.getByTestId('compare-column');
     await expect(columns).toHaveCount(2);
-    for (const col of await columns.all()) {
-      await expect(col.getByTestId('compare-slot-pill')).toHaveCount(1);
-      await expect(col.getByTestId('compare-slot-availability')).toHaveCount(1);
-    }
     const heights = await columns.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
     expect(new Set(heights).size, 'every card the same height').toBe(1);
+    const scoreTops = await page.getByTestId('compare-score').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(scoreTops).size, 'scores on one level').toBe(1);
   });
 
   for (const count of [2, 3, 4] as const) {
@@ -1324,15 +1325,15 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(borrowed).toHaveCount(1);
     await expect(borrowed).toHaveText(BORROWED.toFixed(1));
 
-    // The app-wide mark since 15 October 2026: grey, with `Sleeper` under it, and on nobody else's.
+    // The app-wide marker since 16 October 2026: italic, dotted underline, no word, and on nobody else's.
     await expect(borrowed).toHaveClass(/num-sleeper/);
-    const stack = page.locator('[data-figure="sleeper"]', { has: borrowed });
-    await expect(stack.getByTestId('sleeper-tag')).toHaveText('Sleeper');
+    expect(await borrowed.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
+    expect(await borrowed.evaluate((el) => getComputedStyle(el).textDecorationStyle)).toBe('dotted');
+    await expect(page.getByTestId('sleeper-tag')).toHaveCount(0);
     const ours = page.locator('[data-testid="starter-proj"][data-projection-source="market"]').first();
     if (await ours.count()) {
       await expect(ours).not.toHaveClass(/num-sleeper/);
-      const color = (sel: typeof ours) => sel.evaluate((el) => getComputedStyle(el).color);
-      expect(await color(borrowed), 'grey, not the normal number colour').not.toBe(await color(ours));
+      expect(await ours.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('normal');
     }
   });
 
@@ -1356,12 +1357,11 @@ test.describe('a borrowed projection says whose it is', () => {
     await expect(provenance).toBeVisible();
     await expect(provenance).toContainText(/rotowire/i);
     /*
-     * "Ranked a little below", not "not used to rank": a borrowed figure does
-     * rank its man, docked by `BORROWED_RANKING_DISCOUNT`. The older wording
-     * survived the change that made it false, which is the whole reason this
-     * assertion names the rule rather than the source alone.
+     * The rule, named: since `lineup@5` (16 October 2026) a borrowed figure
+     * starts only where no player with Vegas lines can. The older "ranked a
+     * little below" survived nothing; this assertion names the current rule.
      */
-    await expect(provenance).toContainText(/ranked a little below/i);
+    await expect(provenance).toContainText(/only starts him where no player with Vegas lines can/i);
     await expect(provenance).not.toContainText(/not used to rank/i);
   });
 

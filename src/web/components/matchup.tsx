@@ -32,7 +32,7 @@
 
 import { useState, type ReactNode } from 'react';
 import type { HeroInsight, MatchupForecast, MatchupPlayerView, MatchupTeamView } from '../api.ts';
-import { SleeperTag, TeamLogo } from './common.tsx';
+import { TeamLogo } from './common.tsx';
 import { SLEEPER_NUM_CLASS } from '../sleeperFallback.ts';
 import { Estimated } from './estimate.tsx';
 import { ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
@@ -522,9 +522,7 @@ function PlayerHalf({
           {player.projectionEstimated ? (
             <Estimated value={player.projectedFinal} digits={0} />
           ) : (
-            <>
-              {player.projectedFinal.toFixed(1)} <SleeperTag />
-            </>
+            player.projectedFinal.toFixed(1)
           )}
         </span>
       ) : (

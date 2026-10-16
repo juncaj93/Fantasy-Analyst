@@ -7,22 +7,23 @@
  * (`decisionPoints`, basis `published`). What this file owns is how that looks,
  * so Compare, the Team rows, Best move and Matchup cannot drift apart:
  *
- *  - the number is drawn in the muted grey (`SLEEPER_NUM_CLASS`), and
- *  - a tiny grey `Sleeper` label sits under it (`SleeperTag` in
- *    `components/common.tsx`). The word carries the meaning; the grey only
- *    agrees with it, so nothing rests on colour alone.
+ *  - the number is marked italic with a thin dotted underline
+ *    (`SLEEPER_NUM_CLASS`), the look the Matchup screen gave borrowed figures
+ *    first (16 October 2026, replacing a grey colour and a "Sleeper" word). It
+ *    keeps the number's place and size, so rows stay aligned;
+ *  - a visually hidden "Sleeper projection" says it to a screen reader.
  *
- * Market lines that are posted keep their normal colour wherever they are
- * shown; a missing one is a grey dash.
+ * Compare also greys it. Posted market lines keep their normal colour; a
+ * missing one is a grey dash.
  */
 
 import type { WeekPoints } from '../core/startsit/weekPoints.ts';
 
-/** The class that greys a number built on Sleeper's week. */
+/** The class that marks a number built on Sleeper's week. */
 export const SLEEPER_NUM_CLASS = 'num-sleeper';
 
 /** The words a screen reader hears after the number. */
-export const SLEEPER_SPOKEN = 'from Sleeper, not a full betting market';
+export const SLEEPER_SPOKEN = 'Sleeper projection';
 
 /**
  * Whether a number's source is Sleeper's week. Takes whichever word the

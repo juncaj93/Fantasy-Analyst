@@ -1586,7 +1586,8 @@ test.describe('team, ADP import and start/sit', () => {
     await showComparison(page);
 
     const comparison = page.getByTestId('comparison');
-    await expect(page.getByTestId('comparison-verdict')).toContainText(/Start|Close call|Not the same/);
+    // The cards and the table speak for themselves: no verdict sentence (16 October 2026).
+    await expect(page.getByTestId('comparison-verdict')).toHaveCount(0);
     await expect(page.getByTestId('compare-column')).toHaveCount(2);
     // One table, players across, factors down: a real table a screen reader can walk.
     const grid = page.getByTestId('compare-grid');
@@ -1687,8 +1688,9 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(base).toHaveCount(2);
     const column = page.locator('[data-testid="compare-column"][data-player-id="1011"]');
     const score = (await column.getByTestId('compare-score').textContent())!.split(',')[0]!.trim();
-    // ...and his score is either a dash or a Sleeper fallback, grey and labelled.
-    if (score !== '–') await expect(column.getByTestId('sleeper-tag')).toHaveText('Sleeper');
+    // ...and his score is either a dash or a Sleeper fallback, carrying the fallback marker and no word.
+    if (score !== '–') await expect(column.getByTestId('compare-score')).toHaveClass(/num-sleeper/);
+    await expect(column.getByTestId('sleeper-tag')).toHaveCount(0);
     await expect(page.getByTestId('comparison')).not.toContainText('unknown');
   });
 });
