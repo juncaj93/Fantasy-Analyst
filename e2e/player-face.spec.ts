@@ -308,6 +308,14 @@ test.describe('the portrait on the expanded player card', () => {
 
   test('costs the header a fixed 64px and costs no name a single letter', async ({ page }) => {
     /*
+      Opens and closes the card for every seeded player, each with its rise and
+      its 240ms exit: about 21s in Chromium, and over the 30s default in CI's
+      WebKit at 430 (16 October 2026, twice on main at bff247c, timing out mid
+      loop rather than on any assertion). The walk is the point, so it gets the
+      slow-test allowance rather than fewer players.
+    */
+    test.slow();
+    /*
       The measurement that decided the header's shape, kept as a test.
 
       A 64px face on the identity line the sheet used to have truncated
