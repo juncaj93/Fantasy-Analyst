@@ -383,6 +383,15 @@ export function recommendLineup(
      * Absent or null means no tie-break: see `tiebreak.ts`.
      */
     posture?: Posture | null;
+    /**
+     * Vegas first (16 October 2026, Alex): a Sleeper-only player is never
+     * started over a fully priced one; he takes a slot only when no priced
+     * player can. The Team screen's lineup turns this on (`assembleLineup`),
+     * so its Best move agrees with Compare (`completeFirst.ts`). Off for the
+     * waiver planner and the trade engine, which keep the
+     * {@link BORROWED_RANKING_DISCOUNT} ranking.
+     */
+    vegasFirst?: boolean;
   } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
@@ -492,7 +501,13 @@ export function recommendLineup(
    * which is most of them — stops ranking the unpriced remainder against
    * itself on news tallies.
    */
-  const openAssignment = assignBest(playable, openSlots.map((o) => o.spec), currentStarters, opts.published);
+  const openAssignment = assignBest(
+    playable,
+    openSlots.map((o) => o.spec),
+    currentStarters,
+    opts.published,
+    opts.vegasFirst === true,
+  );
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
   for (const [openIndex, player] of openAssignment) {
@@ -585,7 +600,16 @@ export function recommendLineup(
    */
   for (const evaluation of evaluations) evaluation.decision = decisionPoints(evaluation, opts.published);
 
-  const { swaps, fills } = buildSwaps(filled, slots, currentStarters, evaluations, minGain, opts.published, tiebreaks);
+  const { swaps, fills } = buildSwaps(
+    filled,
+    slots,
+    currentStarters,
+    evaluations,
+    minGain,
+    opts.published,
+    tiebreaks,
+    opts.vegasFirst === true,
+  );
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -620,7 +644,9 @@ export function recommendLineup(
     if (borrowed.length > 0) {
       notes.push(
         `No betting market has priced ${borrowed.length} of your ${scored.length} players yet, so ${borrowed.length === 1 ? 'that row uses' : 'those rows use'} ` +
-          'Rotowire’s published figure. It is ranked slightly below a number this app worked out itself, because the two come from different models.',
+          (opts.vegasFirst
+            ? 'Rotowire’s published figure, and only starts where no player with Vegas lines can.'
+            : 'Rotowire’s published figure. It is ranked slightly below a number this app worked out itself, because the two come from different models.'),
       );
     }
     if (unrankable.length > 0) {
@@ -1243,6 +1269,7 @@ function assignBest(
    */
   currentStarters: ReadonlySet<string> | null = null,
   published?: ReadonlyMap<string, number>,
+  vegasFirst = false,
 ): Map<number, StartSitEvaluation> {
   /*
    * Rankable, then unrankable-and-starting, then unrankable-and-benched.
@@ -1266,7 +1293,7 @@ function assignBest(
    * handed would not be transitive and `sort` would be free to return
    * anything.
    */
-  const keyOf = new Map(players.map((e) => [e.playerId, rankingKey(e, published)]));
+  const keyOf = new Map(players.map((e) => [e.playerId, rankingKey(e, published, vegasFirst)]));
   const tier = (e: StartSitEvaluation): number =>
     keyOf.get(e.playerId) != null ? 0 : currentStarters?.has(e.playerId) ? 1 : 2;
   const order = [...players].sort(
@@ -1373,6 +1400,7 @@ function buildSwaps(
   minGain: number,
   published?: ReadonlyMap<string, number>,
   tiebreaks: ReadonlyMap<string, { outPlayerId: string; note: TiebreakNote }> = new Map(),
+  vegasFirst = false,
 ): { swaps: LineupSwap[]; fills: LineupFill[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
@@ -1468,7 +1496,14 @@ function buildSwaps(
      */
     const tiebreak = tiebreaks.get(incoming.playerId);
     const byTiebreak = tiebreak != null && tiebreak.outPlayerId === outgoing.playerId;
-    if (gain < minGain && !byTiebreak) continue;
+    /*
+     * Vegas first: a priced player replacing a Sleeper-only starter is the
+     * change itself, whatever the two numbers say, so the card names it as the
+     * lineup row does. The gain is still the honest difference, and may be
+     * negative.
+     */
+    const byVegasFirst = vegasFirst && !incomingBasis.borrowed && outgoingBasis?.borrowed === true;
+    if (gain < minGain && !byTiebreak && !byVegasFirst) continue;
     used.add(outgoing.playerId);
     lineup.delete(outgoing.playerId);
     lineup.add(incoming.playerId);
@@ -1480,7 +1515,11 @@ function buildSwaps(
       outPlayerId: outgoing.playerId,
       outName: outgoing.name,
       gain,
-      reason: byTiebreak ? tiebreak.note.sentence : swapReason(incoming, outgoing),
+      reason: byTiebreak
+        ? tiebreak.note.sentence
+        : byVegasFirst && gain < minGain
+          ? `${incoming.name} has a full set of Vegas lines; ${outgoing.name} has only Sleeper's projection`
+          : swapReason(incoming, outgoing),
       ...(byTiebreak ? { tiebreak: tiebreak.note } : {}),
     });
   }
@@ -1614,14 +1653,27 @@ function rankingPoints(
   return { points: decision.points, borrowed: decision.basis === 'published' };
 }
 
-/** The same, already discounted, which is the form the ordering uses. */
+/**
+ * How far below every priced player a Sleeper-only one ranks under Vegas first.
+ * Larger than any week's points, so a borrowed figure can never pass a priced one,
+ * while two borrowed figures still order by their own numbers.
+ */
+const VEGAS_FIRST_OFFSET = 1000;
+
+/**
+ * The same, already discounted, which is the form the ordering uses. Under
+ * `vegasFirst` the discount is replaced by {@link VEGAS_FIRST_OFFSET}: a
+ * published week then ranks below every priced player, not 2 points below him.
+ */
 function rankingKey(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
+  vegasFirst = false,
 ): number | null {
   const basis = rankingPoints(evaluation, published, { rosterRisk: true });
   if (basis == null) return null;
-  return basis.borrowed ? basis.points - BORROWED_RANKING_DISCOUNT : basis.points;
+  if (!basis.borrowed) return basis.points;
+  return basis.points - (vegasFirst ? VEGAS_FIRST_OFFSET : BORROWED_RANKING_DISCOUNT);
 }
 
 function worstConfidence(evaluations: StartSitEvaluation[]): 'high' | 'medium' | 'low' {

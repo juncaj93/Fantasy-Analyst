@@ -123,6 +123,12 @@ describe('the Compare table', () => {
     expect(score.map((x) => x.muted === true)).toEqual([false, true, false, false]);
   });
 
+  it('marks Base and Score as Sleeper fallbacks, and never a missing line or a partial total', () => {
+    expect(rows[0]!.cells.map((x) => x.sleeper === true)).toEqual([false, true, false, false]);
+    expect(score.map((x) => x.sleeper === true)).toEqual([false, true, false, false]);
+    for (const row of rows.filter((r) => r.kind === 'line')) for (const c of row.cells) expect(c.sleeper).toBeUndefined();
+  });
+
   it('keeps a posted line in normal colour under a grey number, and greys the missing ones', () => {
     const [yards, catches, td] = rows.slice(1, 4);
     // Egbuka: only his touchdown price is posted.

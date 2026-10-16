@@ -445,3 +445,25 @@ fails if two of them disagree.
 - **Cards:** photos 60px for two players, 46px for three, 36px for four (above
   the score). Chips: three or four share the row; the number moves under the
   name and the whole chip is the remove target, so nothing is cut off at 360px.
+
+### 16 October 2026, round 2: card polish, one fallback marker, Vegas first on Team
+
+- **Compare cards** are one centred column: name, position pill and team logo
+  (`TeamLogo`, abbreviation when the logo is missing), photo (96px for two,
+  76px for three, 56px for four), score, and Start at the foot of the pick.
+  Rows line up across cards (CSS subgrid). No verdict sentence under the cards.
+- **One fallback marker** (`.num-sleeper`, `src/web/sleeperFallback.ts`): a
+  number built on Sleeper's week is italic with a 1px dotted underline, the
+  treatment Matchup's borrowed figures already had. No "Sleeper" word beside
+  any number (Compare cards, chips and picker, Team rows and the "instead"
+  figure, the empty-slot figure, Matchup rows, the weekly card); screen readers
+  hear "Sleeper projection". The word stays only inside the Best move sentence.
+  Compare also greys it; a missing line or a partial yards total is grey but
+  not marked.
+- **Vegas first on the Team screen** (`lineup@5`, `recommendLineup({ vegasFirst })`,
+  turned on by `assembleLineup`): a Sleeper-only player is never started or
+  suggested over a healthy, fully priced player and takes a slot only when no
+  priced player can. When a Sleeper-only player is starting and a priced one is
+  on the bench, Best move names the swap even when the priced number is lower,
+  with that reason. The 2-point `BORROWED_RANKING_DISCOUNT` no longer applies on
+  Team; the waiver planner, the trade engine and Matchup's decision still use it.

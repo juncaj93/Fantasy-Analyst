@@ -29,7 +29,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type PillReading, type StartSitComparison, type StartSitEvaluation } from '../api.ts';
-import { CompactFace, InjuryTag, PositionPill, SleeperTag } from './common.tsx';
+import { CompactFace, InjuryTag, PositionPill, TeamLogo } from './common.tsx';
 import { SearchField, SegmentedControl, Sheet } from './native.tsx';
 import { CheckIcon } from './icons.tsx';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
@@ -406,7 +406,7 @@ function Picker({
                   </span>
                   <span className="cmp2-row-pts" data-testid="compare-points">
                     <span className={sleeperClass('cmp2-num', weekIsSleeper(row.week))}>{weekText(row.week)}</span>
-                    {weekIsSleeper(row.week) ? <SleeperTag /> : null}
+                    {weekIsSleeper(row.week) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
                   </span>
                 </button>
               </li>
@@ -429,43 +429,20 @@ function rankedColumns(comparison: StartSitComparison): StartSitEvaluation[] {
   return [...comparison.evaluations].sort((a, b) => rank(a) - rank(b) || points(b) - points(a));
 }
 
-/** The one line under the verdict: the tie-break's sentence, or the gap and where it came from. */
-export function verdictLine(comparison: StartSitComparison): string {
-  const comparable = comparison.slot?.comparable ?? true;
-  if (!comparable) return 'Not the same lineup decision: no slot takes both.';
-  const columns = rankedColumns(comparison);
-  const pick = columns.find((e) => e.playerId === comparison.recommendedPlayerId) ?? null;
-  if (!pick) return 'Not enough to choose between them.';
-  /* A Sleeper-only player ahead of the pick is named, not recommended (16 October 2026). */
-  if (comparison.sleeperOnly) {
-    return `Start ${shortName(pick.name)}. ${shortName(comparison.sleeperOnly.name)} projects higher on Sleeper only (no Vegas lines yet).`;
-  }
-  if (comparison.tiebreak) return comparison.tiebreak.sentence;
-  const next = columns.find((e) => e.playerId !== pick.playerId) ?? null;
-  const a = weekPointsOf(pick).points;
-  const b = next ? weekPointsOf(next).points : null;
-  if (a == null || b == null || !next) return `Start ${shortName(pick.name)}.`;
-  const gap = a - b;
-  /*
-   * Whether the gap is mostly the base, and which base: "the Vegas lines" only
-   * when both players' base is the full Vegas number, otherwise "the published
-   * projection" (Alex, 13 October 2026: it said Vegas over two Sleeper weeks).
-   */
-  const base = (e: StartSitEvaluation) => e.decision?.base ?? 0;
-  const fromBase = Math.abs(base(pick) - base(next)) >= Math.abs(gap) * 0.6;
-  const bothVegas = weekPointsOf(pick).basis === 'market' && weekPointsOf(next).basis === 'market';
-  const source = bothVegas ? 'the Vegas lines' : 'the published projection';
-  const close = gap < 0.75 ? 'Close call. ' : '';
-  return `${close}Start ${shortName(pick.name)}, ${gap.toFixed(1)} pts ahead${fromBase ? `, mostly on ${source}` : ''}.`;
-}
-
+/**
+ * The cards, one centred column each (16 October 2026): name, position and
+ * team logo, photo, score, and Start on the pick. No verdict sentence under
+ * them: the cards and the table say it. A Sleeper-only player ahead of the
+ * pick is a second choice: dashed grey outline, the fallback marker on his
+ * number, no check and no green.
+ */
 function Verdict({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
   const comparable = comparison.slot?.comparable ?? true;
   const pick = comparable ? comparison.recommendedPlayerId : null;
   const second = comparable ? comparison.sleeperOnly ?? null : null;
-  /* Photos scale with the room each card has: large for two, medium for three, small for four. */
-  const faceSize = columns.length <= 2 ? 60 : columns.length === 3 ? 46 : 36;
+  /* Photos scale with the room each card has: largest for two, still well up for four. */
+  const faceSize = columns.length <= 2 ? 96 : columns.length === 3 ? 76 : 56;
   return (
     <section className="cmp2-verdict" aria-label="Verdict" data-testid="comparison" data-columns={columns.length}>
       <ul
@@ -476,55 +453,43 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
           const week = weekPointsOf(e);
           const sleeper = weekIsSleeper(week);
           const lead = e.playerId === pick;
-          const sleeperOnly = second?.playerId === e.playerId ? second : null;
+          const isSecond = second?.playerId === e.playerId;
+          const status = designationOf(e.statusFlag) ?? (e.ruledOut ? 'Out' : null);
           return (
             <li
               key={e.playerId}
-              className={lead ? 'cmp2-col cmp2-col-lead' : sleeperOnly ? 'cmp2-col cmp2-col-second' : 'cmp2-col'}
+              className={lead ? 'cmp2-col cmp2-col-lead' : isSecond ? 'cmp2-col cmp2-col-second' : 'cmp2-col'}
               data-testid="compare-column"
               data-player-id={e.playerId}
               data-pick={lead ? 'true' : 'false'}
-              data-second={sleeperOnly ? 'true' : undefined}
+              data-second={isSecond ? 'true' : undefined}
             >
               <span className="cmp2-col-name">{shortName(e.name)}</span>
               <span className="cmp2-col-meta">
-                <PositionPill position={e.position} /> {e.team}
+                <PositionPill position={e.position} />
+                <TeamLogo team={e.team} />
+                {status ? <InjuryTag status={status} /> : null}
               </span>
-              {/* The face sits in the empty space beside the score, never in the name's width. */}
-              <span className="cmp2-col-scoreline">
-                <span className={sleeperClass('cmp2-col-score', sleeper)} data-testid="compare-score">
-                  {weekText(week)}
-                  {sleeper ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
-                </span>
-                <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} size={faceSize} />
+              <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} size={faceSize} />
+              <span className={sleeperClass('cmp2-col-score', sleeper)} data-testid="compare-score">
+                {weekText(week)}
+                {sleeper ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
               </span>
-              {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
-              <span className="cmp2-col-slot" data-testid="compare-slot-pill">
-                {sleeperOnly ? (
-                  <span className="sleeper-tag" data-testid="compare-sleeper-only">
-                    Sleeper only
+              {/* One foot row on every card, so the rows line up across them. */}
+              <span className="cmp2-col-foot">
+                {lead ? (
+                  <span className="cmp2-start">
+                    <CheckIcon size={12} /> Start
                   </span>
-                ) : sleeper ? (
-                  <SleeperTag />
-                ) : (
+                ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />
-                )}
+                ) : null}
+                {isSecond ? <span className="sr-only">second choice, Sleeper projection only</span> : null}
               </span>
-              <span className="cmp2-col-slot" data-testid="compare-slot-availability">
-                <InjuryTag status={designationOf(e.statusFlag) ?? (e.ruledOut ? 'Out' : null)} />
-              </span>
-              {lead ? (
-                <span className="cmp2-start">
-                  <CheckIcon size={12} /> Start
-                </span>
-              ) : null}
             </li>
           );
         })}
       </ul>
-      <p className="cmp2-why" data-testid="comparison-verdict">
-        {verdictLine(comparison)}
-      </p>
     </section>
   );
 }
@@ -582,7 +547,7 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
               <span
                 role="cell"
                 key={columns[i]!.playerId}
-                className={sleeperClass('cmp2-num', cell.muted === true)}
+                className={cellClass(cell)}
                 data-testid="compare-cell"
                 data-muted={cell.muted ? 'true' : undefined}
               >
@@ -599,7 +564,7 @@ function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
             <span
               role="cell"
               key={columns[i]!.playerId}
-              className={sleeperClass('cmp2-num', cell.muted === true)}
+              className={cellClass(cell)}
               data-muted={cell.muted ? 'true' : undefined}
             >
               {cell.text}
@@ -619,6 +584,12 @@ function lastName(name: string): string {
   if (parts.length < 2) return name;
   const last = parts[parts.length - 1]!;
   return /^(jr\.?|sr\.?|ii|iii|iv)$/i.test(last) && parts.length > 2 ? parts[parts.length - 2]! : last;
+}
+
+/** A table cell: grey when muted, and the fallback marker too when it is Sleeper's week. */
+function cellClass(cell: { muted?: boolean; sleeper?: boolean }): string {
+  if (cell.sleeper) return sleeperClass('cmp2-num cmp2-muted', true);
+  return cell.muted ? 'cmp2-num cmp2-muted' : 'cmp2-num';
 }
 
 /** `J. Smith-Njigba` from `Jaxon Smith-Njigba`; a defence keeps its name. */

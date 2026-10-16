@@ -129,17 +129,18 @@ test('a number on Sleeper’s week is grey with a Sleeper label, and a posted li
   const grey = page.locator('[data-testid="compare-column"] .cmp2-col-score.num-sleeper');
   await expect(grey).toHaveCount(1);
   const column = page.locator('[data-testid="compare-column"]', { has: page.locator('.cmp2-col-score.num-sleeper') });
-  await expect(column.getByTestId('sleeper-tag')).toHaveText('Sleeper');
+  // No word on the card (16 October 2026): the marker carries it, and a screen reader hears it.
+  await expect(column.getByTestId('sleeper-tag')).toHaveCount(0);
   await expect(column).not.toContainText('lower confidence');
+  await expect(column.getByTestId('compare-score')).toContainText('Sleeper projection');
 
   // In the table: Base and Score grey in that column, and only there.
   await expect(page.locator('[data-testid="compare-factor"][data-factor="base"] [data-muted="true"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="compare-total"] [data-muted="true"]')).toHaveCount(1);
 
-  // The label reads: small, but at the app's faint text colour, never a hairline.
-  const tag = column.getByTestId('sleeper-tag');
-  const size = await tag.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(size).toBeGreaterThanOrEqual(9);
+  // The marker: italic with a dotted underline on the fallback number only.
+  expect(await grey.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
+  expect(await grey.evaluate((el) => getComputedStyle(el).textDecorationStyle)).toBe('dotted');
 
   // A normal number keeps the normal colour.
   const other = page.locator('[data-testid="compare-column"] .cmp2-col-score:not(.num-sleeper)').first();
