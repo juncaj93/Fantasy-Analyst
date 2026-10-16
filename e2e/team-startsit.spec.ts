@@ -764,7 +764,9 @@ test.describe('the comparison tool', () => {
       await allPlayers(page);
       const ids = await page.getByTestId('compare-candidate').evaluateAll((els, n) => els.slice(0, n).map((e) => e.getAttribute('data-player-id')!), count);
       for (const id of ids) await choose(page, id);
-      await expect(page.getByTestId('compare-mini-verdict')).toBeVisible();
+      // No preview of the answer while choosing (16 October 2026): it only shows after Compare.
+      await expect(page.getByTestId('compare-mini-verdict')).toHaveCount(0);
+      await expect(page.getByTestId('comparison')).toHaveCount(0);
       await showComparison(page);
       const grid = page.getByTestId('compare-grid');
       await expect(grid).toHaveAttribute('data-columns', String(count));
@@ -785,7 +787,7 @@ test.describe('the comparison tool', () => {
     await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
   });
 
-  test('keeps the chosen players on one slim line, with + Add pinned at the right', async ({ page }) => {
+  test('keeps the chosen players on one slim line, with + Add in the header row', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await allPlayers(page);
     const ids = await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(0, 4).map((e) => e.getAttribute('data-player-id')!));
@@ -795,14 +797,12 @@ test.describe('the comparison tool', () => {
     const tops = await chips.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
     expect(new Set(tops).size, 'every chip on the same line').toBe(1);
     const strip = (await page.getByTestId('compare-strip').boundingBox())!;
-    expect(strip.height, 'one slim line, not a block of chips').toBeLessThanOrEqual(46);
-    // The chips scroll sideways under + Add, which never moves.
+    expect(strip.height, 'one slim line, not a block of chips').toBeLessThanOrEqual(48);
+    // + Add lives in the header row since 16 October 2026, so the chips have the whole width.
     const add = (await page.getByTestId('compare-add').boundingBox())!;
     const viewport = page.viewportSize()!;
     expect(add.x + add.width).toBeLessThanOrEqual(viewport.width);
-    const row = page.getByTestId('compare-chips');
-    const box = (await row.boundingBox())!;
-    expect(box.x + box.width, 'the chips end before + Add').toBeLessThanOrEqual(add.x + 1);
+    expect(add.y + add.height, '+ Add sits above the chips, in the header').toBeLessThanOrEqual(strip.y + 1);
     // Every chip keeps its X.
     await expect(page.getByTestId('compare-remove')).toHaveCount(4);
   });

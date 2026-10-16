@@ -289,22 +289,26 @@ export function CompactFace({
   name,
   position,
   team,
+  size = 32,
 }: {
   playerId: string;
   name: string;
   position: string;
   team: string;
+  /** The square in pixels: 32 in a list, larger on a Compare card with room for it. */
+  size?: number;
 }) {
+  const box = { ['--cmp-face' as string]: `${size}px` };
   if (position === 'DEF' || position === 'DST') {
     return (
-      <span className="cmp2-face cmp2-face-team" aria-hidden="true">
+      <span className="cmp2-face cmp2-face-team" aria-hidden="true" style={box}>
         <TeamLogo team={team} />
       </span>
     );
   }
   return (
-    <span className="cmp2-face" aria-hidden="true">
-      <PlayerFace playerId={playerId} name={name} position={position} size={32} testId="compare-face" />
+    <span className="cmp2-face" aria-hidden="true" style={box}>
+      <PlayerFace playerId={playerId} name={name} position={position} size={size} testId="compare-face" />
     </span>
   );
 }

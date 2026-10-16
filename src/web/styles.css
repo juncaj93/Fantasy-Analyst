@@ -10240,21 +10240,13 @@ div.matchup-result {
   --surface: var(--bg);
 }
 
-/* `Done` as the mockup draws it: a word in the accent colour, still a full tap target. */
-.sheet-compare .sheet-header .btn {
-  background: none;
-  color: var(--paper-blue);
-  font-weight: 500;
-  min-height: var(--tap);
-  padding: 0 var(--sp-2);
-  border-radius: var(--radius-pill);
-}
 
 .cmp-title {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: var(--sp-2);
   min-width: 0;
+  white-space: nowrap;
 }
 
 .cmp-title-main {
@@ -10266,19 +10258,14 @@ div.matchup-result {
 }
 
 .cmp-title-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.78rem;
   font-weight: 400;
   letter-spacing: 0;
   color: var(--paper-faint);
 }
 
-.cmp-eyebrow {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--paper-faint);
-}
 
 /* ======================================================== check a trade */
 /*
@@ -10412,8 +10399,6 @@ div.matchup-result {
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
 }
 .cmp2-chips::-webkit-scrollbar { display: none; }
 .cmp2-chip {
@@ -10430,7 +10415,40 @@ div.matchup-result {
   color: var(--paper-ink);
   white-space: nowrap;
 }
-.cmp2-chip:last-child { margin-right: 14px; }
+.cmp2-strip[hidden] { display: none; }
+.cmp2-chip-text { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+/*
+ * Three or four chips share the row equally (16 October 2026): the number
+ * moves under the name and the X shrinks, so nothing is cut off at 360px. A
+ * very long surname wraps rather than being clipped.
+ */
+.cmp2-chips-tight > .cmp2-chip {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: auto;
+  min-height: 34px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+}
+.cmp2-chips-tight .cmp2-chip-text { flex-direction: column; align-items: flex-start; gap: 0; flex: 1; min-width: 0; line-height: 1.15; }
+.cmp2-chips-tight .cmp2-chip-name { max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.cmp2-chips-tight .cmp2-chip-pts { font-size: 0.68rem; }
+/* The whole chip removes him: a 44px-tall target over the chip, its × drawn on the number's line. */
+.cmp2-chips-tight .cmp2-chip-x {
+  position: absolute;
+  inset: -5px 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: var(--tap);
+  margin: 0;
+  padding: 0 8px 9px 0;
+  align-items: flex-end;
+  justify-content: flex-end;
+  font-size: 0.62rem;
+}
 .cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 7.5em; }
 .cmp2-chip-pts { color: var(--paper-dim); font-variant-numeric: tabular-nums; }
 .cmp2-chip-x,
@@ -10468,8 +10486,7 @@ div.matchup-result {
 .cmp2-chip-x:focus-visible,
 .cmp2-add:focus-visible,
 .cmp2-row:focus-visible,
-.cmp2-factor:focus-visible,
-.cmp2-mini-verdict:focus-visible {
+.cmp2-factor:focus-visible {
   outline: 2px solid var(--paper-blue);
   outline-offset: -2px;
 }
@@ -10477,23 +10494,11 @@ div.matchup-result {
 .cmp2-empty { margin: var(--sp-3) 2px; font-size: 0.85rem; color: var(--paper-dim); }
 
 /* Compare: the picker. */
+/* 8px between every section and nothing more (16 October 2026): the shared controls bring their own bottom margins, dropped here. */
 .cmp2-picker { display: grid; gap: var(--sp-2); padding-top: var(--sp-2); }
 .cmp2-search { margin: 0; }
-.cmp2-mini-verdict {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: var(--tap);
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--paper-line);
-  border-radius: var(--radius);
-  background: var(--paper-card);
-  color: var(--paper-ink);
-  font: inherit;
-  font-size: 0.82rem;
-  text-align: left;
-}
+.cmp2-picker .search,
+.cmp2-picker .filter-row { margin-bottom: 0; }
 .cmp2-list { margin: 0; padding: 0; list-style: none; }
 .cmp2-list > li + li { border-top: 1px solid var(--paper-line-soft); }
 .cmp2-row {
@@ -10536,9 +10541,9 @@ div.matchup-result {
   overflow: hidden;
   background: var(--surface-sunken);
 }
-.cmp2-face .player-face { width: 32px; height: 32px; }
-.cmp2-face-team img { width: 26px; height: 26px; }
-.cmp2-row-status { margin-left: 4px; font-size: 0.7rem; font-weight: 700; color: var(--paper-warn); }
+.cmp2-face { width: var(--cmp-face, 32px); height: var(--cmp-face, 32px); }
+.cmp2-face .player-face { width: var(--cmp-face, 32px); height: var(--cmp-face, 32px); }
+.cmp2-face-team img { width: calc(var(--cmp-face, 32px) * 0.8); height: calc(var(--cmp-face, 32px) * 0.8); }
 .cmp2-row-meta {
   display: flex;
   align-items: center;
@@ -10610,7 +10615,8 @@ div.matchup-result {
   min-width: 0;
 }
 /* Four cards are too narrow to spare the room: no face there, the name and score win. */
-.cmp2-cols-wide .cmp2-col-scoreline .cmp2-face { display: none; }
+/* Four cards: the photo sits above the score, since the score needs the whole width. */
+.cmp2-cols-wide .cmp2-col-scoreline { flex-direction: column-reverse; align-items: flex-start; gap: 4px; }
 .cmp2-col-meta { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .cmp2-col-name {
   max-width: 100%;
@@ -11306,3 +11312,51 @@ div.matchup-result {
   color: var(--text-faint);
   white-space: nowrap;
 }
+
+/*
+ * Compare's header, one row (16 October 2026): title and week, the list's
+ * action, and an X in place of Done. The X is a 44px target; the glyph is 18px.
+ */
+.sheet-close-x {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sheet-close-x:active { transform: scale(0.96); }
+.sheet-close-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/*
+ * The list's action, as a real button the same height and corner as the X
+ * beside it (16 October 2026): tinted for + Add and Hide list, solid for
+ * Compare, the one tap that shows the answer.
+ */
+.sheet-compare .sheet-header .cmp2-add {
+  margin: 0 0 0 auto;
+  height: var(--tap);
+  padding: 0 var(--sp-4);
+  border-radius: 12px;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  font-weight: 650;
+}
+.sheet-compare .sheet-header .cmp2-add-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.sheet-compare .sheet-header .cmp2-add:active { transform: scale(0.96); }
+.sheet-compare .sheet-header .cmp2-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/*
+ * The Sleeper-only second choice: a dashed grey outline and grey words, no
+ * check and no green, so it can never be read as a second Start.
+ */
+.cmp2-col-second { border: 1px dashed var(--text-faint); }

@@ -17,7 +17,7 @@ import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestur
 import { useOverlay } from '../overlay.ts';
 import { HANDLE_ATTRIBUTE, useSheetDrag } from '../sheetDrag.ts';
 import { useKeyboardInset } from '../viewport.ts';
-import { BackChevronIcon, ChevronIcon, DisclosureChevronIcon } from './icons.tsx';
+import { BackChevronIcon, ChevronIcon, CloseIcon, DisclosureChevronIcon } from './icons.tsx';
 
 /* ---------------------------------------------------------- navigation bar */
 
@@ -513,6 +513,8 @@ export function Sheet({
   children,
   testId,
   className,
+  close = 'done',
+  headerAction,
 }: {
   title: ReactNode;
   /**
@@ -529,6 +531,14 @@ export function Sheet({
   testId?: string;
   /** An extra class on the card, for a sheet that re-values the palette's roles. */
   className?: string;
+  /**
+   * How the header closes the sheet: the word `Done` (every sheet until
+   * October 2026) or an X with the accessible name "Close" (Compare, 16
+   * October 2026). Escape, a tap outside and a swipe down work either way.
+   */
+  close?: 'done' | 'x';
+  /** One control in the header row, before the close button, so a sheet keeps a one-row header. */
+  headerAction?: ReactNode;
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
@@ -574,9 +584,16 @@ export function Sheet({
         <div className="sheet-grip" aria-hidden="true" data-testid="sheet-grip" {...{ [HANDLE_ATTRIBUTE]: '' }} />
         <div className="sheet-header" {...{ [HANDLE_ATTRIBUTE]: '' }}>
           <div className="sheet-title">{title}</div>
-          <button type="button" className="btn btn-sm" onClick={dismiss} data-testid="sheet-close">
-            Done
-          </button>
+          {headerAction}
+          {close === 'x' ? (
+            <button type="button" className="sheet-close-x" onClick={dismiss} data-testid="sheet-close" aria-label="Close">
+              <CloseIcon size={18} />
+            </button>
+          ) : (
+            <button type="button" className="btn btn-sm" onClick={dismiss} data-testid="sheet-close">
+              Done
+            </button>
+          )}
         </div>
         <div className="sheet-body">{children}</div>
       </div>

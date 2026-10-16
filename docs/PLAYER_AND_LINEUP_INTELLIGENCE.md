@@ -423,3 +423,25 @@ fails if two of them disagree.
   13 October was weeks 1 to 4; week 5 raised both. On Alex's roster the
   largest moves were +0.50 (Love, Bijan), +0.45 (Walker), +0.36 (Collins),
   +0.33 (Pickens); Best move did not change.
+
+### 16 October 2026: Compare follow-ups from the phone check
+
+- **Winner rule** (`core/startsit/completeFirst.ts`, inside `compareStartSit`):
+  when a comparison mixes complete Vegas markets with Sleeper-only numbers,
+  only a complete, healthy player can be the pick. The best Sleeper-only player
+  above him is returned as `sleeperOnly` and drawn as a second choice: dashed
+  grey outline, a grey number and "Sleeper only" (Alex: that is enough), no
+  check and no green. All complete or all Sleeper-only: unchanged. Scores are
+  unchanged, so the engine stays `startsit@6`.
+- **The Team lineup does not use this rule.** It ranks a Sleeper-only player
+  at his number less `BORROWED_RANKING_DISCOUNT` (2 points, `lineup.ts`), so a
+  Sleeper-only player more than 2 points ahead can still take a slot and lead
+  Best move, while Compare on the same pair would now start the Vegas player.
+- **Sheet:** Compare's header is one row: title and week, the list's action
+  (+ Add, Hide list, Compare) and an X (`Sheet close="x"`, 44px, "Close").
+  Every other sheet keeps Done; the option is there for them.
+- **Picker:** no preview of the answer while choosing; 8px between sections;
+  the first tab reads "My team".
+- **Cards:** photos 60px for two players, 46px for three, 36px for four (above
+  the score). Chips: three or four share the row; the number moves under the
+  name and the whole chip is the remove target, so nothing is cut off at 360px.
