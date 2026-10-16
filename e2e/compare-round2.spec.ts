@@ -170,3 +170,53 @@ test('Matchup rows stay aligned with a marked fallback number, and no "Sleeper" 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+/* Alex's phone check after round 2: the × on three or four chips sits where it does on two. */
+test('the × on every chip is centred top to bottom, at its right edge, at one size for 2 to 4 players', async ({ page }) => {
+  const xSizes: number[] = [];
+  for (const count of [2, 3, 4]) {
+    await openCompare(page);
+    await compareRunningBacksAndTightEnds(page, count);
+    for (const chip of await page.getByTestId('compare-chosen').all()) {
+      const box = (await chip.boundingBox())!;
+      const mark = (await chip.locator('.cmp2-chip-x [aria-hidden="true"]').boundingBox())!;
+      const name = (await chip.locator('.cmp2-chip-name').boundingBox())!;
+      expect(Math.abs(mark.y + mark.height / 2 - (box.y + box.height / 2)), `${count} chips: × centred top to bottom`).toBeLessThanOrEqual(1.5);
+      expect(box.x + box.width - (mark.x + mark.width), `${count} chips: × at the right edge`).toBeLessThanOrEqual(14);
+      expect(mark.x, `${count} chips: × clear of the name`).toBeGreaterThanOrEqual(name.x + name.width);
+      xSizes.push(Math.round(mark.height));
+    }
+  }
+  expect(new Set(xSizes).size, 'one × size whatever the count').toBe(1);
+});
+
+/* Alex's phone check after round 2: once Compare shows, the chips read in the cards' order. */
+test('after Compare the chips follow the ranking, however they were chosen', async ({ page }) => {
+  await openCompare(page);
+  await page.getByTestId('compare-tab-all').click();
+  await expect(page.getByTestId('compare-candidate').first()).toBeVisible();
+  await page.waitForTimeout(250);
+  // Choose three lowest first, so the order chosen is not the ranked order.
+  const ids = (await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(2, 5).map((e) => e.getAttribute('data-player-id')!))).reverse();
+  for (const id of ids) {
+    const row = page.locator(`[data-testid="compare-candidate"][data-player-id="${id}"]`);
+    await row.click();
+    await expect(row).toHaveAttribute('data-chosen', 'true');
+  }
+  const chips = () => page.getByTestId('compare-chosen').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+  const cards = () => page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')));
+  // While choosing, the chips stay in the order he tapped them.
+  expect(await chips()).toEqual(ids);
+
+  await page.getByTestId('compare-add').click();
+  await expect(page.getByTestId('comparison')).toBeVisible();
+  await page.waitForTimeout(400);
+  const ranked = await cards();
+  expect(ranked).not.toEqual(ids);
+  await expect.poll(chips).toEqual(ranked);
+  await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveAttribute('data-player-id', ranked[0]!);
+
+  // Reopening the list keeps that order.
+  await page.getByTestId('compare-add').click();
+  expect(await chips()).toEqual(ranked);
+});
