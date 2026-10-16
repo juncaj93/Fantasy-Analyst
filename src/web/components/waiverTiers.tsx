@@ -15,11 +15,15 @@ import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
 import { PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 import { BestDrops, clearDay } from './waivers.tsx';
+import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN } from '../sleeperFallback.ts';
 
-/** Where a week's number came from, short enough for a phone row. */
-const WEEK_SOURCE_SHORT: Record<WeekSource, string> = {
+/**
+ * Where a week's number came from, short enough for a phone row. A Sleeper
+ * week has no word: its number wears the shared fallback marker instead
+ * (16 October 2026).
+ */
+const WEEK_SOURCE_SHORT: Record<Exclude<WeekSource, 'sleeper'>, string> = {
   this_week: 'this week',
-  sleeper: 'Sleeper',
   current: 'this week’s number',
 };
 
@@ -254,7 +258,17 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
                 {row.weekNumbers.map((n, k) => (
                   <span key={n.week}>
                     {k > 0 ? ' · ' : ''}
-                    Wk {n.week} {n.points.toFixed(1)} <span className="faint">{WEEK_SOURCE_SHORT[n.source]}</span>
+                    Wk {n.week}{' '}
+                    {n.source === 'sleeper' ? (
+                      <span className={SLEEPER_NUM_CLASS}>
+                        {n.points.toFixed(1)}
+                        <span className="sr-only">, {SLEEPER_SPOKEN}</span>
+                      </span>
+                    ) : (
+                      <>
+                        {n.points.toFixed(1)} <span className="faint">{WEEK_SOURCE_SHORT[n.source]}</span>
+                      </>
+                    )}
                   </span>
                 ))}
               </dd>

@@ -221,9 +221,23 @@ test.describe('the tiers the deployment computes', () => {
   test('says each week’s number and where it came from, inside the phone', async ({ page }) => {
     await page.getByTestId('waiver-tier-row').first().click();
     const numbers = page.getByTestId('tier-detail').getByTestId('tier-detail-numbers');
-    /* Three weeks, each with its number and its source. */
-    const source = '(this week|Sleeper|this week’s number)';
-    await expect(numbers).toHaveText(new RegExp(`^His numbersWk \\d+ \\d+\\.\\d ${source}( · Wk \\d+ \\d+\\.\\d ${source}){2}$`));
+    /*
+     * Three weeks, each with its number and its source. A Sleeper week has no
+     * word since 16 October 2026: its number wears the fallback marker, and
+     * the words are for a screen reader (they are in the text, not drawn).
+     */
+    const week = '\\d+\\.\\d(, Sleeper projection| this week| this week’s number)';
+    await expect(numbers).toHaveText(new RegExp(`^His numbersWk \\d+ ${week}( · Wk \\d+ ${week}){2}$`));
+    for (const marked of await numbers.locator('.num-sleeper').all()) {
+      await expect(marked.locator('.sr-only')).toHaveText(', Sleeper projection');
+      expect(await marked.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
+    }
+    const drawn = await numbers.evaluate((el) => {
+      const copy = el.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('.sr-only').forEach((n) => n.remove());
+      return copy.textContent ?? '';
+    });
+    expect(drawn, 'no "Sleeper" drawn beside a number').not.toMatch(/sleeper/i);
     const box = (await numbers.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);

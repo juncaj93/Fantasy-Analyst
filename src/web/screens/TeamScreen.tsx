@@ -40,7 +40,6 @@ import {
   InjuryTag,
   Notice,
   PlayerIdentity,
-  SleeperTag,
   TeamLogo,
   positionAccentClass,
 } from '../components/common.tsx';
@@ -1795,11 +1794,15 @@ function LineupCard({
     return week.out ? 'Out' : fmt(week.points);
   };
   const spoken = (id: string) => `${pts(id)}${weekIsSleeper(weekOf(id)) ? ` (${SLEEPER_SPOKEN})` : ''}`;
-  /* The same figure on the card, grey with `Sleeper` beside it when it is Sleeper's week. */
+  /*
+   * The same figure as the rows below: on Sleeper's week it wears the shared
+   * fallback marker and no word (16 October 2026); a screen reader hears it.
+   */
   const num = (id: string) =>
     weekIsSleeper(weekOf(id)) ? (
-      <span className="best-move-num">
-        <span className={SLEEPER_NUM_CLASS}>{pts(id)}</span> <SleeperTag />
+      <span className={SLEEPER_NUM_CLASS} data-testid="best-move-num">
+        {pts(id)}
+        <span className="sr-only">, {SLEEPER_SPOKEN}</span>
       </span>
     ) : (
       pts(id)
