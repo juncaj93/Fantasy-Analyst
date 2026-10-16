@@ -10240,15 +10240,6 @@ div.matchup-result {
   --surface: var(--bg);
 }
 
-/* `Done` as the mockup draws it: a word in the accent colour, still a full tap target. */
-.sheet-compare .sheet-header .btn {
-  background: none;
-  color: var(--paper-blue);
-  font-weight: 500;
-  min-height: var(--tap);
-  padding: 0 var(--sp-2);
-  border-radius: var(--radius-pill);
-}
 
 .cmp-title {
   display: flex;
@@ -10275,13 +10266,6 @@ div.matchup-result {
   color: var(--paper-faint);
 }
 
-.cmp-eyebrow {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--paper-faint);
-}
 
 /* ======================================================== check a trade */
 /*
@@ -10560,7 +10544,6 @@ div.matchup-result {
 .cmp2-face { width: var(--cmp-face, 32px); height: var(--cmp-face, 32px); }
 .cmp2-face .player-face { width: var(--cmp-face, 32px); height: var(--cmp-face, 32px); }
 .cmp2-face-team img { width: calc(var(--cmp-face, 32px) * 0.8); height: calc(var(--cmp-face, 32px) * 0.8); }
-.cmp2-row-status { margin-left: 4px; font-size: 0.7rem; font-weight: 700; color: var(--paper-warn); }
 .cmp2-row-meta {
   display: flex;
   align-items: center;
@@ -11377,10 +11360,3 @@ div.matchup-result {
  * check and no green, so it can never be read as a second Start.
  */
 .cmp2-col-second { border: 1px dashed var(--text-faint); }
-.cmp2-second-tag {
-  font-size: 0.62rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  color: var(--text-faint);
-  white-space: nowrap;
-}

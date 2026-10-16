@@ -501,7 +501,7 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
               <span className="cmp2-col-slot" data-testid="compare-slot-pill">
                 {sleeperOnly ? (
-                  <span className="cmp2-second-tag" data-testid="compare-sleeper-only">
+                  <span className="sleeper-tag" data-testid="compare-sleeper-only">
                     Sleeper only
                   </span>
                 ) : sleeper ? (
