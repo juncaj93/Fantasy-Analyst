@@ -41,4 +41,11 @@ describe('the verdict line', () => {
       /mostly on the published projection\.$/,
     );
   });
+
+  it('names a Sleeper-only player ahead of the pick without recommending him (16 October 2026)', () => {
+    const wilson = player('w', 'Garrett Wilson', 'market', 12, 12.2);
+    const mcconkey = player('m', 'Ladd McConkey', 'published', 13.8, 13.8);
+    const c = { ...comparison(wilson, mcconkey), sleeperOnly: { playerId: 'm', name: 'Ladd McConkey', aheadBy: 1.6 } } as StartSitComparison;
+    expect(verdictLine(c)).toBe('Start G. Wilson. L. McConkey projects higher on Sleeper only (no Vegas lines yet).');
+  });
 });

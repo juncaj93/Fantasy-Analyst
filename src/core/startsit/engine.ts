@@ -45,6 +45,7 @@ import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
 import { tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
+import { completeFirst, type SleeperOnlyNote } from './completeFirst.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -321,6 +322,11 @@ export interface StartSitComparison {
    * tenths ahead: the pill, the posture and the one-line reason.
    */
   tiebreak?: TiebreakNote;
+  /**
+   * The best Sleeper-only player, when he projects above the pick: shown as a
+   * second choice, never recommended. See `completeFirst.ts`.
+   */
+  sleeperOnly?: SleeperOnlyNote;
   /**
    * Whether the top two were priced on the same markets at all.
    *
@@ -1129,7 +1135,13 @@ export function compareStartSit(
     };
   }
 
-  const sorted = [...scored].sort((a, b) => pointsOf(b) - pointsOf(a) || a.name.localeCompare(b.name));
+  const ranked = [...scored].sort((a, b) => pointsOf(b) - pointsOf(a) || a.name.localeCompare(b.name));
+  /*
+   * A complete market leads a Sleeper-only number (16 October 2026): when the
+   * group mixes the two, only a complete player can be the pick, and the best
+   * Sleeper-only player ahead of him is named instead. See `completeFirst.ts`.
+   */
+  const { order: sorted, sleeperOnly } = completeFirst(ranked);
   /*
    * The pill tie-break, the same rule the lineup applies: inside the close-call
    * band, the player whose week has the shape this matchup wants goes first.
@@ -1147,7 +1159,12 @@ export function compareStartSit(
   if (tiebreak) sorted.splice(0, 2, sorted[1]!, sorted[0]!);
   const best = sorted[0]!;
   const runnerUp = sorted[1];
-  const margin = runnerUp ? round2(pointsOf(best) - pointsOf(runnerUp)) : null;
+  /* Behind the pick on points, or there is no margin to speak of: a Sleeper-only player ahead is not one. */
+  const gap = runnerUp ? round2(pointsOf(best) - pointsOf(runnerUp)) : null;
+  const margin = gap != null && gap >= 0 ? gap : null;
+  if (sleeperOnly) {
+    reasons.push(`${sleeperOnly.name} projects ${sleeperOnly.aheadBy.toFixed(1)} higher on Sleeper only, with no complete Vegas market yet`);
+  }
   if (tiebreak) reasons.push(tiebreak.sentence);
 
   const missingVegas = evaluations.filter((e) => e.expectation.points == null);
@@ -1309,6 +1326,7 @@ export function compareStartSit(
     market,
     comparability,
     ...(tiebreak ? { tiebreak } : {}),
+    ...(sleeperOnly ? { sleeperOnly } : {}),
   };
 }
 

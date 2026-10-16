@@ -1330,6 +1330,11 @@ export interface StartSitComparison {
   margin: number | null;
   /** Set when the pill tie-break chose the recommendation. */
   tiebreak?: TiebreakNote;
+  /**
+   * The best Sleeper-only player, when he projects above the pick: a marked
+   * second choice that cannot win (16 October 2026). Absent from older workers.
+   */
+  sleeperOnly?: { playerId: string; name: string; aheadBy: number };
   confidence: string;
   reasons: string[];
   warnings: string[];

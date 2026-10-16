@@ -7,9 +7,9 @@
  *
  * Now, top to bottom:
  *
- *  1. **A pinned strip** of the chosen players (at most four) on one line
- *     that scrolls sideways, each with an X, and `+ Add` pinned at the right.
- *     It never scrolls away.
+ *  1. **A pinned strip** of the chosen players (at most four) on one line,
+ *     each with an X. `+ Add` sits in the header row beside the close X
+ *     (16 October 2026), so the chips have the whole width.
  *  2. **The verdict**: the players side by side with their score and the
  *     winner, and one line saying why. Each card keeps two fixed chip slots,
  *     the pill and availability, so a chip never moves the layout.
@@ -18,7 +18,7 @@
  *     row shows the engine's own sentence for each player. Factors that moved
  *     nobody are not shown, and availability is the card's chip, not a row.
  *     With four players the table scrolls sideways and its labels stay put.
- *  4. **The picker**, when open: My roster, Waivers or All players, sorted by
+ *  4. **The picker**, when open: My team, Waivers or All players, sorted by
  *     this week's number, highest first. A tap adds, a second tap removes, and
  *     the list stays open for quick swaps.
  *
@@ -39,7 +39,7 @@ import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
 import { compareTable } from '../compareTable.ts';
 import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 
-/** Two or three fit a 360px phone; four scroll sideways. Matched by the server. */
+/** Up to four fit a 360px phone side by side. Matched by the server. */
 export const MAX_COMPARE = 4;
 
 type PoolTab = 'mine' | 'waivers' | 'all';
@@ -59,7 +59,7 @@ interface PoolRow {
 }
 
 const TABS: { id: PoolTab; label: string }[] = [
-  { id: 'mine', label: 'My roster' },
+  { id: 'mine', label: 'My team' },
   { id: 'waivers', label: 'Waivers' },
   { id: 'all', label: 'All players' },
 ];
@@ -209,6 +209,23 @@ export function CompareSheet({
     .filter(Boolean)
     .join(' · ');
 
+  /*
+   * One header row (16 October 2026): the title and week, the list's one
+   * action, and the X. The action used to sit at the end of the chip row,
+   * under Done, which made the header two rows tall and squeezed the chips.
+   */
+  const action = (
+    <button
+      type="button"
+      className="cmp2-add"
+      data-testid="compare-add"
+      aria-expanded={pickerOpen}
+      onClick={() => setPickerOpen((open) => !open)}
+    >
+      {pickerOpen ? (ids.length >= 2 ? 'Compare' : 'Hide list') : '+ Add'}
+    </button>
+  );
+
   return (
     <Sheet
       title={
@@ -221,16 +238,24 @@ export function CompareSheet({
       className="sheet-compare"
       onClose={onClose}
       testId="compare-sheet"
+      close="x"
+      headerAction={action}
     >
-      {/* 1. The strip: pinned to the top of the sheet's scroll. */}
-      <div className="cmp2-strip" data-testid="compare-strip">
-        <ul className="cmp2-chips" aria-label="Players being compared" data-testid="compare-chips">
+      {/* 1. The strip: pinned to the top of the sheet's scroll. Up to four chips share its width. */}
+      <div className="cmp2-strip" data-testid="compare-strip" hidden={ids.length === 0}>
+        <ul
+          className={ids.length >= 3 ? 'cmp2-chips cmp2-chips-tight' : 'cmp2-chips'}
+          aria-label="Players being compared"
+          data-testid="compare-chips"
+        >
           {ids.map((id) => (
             <li key={id} className="cmp2-chip" data-testid="compare-chosen" data-player-id={id}>
+              <span className="cmp2-chip-text">
               <span className="cmp2-chip-name">{lastName(names[id] ?? id)}</span>
               <span className={sleeperClass('cmp2-chip-pts', weekIsSleeper(weekOf(id)))}>
                 {weekText(weekOf(id))}
                 {weekIsSleeper(weekOf(id)) ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
+              </span>
               </span>
               <button
                 type="button"
@@ -244,15 +269,6 @@ export function CompareSheet({
             </li>
           ))}
         </ul>
-        <button
-          type="button"
-          className="cmp2-add"
-          data-testid="compare-add"
-          aria-expanded={pickerOpen}
-          onClick={() => setPickerOpen((open) => !open)}
-        >
-          {pickerOpen ? (ids.length >= 2 ? 'Compare' : 'Hide list') : '+ Add'}
-        </button>
       </div>
 
       {notice ? (
@@ -278,8 +294,6 @@ export function CompareSheet({
           rows={rows}
           chosen={ids}
           onToggle={toggle}
-          verdict={comparison && ids.length >= 2 ? verdictLine(comparison) : null}
-          onSeeComparison={() => setPickerOpen(false)}
         />
       ) : ids.length < 2 ? (
         <p className="cmp2-empty" data-testid="compare-empty">
@@ -310,8 +324,6 @@ function Picker({
   rows,
   chosen,
   onToggle,
-  verdict,
-  onSeeComparison,
 }: {
   tab: PoolTab;
   onTab: (tab: PoolTab) => void;
@@ -323,17 +335,10 @@ function Picker({
   rows: PoolRow[] | null;
   chosen: string[];
   onToggle: (row: PoolRow) => void;
-  verdict: string | null;
-  onSeeComparison: () => void;
 }) {
+  /* No preview of the answer while choosing (16 October 2026): it resized the sheet under the finger. */
   return (
     <section className="cmp2-picker" aria-label="Choose players" data-testid="compare-picker">
-      {verdict ? (
-        <button type="button" className="cmp2-mini-verdict" data-testid="compare-mini-verdict" onClick={onSeeComparison}>
-          <span>{verdict}</span>
-          <span aria-hidden="true">›</span>
-        </button>
-      ) : null}
       <SegmentedControl
         label="Which players"
         value={tab}
@@ -418,9 +423,10 @@ function Picker({
 function rankedColumns(comparison: StartSitComparison): StartSitEvaluation[] {
   const points = (e: StartSitEvaluation) => weekPointsOf(e).points ?? -Infinity;
   const pick = comparison.recommendedPlayerId;
-  return [...comparison.evaluations].sort((a, b) =>
-    a.playerId === pick ? -1 : b.playerId === pick ? 1 : points(b) - points(a),
-  );
+  /* The pick, then the Sleeper-only second choice beside him, then everybody by number. */
+  const second = comparison.sleeperOnly?.playerId ?? null;
+  const rank = (e: StartSitEvaluation) => (e.playerId === pick ? 0 : e.playerId === second ? 1 : 2);
+  return [...comparison.evaluations].sort((a, b) => rank(a) - rank(b) || points(b) - points(a));
 }
 
 /** The one line under the verdict: the tie-break's sentence, or the gap and where it came from. */
@@ -430,6 +436,10 @@ export function verdictLine(comparison: StartSitComparison): string {
   const columns = rankedColumns(comparison);
   const pick = columns.find((e) => e.playerId === comparison.recommendedPlayerId) ?? null;
   if (!pick) return 'Not enough to choose between them.';
+  /* A Sleeper-only player ahead of the pick is named, not recommended (16 October 2026). */
+  if (comparison.sleeperOnly) {
+    return `Start ${shortName(pick.name)}. ${shortName(comparison.sleeperOnly.name)} projects higher on Sleeper only (no Vegas lines yet).`;
+  }
   if (comparison.tiebreak) return comparison.tiebreak.sentence;
   const next = columns.find((e) => e.playerId !== pick.playerId) ?? null;
   const a = weekPointsOf(pick).points;
@@ -453,6 +463,9 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
   const comparable = comparison.slot?.comparable ?? true;
   const pick = comparable ? comparison.recommendedPlayerId : null;
+  const second = comparable ? comparison.sleeperOnly ?? null : null;
+  /* Photos scale with the room each card has: large for two, medium for three, small for four. */
+  const faceSize = columns.length <= 2 ? 60 : columns.length === 3 ? 46 : 36;
   return (
     <section className="cmp2-verdict" aria-label="Verdict" data-testid="comparison" data-columns={columns.length}>
       <ul
@@ -463,13 +476,15 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
           const week = weekPointsOf(e);
           const sleeper = weekIsSleeper(week);
           const lead = e.playerId === pick;
+          const sleeperOnly = second?.playerId === e.playerId ? second : null;
           return (
             <li
               key={e.playerId}
-              className={lead ? 'cmp2-col cmp2-col-lead' : 'cmp2-col'}
+              className={lead ? 'cmp2-col cmp2-col-lead' : sleeperOnly ? 'cmp2-col cmp2-col-second' : 'cmp2-col'}
               data-testid="compare-column"
               data-player-id={e.playerId}
               data-pick={lead ? 'true' : 'false'}
+              data-second={sleeperOnly ? 'true' : undefined}
             >
               <span className="cmp2-col-name">{shortName(e.name)}</span>
               <span className="cmp2-col-meta">
@@ -481,11 +496,15 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
                   {weekText(week)}
                   {sleeper ? <span className="sr-only">, {SLEEPER_SPOKEN}</span> : null}
                 </span>
-                <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} />
+                <CompactFace playerId={e.playerId} name={e.name} position={e.position} team={e.team} size={faceSize} />
               </span>
               {/* Two fixed slots, always drawn, so a chip never moves the layout. */}
               <span className="cmp2-col-slot" data-testid="compare-slot-pill">
-                {sleeper ? (
+                {sleeperOnly ? (
+                  <span className="cmp2-second-tag" data-testid="compare-sleeper-only">
+                    Sleeper only
+                  </span>
+                ) : sleeper ? (
                   <SleeperTag />
                 ) : (
                   <PillChip pill={e.pill} />
@@ -497,6 +516,11 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               {lead ? (
                 <span className="cmp2-start">
                   <CheckIcon size={12} /> Start
+                </span>
+              ) : sleeperOnly ? (
+                /* Grey words, no check and no green: it must never read as a second Start. */
+                <span className="cmp2-second" data-testid="compare-second-choice">
+                  +{sleeperOnly.aheadBy.toFixed(1)} on Sleeper, no Vegas lines yet
                 </span>
               ) : null}
             </li>
