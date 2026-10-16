@@ -1805,7 +1805,12 @@ test.describe('the season features', () => {
             pill: at('.pos-pill', 'left'),
             name: at('.player-name', 'left'),
             value: at('.proj', 'right'),
-            text: (row.querySelector('.proj')?.textContent ?? '').trim(),
+            /* What is drawn: a Sleeper fallback also carries words for a screen reader only. */
+            text: [...(row.querySelector('.proj')?.childNodes ?? [])]
+              .filter((n) => !(n instanceof Element && n.classList.contains('sr-only')))
+              .map((n) => n.textContent ?? '')
+              .join('')
+              .trim(),
           };
         }),
       );
