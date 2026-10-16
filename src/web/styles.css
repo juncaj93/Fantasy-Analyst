@@ -9990,23 +9990,27 @@ div.matchup-result {
 .cmp2-chip-text { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
 /*
  * Three or four chips share the row equally (16 October 2026): the number
- * moves under the name and the X shrinks, so nothing is cut off at 360px. A
+ * moves under the name and the X sits at the right edge, so nothing is cut off at 360px. A
  * very long surname wraps rather than being clipped.
  */
+.cmp2-chips-tight { gap: 4px; }
 .cmp2-chips-tight > .cmp2-chip {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
   height: auto;
   min-height: 34px;
-  padding: 3px 8px;
+  padding: 3px 17px 3px 7px;
   border-radius: 12px;
   font-size: 0.72rem;
 }
 .cmp2-chips-tight .cmp2-chip-text { flex-direction: column; align-items: flex-start; gap: 0; flex: 1; min-width: 0; line-height: 1.15; }
 .cmp2-chips-tight .cmp2-chip-name { max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
 .cmp2-chips-tight .cmp2-chip-pts { font-size: 0.68rem; }
-/* The whole chip removes him: a 44px-tall target over the chip, its × drawn on the number's line. */
+/*
+ * The whole chip removes him: a 44px-tall target over the chip, its × the same
+ * size as on two chips and centred top to bottom in the chip's right edge.
+ */
 .cmp2-chips-tight .cmp2-chip-x {
   position: absolute;
   inset: -5px 0;
@@ -10015,10 +10019,9 @@ div.matchup-result {
   min-width: 0;
   min-height: var(--tap);
   margin: 0;
-  padding: 0 8px 9px 0;
-  align-items: flex-end;
+  padding: 0 6px 0 0;
+  align-items: center;
   justify-content: flex-end;
-  font-size: 0.62rem;
 }
 .cmp2-chip-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 7.5em; }
 .cmp2-chip-pts { color: var(--paper-dim); font-variant-numeric: tabular-nums; }
