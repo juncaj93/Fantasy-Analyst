@@ -430,7 +430,7 @@ fails if two of them disagree.
   when a comparison mixes complete Vegas markets with Sleeper-only numbers,
   only a complete, healthy player can be the pick. The best Sleeper-only player
   above him is returned as `sleeperOnly` and drawn as a second choice: dashed
-  grey outline, "Sleeper only", "+1.6 on Sleeper, no Vegas lines yet", no
+  grey outline, a grey number and "Sleeper only" (Alex: that is enough), no
   check and no green. All complete or all Sleeper-only: unchanged. Scores are
   unchanged, so the engine stays `startsit@6`.
 - **The Team lineup does not use this rule.** It ranks a Sleeper-only player

@@ -11341,16 +11341,36 @@ div.matchup-result {
   justify-content: center;
   width: var(--tap);
   height: var(--tap);
-  margin-right: calc(-1 * var(--sp-2));
   padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: none;
+  border-radius: 12px;
+  background: var(--surface-sunken);
   color: var(--text-dim);
   cursor: pointer;
 }
-.sheet-close-x:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.sheet-compare .sheet-header .cmp2-add { margin: 0 0 0 auto; }
+.sheet-close-x:active { transform: scale(0.96); }
+.sheet-close-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/*
+ * The list's action, as a real button the same height and corner as the X
+ * beside it (16 October 2026): tinted for + Add and Hide list, solid for
+ * Compare, the one tap that shows the answer.
+ */
+.sheet-compare .sheet-header .cmp2-add {
+  margin: 0 0 0 auto;
+  height: var(--tap);
+  padding: 0 var(--sp-4);
+  border-radius: 12px;
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  font-weight: 650;
+}
+.sheet-compare .sheet-header .cmp2-add-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.sheet-compare .sheet-header .cmp2-add:active { transform: scale(0.96); }
+.sheet-compare .sheet-header .cmp2-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /*
  * The Sleeper-only second choice: a dashed grey outline and grey words, no
@@ -11363,10 +11383,4 @@ div.matchup-result {
   letter-spacing: 0.02em;
   color: var(--text-faint);
   white-space: nowrap;
-}
-.cmp2-second {
-  font-size: 0.66rem;
-  font-weight: 600;
-  line-height: 1.2;
-  color: var(--text-faint);
 }

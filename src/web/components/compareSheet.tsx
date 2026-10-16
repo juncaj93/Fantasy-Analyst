@@ -217,7 +217,7 @@ export function CompareSheet({
   const action = (
     <button
       type="button"
-      className="cmp2-add"
+      className={pickerOpen && ids.length >= 2 ? 'cmp2-add cmp2-add-primary' : 'cmp2-add'}
       data-testid="compare-add"
       aria-expanded={pickerOpen}
       onClick={() => setPickerOpen((open) => !open)}
@@ -516,11 +516,6 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               {lead ? (
                 <span className="cmp2-start">
                   <CheckIcon size={12} /> Start
-                </span>
-              ) : sleeperOnly ? (
-                /* Grey words, no check and no green: it must never read as a second Start. */
-                <span className="cmp2-second" data-testid="compare-second-choice">
-                  +{sleeperOnly.aheadBy.toFixed(1)} on Sleeper, no Vegas lines yet
                 </span>
               ) : null}
             </li>

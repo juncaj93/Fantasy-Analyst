@@ -131,6 +131,10 @@ test('an X closes Compare, the header is one row, and the picker is tight', asyn
   expect(Math.abs(middle(add) - middle(title)), '+ Add / Hide list beside the title').toBeLessThanOrEqual(8);
   expect(Math.abs(middle(x) - middle(title)), 'the X beside the title').toBeLessThanOrEqual(8);
   expect(add.x + add.width).toBeLessThanOrEqual(x.x + 1);
+  // Both are real buttons with a box, the same height side by side.
+  const fill = (id: string) => sheet.getByTestId(id).evaluate((el) => getComputedStyle(el).backgroundColor);
+  for (const id of ['compare-add', 'sheet-close']) expect(await fill(id), `${id} has a filled box`).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(Math.abs(add.height - x.height)).toBeLessThanOrEqual(1);
 
   // About 8px between the picker's sections.
   const tabs = (await page.getByTestId('compare-tabs').boundingBox())!;
@@ -188,7 +192,9 @@ test('a Sleeper-only player ahead is a marked second choice, never a second Star
   const second = page.locator('[data-testid="compare-column"][data-second="true"]');
   await expect(second).toHaveCount(1);
   await expect(second.getByTestId('compare-sleeper-only')).toHaveText('Sleeper only');
-  await expect(second.getByTestId('compare-second-choice')).toHaveText('+1.6 on Sleeper, no Vegas lines yet');
+  // The grey number and "Sleeper only" are enough: no extra line about the gap.
+  await expect(second.getByTestId('compare-second-choice')).toHaveCount(0);
+  await expect(second.locator('.cmp2-col-score.num-sleeper')).toHaveCount(1);
   // Not a Start: no Start badge, no check, a dashed grey outline, not the pick's green one.
   await expect(second).toHaveAttribute('data-pick', 'false');
   await expect(second.locator('.cmp2-start')).toHaveCount(0);
