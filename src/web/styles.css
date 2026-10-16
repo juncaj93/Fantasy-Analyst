@@ -6375,9 +6375,7 @@ table.compact tr:last-child td {
 
 /*
  * A number this app did not compute: Rotowire's week, by way of Sleeper. It
- * wears the app-wide mark since 15 October 2026, the figure in grey with
- * `Sleeper` under it (`.num-sleeper`, `.sleeper-tag` at the end of this file),
- * where it used to wear a dotted rule.
+ * wears the app-wide marker, `.num-sleeper` at the end of this file.
  */
 
 /*
@@ -10862,15 +10860,6 @@ div.matchup-result {
 }
 .sheet-compare .num-sleeper,
 .cmp2-muted { color: var(--text-faint); }
-.sleeper-tag {
-  display: inline-block;
-  font-size: 0.62rem;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
 
 /*
  * Compare's header, one row (16 October 2026): title and week, the list's

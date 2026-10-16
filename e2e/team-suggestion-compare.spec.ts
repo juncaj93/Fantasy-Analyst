@@ -154,3 +154,61 @@ test.describe('the Team round of 30 September', () => {
     }
   });
 });
+
+/*
+ * Alex, 16 October 2026: Best move read "18.8 vs 5.3 Sleeper projected". The
+ * word is gone; the fallback number wears the same marker as the rows below,
+ * and the sentence stays on one line with its pill at every width.
+ */
+test('Best move marks a Sleeper number without the word, on one line with its pill', async ({ page }) => {
+  await inSeason(page);
+  await page.route('**/api/leagues/*/lineup', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const swap = { slot: 'FLEX', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1001', outName: 'Marcus Vance', gain: 13.5, reason: 'x' };
+    for (const group of ['starters', 'bench', 'undecidable']) {
+      body[group] = ((body[group] ?? []) as Record<string, unknown>[]).map((e) =>
+        e['playerId'] === '1001'
+          ? { ...e, decision: { points: 5.3, basis: 'published', base: 5.3, adjustments: 0 } }
+          : e['playerId'] === '1004'
+            ? { ...e, decision: { points: 18.8, basis: 'market', base: 18.1, adjustments: 0.7 }, pill: { pill: 'explosive', label: 'Explosive', reason: 'x' } }
+            : e,
+      );
+    }
+    await route.fulfill({ response, body: JSON.stringify({ ...body, swaps: [swap], fills: [] }) });
+  });
+  await page.goto('/');
+  await page.getByTestId('tab-team').click();
+  const line = page.getByTestId('best-move-points');
+  await expect(line).toBeVisible();
+
+  // What is drawn: no "Sleeper" anywhere on the line, and "vs 5.3 projected" reads straight through.
+  const drawn = await line.evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('.sr-only').forEach((n) => n.remove());
+    return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
+  });
+  expect(drawn).not.toMatch(/sleeper/i);
+  expect(drawn).toMatch(/^\d+\.\d vs 5\.3 projected/);
+
+  // The marker sits on the fallback number only, and a screen reader still hears it.
+  const marked = line.locator('.num-sleeper');
+  await expect(marked).toHaveCount(1);
+  await expect(marked).toContainText('5.3');
+  await expect(marked.locator('.sr-only')).toHaveText(', Sleeper projection');
+  expect(await marked.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
+  expect(await marked.evaluate((el) => getComputedStyle(el).textDecorationStyle)).toBe('dotted');
+  await expect(page.getByTestId('lineup-swap')).toHaveAttribute('aria-label', /5\.3 \(Sleeper projection\) projected/);
+
+  // One line: the numbers and the pill share a row, and the pill is whole.
+  const pill = line.locator('.pill-chip');
+  await expect(pill).toBeVisible();
+  const n = (await marked.boundingBox())!;
+  const p = (await pill.boundingBox())!;
+  const box = (await line.boundingBox())!;
+  expect(Math.abs(n.y + n.height / 2 - (p.y + p.height / 2)), 'pill on the numbers’ line').toBeLessThanOrEqual(4);
+  expect(box.height, 'the line does not wrap').toBeLessThan(p.height * 1.8);
+  expect(p.x + p.width, 'the pill is not cut off').toBeLessThanOrEqual(box.x + box.width + 0.5);
+  expect(await pill.evaluate((el) => el.scrollWidth - el.clientWidth), 'pill text whole').toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
