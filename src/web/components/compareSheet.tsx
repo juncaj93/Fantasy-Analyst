@@ -94,6 +94,7 @@ export function CompareSheet({
   nameOf,
   mode,
   posture,
+  note,
   onClose,
 }: {
   leagueId: string;
@@ -105,6 +106,11 @@ export function CompareSheet({
   mode: string | null;
   /** Underdog or favourite this week, for the pill tie-break on close calls. */
   posture: 'underdog' | 'favourite' | null;
+  /**
+   * Short lines from the Best move that opened this: the drop a pickup needs,
+   * or a free agent who ties. Drawn as the sheet's existing notice, one per line.
+   */
+  note?: readonly string[] | null;
   onClose: () => void;
 }) {
   const [ids, setIds] = useState<string[]>(() => [...new Set(seed)].slice(0, MAX_COMPARE));
@@ -292,6 +298,13 @@ export function CompareSheet({
         </ul>
       </div>
 
+      {note && note.length > 0
+        ? note.map((line) => (
+            <p key={line} className="cmp2-notice cmp2-note" data-testid="compare-best-move-note">
+              {line}
+            </p>
+          ))
+        : null}
       {notice ? (
         <p className="cmp2-notice" role="status" data-testid="compare-notice">
           {notice}

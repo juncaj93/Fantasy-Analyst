@@ -12,7 +12,7 @@ import type { EvidenceItem, EvidenceOverride, PlayerSignal, ReviewStatus } from 
 import type { ProposedEvidence } from '../../core/newsletter/pipeline.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 
-interface EvidenceRow {
+export interface EvidenceRow {
   id: number;
   dedupe_key: string;
   player_id: string;
@@ -34,7 +34,7 @@ interface EvidenceRow {
   created_at: string;
 }
 
-function toItem(row: EvidenceRow): EvidenceItem & { numericId: number } {
+export function toItem(row: EvidenceRow): EvidenceItem & { numericId: number } {
   return {
     numericId: row.id,
     id: String(row.id),

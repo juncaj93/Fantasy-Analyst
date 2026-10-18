@@ -10063,6 +10063,8 @@ div.matchup-result {
   outline-offset: -2px;
 }
 .cmp2-notice { margin: var(--sp-2) 0 0; font-size: 0.8rem; color: var(--paper-warn); }
+/* A line carried from Best move (a pickup's drop, a free agent who ties): information, not a warning. */
+.cmp2-note { color: var(--text-dim); }
 .cmp2-empty { margin: var(--sp-3) 2px; font-size: 0.85rem; color: var(--paper-dim); }
 
 /* Compare: the picker. */
@@ -10908,3 +10910,20 @@ div.matchup-result {
  * check and no green, so it can never be read as a second Start.
  */
 .cmp2-col-second { border: 1px dashed var(--text-faint); }
+
+/*
+ * Best move: pick up and start (18 October 2026). The numbers and at most two
+ * short chips share one line that never wraps; the chips are the app's mini
+ * tag, so they read as labels rather than controls.
+ */
+.best-move-pickup-metrics {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  white-space: nowrap;
+}
+.best-move-pickup-numbers { flex: 0 0 auto; }
+/* The sentence takes the whole line and never wraps: `useFittingText` shortens the names instead. */
+.best-move-row .best-move-pickup-names { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.best-move-chip { flex: 0 0 auto; }

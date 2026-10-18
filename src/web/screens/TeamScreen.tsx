@@ -23,7 +23,7 @@
  * every one of these is a sentence the user acts on in Sleeper, by hand.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   api,
   type LeagueSummary,
@@ -50,6 +50,7 @@ import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
+import type { PickupStartMove, PickupStartPlan } from '../../core/waivers/pickupStart.ts';
 import { orderPositions } from '../../core/sleeper/eligibility.ts';
 /*
  * `1.04` during the draft, `#8` afterwards — one rule, shared with the player
@@ -134,7 +135,17 @@ export function TeamScreen({
    */
   const [refreshing, setRefreshing] = useState(false);
   /** Open with the slot it was launched from, and whoever it was launched on. */
-  const [compare, setCompare] = useState<{ slot: string | null; seed: string[] } | null>(null);
+  /*
+   * Open with the slot it was launched from, and whoever it was launched on.
+   * A pickup from Best move also brings his name (he is not on the roster) and
+   * the sheet's short lines: his drop, or a free agent who ties.
+   */
+  const [compare, setCompare] = useState<{
+    slot: string | null;
+    seed: string[];
+    note?: string[];
+    names?: Record<string, string>;
+  } | null>(null);
   /** Which of your players the weekly card is open on. */
   const [weekly, setWeekly] = useState<{ playerId: string; context: WeeklyContext } | null>(null);
   /** Which waiver row's detail is open. */
@@ -554,7 +565,8 @@ export function TeamScreen({
                   weekOf={(id) => weekPointsOf(evaluations.get(id))}
                   pillOf={(id) => evaluations.get(id)?.pill}
                   evaluationOf={(id) => evaluations.get(id) ?? null}
-                  onOpen={(slot, seed) => setCompare({ slot, seed })}
+                  pickup={waivers?.found ? (waivers.pickupStart ?? null) : null}
+                  onOpen={(slot, seed, extra) => setCompare({ slot, seed, ...extra })}
                 />
               ) : null}
 
@@ -749,9 +761,10 @@ export function TeamScreen({
           rosterPositions={selected.rosterPositions}
           slot={compare.slot}
           seed={compare.seed}
-          nameOf={(id) => byId.get(id)?.name ?? id}
+          nameOf={(id) => compare.names?.[id] ?? byId.get(id)?.name ?? id}
           mode={lineup?.found ? (lineup.mode ?? null) : null}
           posture={postureFrom(lineup?.modeSuggestion?.margin)}
+          note={compare.note ?? null}
           onClose={() => setCompare(null)}
         />
       ) : null}
@@ -1765,6 +1778,7 @@ function LineupCard({
   weekOf,
   pillOf,
   evaluationOf,
+  pickup = null,
   onOpen,
 }: {
   lineup: LineupRecommendation;
@@ -1773,8 +1787,13 @@ function LineupCard({
   pillOf: (playerId: string) => StartSitEvaluation['pill'] | undefined;
   /** For the one-line warning when the player to start may not play. */
   evaluationOf: (playerId: string) => StartSitEvaluation | null;
-  /** Open the Compare sheet on this change's players, in its slot. */
-  onOpen: (slot: string, seed: string[]) => void;
+  /**
+   * The waiver scan's "pick up and start" call (`core/waivers/pickupStart.ts`),
+   * from the Waivers response Team already reads. Null: Best move as before.
+   */
+  pickup?: PickupStartPlan | null;
+  /** Open the Compare sheet on this change's players, in its slot, with any lines for the sheet. */
+  onOpen: (slot: string, seed: string[], extra?: { note?: string[]; names?: Record<string, string> }) => void;
 }) {
   /*
    * "Best move", since October 2026: the one place in the app that says who to
@@ -1787,6 +1806,14 @@ function LineupCard({
   const [best = null] = lineup.swaps;
   const [fill = null] = lineup.fills ?? [];
   const useFill = fill != null && (best == null || fill.gain >= best.gain);
+  /*
+   * Pick up and start (18 October 2026): a free agent who beats the best
+   * lineup the roster can already make leads, unless Sleeper has a slot
+   * empty, which is the more urgent line. The app never adds him.
+   */
+  const pick = !useFill && pickup?.start ? pickup.start : null;
+  /* A free agent who only ties is one line in the sheet, never the headline. */
+  const ties = (pickup?.consider ?? []).map((t) => `Tie on waivers: ${t.name}, ${fmt(t.points)}, free agent`);
   const risks = (lineup.lateSwapRisks ?? []).filter((r) => r.starting);
   /* A ruled-out player reads "Out", never the engine's gate value. */
   const pts = (id: string) => {
@@ -1829,14 +1856,16 @@ function LineupCard({
 
   return (
     <div className="best-move-card" data-testid="lineup-card">
-      {useFill ? (
+      {pick ? (
+        <PickupMoveRow pick={pick} head={head} weekOf={weekOf} num={num} spoken={spoken} onOpen={onOpen} />
+      ) : useFill ? (
         <button
           type="button"
           className="matchup-best-move best-move-row"
           data-testid="lineup-fill"
           data-seed={fill.inPlayerId}
           aria-label={`Best move: start ${fill.inName} at ${fill.slot}, empty in Sleeper, ${spoken(fill.inPlayerId)} projected.${warning ? ` ${warning}.` : ''} Compare.`}
-          onClick={() => onOpen(fill.slot, [fill.inPlayerId])}
+          onClick={() => onOpen(fill.slot, [fill.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
         >
           <span className="matchup-best-move-body">
             {head}
@@ -1859,7 +1888,7 @@ function LineupCard({
           data-seed={`${best.outPlayerId},${best.inPlayerId}`}
           data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
           aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${spoken(best.inPlayerId)} projected` : `${spoken(best.inPlayerId)} against ${spoken(best.outPlayerId)} projected`}.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
-          onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId])}
+          onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
         >
           <span className="matchup-best-move-body">
             {head}
@@ -1906,6 +1935,124 @@ function LineupCard({
       ))}
     </div>
   );
+}
+
+/**
+ * `Pick up and start Jaleel McLaughlin over Emeka Egbuka`, `7.6 vs 6.7 projected`.
+ *
+ * Best move's own row, in its own grammar, for a free agent who beats every
+ * lineup the roster can already make (`core/waivers/pickupStart.ts`). Two
+ * chips at most, only when they are true: `Starter out` when his club's
+ * starter at his position is Out or Doubtful, and `drop X` when the roster is
+ * full. Tapping opens Compare on him and the player he sits; the sheet says
+ * the drop in full. Nothing here adds anybody: the add is made in Sleeper.
+ */
+function PickupMoveRow({
+  pick,
+  head,
+  weekOf,
+  num,
+  spoken,
+  onOpen,
+}: {
+  pick: PickupStartMove;
+  head: ReactNode;
+  weekOf: (playerId: string) => WeekPoints;
+  num: (playerId: string) => ReactNode;
+  spoken: (playerId: string) => string;
+  onOpen: (slot: string, seed: string[], extra?: { note?: string[]; names?: Record<string, string> }) => void;
+}) {
+  const over = pick.over;
+  /* His number is a full Vegas read by rule; the incumbent's is the Team row's own figure. */
+  const overKnown = over != null && (weekOf(over.playerId).points != null || weekOf(over.playerId).out);
+  const lastName = (name: string) => name.split(' ').slice(1).join(' ') || name;
+  const dropChip = pick.drop ? (pick.drop.viaReserve ? `${lastName(pick.drop.name)} to IR` : `drop ${lastName(pick.drop.name)}`) : null;
+  const sheet: string[] = [
+    `${pick.name} is a free agent: add him in Sleeper. +${pick.gain.toFixed(2)} pts on your best lineup this week.`,
+    ...(pick.drop
+      ? [pick.drop.viaReserve ? `Your roster is full: move ${pick.drop.name} to IR first.` : `Your roster is full: drop ${pick.drop.name} to add him.`]
+      : []),
+    ...(pick.starterOut ? [`${pick.starterOut.name}, his team's starter, is out or doubtful.`] : []),
+  ];
+  const slot = pick.slot ?? pick.position;
+  const seed = [over?.playerId ?? pick.displaces?.playerId, pick.playerId].filter((id): id is string => id != null);
+  /* Full names when they fit on one line, then initials, then surnames: the line never wraps. */
+  const initial = (name: string) => (name.includes(' ') ? `${name[0]}. ${lastName(name)}` : name);
+  const sentence = (n: (name: string) => string) => `Pick up and start ${n(pick.name)}${over ? ` over ${n(over.name)}` : ''}`;
+  const names = useFittingText([sentence((n) => n), sentence(initial), sentence(lastName)]);
+  return (
+    <button
+      type="button"
+      className="matchup-best-move best-move-row"
+      data-testid="lineup-pickup"
+      data-seed={seed.join(',')}
+      aria-label={
+        `Best move: pick up and start ${pick.name}${over ? ` over ${over.name}` : ''} at ${slot}, ` +
+        `${fmt(pick.points)}${over && overKnown ? ` against ${spoken(over.playerId)}` : ''} projected.` +
+        `${pick.starterOut ? ` Starter out: ${pick.starterOut.name}.` : ''}` +
+        `${pick.drop ? (pick.drop.viaReserve ? ` Move ${pick.drop.name} to IR first.` : ` Drop ${pick.drop.name}.`) : ''}` +
+        ' Compare them.'
+      }
+      onClick={() => onOpen(slot, seed, { note: sheet, names: { [pick.playerId]: pick.name } })}
+    >
+      <span className="matchup-best-move-body">
+        {head}
+        <span className="matchup-best-move-swap">
+          <span className="matchup-best-move-names best-move-pickup-names" data-testid="best-move-pickup-names" ref={names.ref}>
+            {names.text}
+          </span>
+          <span className="matchup-best-move-slot">{slot}</span>
+        </span>
+        <span className="matchup-best-move-metrics best-move-pickup-metrics" data-testid="best-move-points">
+          <span className="best-move-pickup-numbers">
+            {fmt(pick.points)}
+            {over && overKnown ? <> vs {num(over.playerId)}</> : null} projected
+          </span>
+          {pick.starterOut ? (
+            <span className="tag tag-mini best-move-chip" data-testid="best-move-starter-out">
+              Starter out
+            </span>
+          ) : null}
+          {dropChip ? (
+            <span className="tag tag-mini best-move-chip" data-testid="best-move-drop">
+              {dropChip}
+            </span>
+          ) : null}
+        </span>
+      </span>
+      <span className="dense-chevron" aria-hidden="true">›</span>
+    </button>
+  );
+}
+
+/**
+ * The longest of `variants` that fits its element on one line, re-measured
+ * when the element's width changes. Measured with the element's own font on a
+ * canvas, which ignores the names' slight negative letter spacing and so errs
+ * toward the shorter variant, never toward a wrap.
+ */
+function useFittingText(variants: string[]) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [index, setIndex] = useState(0);
+  const key = variants.join('\n');
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const ctx = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+    if (!el || !ctx) return;
+    const measure = () => {
+      const style = getComputedStyle(el);
+      ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const room = el.clientWidth;
+      const fits = variants.findIndex((text) => ctx.measureText(text).width <= room);
+      setIndex(fits < 0 ? variants.length - 1 : fits);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [key]);
+  return { ref, text: variants[index] ?? variants[0] ?? '' };
 }
 
 function fmt(points: number | null): string {

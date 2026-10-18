@@ -37,7 +37,7 @@ import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
-import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION } from '../../core/roster/freeAgents.ts';
+import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION, publishedFreeAgentIds } from '../../core/roster/freeAgents.ts';
 import { AdpRepo, type AdpValue } from '../repos/adp.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
@@ -535,7 +535,13 @@ export async function gatherWaiverInputs(
    * On D1 a round trip is a network hop; the chain was most of the time this
    * screen took. Same reads, same answers, fewer waits.
    */
-  const [players, ranks, strategy, context, draft] = await Promise.all([
+  /*
+   * Sleeper's published week, read whole once and started with everything
+   * else: it orders the second half of the wire scan below and is scored for
+   * the yardstick further down, so the one read serves both.
+   */
+  const projections = new SleeperProjectionService(db, sleeper);
+  const [players, ranks, strategy, context, draft, storedWeek] = await Promise.all([
     new PlayerRepo(db).listAll(),
     /*
      * Read once and used twice: to bound the wire scan, and to say who this room
@@ -562,6 +568,7 @@ export async function gatherWaiverInputs(
      */
     buildStartSitContext(db),
     league.draftId ? new LeagueRepo(db).getDraft(league.draftId).catch(() => null) : Promise.resolve(null),
+    projections.storedWeek(league.season, week).catch(() => null),
   ]);
 
   /*
@@ -577,8 +584,26 @@ export async function gatherWaiverInputs(
     const p = players.find((x) => x.id === id);
     return p != null && p.active && (startable.size === 0 || startable.has(p.position));
   });
-  const candidateIds = [...scanned, ...inWindow];
   const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
+  /*
+   * And the best few at each position by this week's published number (18
+   * October 2026): the free agent whose week just changed, a backup whose
+   * starter was ruled Out, sits nowhere near the top of a draft order. Read for
+   * "pick up and start" (`core/waivers/pickupStart.ts`), from the stored week
+   * already in hand, so it costs no read of its own.
+   */
+  const wireIds = players
+    .filter((p) => p.active && !rosteredIds.has(p.id) && (startable.size === 0 || startable.has(p.position)))
+    .map((p) => p.id);
+  const byWeek = storedWeek
+    ? publishedFreeAgentIds(players, {
+        rosteredIds,
+        startable,
+        published: projections.scoredWithoutLines(storedWeek, profile, wireIds, (id) => positionOfId.get(id) ?? null),
+        exclude: new Set([...scanned, ...inWindow]),
+      })
+    : [];
+  const candidateIds = [...scanned, ...inWindow, ...byWeek];
 
   /*
    * The roster's inputs, and the depth chart read that needs them, as one
@@ -650,10 +675,11 @@ export async function gatherWaiverInputs(
      * Sleeper on a page load; a failure is an empty map, which leaves only fully
      * priced pairs comparable.
      */
-    new SleeperProjectionService(db, sleeper)
+    projections
       .publishedFor({
         season: league.season,
         week,
+        ...(storedWeek ? { stored: storedWeek } : {}),
         /*
          * Every rostered player too: the competition read asks whether each
          * rival's starters are weak enough that he needs the position. One

@@ -1542,6 +1542,55 @@ function seatable(positions: string[], slots: SlotSpec[]): number {
   return positions.filter((position) => tryAssign({ position }, slots, bySlot, new Set<number>())).length;
 }
 
+/** One player as {@link solveLineup} reads him: a position and a decision number. */
+export interface SolvablePlayer {
+  playerId: string;
+  name: string;
+  position: string;
+  /** The decision number (`decisionPoints`). */
+  points: number;
+  /** A Sleeper-only number: under Vegas first it ranks below every priced player. */
+  borrowed: boolean;
+  /** Seated before anyone else: a locked starter, or a player being tested in the lineup. */
+  forced?: boolean;
+}
+
+export interface SolvedLineup {
+  /** The decision numbers of the chosen players, summed. Never rounded. */
+  total: number;
+  /** Who starts, by slot label, in the league's slot order. */
+  slots: { slot: string; playerId: string }[];
+  starterIds: Set<string>;
+}
+
+/**
+ * The best legal lineup from a set of players, for a whole-lineup comparison.
+ *
+ * The same assignment {@link recommendLineup} makes under Vegas first, without
+ * the passes that only explain a lineup to a reader: players are taken in
+ * order (forced first, then priced by number, then Sleeper-only by number) and
+ * each is seated with {@link tryAssign}, which moves the players already seated
+ * between the slots that accept them. Sets of players a league can seat form a
+ * matroid, so that greedy order gives the best lineup there is, with every
+ * reshuffle (a receiver from FLEX to WR3 so a back can take FLEX) already in it.
+ *
+ * Used by the waiver "pick up and start" test (`waivers/pickupStart.ts`), which
+ * compares this lineup with a free agent and without him.
+ */
+export function solveLineup(players: readonly SolvablePlayer[], shape: RosterShape): SolvedLineup {
+  const slots = buildSlots(shape);
+  const key = (p: SolvablePlayer) => (p.forced ? 1e6 : 0) + p.points - (p.borrowed ? VEGAS_FIRST_OFFSET : 0);
+  const order = [...players].sort((a, b) => key(b) - key(a) || a.name.localeCompare(b.name) || a.playerId.localeCompare(b.playerId));
+  const bySlot = new Map<number, SolvablePlayer>();
+  for (const player of order) tryAssign(player, slots, bySlot, new Set<number>());
+  const seated = [...bySlot.entries()].sort((a, b) => a[0] - b[0]);
+  return {
+    total: seated.reduce((sum, [, p]) => sum + p.points, 0),
+    slots: seated.map(([index, p]) => ({ slot: slots[index]!.slot, playerId: p.playerId })),
+    starterIds: new Set(seated.map(([, p]) => p.playerId)),
+  };
+}
+
 function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation): string {
   if (outgoing.statusFlag) return `${outgoing.name} is listed ${outgoing.statusFlag}`;
   const inNews = incoming.components.find((c) => c.key === 'news_recent');
