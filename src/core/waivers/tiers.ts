@@ -122,7 +122,11 @@ export type TierReasonCode =
   | 'bye_depth'
   | 'injury_backup'
   | 'ir_stash'
-  | 'depth';
+  | 'depth'
+  /** Starts this week and beats every lineup the roster can already make (`pickupStart.ts`). */
+  | 'start_now'
+  /** Ties the best lineup the roster can already make this week. */
+  | 'start_tie';
 
 /** One player as the planner reads him. */
 export interface TierPlayer {
@@ -211,6 +215,21 @@ export interface TierRequest {
    * them). Moving one there frees a bench spot with no drop. Absent: none.
    */
   reserveEligible?: ReadonlySet<string> | undefined;
+  /**
+   * The "pick up and start" decision for this week (`pickupStart.ts`), so the
+   * tiers and Team's Best move say the same thing: `start` is a "Do this"
+   * move, `consider` a Worth considering row. Absent: the tiers as before.
+   */
+  startNow?: ReadonlyMap<string, StartNowCall> | undefined;
+}
+
+/** One free agent's call from `pickupStart.ts`, as the tiers read it. */
+export interface StartNowCall {
+  verdict: 'start' | 'consider';
+  /** This week's whole-lineup gain over the best lineup the roster can already make. */
+  gain: number;
+  /** Whom he ties or passes in that lineup. */
+  displaces: string | null;
 }
 
 export interface TierPreference {
@@ -634,14 +653,30 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * it yet.
    */
   const doThese: TierMove[] = [];
+  /*
+   * Pick up and start, first: the same call Team's Best move makes, so the
+   * two screens cannot disagree (`pickupStart.ts`). A tie is a Worth
+   * considering row below, never "Do this".
+   */
+  const startNow = request.startNow ?? new Map<string, StartNowCall>();
+  for (const m of ranked) {
+    const call = startNow.get(m.playerId);
+    if (!call) continue;
+    m.reasonCode = call.verdict === 'start' ? 'start_now' : 'start_tie';
+    m.reason = startNowReason(call);
+    if (call.verdict === 'start') doThese.push(m);
+  }
   const holeNeeds = new Set<string>();
   for (const m of ranked) {
+    if (doThese.includes(m)) continue;
     if (!isHole(m) || m.gain < TIER_RULES.consider) continue;
     if (holeNeeds.has(m.reason)) continue;
     holeNeeds.add(m.reason);
     doThese.push(m);
   }
-  const big = ranked.find((m) => m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis);
+  const big = doThese.some((m) => m.reasonCode === 'start_now')
+    ? undefined
+    : ranked.find((m) => m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis);
   if (big) {
     big.reasonCode = 'big_upgrade';
     doThese.push(big);
@@ -662,8 +697,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       continue;
     }
     const stash = m.reasonCode === 'ir_stash' && !stashUnknown.has(m.playerId) && !stashTaken;
-    const qualifies = (m.gain >= TIER_RULES.consider && m.reasonCode !== 'ir_stash') || stash;
-    if (qualifies && consider.length < TIER_RULES.maxConsider) {
+    const tie = m.reasonCode === 'start_tie';
+    const qualifies = (m.gain >= TIER_RULES.consider && m.reasonCode !== 'ir_stash') || stash || tie;
+    if (qualifies && (consider.length < TIER_RULES.maxConsider || tie)) {
       m.tier = 'consider';
       if (stash) stashTaken = true;
       consider.push(m);
@@ -715,8 +751,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         competesWith: m.competesWith,
         alternatives: m.alternatives,
         ...(m.stashLabel !== undefined ? { stashLabel: m.stashLabel } : {}),
-        reasonCode: m.reasonCode === 'ir_stash' || m.reasonCode === 'big_upgrade' ? m.reasonCode : replaced.reasonCode,
-        reason: m.reasonCode === 'ir_stash' ? m.reason : replaced.reason,
+        reasonCode: KEPT_REASONS.has(m.reasonCode) ? m.reasonCode : replaced.reasonCode,
+        reason: m.reasonCode === 'ir_stash' || m.reasonCode === 'start_now' || m.reasonCode === 'start_tie' ? m.reason : replaced.reason,
       });
     }
     if (option.drop) used.set(option.drop.playerId, m.name);
@@ -990,6 +1026,15 @@ function pointsIn(p: TierPlayer, k: number): number {
 }
 
 /** The ordering number: the gain, with the RB lean. Never printed as points. */
+/** Reasons a different drop does not change: they are about the add, not the cut. */
+const KEPT_REASONS: ReadonlySet<TierReasonCode> = new Set(['ir_stash', 'big_upgrade', 'start_now', 'start_tie']);
+
+/** `Starts this week: +0.9 pts on your best lineup`, or `Ties Ladd McConkey this week`. */
+function startNowReason(call: StartNowCall): string {
+  if (call.verdict === 'start') return `Starts this week: +${call.gain.toFixed(1)} pts on your best lineup`;
+  return call.displaces ? `Ties ${call.displaces} this week` : 'Ties your best lineup this week';
+}
+
 function sortKey(m: TierMove): number {
   return m.gain + (m.position === 'RB' ? TIER_PREFS.rbLean : 0);
 }

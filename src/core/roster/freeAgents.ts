@@ -103,3 +103,48 @@ export function boundedFreeAgentIds(
   }
   return ids;
 }
+
+/**
+ * How many more free agents per position the scan takes by this week's
+ * published number, on top of the draft-order slice above.
+ *
+ * Added 18 October 2026 for "pick up and start": the free agent whose number
+ * jumped this week is usually the backup to a starter who was just ruled Out,
+ * and a backup is rarely near the top of a draft order. Sleeper's published
+ * week is read whole on every Waivers load anyway, so ranking by it costs no
+ * read; the extra players cost only their own rows in the batched input reads.
+ */
+export const PUBLISHED_EXTRA_PER_POSITION = 4;
+
+/**
+ * The best unrostered players at each position by this week's published
+ * number, leaving out anyone already in `exclude` (the draft-order slice).
+ * Whole-slate positions (defences) are already scanned whole and are skipped.
+ */
+export function publishedFreeAgentIds(
+  players: CanonicalPlayer[],
+  opts: {
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+    published: ReadonlyMap<string, number>;
+    exclude: ReadonlySet<string>;
+    perPosition?: number;
+  },
+): string[] {
+  const perPosition = opts.perPosition ?? PUBLISHED_EXTRA_PER_POSITION;
+  const byPosition = new Map<string, { id: string; points: number; name: string }[]>();
+  for (const p of players) {
+    if (!p.active || opts.rosteredIds.has(p.id) || opts.exclude.has(p.id)) continue;
+    if (opts.startable.size > 0 && !opts.startable.has(p.position)) continue;
+    if (WHOLE_SLATE_POSITIONS.has(p.position.toUpperCase())) continue;
+    const points = opts.published.get(p.id);
+    if (points == null || !(points > 0)) continue;
+    (byPosition.get(p.position) ?? byPosition.set(p.position, []).get(p.position)!).push({ id: p.id, points, name: p.fullName });
+  }
+  const ids: string[] = [];
+  for (const bucket of byPosition.values()) {
+    bucket.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    for (const p of bucket.slice(0, perPosition)) ids.push(p.id);
+  }
+  return ids;
+}

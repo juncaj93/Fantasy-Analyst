@@ -68,7 +68,10 @@ import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindo
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import { buildTierInputs } from './tierInputs.ts';
 import type { AheadNumbers } from './aheadWeeks.ts';
-import { planWaiverTiers } from './tiers.ts';
+import { planWaiverTiers, type StartNowCall, type WaiverTierPlan } from './tiers.ts';
+import { planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
+import { evaluatePlayer } from '../startsit/engine.ts';
+import { decisionPoints } from '../startsit/decisionPoints.ts';
 import { buildTiersView, tierClaimPlan, type WaiverTiersView } from './tierPlan.ts';
 import { blendRivalTendency, seedTendency, type RivalSeasonAggregate } from './rivalHistory.ts';
 import { positionNeed } from './rivalNeed.ts';
@@ -302,6 +305,12 @@ export interface WaiverAssembly extends WaiverAdvice {
    * when the league's window could not be read.
    */
   pickup: Record<string, PickupState>;
+  /**
+   * This week's "pick up and start" call (`pickupStart.ts`): the free agent
+   * who beats every lineup the roster can already make, and the ties. Team's
+   * Best move and the tiers above both read it. Null when it could not be made.
+   */
+  pickupStart: PickupStartPlan | null;
   /**
    * The lineup the whole board was measured against.
    *
@@ -689,6 +698,31 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     .sort((a, b) => a.leagueRank - b.leagueRank);
 
   /*
+   * Pick up and start: this week's whole-lineup test, made once and read by
+   * Team's Best move and by the tiers below. Its drop, when the roster is
+   * full, is the tier planner's own (`dropFor`), so it is decided inside the
+   * tiers block once the planner has run, and here without a drop if the
+   * tiers fail.
+   */
+  const startNowInput = pickupStartInputs(request, openSpots, pickup);
+  let pickupStart: PickupStartPlan | null = null;
+  const decidePickup = (plan: WaiverTierPlan | null): PickupStartPlan | null => {
+    try {
+      const moves = new Map((plan?.all ?? []).map((m) => [m.playerId, m] as const));
+      return planPickupStart({
+        ...startNowInput,
+        dropFor: (id) => {
+          const move = moves.get(id);
+          if (!move?.drop || move.needsSpot) return null;
+          return { playerId: move.drop.playerId, name: move.drop.name, ...(move.drop.viaReserve ? { viaReserve: true } : {}) };
+        },
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  /*
    * The tiers: every scanned free agent scored by what he adds to the best
    * lineup over the next three weeks, paired with his best drop, and a bid
    * from the league's own bidding behaviour. A failure is swallowed to null,
@@ -749,7 +783,11 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
             }
           : {}),
       });
-      const plan = planWaiverTiers(inputs.request);
+      const first = planWaiverTiers(inputs.request);
+      pickupStart = decidePickup(first);
+      const startNow = startNowCalls(pickupStart);
+      /* Planned again only when the call changes a tier, with the call in it. */
+      const plan = startNow.size > 0 ? planWaiverTiers({ ...inputs.request, startNow }) : first;
       const rivalsFor = round2 ? rivalReader(request, round2, fixtures, inputs.window.weeks.slice(0, 2)) : undefined;
       const claims: ClaimRecord[] = request.observations
         .filter((o) => o.playerId != null)
@@ -801,7 +839,64 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     }
   })();
 
-  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, tiers, lineup, pickup };
+  if (pickupStart == null) pickupStart = decidePickup(null);
+
+  return { ...advice, upgrades, valueAdds, unknowns, dst, bids, claimPlan, tiers, lineup, pickup, pickupStart };
+}
+
+/** The tiers' reading of the pickup call: a "Do this" for the headline, Worth considering for a tie. */
+function startNowCalls(plan: PickupStartPlan | null): Map<string, StartNowCall> {
+  const out = new Map<string, StartNowCall>();
+  if (!plan) return out;
+  for (const m of [...(plan.start ? [plan.start] : []), ...plan.consider]) {
+    out.set(m.playerId, { verdict: m.verdict, gain: m.gain, displaces: m.displaces?.name ?? null });
+  }
+  return out;
+}
+
+/**
+ * Everyone as the pickup test reads him: this week's decision number, from the
+ * same engine and published week as Team's lineup, at the request's `now` so
+ * a game that has kicked off is locked. No read: arithmetic over the inputs.
+ */
+function pickupStartInputs(
+  request: WaiverAssemblyRequest,
+  openSpots: number,
+  pickup: Readonly<Record<string, PickupState>>,
+): Omit<Parameters<typeof planPickupStart>[0], 'dropFor'> {
+  const reserved = new Set(request.reserveIds);
+  const read = (input: StartSitInput): PickupPlayer => {
+    const e = evaluatePlayer({ ...input, now: request.now }, request.profile);
+    const d = decisionPoints(e, request.published);
+    const priced = d != null && (d.basis === 'market' || d.basis === 'published');
+    return {
+      playerId: e.playerId,
+      name: e.name,
+      position: e.position,
+      team: e.team,
+      points: priced ? d.points : null,
+      basis: d?.basis ?? 'none',
+      ruledOut: e.ruledOut,
+      locked: e.lock.locked,
+      designation: e.injury.designation ?? null,
+      onReserve: reserved.has(e.playerId),
+    };
+  };
+  const round2 = request.round2 ?? null;
+  const injury = new Map(Object.entries(round2?.injuryNotes ?? {}).map(([id, n]) => [id, n.status] as const));
+  return {
+    shape: request.shape,
+    roster: request.rosterInputs.map(read),
+    candidates: request.candidateInputs.filter((i) => !request.rosteredIds.has(i.player.id)).map(read),
+    currentStarterIds: request.currentStarterIds,
+    pickup,
+    openSpots,
+    starterOut: starterOutReader({
+      players: request.players,
+      injuryStatus: injury,
+      depthOrder: new Map(Object.entries(round2?.depthOrder ?? {})),
+    }),
+  };
 }
 
 /**

@@ -245,13 +245,17 @@ export class SleeperProjectionService {
      * would otherwise pay for every player the feed publishes.
      */
     narrow?: boolean;
+    /** The whole stored week, already read by the caller with {@link storedWeek}: not read again. */
+    stored?: ReadonlyMap<string, StoredWeeklyProjection>;
   }): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (opts.playerIds.length === 0) return out;
 
-    const stored = opts.narrow
-      ? await this.repo.forPlayers(opts.season, opts.week, opts.playerIds)
-      : await this.repo.forWeek(opts.season, opts.week);
+    const stored = opts.stored
+      ? opts.stored
+      : opts.narrow
+        ? await this.repo.forPlayers(opts.season, opts.week, opts.playerIds)
+        : await this.repo.forWeek(opts.season, opts.week);
     if (stored.size === 0) return out;
 
     const lines = (await this.needsQbLines(opts.profile, opts.playerIds, opts.positionOf))
@@ -261,6 +265,36 @@ export class SleeperProjectionService {
       const row = stored.get(playerId);
       if (!row) continue;
       const points = scoreStored(row, opts.profile, opts.positionOf?.(playerId) ?? null, lines[playerId]);
+      if (points != null) out.set(playerId, points);
+    }
+    return out;
+  }
+
+  /**
+   * The whole stored week, for a caller that starts the read early and hands
+   * it to {@link publishedFor} later, so one read serves both.
+   */
+  storedWeek(season: string, week: number): Promise<Map<string, StoredWeeklyProjection>> {
+    return this.repo.forWeek(season, week);
+  }
+
+  /**
+   * Each player's published week in this league's scoring, from a stored week
+   * already in hand, with no read at all: a position that needs the QB lines
+   * row (rescored passing touchdowns) is left out rather than read for. For
+   * ordering a list, never for a number a screen prints.
+   */
+  scoredWithoutLines(
+    stored: ReadonlyMap<string, StoredWeeklyProjection>,
+    profile: ScoringProfile,
+    playerIds: readonly string[],
+    positionOf: (playerId: string) => string | null | undefined,
+  ): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const playerId of playerIds) {
+      const row = stored.get(playerId);
+      if (!row) continue;
+      const points = scoreStored(row, profile, positionOf(playerId) ?? null);
       if (points != null) out.set(playerId, points);
     }
     return out;

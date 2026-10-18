@@ -4,6 +4,7 @@ import type { DstPlan } from '../core/dst/planner.ts';
 import type { WaiverLeagueIntel } from '../core/waivers/board.ts';
 import type { WaiverClaimPlan } from '../core/waivers/claimPlan.ts';
 import type { WaiverTiersView } from '../core/waivers/tierPlan.ts';
+import type { PickupStartPlan } from '../core/waivers/pickupStart.ts';
 import type { WaiverNearMiss } from '../core/startsit/waivers.ts';
 /*
  * The rule about what a response has to be before it is parsed.
@@ -1651,6 +1652,12 @@ export interface WaiverAdvice {
    * an older payload, which the screen draws the old way.
    */
   tiers?: WaiverTiersView | null;
+  /**
+   * This week's "pick up and start" call: a free agent who beats every lineup
+   * the roster can already make, and the ties. Team's Best move reads it.
+   * Absent on an older payload, which leaves Best move as it was.
+   */
+  pickupStart?: PickupStartPlan | null;
   /**
    * When the Sleeper-side inputs — the trending lists and the league's
    * transactions — were last read. Drawn as `Updated 5:00 AM`. Null before the
