@@ -40,6 +40,7 @@ function move(fa: { id: string }, verdict: 'start' | 'consider', over: Partial<R
     over: { playerId: '1001', name: 'Emeka Egbuka', points: 6.7 },
     displaces: { playerId: '1001', name: 'Emeka Egbuka', points: 6.7 },
     drop: null,
+    pickDrop: null,
     starterOut: null,
     ...over,
   };
@@ -127,4 +128,27 @@ test('with no call, Best move is exactly as before', async ({ page }) => {
   await page.getByTestId('lineup-swap').click();
   await expect(page.getByTestId('compare-sheet')).toBeVisible();
   await expect(page.getByTestId('compare-best-move-note')).toHaveCount(0);
+});
+
+test('a full roster with no honest drop: "Pick your drop" on one line, the options in the sheet', async ({ page }) => {
+  await withPickup(page, (f) => ({
+    start: move(f, 'start', {
+      starterOut: { playerId: 'x', name: 'Quinshon Judkins' },
+      pickDrop: [
+        { playerId: '1004', name: 'Brian Robinson', reason: 'no start in weeks 6 to 8' },
+        { playerId: '1005', name: 'Emmett Johnson', reason: null },
+      ],
+    }),
+  }));
+  const row = page.getByTestId('lineup-pickup');
+  await expect(row.getByTestId('best-move-drop')).toHaveText('Pick your drop');
+  await oneLine(page, 'best-move-pickup-names');
+  await oneLine(page, 'best-move-points');
+  const page_ = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(page_.scroll).toBeLessThanOrEqual(page_.client);
+  await row.click();
+  const notes = page.getByTestId('compare-best-move-note');
+  await expect(notes.nth(1)).toHaveText('Your roster is full: pick your drop.');
+  await expect(notes.nth(2)).toHaveText('1. Brian Robinson: no start in weeks 6 to 8');
+  await expect(notes.nth(3)).toHaveText('2. Emmett Johnson');
 });

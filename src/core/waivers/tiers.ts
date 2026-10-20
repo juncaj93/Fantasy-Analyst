@@ -597,7 +597,17 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       excludedFas.push({ playerId: c.playerId, name: c.name, reason: verdict.label });
       continue;
     }
-    const list = optionsFor(c, valued, request.openSpots);
+    let list = optionsFor(c, valued, request.openSpots);
+    /*
+     * A full roster with no honest drop still gets its "pick up and start"
+     * row (18 October 2026, Alex's bench is always full): valued as if a
+     * bench spot were freed, and below it says "Pick your drop" with the
+     * cheapest few. The app never picks the drop for him.
+     */
+    if (list.length === 0 && request.startNow?.has(c.playerId)) {
+      const after = value([...valued, c]);
+      list = [{ drop: null, lineup: round2(after.lineup - base.lineup), insurance: round2(after.insurance - base.insurance), after }];
+    }
     options.set(c.playerId, list);
     if (list.length === 0) continue;
     best.push(moveFor(c, list[0]!, base));
@@ -813,7 +823,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       .slice(0, 3)
       .map(({ band: _b, score: _s, ...c }) => c);
   for (const m of unplaced) {
-    if (signals && isHole(m)) {
+    /* A pick-up-and-start call keeps its tier too: it says "Pick your drop" rather than moving down. */
+    if ((signals && isHole(m)) || m.reasonCode === 'start_now' || m.reasonCode === 'start_tie') {
       m.drop = null;
       m.dropCost = null;
       m.needsSpot = spotCandidates(new Set(used.keys()));
@@ -1031,7 +1042,8 @@ const KEPT_REASONS: ReadonlySet<TierReasonCode> = new Set(['ir_stash', 'big_upgr
 
 /** `Starts this week: +0.9 pts on your best lineup`, or `Ties Ladd McConkey this week`. */
 function startNowReason(call: StartNowCall): string {
-  if (call.verdict === 'start') return `Starts this week: +${call.gain.toFixed(1)} pts on your best lineup`;
+  /* A small gain under the headline bar is still a gain, and says so (Alex, 20 October 2026). */
+  if (call.verdict === 'start' || call.gain >= 0.05) return `Starts this week: +${call.gain.toFixed(1)} pts on your best lineup`;
   return call.displaces ? `Ties ${call.displaces} this week` : 'Ties your best lineup this week';
 }
 

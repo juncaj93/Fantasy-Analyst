@@ -1813,7 +1813,11 @@ function LineupCard({
    */
   const pick = !useFill && pickup?.start ? pickup.start : null;
   /* A free agent who only ties is one line in the sheet, never the headline. */
-  const ties = (pickup?.consider ?? []).map((t) => `Tie on waivers: ${t.name}, ${fmt(t.points)}, free agent`);
+  const ties = (pickup?.consider ?? []).map((t) =>
+    t.gain >= 0.05
+      ? `Close call on waivers: ${t.name}, ${fmt(t.points)}, +${t.gain.toFixed(1)} pts, free agent`
+      : `Tie on waivers: ${t.name}, ${fmt(t.points)}, free agent`,
+  );
   const risks = (lineup.lateSwapRisks ?? []).filter((r) => r.starting);
   /* A ruled-out player reads "Out", never the engine's gate value. */
   const pts = (id: string) => {
@@ -1966,12 +1970,25 @@ function PickupMoveRow({
   /* His number is a full Vegas read by rule; the incumbent's is the Team row's own figure. */
   const overKnown = over != null && (weekOf(over.playerId).points != null || weekOf(over.playerId).out);
   const lastName = (name: string) => name.split(' ').slice(1).join(' ') || name;
-  const dropChip = pick.drop ? (pick.drop.viaReserve ? `${lastName(pick.drop.name)} to IR` : `drop ${lastName(pick.drop.name)}`) : null;
+  /* Full roster with no honest drop: the app never picks, so the chip asks and the sheet lists the options. */
+  const pickYourDrop = pick.drop == null && (pick.pickDrop?.length ?? 0) > 0;
+  const dropChip = pick.drop
+    ? pick.drop.viaReserve
+      ? `${lastName(pick.drop.name)} to IR`
+      : `drop ${lastName(pick.drop.name)}`
+    : pickYourDrop
+      ? 'Pick your drop'
+      : null;
   const sheet: string[] = [
     `${pick.name} is a free agent: add him in Sleeper. +${pick.gain.toFixed(2)} pts on your best lineup this week.`,
     ...(pick.drop
       ? [pick.drop.viaReserve ? `Your roster is full: move ${pick.drop.name} to IR first.` : `Your roster is full: drop ${pick.drop.name} to add him.`]
-      : []),
+      : pickYourDrop
+        ? [
+            'Your roster is full: pick your drop.',
+            ...(pick.pickDrop ?? []).map((o, i) => `${i + 1}. ${o.name}${o.reason ? `: ${o.reason}` : ''}`),
+          ]
+        : []),
     ...(pick.starterOut ? [`${pick.starterOut.name}, his team's starter, is out or doubtful.`] : []),
   ];
   const slot = pick.slot ?? pick.position;
@@ -1990,7 +2007,7 @@ function PickupMoveRow({
         `Best move: pick up and start ${pick.name}${over ? ` over ${over.name}` : ''} at ${slot}, ` +
         `${fmt(pick.points)}${over && overKnown ? ` against ${spoken(over.playerId)}` : ''} projected.` +
         `${pick.starterOut ? ` Starter out: ${pick.starterOut.name}.` : ''}` +
-        `${pick.drop ? (pick.drop.viaReserve ? ` Move ${pick.drop.name} to IR first.` : ` Drop ${pick.drop.name}.`) : ''}` +
+        `${pick.drop ? (pick.drop.viaReserve ? ` Move ${pick.drop.name} to IR first.` : ` Drop ${pick.drop.name}.`) : pickYourDrop ? ' Roster full: pick your drop.' : ''}` +
         ' Compare them.'
       }
       onClick={() => onOpen(slot, seed, { note: sheet, names: { [pick.playerId]: pick.name } })}
