@@ -322,3 +322,13 @@ describe('the tiers with a full roster and no honest drop', () => {
     expect(move?.needsSpot).toBeDefined();
   });
 });
+
+describe('defences', () => {
+  it('are the defence planner\'s: never called, and labelled as that in the audit', () => {
+    const plan = planPickupStart(request([p('Saints', 'DEF', 12.0)]));
+    expect(plan.start).toBeNull();
+    expect(plan.consider).toEqual([]);
+    expect(plan.audit[0]?.status).toBe('defence_planner');
+    expect(plan.audit[0]?.gain).not.toBeNull();
+  });
+});
