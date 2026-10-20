@@ -709,6 +709,17 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
   const decidePickup = (plan: WaiverTierPlan | null): PickupStartPlan | null => {
     try {
       const moves = new Map((plan?.all ?? []).map((m) => [m.playerId, m] as const));
+      /*
+       * The planner's cheapest bench players, for a full roster with no
+       * honest drop: dead spots first, then the lowest drop scores, nobody in
+       * the coming week's lineup and nobody protected (a handcuff, a market
+       * hold, high draft capital). Without drop scores, the drop-ready bench.
+       */
+      const scored = (plan?.dropScores ?? [])
+        .filter((d) => d.protectedAs == null)
+        .sort((a, b) => Number(b.deadSpot === true) - Number(a.deadSpot === true) || a.score - b.score)
+        .map((d) => ({ playerId: d.playerId, name: d.name, reason: d.reason || null }));
+      const choices = scored.length > 0 ? scored : (plan?.dropReady ?? []).map((d) => ({ playerId: d.playerId, name: d.name, reason: d.reason }));
       return planPickupStart({
         ...startNowInput,
         dropFor: (id) => {
@@ -716,6 +727,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           if (!move?.drop || move.needsSpot) return null;
           return { playerId: move.drop.playerId, name: move.drop.name, ...(move.drop.viaReserve ? { viaReserve: true } : {}) };
         },
+        spotChoices: () => choices,
       });
     } catch {
       return null;
@@ -788,6 +800,11 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       const startNow = startNowCalls(pickupStart);
       /* Planned again only when the call changes a tier, with the call in it. */
       const plan = startNow.size > 0 ? planWaiverTiers({ ...inputs.request, startNow }) : first;
+      /* "Pick your drop": the same few names the tier row lists, when the planner made that list. */
+      for (const m of pickupStart ? [...(pickupStart.start ? [pickupStart.start] : []), ...pickupStart.consider] : []) {
+        const spot = [...plan.doThese, ...plan.consider].find((x) => x.playerId === m.playerId)?.needsSpot;
+        if (m.pickDrop && spot && spot.length > 0) m.pickDrop = spot.map((x) => ({ playerId: x.playerId, name: x.name, reason: x.reason || null }));
+      }
       const rivalsFor = round2 ? rivalReader(request, round2, fixtures, inputs.window.weeks.slice(0, 2)) : undefined;
       const claims: ClaimRecord[] = request.observations
         .filter((o) => o.playerId != null)

@@ -239,3 +239,86 @@ describe('the tiers read the same call', () => {
     expect([...plan.doThese, ...plan.consider].some((m) => m.reasonCode === 'start_now' || m.reasonCode === 'start_tie')).toBe(false);
   });
 });
+
+describe('a full roster with no honest drop (Alex, 20 October 2026)', () => {
+  const choices = [
+    { playerId: 'Spare', name: 'Spare Back', reason: 'no start in weeks 6 to 8' },
+    { playerId: 'Egbuka', name: 'Egbuka', reason: 'bench' },
+  ];
+  const full = (candidates: PickupPlayer[]) =>
+    request(candidates, { openSpots: 0, dropFor: () => null, spotChoices: () => choices });
+
+  it('still headlines a big gain, with "Pick your drop" and no named drop', () => {
+    const plan = planPickupStart(full([p('Big', 'RB', 10.0)]));
+    expect(plan.start?.playerId).toBe('Big');
+    expect(plan.start?.gain).toBeCloseTo(10.0 - 7.6, 6);
+    expect(plan.start?.drop).toBeNull();
+    expect(plan.start?.pickDrop?.map((c) => c.playerId)).toEqual(['Spare', 'Egbuka']);
+  });
+
+  it('never offers a player who starts beside him as the drop', () => {
+    const plan = planPickupStart(
+      request([p('Big', 'RB', 10.0)], { openSpots: 0, dropFor: () => null, spotChoices: () => [{ playerId: 'Wilson', name: 'Wilson' }, ...choices] }),
+    );
+    expect(plan.start?.pickDrop?.map((c) => c.playerId)).not.toContain('Wilson');
+  });
+
+  it('does not headline a small gain', () => {
+    const plan = planPickupStart(full([p('Small', 'RB', 7.9)]));
+    expect(plan.start).toBeNull();
+    expect(plan.consider[0]?.playerId).toBe('Small');
+    expect(plan.consider[0]?.pickDrop?.length).toBeGreaterThan(0);
+  });
+
+  it('pairs the honest drop as before when the planner has one', () => {
+    const plan = planPickupStart(
+      request([p('Big', 'RB', 10.0)], { openSpots: 0, dropFor: () => ({ playerId: 'Spare', name: 'Spare' }), spotChoices: () => choices }),
+    );
+    expect(plan.start?.drop).toEqual({ playerId: 'Spare', name: 'Spare' });
+    expect(plan.start?.pickDrop).toBeNull();
+  });
+
+  it('shows the gain for every scanned free agent in the audit, whatever stops him', () => {
+    const plan = planPickupStart(
+      request(
+        [p('Priced', 'RB', 9.0), p('Fallback', 'WR', 9.0, { basis: 'published' }), p('Hurt', 'RB', 9.0, { designation: 'questionable' }), p('NoDrop', 'WR', 9.0)],
+        { openSpots: 0, dropFor: () => null, spotChoices: () => [] },
+      ),
+    );
+    for (const row of plan.audit) expect(row.gain, row.name).not.toBeNull();
+    expect(plan.audit.find((r) => r.name === 'NoDrop')?.status).toBe('no_drop');
+    expect(plan.audit.find((r) => r.name === 'NoDrop')?.gain).toBeCloseTo(1.4, 6);
+  });
+});
+
+describe('the band between a tie and the headline', () => {
+  it('a gain of 0.3 is Worth considering, not nothing', () => {
+    const plan = planPickupStart(request([p('Close', 'WR', 7.9)]));
+    expect(plan.start).toBeNull();
+    expect(plan.consider[0]?.playerId).toBe('Close');
+    expect(plan.consider[0]?.gain).toBeCloseTo(0.3, 6);
+  });
+});
+
+describe('the tiers with a full roster and no honest drop', () => {
+  it('keep a pick-up-and-start move in "Do this" with "Pick your drop"', () => {
+    const t = (id: string, position: string, rate: number): TierPlayer => ({ playerId: id, name: id, position, team: 'XX', rate, weekly: [1, 1, 1], designation: 'healthy', byeWeek: null });
+    /* Nobody on the bench is worth less than a replacement-level back, so the planner has no honest drop. */
+    const plan = planWaiverTiers({
+      shape: SHAPE,
+      weeks: [6, 7, 8],
+      roster: [...roster().map((x) => t(x.playerId, x.position, x.points ?? 0)), t('B1', 'QB', 18), t('B2', 'QB', 17), t('B3', 'TE', 9), t('B4', 'TE', 8), t('B5', 'QB', 16)],
+      candidates: [t('Big', 'RB', 10)],
+      openSpots: 0,
+      openReserve: 0,
+      protections: new Map(),
+      excludedPositions: new Set(['DEF']),
+      replacement: new Map([['RB', 9.9], ['WR', 5], ['QB', 5], ['TE', 2]]),
+      startNow: new Map([['Big', { verdict: 'start' as const, gain: 2.4, displaces: 'McConkey' }]]),
+    });
+    const move = plan.doThese.find((m) => m.playerId === 'Big');
+    expect(move?.reasonCode).toBe('start_now');
+    expect(move?.drop).toBeNull();
+    expect(move?.needsSpot).toBeDefined();
+  });
+});

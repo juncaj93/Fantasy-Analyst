@@ -35,8 +35,9 @@
  *    `Pick up and start <player>`. Small on purpose: Alex wants the heads-up
  *    even for a small margin.
  *  - Otherwise `margin` no worse than {@link PICKUP_START.tie} below zero: a
- *    **tie**. No headline; a softer Worth considering row on Waivers and one
- *    line in the Best move sheet.
+ *    **tie or small gain** (anything from a 0.05 loss up to just under the
+ *    headline, so a gain of 0.2 is here too). No headline; a softer Worth
+ *    considering row on Waivers and one line in the Best move sheet.
  *  - Anything else: nothing.
  *
  * Only a free agent who can be added now, before his game, with every line his
@@ -99,6 +100,13 @@ export interface PickupStartRequest {
   openSpots: number;
   /** The waiver planner's drop for this add, or null when no honest drop is left. */
   dropFor?: (playerId: string) => PickupDrop | null;
+  /**
+   * With a full roster and no honest drop: the planner's cheapest bench
+   * players to free a spot with, cheapest first, protections respected. The
+   * move then says "Pick your drop" and lists them; anybody in the lineup with
+   * him is left out here. Absent or empty: no call can be made.
+   */
+  spotChoices?: (playerId: string) => PickupSpotChoice[];
   /** A teammate starter at his position who is Out or Doubtful, or null. */
   starterOut?: (player: PickupPlayer) => { playerId: string; name: string } | null;
   /** Override {@link PICKUP_START.gain}, for tests. */
@@ -110,6 +118,14 @@ export interface PickupDrop {
   name: string;
   /** Not a cut: he moves to an open IR slot. */
   viaReserve?: boolean;
+}
+
+/** A bench player Alex could cut to make room, with the planner's short reason. */
+export interface PickupSpotChoice {
+  playerId: string;
+  name: string;
+  /** `no start in weeks 6 to 8`, `handcuff to Kenneth Walker`. */
+  reason?: string | null;
 }
 
 export interface PickupStartMove {
@@ -129,8 +145,14 @@ export interface PickupStartMove {
   over: { playerId: string; name: string; points: number | null } | null;
   /** The player who leaves the best lineup the roster can already make. */
   displaces: { playerId: string; name: string; points: number } | null;
-  /** Who goes to make room, when the roster is full. */
+  /** Who goes to make room, when the roster is full and the planner has an honest drop. */
   drop: PickupDrop | null;
+  /**
+   * Full roster, no honest drop: Alex picks. The cheapest few to free a spot
+   * with, none of them in the lineup with him. Null when no drop is needed or
+   * one is named in {@link drop}.
+   */
+  pickDrop: PickupSpotChoice[] | null;
   /** A teammate starter at his position who is Out or Doubtful. */
   starterOut: { playerId: string; name: string } | null;
 }
@@ -201,7 +223,21 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
 
   for (const c of request.candidates) {
     const row = { playerId: c.playerId, name: c.name, position: c.position, points: c.points, basis: c.basis, gain: null as number | null, margin: null as number | null };
-    if (c.points == null || c.basis !== 'market') {
+    /*
+     * The gain is worked out for everybody with a number, before any rule
+     * below says whether he may be called: the audit shows every scanned
+     * free agent's gain, whatever stops him.
+     */
+    const full = request.openSpots <= 0;
+    const drop = full ? (request.dropFor?.(c.playerId) ?? null) : null;
+    const pool = ownedSolvable.filter((p) => p.playerId !== drop?.playerId);
+    const withHim = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c)], request.shape);
+    const forced = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c, true)], request.shape);
+    if (withHim && forced) {
+      row.gain = withHim.total - baseline.total;
+      row.margin = forced.total - baseline.total;
+    }
+    if (!withHim || !forced || c.basis !== 'market') {
       audit.push({ ...row, status: 'not_priced' });
       continue;
     }
@@ -209,18 +245,21 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
       audit.push({ ...row, status: 'injured' });
       continue;
     }
-    const drop = request.openSpots > 0 ? null : (request.dropFor?.(c.playerId) ?? null);
-    if (request.openSpots <= 0 && drop == null) {
+    /*
+     * Full roster, no honest drop: still a call, valued as if a bench spot
+     * were freed, with the planner's cheapest bench players to pick from.
+     * Never a player in the lineup with him, so the gain holds whichever he
+     * picks. With nobody left to offer, no call.
+     */
+    const pickDrop = full && drop == null
+      ? (request.spotChoices?.(c.playerId) ?? []).filter((x) => !withHim.starterIds.has(x.playerId) && !forced.starterIds.has(x.playerId)).slice(0, 3)
+      : null;
+    if (pickDrop != null && pickDrop.length === 0) {
       audit.push({ ...row, status: 'no_drop' });
       continue;
     }
-    const pool = ownedSolvable.filter((p) => p.playerId !== drop?.playerId);
-    const withHim = solveLineup([...pool, solvable(c)], request.shape);
-    const forced = solveLineup([...pool, solvable(c, true)], request.shape);
-    const gain = withHim.total - baseline.total;
-    const margin = forced.total - baseline.total;
-    row.gain = gain;
-    row.margin = margin;
+    const gain = row.gain!;
+    const margin = row.margin!;
 
     const state = request.pickup[c.playerId];
     const instant = !c.locked && state?.state === 'free';
@@ -255,13 +294,14 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
       name: c.name,
       position: c.position,
       team: c.team,
-      points: c.points,
+      points: c.points!,
       gain,
       margin,
       slot: lineup.slots.find((s) => s.playerId === c.playerId)?.slot ?? null,
       over: overOf(lineup, current, byId, drop),
       displaces: displacedOf(baseline, lineup, byId),
       drop,
+      pickDrop,
       starterOut: request.starterOut?.(c) ?? null,
     });
   }
