@@ -157,7 +157,7 @@ export interface PickupStartMove {
   starterOut: { playerId: string; name: string } | null;
 }
 
-export type PickupAuditStatus = 'start' | 'consider' | 'below' | 'not_priced' | 'injured' | 'not_now' | 'no_drop';
+export type PickupAuditStatus = 'start' | 'consider' | 'below' | 'not_priced' | 'injured' | 'defence_planner' | 'not_now' | 'no_drop';
 
 export interface PickupStartPlan {
   threshold: number;
@@ -184,6 +184,7 @@ export interface PickupStartPlan {
   }[];
 }
 
+const DEFENCE_POSITIONS = new Set(['DEF', 'DST', 'D/ST']);
 const HEALTHY = new Set(['', 'healthy', 'active', 'none']);
 
 function healthy(p: PickupPlayer): boolean {
@@ -239,6 +240,16 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     }
     if (!withHim || !forced || c.basis !== 'market') {
       audit.push({ ...row, status: 'not_priced' });
+      continue;
+    }
+    /*
+     * A defence is the defence planner's call (Alex, 20 October 2026): it
+     * decides streaming on Waivers, and two answers for one slot would
+     * conflict. Said in the audit as what it is, not as an injury; the
+     * gain above is still shown, and nothing else changes.
+     */
+    if (DEFENCE_POSITIONS.has(c.position.toUpperCase())) {
+      audit.push({ ...row, status: 'defence_planner' });
       continue;
     }
     if (!healthy(c)) {
