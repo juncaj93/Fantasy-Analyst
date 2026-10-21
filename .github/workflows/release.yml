@@ -233,6 +233,32 @@ jobs:
           fi
           # Piped in, never echoed. Overwrites cleanly on every run.
           printf '%s' "${{ secrets.SPORTSGAMEODDS_API_KEY }}" | npx wrangler secret put SPORTSGAMEODDS_API_KEY
+
+      # And the token the allowance panel reads today's D1 usage with.
+      #
+      # Same shape as the odds key above and for the same reasons: published by
+      # the deploy so nobody has to open a terminal, and skipped rather than
+      # failed when absent, because a deployment that refused for the want of an
+      # optional diagnostic would be refusing to do the job it was asked to do.
+      # Without it Setup -> Data Health says the allowance is not connected,
+      # which is true and is better than a number nobody measured.
+      #
+      # Deliberately NOT `CLOUDFLARE_API_TOKEN`, which is the deploy token this
+      # very workflow authenticates with. This one lives inside a Worker that
+      # answers HTTP, so it is scoped to Account Analytics: Read and nothing
+      # else — it cannot read a row of anybody's data, change a setting, or
+      # deploy anything if it ever leaked. Publishing the deploy token here
+      # would put a credential that can replace production inside the thing it
+      # deploys.
+      - name: Store the analytics token the allowance panel reads with
+        run: |
+          set -uo pipefail
+          if [ -z "${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}" ]; then
+            echo "::warning::CLOUDFLARE_ANALYTICS_TOKEN is not set, so the D1 allowance panel on Data Health will say it is not connected. See docs/DATA_HEALTH.md."
+            exit 0
+          fi
+          # Piped in, never echoed. Overwrites cleanly on every run.
+          printf '%s' "${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}" | npx wrangler secret put CLOUDFLARE_ANALYTICS_TOKEN
           echo "Odds provider key published to the Worker."
 
       # The first question after any deploy, asked before the slower ones: is
