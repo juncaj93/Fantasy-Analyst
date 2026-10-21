@@ -9,8 +9,10 @@
  * each of the four widths the projects run (360, 375, 390, 430).
  *
  * And the rule the whole screen keeps: no control on it offers a transaction.
- * Rows are buttons that open a sheet, so they say "in for X" and "$3 to win",
- * never "drop", "bid", "add" or "claim".
+ * Cards are buttons that open a sheet. Since 21 October 2026 a card carries
+ * status chips (`Drop: Miller`, `Pick your drop`), which describe the plan in
+ * Alex's words; the control itself, its name and the rest of its text never
+ * reads "drop", "bid", "add" or "claim".
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -178,9 +180,21 @@ async function noSidewaysScroll(page: Page) {
   expect(overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
 }
 
-/** Every control on the screen, read for a transaction word. */
+/** The fixed set of chips a waiver card may carry (21 October 2026). */
+const CHIP = /^(Free agent|Waivers until \w+|Open spot|Needs a drop|Pick your drop|Drop: .+|IR: .+|\$\d+(–\d+)?|Starter out|Q|D|O|IR|PUP|SUS)$/;
+
+/** Every control on the screen, read for a transaction word. A card's status chips are labels, read on their own. */
 async function noTransactionControl(page: Page) {
-  const texts = (await page.locator('button:visible').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
+  for (const chip of await page.locator('button:visible [data-testid="wcard-chip"]').allInnerTexts()) expect(chip.trim()).toMatch(CHIP);
+  const texts = (
+    await page.locator('button:visible').evaluateAll((els) =>
+      els.map((el) => {
+        const copy = el.cloneNode(true) as HTMLElement;
+        copy.querySelectorAll('[data-testid="wcard-chip"]').forEach((n) => n.remove());
+        return `${copy.textContent ?? ''} ${el.getAttribute('aria-label') ?? ''}`;
+      }),
+    )
+  ).map((t) => t.replace(/\s+/g, ' ').trim().toLowerCase());
   for (const text of texts) {
     for (const word of ['add', 'drop', 'claim', 'bid', 'submit']) {
       expect(new RegExp(`\\b${word}\\b`).test(text), `a control reads "${word}": ${text}`).toBe(false);
@@ -200,9 +214,9 @@ test.describe('the tiers the deployment computes', () => {
     const rows = page.getByTestId('waiver-tier-row');
     await expect(rows.first()).toBeVisible();
     for (const row of await rows.all()) {
-      await expect(row.getByTestId('tier-reason')).toHaveCount(1);
-      expect((await row.getByTestId('tier-reason').innerText()).trim().length).toBeGreaterThan(0);
-      expect(await row.getByTestId('tier-gain').innerText()).toMatch(/^\+\d+\.\d pts$|^IR stash$|^Return unknown$/);
+      /* At most one short reason; the full sentence is the sheet's "Why". */
+      for (const reason of await row.getByTestId('tier-reason').allInnerTexts()) expect(reason.trim().length).toBeLessThanOrEqual(32);
+      expect(await row.getByTestId('tier-gain').innerText()).toMatch(/^\+\d+\.\d$|^IR stash$|^Return unknown$/);
     }
     await noSidewaysScroll(page);
     await noTransactionControl(page);
@@ -244,16 +258,15 @@ test.describe('the tiers the deployment computes', () => {
     await noSidewaysScroll(page);
   });
 
-  test('draws the plan card with no control on it when there is a "Do this"', async ({ page }) => {
-    const card = page.getByTestId('waiver-plan');
-    if ((await card.count()) === 0) {
+  test('draws "Do this" as cards, with no summary box when each claim stands alone', async ({ page }) => {
+    const doRows = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
+    if ((await doRows.count()) === 0) {
       await expect(page.getByTestId('waivers-no-move')).toBeVisible();
       return;
     }
-    await expect(card.getByRole('button')).toHaveCount(0);
-    /* One claim per "Do this" move: two holes are two claims, each under its own drop. */
-    const doRows = await page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row').count();
-    await expect(card.getByTestId('waiver-plan-claim')).toHaveCount(doRows);
+    /* Each "Do this" move has its own drop or an open spot, so nothing depends on anything: the cards say it all. */
+    await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
+    await noTransactionControl(page);
   });
 });
 
@@ -267,18 +280,25 @@ test.describe('the tiers as a layout', () => {
   test('keeps a long name, a $100 bid, alternatives and a shared spot on the phone', async ({ page }) => {
     const first = page.getByTestId('waiver-tier-row').first();
     await expect(first).toContainText(LONG);
-    await expect(first.getByTestId('tier-extra')).toHaveText('Or C.J. Stroud, Jordan Love, Sam Darnold');
+    await expect(first.getByTestId('tier-reason')).toHaveText('Burrow on bye wk 6');
     /* The name is never the part that gives way: the badge shrinks first. */
     const name = (await first.locator('.player-name').boundingBox())!;
     expect(name.width).toBeGreaterThan(100);
 
     const claim = page.locator('[data-testid="waiver-tier-row"][data-player-id="t2"]');
-    await expect(claim.getByTestId('tier-bid')).toHaveText('$100 to win');
-    await expect(claim.getByTestId('tier-drop')).toContainText('in for Kendre Miller');
+    await expect(claim.getByTestId('wcard-chip')).toHaveText([/^Waivers until \w+$/, 'Drop: Miller']);
     const box = (await claim.boundingBox())!;
-    expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(160);
+    expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(110);
     await noSidewaysScroll(page);
     await noTransactionControl(page);
+
+    /* What left the card is on the sheet, word for word. */
+    await claim.click();
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet.getByTestId('tier-detail-pickup')).toHaveText(/^PickupOn waivers until \w+ · \$100 to win · in for Kendre Miller$/);
+    await sheet.getByRole('button', { name: 'Done' }).click();
+    await first.click();
+    await expect(page.getByTestId('tier-detail').getByTestId('tier-detail-also')).toHaveText('Also fitsOr C.J. Stroud, Jordan Love, Sam Darnold');
   });
 
   test('says each tier under its own heading, in order', async ({ page }) => {
@@ -311,8 +331,17 @@ test.describe('the tiers as a layout', () => {
   });
 
   test('says a free agent needs no bid, and the league rule once', async ({ page }) => {
-    await expect(page.getByTestId('waiver-tier-row').first().getByTestId('tier-free')).toHaveText('Free agent');
-    await expect(page.getByTestId('waivers-free-agent-rule')).toHaveCount(1);
+    await expect(page.getByTestId('waiver-tier-row').first().locator('[data-chip="free"]')).toHaveText('Free agent');
+    /* The rule moved off the screen and onto the info sheet, one fact a line. */
+    await expect(page.getByTestId('waivers-free-agent-rule')).toHaveCount(0);
+    await page.getByTestId('waivers-info-button').click();
+    const rule = page.getByTestId('waivers-free-agent-rule');
+    await expect(rule).toHaveCount(1);
+    await expect(rule.locator('li')).toHaveText([
+      'A dropped player is on waivers for 2 days.',
+      'A player whose game has started waits for the Wednesday run.',
+      'Anyone else is an instant add.',
+    ]);
   });
 });
 
@@ -447,16 +476,16 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText('Jordan Love');
     await expect(rows.nth(1)).toContainText('Mark Andrews');
-    await expect(rows.nth(0).getByTestId('tier-drop')).toContainText('in for Will Shipley');
-    await expect(rows.nth(1).getByTestId('tier-drop')).toContainText('in for Emeka Egbuka');
-    await expect(page.getByTestId('waiver-plan-claim')).toHaveCount(2);
-    await expect(page.getByTestId('waiver-plan')).toContainText('Drop Will Shipley');
-    await expect(page.getByTestId('waiver-plan')).toContainText('Drop Emeka Egbuka');
+    await expect(rows.nth(0).locator('[data-chip="drop"]')).toHaveText('Drop: Shipley');
+    await expect(rows.nth(1).locator('[data-chip="drop"]')).toHaveText('Drop: Egbuka');
+    await expect(rows.nth(1).getByTestId('tier-reason')).toHaveText('LaPorta on bye wk 6');
+    /* Two claims, each with its own drop: neither depends on the other, so no summary box. */
+    await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
     /* Andrews is a hole fill: never on the Watch list. */
     await expect(page.getByTestId('tier-watch')).not.toContainText('Mark Andrews');
     for (const row of await rows.all()) {
       const box = (await row.boundingBox())!;
-      expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(160);
+      expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(110);
     }
     await noSidewaysScroll(page);
     await noTransactionControl(page);
@@ -465,7 +494,9 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
   test('labels a stash with no known return on the Watch list, at $0 to $1', async ({ page }) => {
     const row = page.locator('[data-testid="waiver-tier-row"][data-player-id="r3"]');
     await expect(row.getByTestId('tier-gain')).toHaveText('Return unknown');
-    await expect(row.getByTestId('tier-bid')).toHaveText('$0 to stash');
+    await expect(row.locator('[data-chip="bid"]')).toHaveText('$0–1');
+    await row.click();
+    await expect(page.getByTestId('tier-detail-pickup')).toHaveText('Pickup$0 to stash · in for Ladd McConkey');
     await noSidewaysScroll(page);
   });
 
@@ -539,76 +570,210 @@ test.describe('round 2 follow-up: an IR move, and the best drops under Andrews',
     await openWaivers(page);
   });
 
-  test('says "Shipley to IR" for Love and lists the best drops under Andrews, Harris first', async ({ page }) => {
+  test('says "IR: Shipley" for Love and "Drop: Harris" for Andrews, with the best drops on the sheet', async ({ page }) => {
     const doRows = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
     await expect(doRows).toHaveCount(2);
-    await expect(doRows.nth(0).getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
-    const card = page.getByTestId('waiver-plan');
-    await expect(card).toContainText('Move Will Shipley to IR, then claim Jordan Love');
-    const groups = card.getByTestId('waiver-plan-group');
-    /* The list sits under the Andrews step, not under Love. */
-    await expect(groups.nth(0).getByTestId('best-drops')).toHaveCount(0);
-    const list = groups.nth(1).getByTestId('best-drops');
-    await expect(list.getByTestId('best-drops-label')).toHaveText('Best drops (tap for why)');
-    const lines = list.getByTestId('best-drop');
-    await expect(lines).toHaveCount(3);
-    await expect(lines.nth(0)).toHaveText("1.Tre' Harris WR \u00b7 1.2 pts");
-    await expect(lines.nth(1)).toContainText('Brian Robinson');
-    for (let i = 0; i < 3; i++) await expect(lines.nth(i)).not.toContainText('(');
-    /* The step comes first, then the list. */
-    const claimBox = (await groups.nth(1).getByTestId('waiver-plan-claim').boundingBox())!;
-    const listBox = (await list.boundingBox())!;
-    expect(listBox.y).toBeGreaterThan(claimBox.y);
+    await expect(doRows.nth(0).locator('[data-chip="ir"]')).toHaveText('IR: Shipley');
+    await expect(doRows.nth(1).locator('[data-chip="drop"]')).toHaveText('Drop: Harris');
+    /* No summary box and no drop list on a card: both moves stand alone. */
+    await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
+    await expect(page.getByTestId('best-drops')).toHaveCount(0);
     /* A Watch list name never borrows a spot another row uses. */
     const watchRow = page.locator('[data-testid="waiver-tier-row"][data-player-id="r5"]');
-    await expect(watchRow.getByTestId('tier-drop')).toContainText('needs a roster spot');
-    await expect(watchRow.getByTestId('tier-drop')).not.toContainText('Will Shipley');
+    await expect(watchRow.locator('[data-chip="needs"]')).toHaveText('Needs a drop');
+    await expect(watchRow).not.toContainText('Shipley');
     await noSidewaysScroll(page);
     await noTransactionControl(page);
+    await watchRow.click();
+    await expect(page.getByTestId('tier-detail-pickup')).toHaveText('PickupFree agent · needs a roster spot');
   });
 
-  test('keeps every best-drops line to two lines at most, with no sideways scroll', async ({ page }) => {
-    const lines = page.getByTestId('waiver-plan').getByTestId('best-drop');
-    await expect(lines).toHaveCount(3);
+  test('opens Andrews into the best drops with their full reasons, inside the phone', async ({ page }) => {
+    await page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row').nth(1).click();
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet).toContainText('Mark Andrews');
+    const items = sheet.getByTestId('tier-detail-best-drop');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toContainText("Tre' Harris");
+    await expect(items.nth(0)).toContainText('lowest season points on your bench (1.2)');
+    await expect(items.nth(1)).toContainText('handcuff to Bijan Robinson');
     for (let i = 0; i < 3; i++) {
-      const el = lines.nth(i);
-      const box = (await el.boundingBox())!;
-      const lineHeight = await el.evaluate((n) => parseFloat(getComputedStyle(n).lineHeight));
-      expect(box.height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+      const box = (await items.nth(i).boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     }
     await noSidewaysScroll(page);
   });
 
-  test('opens the sheet with the full reasons when the list is tapped', async ({ page }) => {
-    await page.getByTestId('waiver-plan').getByTestId('best-drops').click();
-    const sheet = page.getByTestId('tier-detail');
-    await expect(sheet).toContainText('Mark Andrews');
-    const items = sheet.getByTestId('tier-detail-best-drop');
-    await expect(items).toHaveCount(3);
-    await expect(items.nth(0)).toContainText('lowest season points on your bench (1.2)');
-    await expect(items.nth(1)).toContainText('handcuff to Bijan Robinson');
-    const box = (await sheet.getByTestId('tier-detail-drop').boundingBox())!;
-    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    await noSidewaysScroll(page);
-  });
-
-  test('Team shows the same list under Andrews, and Shipley to IR for Love', async ({ page }) => {
+  test('Team shows the same cards: IR: Shipley for Love, Drop: Harris for Andrews, the list on the sheet', async ({ page }) => {
     await page.getByTestId('tab-team').click();
     const rows = page.getByTestId('waiver-card').getByTestId('waiver-tier-row');
     await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0).getByTestId('tier-drop')).toContainText('Will Shipley to IR first');
-    await expect(rows.nth(0).getByTestId('best-drops')).toHaveCount(0);
-    const lines = rows.nth(1).getByTestId('best-drop');
-    await expect(lines).toHaveCount(3);
-    await expect(lines.nth(0)).toContainText("Tre' Harris");
-    for (let i = 0; i < 3; i++) {
-      const el = lines.nth(i);
-      const box = (await el.boundingBox())!;
-      const lineHeight = await el.evaluate((n) => parseFloat(getComputedStyle(n).lineHeight));
-      expect(box.height).toBeLessThanOrEqual(lineHeight * 2 + 1);
-    }
+    await expect(rows.nth(0).locator('[data-chip="ir"]')).toHaveText('IR: Shipley');
+    await expect(rows.nth(1).locator('[data-chip="drop"]')).toHaveText('Drop: Harris');
+    await expect(page.getByTestId('best-drops')).toHaveCount(0);
+    await rows.nth(1).click();
+    await expect(page.getByTestId('tier-detail').getByTestId('tier-detail-best-drop')).toHaveCount(3);
     await noSidewaysScroll(page);
     await noTransactionControl(page);
+  });
+});
+
+/*
+ * The waiver card (21 October 2026), at each of the four widths the projects
+ * run: a 44px face that is never squashed, a name line and a chip line that
+ * never wrap, a third line only for a reason, 12px inside and 8px between
+ * cards, a 44px tap target, and no "Sleeper" drawn beside a number.
+ */
+test.describe('the waiver card on a phone', () => {
+  test.beforeEach(async ({ page }) => {
+    await inSeason(page);
+    await serve(page, { tiers: round2Fixture(), claimPlan: ROUND2_PLAN });
+    await openWaivers(page);
+  });
+
+  test('two lines, three with a reason; nothing wraps, clips sideways or squashes', async ({ page }) => {
+    const cards = page.getByTestId('waiver-tier-row');
+    await expect(cards.first()).toBeVisible();
+    const width = page.viewportSize()!.width;
+    const measured = await cards.evaluateAll((els) =>
+      els.map((el) => {
+        const box = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const face = el.querySelector('.wcard-face .player-face, .wcard-face .cmp2-face')!.getBoundingClientRect();
+        const top = el.querySelector('.wcard-top')!.getBoundingClientRect();
+        const name = el.querySelector('.wcard-top .player-name')!.getBoundingClientRect();
+        const chips = el.querySelector('.wcard-chips') as HTMLElement;
+        const chipsBox = chips.getBoundingClientRect();
+        const kids = [...chips.children].map((c) => c.getBoundingClientRect());
+        const reason = el.querySelector('.wcard-reason');
+        return {
+          left: box.left,
+          right: box.right,
+          height: box.height,
+          bottom: box.bottom,
+          padding: [style.paddingTop, style.paddingLeft, style.paddingRight, style.paddingBottom].map(parseFloat),
+          marginBottom: parseFloat(style.marginBottom),
+          face: [face.width, face.height],
+          topHeight: top.height,
+          nameHeight: name.height,
+          nameLineHeight: parseFloat(getComputedStyle(el.querySelector('.wcard-top .player-name')!).lineHeight) || 20,
+          chipsHeight: chipsBox.height,
+          chipRight: chipsBox.right,
+          childTops: kids.map((k) => Math.round((k.top + k.bottom) / 2)),
+          childRights: kids.map((k) => k.right),
+          hasReason: reason != null,
+        };
+      }),
+    );
+    for (const card of measured) {
+      expect(card.left).toBeGreaterThanOrEqual(0);
+      expect(card.right).toBeLessThanOrEqual(width);
+      expect(card.height, 'a tap target under 44px').toBeGreaterThanOrEqual(44);
+      expect(card.padding).toEqual([12, 12, 12, 12]);
+      expect(card.marginBottom).toBe(8);
+      expect(card.face, 'the face is a 44px circle').toEqual([44, 44]);
+      expect(card.nameHeight, 'the name wrapped').toBeLessThanOrEqual(card.nameLineHeight * 1.5);
+      /* One line of chips: every chip on the same row, none past the card. */
+      expect(new Set(card.childTops).size, 'the chip line wrapped').toBe(1);
+      for (const r of card.childRights) expect(r).toBeLessThanOrEqual(card.right - 12 + 0.5);
+      /* 12 + face row + chip line + optional reason + 12: two lines, or three with a reason. */
+      expect(card.height).toBeLessThanOrEqual(card.hasReason ? 100 : 80);
+    }
+    /* 8px between cards in one list. */
+    for (let i = 1; i < measured.length; i++) {
+      const gap = (await cards.nth(i).boundingBox())!.y - measured[i - 1]!.bottom;
+      if (gap >= 0 && gap < 20) expect(Math.round(gap)).toBe(8);
+    }
+    const drawn = await cards.evaluateAll((els) => els.map((el) => el.textContent ?? '').join(' '));
+    expect(drawn, 'no "Sleeper" beside a number').not.toMatch(/sleeper\s*\d|\d\s*sleeper/i);
+    await noSidewaysScroll(page);
+  });
+
+  test('a long name and the longest chips still keep to one line each', async ({ page }) => {
+    const base = round2Fixture();
+    const long = { ...base.doThese[0]!, name: 'Christopher Montgomery-Wellington III', drop: { ...base.doThese[0]!.drop!, name: 'Bartholomew Featherstonehaugh-Smythe' } };
+    await serve(page, { tiers: { ...base, doThis: long, doThese: [long, base.doThese[1]!] }, claimPlan: ROUND2_PLAN });
+    await page.reload();
+    await page.getByTestId('tab-waivers').click();
+    const card = page.getByTestId('waiver-tier-row').first();
+    await expect(card).toContainText('Christopher');
+    const lines = await card.evaluate((el) => {
+      const chips = [...el.querySelectorAll('.wcard-chips > *')].map((c) => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); });
+      const name = el.querySelector('.wcard-top .player-name') as HTMLElement;
+      return { chipRows: new Set(chips).size, nameClipped: name.scrollWidth > name.clientWidth, nameWraps: name.getBoundingClientRect().height > 30 };
+    });
+    expect(lines.chipRows).toBe(1);
+    expect(lines.nameWraps).toBe(false);
+    await noSidewaysScroll(page);
+  });
+
+  test('the info button opens what moved off the screen, and the budget sits in the header', async ({ page }) => {
+    const button = page.getByTestId('waivers-info-button');
+    const refresh = page.getByTestId('waivers-refresh');
+    const [a, b] = [(await button.boundingBox())!, (await refresh.boundingBox())!];
+    expect(a.width).toBeGreaterThanOrEqual(44);
+    expect(a.height).toBeGreaterThanOrEqual(44);
+    expect([a.width, a.height]).toEqual([b.width, b.height]);
+    await expect(page.getByTestId('waivers-budget')).toHaveText(/^ · FAAB \$\d+ of \$\d+$/);
+    /* Nothing of it is left at the foot of the screen. */
+    await expect(page.getByTestId('faab-budget')).toHaveCount(0);
+    await expect(page.getByTestId('tier-watch-note')).toHaveCount(0);
+
+    await button.click();
+    const sheet = page.getByTestId('waivers-info');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('waivers-info-chip')).toContainText('what the move adds to your best lineup over weeks 5–7');
+    await expect(sheet.getByTestId('waivers-info-chip')).toContainText('Weeks 5 and 6 count in full; week 7 counts half.');
+    await expect(sheet.getByTestId('waivers-info-tiers')).toContainText('Watch list: better on paper; no move needed now.');
+    await expect(sheet.getByTestId('faab-budget')).toContainText(/\$\d+ of \$\d+ left\./);
+    await expect(sheet.getByTestId('waivers-free-agent-rule')).toContainText('instant add');
+    for (const li of await sheet.locator('li').all()) {
+      const box = (await li.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+    await noSidewaysScroll(page);
+  });
+
+  test('Team draws the same card with the same numbers as Waivers', async ({ page }) => {
+    const read = async () =>
+      page.getByTestId('waiver-tier-row').evaluateAll((els) =>
+        els.map((el) => ({
+          id: el.getAttribute('data-player-id'),
+          cls: el.className,
+          gain: el.querySelector('[data-testid="tier-gain"]')?.textContent,
+          chips: [...el.querySelectorAll('[data-testid="wcard-chip"]')].map((c) => c.textContent),
+          reason: el.querySelector('[data-testid="tier-reason"]')?.textContent ?? null,
+        })),
+      );
+    const onWaivers = await read();
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('waiver-card').getByTestId('waiver-tier-row').first()).toBeVisible();
+    const onTeam = await page.getByTestId('waiver-card').getByTestId('waiver-tier-row').evaluateAll((els) => els.map((el) => el.getAttribute('data-player-id')));
+    const teamCards = (await read()).filter((c) => onTeam.includes(c.id));
+    expect(teamCards.length).toBeGreaterThan(0);
+    for (const card of teamCards) expect(card).toEqual(onWaivers.find((w) => w.id === card.id));
+  });
+});
+
+/*
+ * A plan whose claims depend on each other gets the numbered summary: names
+ * only, one line each, the fallback saying when it runs.
+ */
+test.describe('the "Do this" summary', () => {
+  test('appears only for claims that depend on each other, as short numbered lines', async ({ page }) => {
+    await inSeason(page);
+    const plan = {
+      ...ROUND2_PLAN,
+      claims: [
+        { ...ROUND2_PLAN.claims[0], addName: 'Keenan Allen', dropPlayerId: 'd-jw', dropName: 'Jaylen Wright' },
+        { ...ROUND2_PLAN.claims[1], addName: 'Tyjae Spears', dropPlayerId: 'd-jw', dropName: 'Jaylen Wright', qualifier: 'Only if 1 loses', relation: 'fallback' },
+      ],
+    };
+    await serve(page, { tiers: round2Fixture(), claimPlan: plan });
+    await openWaivers(page);
+    const box = page.getByTestId('waiver-plan');
+    await expect(box.getByTestId('waiver-plan-claim')).toHaveText(['Add Allen, drop Wright', 'Add Spears, drop Wright, if 1 loses']);
+    await expect(box.getByRole('button')).toHaveCount(0);
+    await noSidewaysScroll(page);
   });
 });

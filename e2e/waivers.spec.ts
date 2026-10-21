@@ -120,8 +120,10 @@ test.describe('the waivers page, as an older payload draws it', () => {
   test('lists who is available as one decision per player', async ({ page }) => {
     const rows = page.getByTestId('waiver-row');
     await expect(rows.first()).toBeVisible();
-    await expect(rows.first().getByTestId('waiver-summary')).toBeVisible();
-    await expect(rows.first().getByTestId('waiver-short-term')).toContainText('pts');
+    await expect(rows.first().getByTestId('wcard-chips')).toBeVisible();
+    /* The projection moved off the card (21 October 2026) to the sheet's "This week". */
+    await rows.first().click();
+    await expect(page.getByTestId('waiver-detail')).toContainText(/Proj|\d+\.\d/);
   });
 
   /**
@@ -140,7 +142,7 @@ test.describe('the waivers page, as an older payload draws it', () => {
     const row = rows.first();
     // The identity, in the order this app now uses everywhere.
     await expect(row.locator('.pos-pill')).toHaveCount(1);
-    await expect(row.getByTestId('team-logo')).toHaveCount(1);
+    await expect(row.locator('[data-testid="team-logo"], [data-testid="team-code"]')).toHaveCount(1);
     await expect(row.getByTestId('waiver-strength')).toBeVisible();
 
     // No pill row on any card, and none of the phrases the pills carried.
@@ -155,19 +157,20 @@ test.describe('the waivers page, as an older payload draws it', () => {
       expect(text).not.toMatch(/Better than|Sleeper projection|Vegas lines|Nobody else needs him|\b0 of \d+ teams need/);
     }
 
-    // One status line: the pickup state or the cost, then the projection.
-    const summary = await row.getByTestId('waiver-summary').innerText();
-    expect(summary).toMatch(/Est\. cost|Free agent/);
-    expect(summary).toMatch(/Proj\. \+?\d+\.\d pts|Proj\. \d+\.\d vs \d+\.\d/);
-    // One decimal, always.
-    expect(summary).not.toMatch(/\d\.\d\d/);
+    // One line of at most two chips: the pickup state, the cost band, an injury letter.
+    const chips = await row.getByTestId('wcard-chip').allInnerTexts();
+    expect(chips.length).toBeLessThanOrEqual(2);
+    for (const chip of chips) expect(chip).toMatch(/^(Free agent|Waivers until \w+|\$?\d+(–\d+)?%?\+?|≤\$?\d+%?|Q|D|O|IR|PUP|SUS)$/);
 
     // At most one reason, never several joined together.
     const count = await rows.count();
     for (let i = 0; i < count; i++) {
       const notes = rows.nth(i).getByTestId('waiver-notes');
       expect(await notes.count()).toBeLessThanOrEqual(1);
-      if ((await notes.count()) === 1) expect(await notes.innerText()).not.toContain(' · ');
+      if ((await notes.count()) === 1) {
+        expect(await notes.innerText()).not.toContain(' · ');
+        expect((await notes.innerText()).length).toBeLessThanOrEqual(32);
+      }
     }
   });
 
@@ -417,32 +420,24 @@ test.describe('the waivers page, as an older payload draws it', () => {
 /**
  * The wallet the board was priced against.
  *
- * Moved here from the Team page, where it closed a two-row teaser of this same
- * board. The claim is unchanged and it is the one worth keeping: the demo
- * league publishes a $100 budget and $35 spent, so the footer has to read $65.
- * A card that assumed Sleeper's $100 default would say $100 here and be wrong
- * in exactly the way this layer exists to avoid.
+ * The claim is unchanged and it is the one worth keeping: the demo league
+ * publishes a $100 budget and $35 spent, so it has to read $65. A card that
+ * assumed Sleeper's $100 default would say $100 here and be wrong in exactly
+ * the way this layer exists to avoid. Since 21 October 2026 it is one muted
+ * fact in the header, and the bid history is on the info sheet.
  */
-test.describe('the league wallet, under the board', () => {
+test.describe('the league wallet', () => {
   test.beforeEach(async ({ page }) => openWaivers(page));
 
-  test('states the budget it priced against, from the league settings', async ({ page }) => {
+  test('states the budget it priced against, from the league settings, in the header', async ({ page }) => {
+    await expect(page.getByTestId('waivers-budget')).toContainText('FAAB $65 of $100');
+    await page.getByTestId('waivers-info-button').click();
     await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
   });
 
-  test('sits below the rows it qualifies, not above them', async ({ page }) => {
-    /*
-     * Order rather than mere presence: a wallet above the board is a figure
-     * with nothing yet to spend it on, which is the arrangement this move was
-     * made to get away from.
-     */
-    const footer = page.getByTestId('faab-budget');
-    await expect(footer).toBeVisible();
-    const rows = page.getByTestId('waiver-row');
-    if ((await rows.count()) === 0) return;
-    const rowBottom = await rows.last().evaluate((el) => el.getBoundingClientRect().bottom);
-    const footerTop = await footer.evaluate((el) => el.getBoundingClientRect().top);
-    expect(footerTop).toBeGreaterThanOrEqual(rowBottom - 1);
+  test('is not a paragraph at the foot of the board any more', async ({ page }) => {
+    await expect(page.getByTestId('waiver-row').first()).toBeVisible();
+    await expect(page.getByTestId('faab-budget')).toHaveCount(0);
   });
 });
 

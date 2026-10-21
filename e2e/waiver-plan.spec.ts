@@ -135,8 +135,18 @@ test.describe('the plan the deployment actually computes', () => {
    * an instruction with a player in it and a rank that matches its place.
    */
   test('hands the reader a numbered instruction per claim', async ({ page }) => {
+    /*
+     * Since 21 October 2026 the numbered summary is drawn only when one claim
+     * depends on another. Claims that each stand alone are their own "Do
+     * this" cards, one per claim, and that is what the seeded league makes.
+     */
     const card = page.getByTestId('waiver-plan');
-    await expect(card).toBeVisible();
+    const doRows = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
+    await expect(doRows.first().or(card)).toBeVisible();
+    if ((await card.count()) === 0) {
+      expect(await doRows.count()).toBeGreaterThan(0);
+      return;
+    }
     // The section title says "Recommended move"; the card repeats nothing.
     await expect(page.getByTestId('waiver-plan-headline')).toHaveCount(0);
     await expect(card).not.toContainText('Your waiver plan');
@@ -401,17 +411,15 @@ test.describe('free agent or waiver claim, on the board', () => {
       await route.fulfill({ response, body: JSON.stringify({ ...original, pickup }) });
     });
     await openWaivers(page);
-    const summaries = page.getByTestId('waiver-summary');
-    await expect(summaries.first()).toBeVisible();
-    const free = page.locator('[data-testid="waiver-summary"][data-pickup="free"]').first();
-    // The app's own status tag, reading just `Free agent`.
-    await expect(free.locator('.tag')).toHaveText('Free agent');
+    const cards = page.getByTestId('waiver-row');
+    await expect(cards.first()).toBeVisible();
+    // The app's own status chip, reading just `Free agent`, and no price beside it.
+    const free = page.locator('[data-testid="waiver-row"]:has([data-chip="free"])').first();
+    await expect(free.locator('[data-chip="free"]')).toHaveText('Free agent');
+    await expect(free.locator('[data-chip="bid"]')).toHaveCount(0);
     await expect(free).not.toContainText('FAAB');
-    const claim = page.locator('[data-testid="waiver-summary"][data-pickup="waivers"]');
-    if ((await claim.count()) > 0) {
-      await expect(claim.first().locator('.tag')).toContainText('On waivers until');
-      await expect(claim.first()).toContainText('Est. cost');
-    }
+    const claim = page.locator('[data-chip="waivers"]');
+    if ((await claim.count()) > 0) await expect(claim.first()).toHaveText(/^Waivers until \w+$/);
   });
 });
 

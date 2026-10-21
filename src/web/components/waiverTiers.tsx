@@ -2,19 +2,19 @@
  * The waiver tiers: Do this, Worth considering, Watch list, and the drop-ready
  * bench.
  *
- * Built from the same parts the board always used: the `player-row
- * waiver-row` button with `PlayerIdentity`, the status `tag`, the
- * `waiver-summary` and `waiver-notes` lines, the shared `Sheet`, and the plan
- * card above it all. A row is a button that opens its detail and nothing else.
- * Nothing here adds, drops or bids: every line is a recommendation to act on in
- * Sleeper.
+ * Every move is the shared `WaiverCard` (`components/waiverCard.tsx`), the
+ * same card Team's "Waiver moves" draws, and opens `TierDetailSheet`, which
+ * holds everything the card does not print. A card is a button that opens its
+ * detail and nothing else. Nothing here adds, drops or bids: every line is a
+ * recommendation to act on in Sleeper.
  */
 
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
-import { PlayerIdentity, PlayerSheetTitle } from './common.tsx';
+import { PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
-import { BestDrops, clearDay } from './waivers.tsx';
+import { WaiverCard } from './waiverCard.tsx';
+import { alsoText, pickupText, tierCard } from '../waiverCard.ts';
 import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN } from '../sleeperFallback.ts';
 
 /**
@@ -27,12 +27,6 @@ const WEEK_SOURCE_SHORT: Record<Exclude<WeekSource, 'sleeper'>, string> = {
   current: 'this week’s number',
 };
 
-const TIER_TAG: Record<TierRow['tier'], string> = {
-  do_this: 'tag-take',
-  consider: 'tag-calm',
-  watch: '',
-};
-
 /** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window (`Return unknown` when nobody knows when). */
 export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
   if (row.reasonCode === 'ir_stash') return row.stashLabel === 'return unknown' ? 'Return unknown' : 'IR stash';
@@ -40,88 +34,21 @@ export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLab
 }
 
 /**
- * The pickup line: `Free agent · in for X`, or `On waivers until Fri · $3 to win
- * · in for X`. The row is a button, so it carries no transaction word (`add`,
- * `drop`, `bid`, `claim`); the detail sheet says it plainly.
+ * One move as a card: face, name, gain, two chips and a short reason. Waivers'
+ * tiers and Team's "Waiver moves" both draw this, from the same row. The
+ * pickup line, the alternatives and the drop list it used to print are on the
+ * sheet (21 October 2026).
  */
-function PickupLine({ row }: { row: TierRow }) {
-  const bid = row.bid;
+export function TierRowButton({ row, onOpen }: { row: TierRow; onOpen: () => void }) {
   return (
-    <div className="waiver-summary" data-testid="tier-summary" data-pickup={bid.kind}>
-      {bid.kind === 'free' ? (
-        <span className="tag tag-mini waiver-pickup" data-testid="tier-free">
-          Free agent
-        </span>
-      ) : bid.kind === 'claim' ? (
-        <>
-          {bid.until ? (
-            <>
-              <span className="tag tag-mini waiver-pickup">On waivers until {clearDay(bid.until)}</span>{' '}
-            </>
-          ) : null}
-          <span data-testid="tier-bid" style={{ whiteSpace: 'nowrap' }}>
-            {bid.posture === 'stash' ? (
-              <>
-                <strong>${bid.recommended}</strong> to stash
-              </>
-            ) : (
-              <>
-                <strong>${bid.recommended}</strong> to win
-              </>
-            )}
-          </span>
-        </>
-      ) : null}
-      <span data-testid="tier-drop" style={{ overflowWrap: 'anywhere' }}>
-        {bid.kind === 'none' ? '' : ' · '}
-        {row.needsSpot
-          ? row.tier === 'watch'
-            ? 'needs a roster spot'
-            : row.tier === 'do_this'
-              ? 'you pick the spot'
-              : 'needs a spot first'
-          : row.drop?.viaReserve
-            ? `${row.drop.name} to IR first`
-            : row.drop
-              ? `in for ${row.drop.name}`
-              : 'uses an open spot'}
-      </span>
-    </div>
-  );
-}
-
-export function TierRowButton({ row, onOpen, showDrops = false }: { row: TierRow; onOpen: () => void; showDrops?: boolean }) {
-  const extra = row.alternatives.length > 0 ? `Or ${row.alternatives.join(', ')}` : row.competesWith.length > 0 ? `Same spot as ${row.competesWith.join(', ')}` : null;
-  return (
-    <button
-      className="player-row waiver-row"
-      data-testid="waiver-tier-row"
-      data-tier={row.tier}
-      data-player-id={row.playerId}
-      data-position={row.position.toUpperCase()}
-      aria-label={`${row.name}, ${row.reason}`}
-      onClick={onOpen}
-    >
-      <div className="player-row-top">
-        <PlayerIdentity position={row.position} team={row.team} />
-        <span className="player-name">{row.name}</span>
-        <span className="player-row-meta" />
-        <span className={`tag waiver-strength ${TIER_TAG[row.tier]}`} data-testid="tier-gain">
-          {tierBadge(row)}
-        </span>
-      </div>
-      <PickupLine row={row} />
-      {/* Team's waiver line has no plan card above it, so the list rides on the row; the row opens the sheet. */}
-      {showDrops && row.bestDrops && row.bestDrops.length > 0 ? <BestDrops items={row.bestDrops} /> : null}
-      <div className="waiver-notes" data-testid="tier-reason">
-        {row.reason}
-      </div>
-      {extra ? (
-        <div className="waiver-notes faint" data-testid="tier-extra">
-          {extra}
-        </div>
-      ) : null}
-    </button>
+    <WaiverCard
+      model={tierCard(row)}
+      onOpen={onOpen}
+      testId="waiver-tier-row"
+      gainTestId="tier-gain"
+      reasonTestId="tier-reason"
+      data={{ 'data-tier': row.tier }}
+    />
   );
 }
 
@@ -176,9 +103,6 @@ export function TierSections({
           <div className="section-title" data-testid="tier-watch-title">
             Watch list
           </div>
-          <div className="faint waivers-others-note" data-testid="tier-watch-note">
-            Better on paper; no move needed now.
-          </div>
           <section data-testid="tier-watch">
             {tiers.watch.map((row) => (
               <TierRowButton key={row.playerId} row={row} onOpen={() => onOpen(row)} />
@@ -224,7 +148,6 @@ function weekLine(row: TierRow, weights: number[]): string {
 
 /** One move in full: why, the lineup arithmetic, the drop, and the bid. */
 export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: WaiverTiersView; onClose: () => void }) {
-  const bid = row.bid;
   return (
     <Sheet
       title={<PlayerSheetTitle playerId={row.playerId} name={row.name} position={row.position} team={row.team} />}
@@ -232,6 +155,20 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
       onClose={onClose}
       testId="tier-detail"
     >
+      <TierDetailBody row={row} tiers={tiers} />
+    </Sheet>
+  );
+}
+
+/**
+ * The sheet's body, apart from the sheet so a test can read every word of it.
+ * Everything the card stopped printing is here: the pickup line, the full
+ * reason, the alternatives and the drop list.
+ */
+export function TierDetailBody({ row, tiers }: { row: TierRow; tiers: WaiverTiersView }) {
+  const bid = row.bid;
+  const also = alsoText(row);
+  return (
       <div className="weekly" data-testid="tier-detail-body" data-player-id={row.playerId}>
         <div className="weekly-head">
           <span className="metric">{row.tier === 'do_this' ? 'Do this' : row.tier === 'consider' ? 'Worth considering' : 'Watch list'}</span>
@@ -240,6 +177,10 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
           </span>
         </div>
         <dl className="weekly-lines">
+          <div className="weekly-line" data-testid="tier-detail-pickup">
+            <dt>Pickup</dt>
+            <dd>{pickupText(row)}</dd>
+          </div>
           <div className="weekly-line">
             <dt>Why</dt>
             <dd>{row.reason}</dd>
@@ -324,10 +265,10 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
               <dd>{keptLine(row, tiers)}</dd>
             </div>
           ) : null}
-          {row.alternatives.length > 0 ? (
-            <div className="weekly-line">
+          {also ? (
+            <div className="weekly-line" data-testid="tier-detail-also">
               <dt>Also fits</dt>
-              <dd>{row.alternatives.join(', ')}</dd>
+              <dd>{also}</dd>
             </div>
           ) : null}
           <div className="weekly-line">
@@ -374,6 +315,5 @@ export function TierDetailSheet({ row, tiers, onClose }: { row: TierRow; tiers: 
 
         <div className="faint">Advisory only. Add, drop or bid in Sleeper; this app never makes a transaction.</div>
       </div>
-    </Sheet>
   );
 }

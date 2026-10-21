@@ -469,7 +469,6 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
     await expect(row).toContainText(top!.name);
     // No pills: fit lives on the detail sheet since 1 October 2026.
     await expect(row.getByTestId('waiver-tags')).toHaveCount(0);
-    await expect(row.getByTestId('waiver-short-term')).toContainText('pts');
     /*
      * The third line was `waiver-why` — one reason, in the engine's own words,
      * under two lines of metrics. The card says it in tags and one summary line
@@ -478,9 +477,15 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
      * worth. The reasons themselves moved into the sheet, where
      * `e2e/waivers.spec.ts` holds them.
      */
-    // The cost, or, for a free agent outside the waiver window, that there is none.
-    await expect(row.getByTestId('waiver-summary')).toContainText(/Est\. cost|Free agent/);
-    await expect(row.getByTestId('waiver-summary')).toContainText(/Proj\./);
+    /*
+     * Since 21 October 2026 the card is a face, the name, the verdict and one
+     * line of chips: `Free agent` or `Waivers until Wed`, the cost band, an
+     * injury letter. The projection moved to the sheet's "This week".
+     */
+    await expect(row.getByTestId('wcard-chips')).toBeVisible();
+    await expect(row.getByTestId('waiver-strength')).not.toBeEmpty();
+    await row.click();
+    await expect(page.getByTestId('waiver-detail')).toContainText('This week');
   });
 
   /**
@@ -508,21 +513,22 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
     const row = page.locator('[data-testid="waiver-row"]').first();
     const playerId = (await row.getAttribute('data-player-id'))!;
     const bid = (waivers.faab?.bids ?? []).find((b: { playerId: string }) => b.playerId === playerId) ?? null;
-    const cost = await row.getByTestId('waiver-cost').innerText();
+    const cost = (await row.getByTestId('wcard-chip').allInnerTexts()).join(' ');
 
     if (waivers.pickup?.[playerId]?.state === 'free') {
       // Outside the waiver window he is an instant add: no price, because
       // nobody bids. See `core/waivers/clearWindow.ts`.
-      expect(cost).toBe('Free agent');
+      expect(cost).toContain('Free agent');
+      await expect(row.locator('[data-chip="bid"]')).toHaveCount(0);
     } else if (bid?.expected) {
       // The number on the row is the number the pricing pass produced, to the
       // dollar. A row that rounded, averaged or re-derived it would be a second
       // opinion about somebody else's arithmetic.
       expect(cost).toContain(`$${bid.expected.low}\u2013${bid.expected.high}`);
     } else {
-      // No honest figure exists, so the field is a dash that says why, and
-      // carries no digit that could be read as a bid.
-      await expect(row.getByTestId('waiver-unknown')).toHaveAttribute('title', /not known yet/);
+      // No honest figure exists, so the card carries no price chip and no digit
+      // that could be read as a bid; the sheet says the cost is unknown.
+      await expect(row.locator('[data-chip="bid"]')).toHaveCount(0);
       expect(cost).not.toMatch(/\d/);
     }
   });
@@ -554,7 +560,18 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
    */
   test('offers no control that would make a transaction', async ({ page }) => {
     const card = page.getByTestId('waiver-card');
-    const buttons = (await card.getByRole('button').allInnerTexts()).join(' ').toLowerCase();
+    /* A card's status chips (`Drop: Miller`) describe the plan; the control's own words are checked. */
+    const buttons = (
+      await card.getByRole('button').evaluateAll((els) =>
+        els.map((el) => {
+          const copy = el.cloneNode(true) as HTMLElement;
+          copy.querySelectorAll('[data-testid="wcard-chip"]').forEach((n) => n.remove());
+          return `${copy.textContent ?? ''} ${el.getAttribute('aria-label') ?? ''}`;
+        }),
+      )
+    )
+      .join(' ')
+      .toLowerCase();
     /*
      * Matched as whole words, not as substrings.
      *
@@ -586,7 +603,7 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
     // The three figures live in the detail sheet now: the row has room for the
     // expected range and nothing else, and the rest opens on tap.
     const row = page.locator('[data-testid="waiver-row"]').first();
-    const free = (await row.getByTestId('waiver-summary').getAttribute('data-pickup')) === 'free';
+    const free = (await row.locator('[data-chip="free"]').count()) > 0;
     await row.click();
     await expect(page.getByTestId('waiver-detail')).toBeVisible();
     const bid = page.getByTestId('faab-bid').first();

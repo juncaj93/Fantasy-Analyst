@@ -24,12 +24,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LeagueSummary, type WaiverAdvice, type WaiverRefreshReport } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
-import { BudgetFooter, NoMoveCard, WaiverDetailSheet, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
+import { budgetChip, DependentClaims, NoMoveCard, WaiverDetailSheet, WaiverPlanCard, WaiverRow, WaiversInfoSheet } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { noMoveSummary, unscoredNotes } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
-import { RefreshIcon } from '../components/icons.tsx';
+import { InfoIcon, RefreshIcon } from '../components/icons.tsx';
 import { TierDetailSheet, TierRowButton, TierSections } from '../components/waiverTiers.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
@@ -44,6 +44,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [open, setOpen] = useState<WaiverBoardRow | null>(null);
   const [openTier, setOpenTier] = useState<TierRow | null>(null);
+  const [info, setInfo] = useState(false);
 
   /*
    * Tapping Waivers while already on Waivers.
@@ -58,6 +59,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
       { when: openTier != null, undo: () => setOpenTier(null) },
+      { when: info, undo: () => setInfo(false) },
       { when: filter !== ALL_FILTER, undo: () => setFilter(ALL_FILTER) },
     ]);
   }, [resetNonce]);
@@ -192,14 +194,29 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         testId="waivers-nav"
         subtitle={
           advice?.found ? (
-            <span data-testid="waivers-updated">
-              {advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}
-            </span>
+            <>
+              <span data-testid="waivers-updated">
+                {advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}
+              </span>
+              {/* The wallet, one muted fact beside the time; the bid history is behind the info button. */}
+              {budgetChip(advice.faab ?? null) ? <span data-testid="waivers-budget"> · {budgetChip(advice.faab ?? null)}</span> : null}
+            </>
           ) : undefined
         }
         trailing={
           selected ? (
             <span className="nav-actions-group">
+              {advice?.found ? (
+                <button
+                  className="btn btn-icon"
+                  data-testid="waivers-info-button"
+                  aria-label="About Waivers: the points chip, waiver rules and bids"
+                  title="About"
+                  onClick={() => setInfo(true)}
+                >
+                  <InfoIcon />
+                </button>
+              ) : null}
               <button
                 className="btn btn-icon"
                 data-testid="waivers-refresh"
@@ -245,13 +262,8 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 Do this
               </div>
               <section data-testid="waivers-recommended">
-                <WaiverPlanCard
-                  plan={advice.claimPlan}
-                  onOpenDrops={(id) => {
-                    const row = [...(tiers.doThese ?? []), ...tiers.consider].find((r) => r.playerId === id);
-                    if (row) setOpenTier(row);
-                  }}
-                />
+                {/* Numbered lines only when one claim depends on another; a lone claim is its own card. */}
+                <DependentClaims plan={advice.claimPlan} />
                 {/* One row per "Do this" move: a QB bye and a TE bye are two, each with its own drop. */}
                 {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).length > 0 ? (
                   (tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).map((row) => (
@@ -393,22 +405,17 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             </div>
           ))}
 
-          {/*
-            The wallet, last, under the board it prices.
-
-            It used to close the Team page, under a two-row teaser of this same
-            board — a frame around almost none of the spending it describes, on
-            a screen about a lineup. The bids it qualifies are the rows above.
-          */}
-          <BudgetFooter faab={advice?.faab ?? null} />
-          {tiers?.freeAgentRule ? (
-            <div className="faint" data-testid="waivers-free-agent-rule" style={{ margin: '0 4px 8px' }}>
-              {tiers.freeAgentRule}
-            </div>
-          ) : null}
         </>
       )}
 
+      {info && advice?.found ? (
+        <WaiversInfoSheet
+          faab={advice.faab ?? null}
+          rule={tiers?.freeAgentRule ?? null}
+          window={tiers?.window ?? null}
+          onClose={() => setInfo(false)}
+        />
+      ) : null}
       {openTier && tiers ? <TierDetailSheet row={openTier} tiers={tiers} onClose={() => setOpenTier(null)} /> : null}
       {open ? (
         <WaiverDetailSheet row={open} onClose={() => setOpen(null)} dropHint={dropHints.get(open.playerId) ?? null} />

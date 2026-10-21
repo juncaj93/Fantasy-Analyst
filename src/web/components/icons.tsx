@@ -145,6 +145,17 @@ export function RefreshIcon({ size = 20, className }: IconProps) {
   );
 }
 
+/** About: an "i" in a ring, for a sheet that explains the screen. */
+export function InfoIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v6" />
+      <path d="M12 7.5v.01" />
+    </svg>
+  );
+}
+
 /** Players: search. */
 export function SearchIcon({ size = 24, className }: IconProps) {
   return (
