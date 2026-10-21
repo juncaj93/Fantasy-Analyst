@@ -1,18 +1,29 @@
 /**
- * One waiver card, for every place a waiver move is drawn.
+ * One waiver row, for every place a waiver move is drawn.
  *
- * The Team row's look (22 October 2026: Alex wants no photos on a list, as on
- * Team and Matchup): position pill, team logo, name and the gain chip on the
- * first line; at most two chips on the second, which never wraps; one short
- * reason on a third line when there is one. The face is on the sheet. The
- * whole card is one button onto the detail sheet, and nothing on it is a
+ * A variant of the Team lineup row, built from its own classes rather than
+ * a second design (Alex, 22 October 2026: Waivers and Team "looked like two
+ * different apps"):
+ *
+ * - `player-row` and `player-row-top`: the lineup row's padding, tap height
+ *   and first line, with the position tint from `positionAccentClass`;
+ * - `PlayerIdentity` and `player-name`: the same pill, logo and name type;
+ * - `row-value`: the score column, holding the gain as a `fixture-chip`,
+ *   Team's small pill (green-tinted for Do this, gray otherwise);
+ * - `verdict-line`: the lineup's indented sub-line, carrying the chips, then
+ *   the short reason in the muted style.
+ *
+ * Rows sit in a `slot-group`, the one rounded card with hairline dividers
+ * that holds "Your lineup". No photo on a row; the face is on the sheet. The
+ * whole row is one button onto the detail sheet, and nothing on it is a
  * second tap target. What goes on it is `web/waiverCard.ts`.
  *
  * Nothing here adds, drops or bids: Alex makes every move in Sleeper.
  */
 
+import type { ReactNode } from 'react';
 import type { WaiverCardModel } from '../waiverCard.ts';
-import { PlayerIdentity } from './common.tsx';
+import { PlayerIdentity, positionAccentClass } from './common.tsx';
 
 export function WaiverCard({
   model,
@@ -37,7 +48,7 @@ export function WaiverCard({
   return (
     <button
       type="button"
-      className="player-row waiver-row wcard"
+      className={positionAccentClass(pos, 'player-row waiver-row')}
       data-testid={testId}
       data-player-id={model.playerId}
       data-position={pos}
@@ -45,29 +56,46 @@ export function WaiverCard({
       onClick={onOpen}
       {...data}
     >
-      <span className="wcard-main">
-        <span className="wcard-top">
-          <PlayerIdentity position={model.position} team={model.team} />
-          <span className="player-name">{model.name}</span>
-          <span className={`tag waiver-strength ${model.gainTone}`} data-testid={gainTestId}>
+      <div className="player-row-top">
+        <PlayerIdentity position={model.position} team={model.team} />
+        <span className="player-name">{model.name}</span>
+        <span className="row-value">
+          <span className="fixture-chip" data-rating={model.gainTone === 'tag-take' ? 'soft' : undefined} data-testid={gainTestId}>
             {model.gain}
           </span>
         </span>
-        {model.chips.length > 0 ? (
-          <span className="wcard-chips" data-testid="wcard-chips">
-            {model.chips.map((chip) => (
-              <span key={chip.key} className={`tag tag-mini${chip.key === 'injury' ? ' badge-warn' : ''}`} data-testid="wcard-chip" data-chip={chip.key}>
-                {chip.label}
-              </span>
-            ))}
-          </span>
-        ) : null}
-        {model.reason ? (
-          <span className={`wcard-reason${reasonWarn ? ' waiver-notes-warn' : ''}`} data-testid={reasonTestId}>
-            {model.reason}
-          </span>
-        ) : null}
-      </span>
+      </div>
+      {model.chips.length > 0 ? (
+        <div className="verdict-line wrow-chips" data-testid="wcard-chips">
+          {model.chips.map((chip) => (
+            <span
+              key={chip.key}
+              className="fixture-chip"
+              data-rating={chip.key === 'injury' ? 'tough' : undefined}
+              data-testid="wcard-chip"
+              data-chip={chip.key}
+            >
+              {chip.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {model.reason ? (
+        <div className={`verdict-line faint${reasonWarn ? ' waiver-notes-warn' : ''}`} data-testid={reasonTestId}>
+          {model.reason}
+        </div>
+      ) : null}
     </button>
+  );
+}
+
+/** Rows in one rounded card with hairline dividers, like "Your lineup". Nothing when there are no rows. */
+export function WaiverRowGroup({ children, testId }: { children: ReactNode; testId?: string }) {
+  const rows = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean);
+  if (rows.length === 0) return null;
+  return (
+    <div className="slot-group" data-testid={testId}>
+      {rows}
+    </div>
   );
 }

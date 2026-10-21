@@ -11,7 +11,7 @@
 
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
-import { PlayerSheetTitle } from './common.tsx';
+import { PlayerIdentity, PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 import { WaiverCard } from './waiverCard.tsx';
 import { alsoText, byGain, pickupText, tierCard } from '../waiverCard.ts';
@@ -55,18 +55,26 @@ export function TierRowButton({ row, onOpen }: { row: TierRow; onOpen: () => voi
 /** The bench players nobody would start: listed so the spot is known before it is needed. */
 export function DropReadyCard({ tiers }: { tiers: WaiverTiersView }) {
   if (tiers.dropReady.length === 0) return null;
+  /*
+   * Team's lineup rows in one card (22 October 2026). Not buttons: there is no
+   * sheet behind a drop-ready player, so the reason wraps in Team's own
+   * wrapping sub-line rather than being cut off.
+   */
   return (
-    <div className="card claim-plan" data-testid="drop-ready">
-      <ul className="claim-plan-list" style={{ listStyle: 'none', paddingInlineStart: 0, marginTop: 0 }}>
-        {tiers.dropReady.map((d) => (
-          <li key={d.playerId} className="claim-plan-claim" data-testid="drop-ready-row" data-player-id={d.playerId}>
-            <span className="claim-plan-headline">
-              {d.name} <span className="faint">{d.position}</span>
+    <div className="slot-group" data-testid="drop-ready">
+      {tiers.dropReady.map((d) => (
+        <div key={d.playerId} className="player-row" data-testid="drop-ready-row" data-player-id={d.playerId}>
+          <div className="player-row-top">
+            <span className="player-identity">
+              <PlayerIdentity position={d.position} />
+              {/* No team on a drop-ready reading: an empty logo-sized slot keeps the name on the lineup's column. */}
+              <span className="team-logo" aria-hidden="true" />
             </span>
-            <span className="claim-plan-detail">{d.reason}</span>
-          </li>
-        ))}
-      </ul>
+            <span className="player-name">{d.name}</span>
+          </div>
+          <div className="faint vacancy-detail">{d.reason}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -90,7 +98,7 @@ export function TierSections({
           <div className="section-title" data-testid="tier-consider-title">
             Worth considering
           </div>
-          <section data-testid="tier-consider">
+          <section className="slot-group" data-testid="tier-consider">
             {byGain(tiers.consider).map((row) => (
               <TierRowButton key={row.playerId} row={row} onOpen={() => onOpen(row)} />
             ))}
@@ -103,7 +111,7 @@ export function TierSections({
           <div className="section-title" data-testid="tier-watch-title">
             Watch list
           </div>
-          <section data-testid="tier-watch">
+          <section className="slot-group" data-testid="tier-watch">
             {byGain(tiers.watch).map((row) => (
               <TierRowButton key={row.playerId} row={row} onOpen={() => onOpen(row)} />
             ))}

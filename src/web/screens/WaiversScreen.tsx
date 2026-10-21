@@ -31,6 +31,7 @@ import { noMoveSummary, unscoredNotes } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { InfoIcon, RefreshIcon } from '../components/icons.tsx';
 import { TierDetailSheet, TierRowButton, TierSections } from '../components/waiverTiers.tsx';
+import { WaiverRowGroup } from '../components/waiverCard.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
 
@@ -265,17 +266,19 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 {/* Numbered lines only when one claim depends on another; a lone claim is its own card. */}
                 <DependentClaims plan={advice.claimPlan} />
                 {/* One row per "Do this" move: a QB bye and a TE bye are two, each with its own drop. */}
-                {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).length > 0 ? (
-                  (tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).map((row) => (
-                    <TierRowButton key={row.playerId} row={row} onOpen={() => setOpenTier(row)} />
-                  ))
-                ) : (
+                {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).length > 0 ? null : (
                   <NoMoveCard summary={tierNoMove(tiers)} />
                 )}
                 {dstNamed.length > 0 ? null : <DstLine plan={board?.dst ?? null} />}
-                {dstHole.map((row) => (
-                  <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
-                ))}
+                {/* The moves in one card, as "Your lineup" on Team (22 October 2026). */}
+                <WaiverRowGroup>
+                  {(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])).map((row) => (
+                    <TierRowButton key={row.playerId} row={row} onOpen={() => setOpenTier(row)} />
+                  ))}
+                  {dstHole.map((row) => (
+                    <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+                  ))}
+                </WaiverRowGroup>
               </section>
               <TierSections
                 tiers={tiers}
@@ -308,9 +311,11 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               */}
               {recommended.some((row) => row.dst != null) ? null : <DstLine plan={board?.dst ?? null} />}
 
-              {recommended.map((row) => (
-                <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
-              ))}
+              <WaiverRowGroup>
+                {recommended.map((row) => (
+                  <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+                ))}
+              </WaiverRowGroup>
             </section>
 
             {scoredOthers.length > 0 ? (
@@ -338,7 +343,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                     segments={segments.map((p) => ({ id: p, label: p, testId: `waiver-filter-${p.toLowerCase()}` }))}
                   />
                 ) : null}
-                <section className="waivers-others" data-testid="waivers-others">
+                <section className={rows.length === 0 ? undefined : 'slot-group'} data-testid="waivers-others">
                   {rows.length === 0 ? (
                     <Empty>{`Nothing else at ${filter} is worth a look.`}</Empty>
                   ) : (
@@ -365,7 +370,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                   <div key={note}>{note}</div>
                 ))}
               </div>
-              <section className="waivers-others" data-testid="waivers-unscored">
+              <section className="slot-group" data-testid="waivers-unscored">
                 {unscored.map((row) => (
                   <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
                 ))}
