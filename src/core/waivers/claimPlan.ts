@@ -371,7 +371,7 @@ export function caseLines(name: string, row: WaiverBoardRow | null): string[] {
   }
   if (basis.projectionGap != null && Math.abs(row.shortTerm.gain - basis.projectionGap) >= 0.25) {
     lines.push(
-      `Injury status moves the call to a ${row.shortTerm.gain.toFixed(1)}-point edge: half a point off for a Questionable player, a point for Doubtful or an injured player who did not practise.`,
+      `Injury status moves the call to a ${row.shortTerm.gain.toFixed(1)}-point edge: half a point off for a Questionable player, a point for Doubtful or an injured player who did not practice.`,
     );
   }
   lines.push(`He had to clear a ${basis.bar.toFixed(1)}-pt bar${basis.yardstick === 'sleeper' ? ', wider on a borrowed projection than on betting lines' : ''}.`);

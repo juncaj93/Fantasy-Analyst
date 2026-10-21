@@ -161,7 +161,7 @@ export const FEATURE_CLASSIFICATIONS: readonly FeatureClassification[] = [
     role: ROLE_OF.B,
     why:
       'Three games is not four and four is not eight. A rate from a short window is not wrong, it is imprecise, ' +
-      'and imprecision belongs in the width rather than in the centre.',
+      'and imprecision belongs in the width rather than in the center.',
   },
   {
     key: 'uncertainty.market_coverage',

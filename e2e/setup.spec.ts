@@ -946,7 +946,7 @@ test.describe('rankings import', () => {
     const result = page.getByTestId('adp-result');
     await expect(result).toBeVisible();
     await expect(result).toContainText('Matched to a player');
-    await expect(result).toContainText('Not recognised');
+    await expect(result).toContainText('Not recognized');
     await expect(page.getByTestId('panel-adp')).toContainText('are kept, not thrown away');
   });
 

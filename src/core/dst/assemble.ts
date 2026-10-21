@@ -363,7 +363,7 @@ function unavailableReason(
 
   const thisWeek = fixtures.find((f) => f.week === week) ?? null;
   if (thisWeek && thisWeek.opponent == null) return 'is on bye';
-  if (input.game == null && thisWeek == null) return 'has no fixture this app has read yet';
+  if (input.game == null && thisWeek == null) return 'has no game this app has read yet';
   return 'cannot be scored this week';
 }
 

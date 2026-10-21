@@ -78,8 +78,8 @@ describe('availability, for a lineup', () => {
     });
 
     it('still says what the practice week said', () => {
-      expect(availabilityPenalty(state('questionable', {}, { practice: ['full', 'full'] })).note).toContain('practised fully');
-      expect(availabilityPenalty(state('questionable', {}, { practice: ['dnp', 'dnp'] })).note).toContain('has not practised');
+      expect(availabilityPenalty(state('questionable', {}, { practice: ['full', 'full'] })).note).toContain('practiced fully');
+      expect(availabilityPenalty(state('questionable', {}, { practice: ['dnp', 'dnp'] })).note).toContain('has not practiced');
     });
 
     it('says when the report is out of date', () => {

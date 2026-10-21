@@ -1610,7 +1610,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         available: scheduleRows.length > 0,
         note:
           scheduleRows.length > 0
-            ? `byes are derived from the stored ${league.season} fixture list`
+            ? `byes are derived from the stored ${league.season} schedule`
             : 'no schedule has been ingested yet, so bye planning reports nothing rather than an all-clear',
       },
       playoffs: {
@@ -2087,7 +2087,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       );
       if (!verdict.valid) {
         return errorResponse(
-          `refusing to store this as Underdog ADP: ${verdict.reason}. Raw Underdog ADP only — rankings, expert ranks and projections cannot be labelled DOG.`,
+          `refusing to store this as Underdog ADP: ${verdict.reason}. Raw Underdog ADP only — rankings, expert ranks and projections cannot be labeled DOG.`,
           422,
         );
       }

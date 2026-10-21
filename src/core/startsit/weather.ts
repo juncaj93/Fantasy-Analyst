@@ -220,7 +220,7 @@ function describeConditions(
 function driverOf(points: number, wind: number | null, rain: number | null, snow: boolean): string | null {
   if (Math.abs(points) < 0.3) return null;
   const cause = wind != null && wind >= WEATHER.windOnset ? `${Math.round(wind)} mph wind` : snow ? 'snow' : `${(rain ?? 0).toFixed(1)} mm/h rain`;
-  return points < 0 ? `Wind-sensitive role · ${cause}` : `Weather pushes this offence toward the run · ${cause}`;
+  return points < 0 ? `Wind-sensitive role · ${cause}` : `Weather pushes this offense toward the run · ${cause}`;
 }
 
 function round1(v: number): number {

@@ -124,7 +124,7 @@ describe('importTally', () => {
     const result = importTally(doc, ROSTER);
     expect(result.evidence).toHaveLength(0);
     expect(result.unmatched.map((u) => u.name)).toEqual(['Nobody McNothing']);
-    expect(result.detail).toContain('not recognised');
+    expect(result.detail).toContain('not recognized');
   });
 
   it('reports an ambiguous name with its candidates rather than picking one', () => {

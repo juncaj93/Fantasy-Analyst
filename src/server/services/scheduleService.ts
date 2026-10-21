@@ -342,7 +342,7 @@ export class ScheduleService {
           lastModified: response.fingerprint.lastModified,
           sourceModifiedAt: response.publishedAt,
           outcome: 'not_published',
-          note: `no ${season} fixtures in the published schedule yet`,
+          note: `no ${season} games in the published schedule yet`,
         });
         await this.state.recordIngestSuccess(SCHEDULE_SOURCE, season, null);
         return {
@@ -350,7 +350,7 @@ export class ScheduleService {
           season,
           games: 0,
           rowsWritten: 0,
-          note: `no ${season} fixtures in the published schedule yet`,
+          note: `no ${season} games in the published schedule yet`,
         };
       }
 

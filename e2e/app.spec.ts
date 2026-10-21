@@ -848,7 +848,7 @@ test.describe('draft room', () => {
     const sotelo = page.locator('[data-testid="recommendation-row"]', { hasText: 'Andre Sotelo' }).first();
     await sotelo.scrollIntoViewIfNeeded();
     await expect(sotelo.getByTestId('injury-line')).toContainText(/hamstring/i);
-    await expect(sotelo.getByTestId('injury-line')).toContainText(/limited → full|practised fully/i);
+    await expect(sotelo.getByTestId('injury-line')).toContainText(/limited → full|practiced fully/i);
     // The badge is still the badge; the line is not a second copy of it.
     await expect(sotelo.locator('.injury-tag')).toBeVisible();
 

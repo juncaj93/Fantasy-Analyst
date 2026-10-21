@@ -134,13 +134,13 @@ describe('what earns a line', () => {
     const card = buildWeeklyCard(
       evaluation({
         statusFlag: 'Questionable · hamstring',
-        availability: { label: 'Questionable', detail: 'practised fully on Friday', risky: false },
+        availability: { label: 'Questionable', detail: 'practiced fully on Friday', risky: false },
       }),
       { starting: true, slot: 'WR2' },
     );
     const line = card.lines.find((l) => l.key === 'availability');
     expect(line?.value).toBe('Questionable');
-    expect(line?.detail).toBe('practised fully on Friday');
+    expect(line?.detail).toBe('practiced fully on Friday');
   });
 
   /** The same fact in two rows is the repetition this card exists to remove. */

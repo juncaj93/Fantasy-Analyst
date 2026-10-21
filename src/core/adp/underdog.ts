@@ -174,7 +174,7 @@ export function validateRawAdp(rows: DogRow[], headers?: string[]): RawAdpVerdic
         valid: false,
         sourceType: offending && offending.startsWith('proj') ? 'projection' : offending ? 'ranking' : 'unknown',
         reason: offending
-          ? `the payload has a "${offending}" column and no ADP column — expert or ranking data cannot be labelled DOG`
+          ? `the payload has a "${offending}" column and no ADP column — expert or ranking data cannot be labeled DOG`
           : 'the payload has no average-draft-position column',
       };
     }

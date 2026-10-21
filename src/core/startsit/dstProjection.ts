@@ -378,7 +378,7 @@ function fromOpponentForm(input: DstProjectionInput, missing: string): DstProjec
     confidence: thin ? 'low' : projection.confidence === 'high' ? 'medium' : projection.confidence,
     reasons: [
       ...projection.reasons,
-      `${missing} — anchored instead on what the market has paid this opponent's offence ` +
+      `${missing} — anchored instead on what the market has paid this opponent's offense ` +
         `(${round1(form.impliedTotal)} implied over ${form.games} priced game${form.games === 1 ? '' : 's'})`,
     ],
   };
@@ -678,10 +678,10 @@ function quarterbackAdjustment(input: DstProjectionInput): { points: number; det
 function driverFor(opponentImpliedTotal: number, spread: number | null): string {
   const environment =
     opponentImpliedTotal <= DST_BASELINES.neutralImpliedTotal - 3
-      ? 'Facing a low-scoring offence'
+      ? 'Facing a low-scoring offense'
       : opponentImpliedTotal >= DST_BASELINES.neutralImpliedTotal + 3
-        ? 'Facing a high-scoring offence'
-        : 'An ordinary offence across the field';
+        ? 'Facing a high-scoring offense'
+        : 'An ordinary offense across the field';
   if (spread == null) return `${environment} · ${opponentImpliedTotal} implied against`;
   const side = spread < 0 ? `favoured by ${Math.abs(spread)}` : spread > 0 ? `underdog by ${spread}` : 'pick’em';
   return `${environment} · ${opponentImpliedTotal} implied against, ${side}`;

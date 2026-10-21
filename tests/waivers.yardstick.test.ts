@@ -168,7 +168,7 @@ describe('the yardstick', () => {
       [],
       3.47,
     );
-    expect(r).toMatchObject({ sleeper: 3.47, market: null, availability: -1, availabilityNote: 'Questionable, did not practise' });
+    expect(r).toMatchObject({ sleeper: 3.47, market: null, availability: -1, availabilityNote: 'Questionable, did not practice' });
   });
 
   it('ignores a healthy veteran\'s rest-day DNP', () => {

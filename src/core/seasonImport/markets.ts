@@ -148,7 +148,7 @@ export function lookupSeasonMarket(raw: string): MarketLookup {
 
   return {
     ok: false,
-    reason: `"${text}" is not a market this app recognises`,
+    reason: `"${text}" is not a market this app recognizes`,
     supported: false,
   };
 }

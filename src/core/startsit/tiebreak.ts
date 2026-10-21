@@ -35,7 +35,7 @@ export function wantedPill(posture: Posture): Pill {
 export function tiebreakSentence(posture: Posture): string {
   return posture === 'underdog'
     ? "Close call. You're the underdog, so the higher ceiling gets the nod."
-    : "Close call. You're the favourite, so the safer floor gets the nod.";
+    : "Close call. You're the favorite, so the safer floor gets the nod.";
 }
 
 export interface TiebreakNote {

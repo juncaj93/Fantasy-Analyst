@@ -105,7 +105,7 @@ export function bestMove(needs: Record<string, NeedBreakdown>): BestMove {
    */
   const thin = ranked.slice(0, 2).map((n) => n.position);
   return {
-    text: `Every starting spot is filled — prioritise ${thin.join('/')} upside depth.`,
+    text: `Every starting spot is filled — prioritize ${thin.join('/')} upside depth.`,
     positions: thin,
     kind: 'depth',
   };

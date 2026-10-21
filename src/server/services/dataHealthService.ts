@@ -585,7 +585,7 @@ export class DataHealthService {
       ...(coverage.rows === 0 ? { state: 'missing' as const } : {}),
       note:
         coverage.rows === 0
-          ? `No ${season} fixture list stored.`
+          ? `No ${season} schedule stored.`
           : `${coverage.teams} teams across ${coverage.weeks} weeks of ${season}.`,
       technical: {
         lastOutcome: state?.lastOutcome ?? null,

@@ -150,7 +150,7 @@ describe('availability travels with the snapshot', () => {
      * describing a board that said something different under a player's name.
      */
     const row = snapshot.decision.output.rows.find((r) => r.injuryLine != null)!;
-    row.injuryLine = 'Q · shoulder · did not practise';
+    row.injuryLine = 'Q · shoulder · did not practice';
 
     const report = await replayDraftSnapshot(readSnapshot(snapshot));
     expect(report.outcome).toBe('output_difference');

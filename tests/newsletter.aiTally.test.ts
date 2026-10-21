@@ -308,7 +308,7 @@ describe('importAiTally', () => {
     expect(result.detail).toContain('3 row(s) read');
     expect(result.detail).toContain('1 matched');
     expect(result.detail).toContain('1 name(s) matched more than one player');
-    expect(result.detail).toContain('1 name(s) were not recognised');
+    expect(result.detail).toContain('1 name(s) were not recognized');
     expect(result.detail).toContain('1 line(s) could not be read');
   });
 });
