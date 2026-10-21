@@ -193,6 +193,9 @@ test.describe('the defence on the Waivers board', () => {
      * a defence identified by nothing would draw the position pill alone.
      */
     await expect(row.locator('[data-testid="team-logo"][data-team="NYJ"], [data-testid="team-code"]')).toHaveCount(1);
+    /* The club is the card's face (21 October 2026), never a person's portrait. */
+    await expect(row.locator('.wcard-face [data-testid="team-logo"]')).toHaveCount(1);
+    await expect(row.getByTestId('compare-face')).toHaveCount(0);
   });
 
   /*

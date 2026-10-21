@@ -175,8 +175,26 @@ test.describe('the identity cluster', () => {
   test('and on Waivers', async ({ page }) => {
     await page.goto('/?demo=in-season');
     await page.getByTestId('tab-waivers').click();
-    await expect(page.locator('[data-testid="waiver-row"]').first()).toBeVisible();
-    await identityReadsLeftToRight(page, 'waiver-row', 2);
+    const cards = page.locator('[data-testid="waiver-row"], [data-testid="waiver-tier-row"]');
+    await expect(cards.first()).toBeVisible();
+    /*
+      Since 21 October 2026 a waiver card puts the name on its first line and
+      the pill and club on the second, under it: the pill still reads before
+      the club, and both start where the name starts.
+    */
+    const rows = await cards.evaluateAll((all) =>
+      all.map((row) => {
+        const pill = row.querySelector('.pos-pill')!.getBoundingClientRect();
+        const mark = row.querySelector('.team-logo, [data-testid="team-code"]')?.getBoundingClientRect() ?? null;
+        const name = row.querySelector('.player-name')!.getBoundingClientRect();
+        return { pill: pill.left, pillRight: pill.right, mark: mark?.left ?? null, name: name.left };
+      }),
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    for (const r of rows) {
+      expect(Math.abs(r.pill - r.name), 'the pill starts under the name').toBeLessThanOrEqual(1);
+      if (r.mark != null) expect(r.pillRight).toBeLessThanOrEqual(r.mark + 1);
+    }
   });
 
   /**

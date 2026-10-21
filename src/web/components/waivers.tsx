@@ -20,8 +20,10 @@ import type { FaabAdvice } from '../api.ts';
 import type { WaiverBoardRow } from '../../core/waivers/board.ts';
 import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from '../../core/waivers/claimPlan.ts';
 import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
-import { Badge, PlayerIdentity, PlayerSheetTitle } from './common.tsx';
+import { PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
+import { WaiverCard } from './waiverCard.tsx';
+import { boardCard, clearDay, surname } from '../waiverCard.ts';
 
 /**
  * What an unknown league fact looks like.
@@ -73,7 +75,7 @@ function UnknownField({ what }: { what: string }) {
  * a backup to your own starter, who looks like the obvious cut the plan
  * skipped; he gets a clause on the drop line (see `ClaimGroup`).
  */
-export function WaiverPlanCard({ plan, onOpenDrops }: { plan: WaiverClaimPlan | null | undefined; onOpenDrops?: (addPlayerId: string) => void }) {
+export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefined }) {
   if (!plan?.surface) return null;
 
   return (
@@ -103,7 +105,6 @@ export function WaiverPlanCard({ plan, onOpenDrops }: { plan: WaiverClaimPlan | 
             key={group.index}
             group={group}
             claims={plan.claims.filter((c) => c.group === group.index)}
-            {...(onOpenDrops && group.addPlayerId ? { onOpenDrops: () => onOpenDrops(group.addPlayerId!) } : {})}
           />
         ))
       ) : plan.claims.length > 0 ? (
@@ -189,24 +190,7 @@ function ClaimLine({ claim }: { claim: WaiverClaimLine }) {
  * When the plan passed over a backup to one of your starters, the drop line
  * says so in one clause, because that is the cut a reader expected.
  */
-function ClaimGroup({ group, claims, onOpenDrops }: { group: WaiverClaimGroup; claims: WaiverClaimLine[]; onOpenDrops?: () => void }) {
-  /*
-   * Waivers round 2: a claim that costs somebody lists the best few to cut
-   * under the claim, numbered, rather than a sentence above it (Alex, 14
-   * October). Tapping the list opens the claim's sheet with the full reasons.
-   */
-  if (group.bestDrops && group.bestDrops.length > 0) {
-    return (
-      <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
-        <ol className="claim-plan-list" start={group.firstRank} data-testid="waiver-plan-claims">
-          {claims.map((claim) => (
-            <ClaimLine key={claim.claimId} claim={claim} />
-          ))}
-        </ol>
-        <BestDrops items={group.bestDrops} {...(onOpenDrops ? { onOpen: onOpenDrops } : {})} />
-      </div>
-    );
-  }
+function ClaimGroup({ group, claims }: { group: WaiverClaimGroup; claims: WaiverClaimLine[] }) {
   return (
     <div className="claim-plan-group" data-testid="waiver-plan-group" data-drop={group.drop?.playerId ?? 'none'}>
       <div className="claim-plan-drop" data-testid="waiver-plan-drop">
@@ -280,120 +264,26 @@ export function cardReason(
   return row.strength.level === 'unknown' ? row.why : null;
 }
 
+/**
+ * A board row as a card: a defence the planner named, a player this app cannot
+ * score, or a league without tiers. The same `WaiverCard` the tiers draw; the
+ * projection, the cost sentence and the full status are on the sheet.
+ */
 export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => void }) {
-  const reason = cardReason(row);
   return (
-    <button
-      className="player-row waiver-row"
-      data-testid="waiver-row"
-      data-player-id={row.playerId}
-      data-position={(row.position ?? '').toUpperCase()}
-      data-strength={row.strength.level}
-      aria-label={`${row.name}, ${row.strength.label}, ${row.fit.label}`}
-      onClick={onOpen}
-    >
-      {/*
-        Who he is, then what the app makes of him — the same order every other
-        row in this app now uses. The club's mark has moved out of the trailing
-        edge and into the identity cluster with the position and the name (see
-        `PlayerIdentity`), which leaves the verdict alone on the right where it
-        is the one thing being weighed.
-      */}
-      <div className="player-row-top">
-        <PlayerIdentity position={row.position} team={row.team} />
-        <span className="player-name">{row.name}</span>
-        <span className="player-row-meta">
-          {row.statusFlag ? <Badge tone="warn">{row.statusFlag.split(' ')[0]}</Badge> : null}
-        </span>
-        {/*
-          The verdict, and it still gives way before the name does.
-
-          The labels are short enough to fit now — see `STRENGTH_LABEL` — but a
-          longer one should never be what clips a player's name, so the badge
-          keeps the floor that lets it shrink first.
-        */}
-        <span
-          className={`tag waiver-strength ${STRENGTH_TAG[row.strength.level]}`}
-          data-testid="waiver-strength"
-          title={row.strength.label}
-        >
-          {row.strength.label}
-        </span>
-      </div>
-
-      {/*
-        No pills. On 1 October 2026 every card carried three of them (`Better
-        than Jaylen Wright`, `Sleeper projection`, `Nobody else needs him`) on
-        top of two or three lines of text, and the owner's verdict was "why's
-        there so much text everywhere". The plan's drop line already names the
-        cut, the plan card says which projection it used, and who else needs
-        him is not a question for a free pickup. Fit, multi-week value, season
-        outlook, competition and the yardstick all remain on the detail sheet
-        one tap away. A card is now: who he is, one status line, and at most
-        one reason.
-      */}
-      {/*
-        A free agent outside the waiver window is an instant add: nobody bids,
-        so no price is printed and nobody's need for him is a competition. A
-        player still on waivers says until when, beside the price that matters
-        now. See `core/waivers/clearWindow.ts`.
-      */}
-      <div className="waiver-summary" data-testid="waiver-summary" data-pickup={row.pickup?.state ?? 'unknown'}>
-        {/*
-          The pickup state as the app's own status tag (`tag tag-mini`, the
-          one the DEF line and the plan already wear): `Free agent`, or `On
-          waivers until Fri` beside the price. Owner's call, 1 October 2026:
-          "no FAAB needed" is what `Free agent` means.
-        */}
-        {row.pickup?.state === 'free' ? (
-          <span className="tag tag-mini waiver-pickup" data-testid="waiver-cost">
-            Free agent
-          </span>
-        ) : (
-          <>
-            {row.pickup?.state === 'waivers' ? (
-              <>
-                <span className="tag tag-mini waiver-pickup" data-testid="waiver-window">
-                  On waivers until {clearDay(row.pickup.until)}
-                </span>{' '}
-              </>
-            ) : null}
-            <span data-testid="waiver-cost">
-              Est. cost{' '}
-              {row.faab ? <strong>{formatFaab(row.faab)}</strong> : <UnknownField what="Expected cost" />}
-            </span>
-          </>
-        )}
-        {/*
-          One unbreakable phrase. `Proj. +6.5 pts` wrapping to leave `pts`
-          alone on a second line is the sort of thing that makes a compact card
-          look accidental.
-        */}
-        <span data-testid="waiver-short-term" style={{ whiteSpace: 'nowrap' }}>
-          {/* No dot straight after the `Free agent` tag: the tag is its own separator. */}
-          {row.pickup?.state === 'free' ? ' ' : ' · '}
-          Proj. <strong>{row.shortTerm.label}</strong>
-        </span>
-      </div>
-
-      {/*
-        One reason, never a stack of them. See `cardReason` for which one.
-      */}
-      {reason ? (
-        <div className={`waiver-notes${row.planExcluded ? ' waiver-notes-warn' : ''}`} data-testid="waiver-notes">
-          {reason}
-        </div>
-      ) : null}
-    </button>
+    <WaiverCard
+      model={boardCard(row, cardReason(row), STRENGTH_TAG[row.strength.level])}
+      onOpen={onOpen}
+      testId="waiver-row"
+      gainTestId="waiver-strength"
+      reasonTestId="waiver-notes"
+      reasonWarn={row.planExcluded != null}
+      data={{ 'data-strength': row.strength.level }}
+    />
   );
 }
 
-/** `Fri`: the day a player on waivers clears, in the reader's own time zone. */
-export function clearDay(iso: string | null): string {
-  if (!iso) return 'the next run';
-  const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? 'the next run' : at.toLocaleDateString(undefined, { weekday: 'short' });
-}
+export { clearDay };
 
 /** `12–18%` / `$4–7` / `unknown`. Never a single number pretending to be a bid. */
 export function formatFaab(faab: NonNullable<WaiverBoardRow['faab']>): string {
@@ -447,9 +337,9 @@ export function WaiverDetailSheet({
         header rather than a second answer — his face, his name, and the pill
         and club that used to open the body's first line.
 
-        The compact board behind it is untouched and stays image-free. A face
-        per row is what the discovery measured and rejected: it costs the name
-        column more than a portrait is worth on a list somebody is scanning.
+        Since 21 October 2026 the cards behind it carry a 44px face too (Alex:
+        "add the player's headshot next to each card"). The card puts the name
+        on a line of its own, so the face no longer costs the name its width.
 
         Availability stays in the body, where it is a sentence under
         `Availability` rather than a code. The row's own badge already shows the
@@ -473,6 +363,12 @@ export function WaiverDetailSheet({
         </div>
 
         <dl className="weekly-lines">
+          {cardReason(row) ? (
+            <div className="weekly-line" data-testid="waiver-detail-why">
+              <dt>Why</dt>
+              <dd>{cardReason(row)}</dd>
+            </div>
+          ) : null}
           <div className="weekly-line">
             <dt>Fit</dt>
             <dd>
@@ -696,82 +592,141 @@ export function WaiverDetailSheet({
 }
 
 /**
- * The budget the board above was priced against, said out loud.
- *
- * A recommendation of $19 means nothing without the wallet it came from, and
- * the two numbers that make it legible — what is left, and what winning has
- * cost in this league — are exactly the two a reader would otherwise have to go
- * to Sleeper to find.
- *
- * It closes the Waivers page rather than the Team page, which is a move rather
- * than a new component. Team carries a two-row teaser of the same board; a
- * wallet under two rows is a frame around almost none of the spending it
- * describes, and it was the last thing on a screen that is about a lineup. Here
- * it sits under the full board, beneath the bids it qualifies.
+ * The wallet, as the lines the info sheet prints: what is left, what winning
+ * has cost here, and the highest losing bid seen. It used to be a paragraph at
+ * the foot of Waivers.
  */
-export function BudgetFooter({ faab }: { faab: FaabAdvice | null }) {
-  if (!faab) return null;
-  if (!faab.rule.usesFaab) {
-    return (
-      <div className="faint" style={{ margin: '6px 4px 8px' }} data-testid="faab-budget">
-        {faab.rule.provenance}.
-      </div>
-    );
-  }
+export function budgetLines(faab: FaabAdvice | null): string[] {
+  if (!faab) return [];
+  if (!faab.rule.usesFaab) return [`${faab.rule.provenance}.`];
   const mine = faab.mine;
+  return [
+    mine?.remaining == null ? 'Your remaining budget is unknown.' : `$${mine.remaining} of $${faab.rule.total} left.`,
+    faab.prices.sample > 0
+      ? `Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
+      : 'No winning bids recorded in this league yet.',
+    faab.losingBids,
+  ].filter(Boolean);
+}
+
+/** `FAAB $77 of $100`, for the header. Null when the league does not bid or the wallet is unknown. */
+export function budgetChip(faab: FaabAdvice | null): string | null {
+  if (!faab?.rule.usesFaab || faab.mine?.remaining == null || faab.rule.total == null) return null;
+  return `FAAB $${faab.mine.remaining} of $${faab.rule.total}`;
+}
+
+/**
+ * The league's waiver rule, one fact a line. The sentence comes from
+ * `freeAgentRule` in `core/waivers/tierPlan.ts`; anything it does not recognize
+ * is printed whole.
+ */
+export function ruleLines(rule: string | null): string[] {
+  if (!rule) return [];
+  const m = rule.match(/^In this league a dropped player is on waivers for (.+?), and a player whose game has started waits for the (.+?) run; anyone else is an instant add\.$/);
+  if (!m) return [rule];
+  return [`A dropped player is on waivers for ${m[1]}.`, `A player whose game has started waits for the ${m[2]} run.`, 'Anyone else is an instant add.'];
+}
+
+/** What the gain chip on a card is, from the window the tiers used. */
+export function chipLines(window: { weeks: number[]; weights: number[] } | null): string[] {
+  if (!window || window.weeks.length === 0) return [];
+  const full = window.weeks.filter((_, i) => (window.weights[i] ?? 1) === 1);
+  const half = window.weeks.filter((_, i) => (window.weights[i] ?? 1) !== 1);
+  const list = (w: number[]) => (w.length === 1 ? `week ${w[0]}` : `weeks ${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`);
+  return [
+    `The +pts chip is what the move adds to your best lineup over weeks ${window.weeks[0]}–${window.weeks[window.weeks.length - 1]}.`,
+    `${list(full)[0]!.toUpperCase()}${list(full).slice(1)} ${full.length === 1 ? 'counts' : 'count'} in full${half.length > 0 ? `; ${list(half)} ${half.length === 1 ? 'counts' : 'count'} half` : ''}.`,
+    'It includes a small credit for bench depth and your roster rules.',
+    'A "starts over" line in the sheet is one week alone, so it can differ.',
+  ];
+}
+
+/**
+ * Everything that used to sit around the cards, on one sheet behind the info
+ * button: what the chip means, what the tiers mean, the league's rule and the
+ * wallet. Lines, not paragraphs.
+ */
+export function WaiversInfoSheet({
+  faab,
+  rule,
+  window,
+  onClose,
+}: {
+  faab: FaabAdvice | null;
+  rule: string | null;
+  window: { weeks: number[]; weights: number[] } | null;
+  onClose: () => void;
+}) {
   return (
-    <div className="faint" style={{ margin: '6px 4px 8px' }} data-testid="faab-budget">
-      {mine?.remaining == null
-        ? 'Your remaining budget is unknown.'
-        : `$${mine.remaining} of $${faab.rule.total} left.`}
-      {faab.prices.sample > 0
-        ? ` Winning bids here have run $${faab.prices.low}–${faab.prices.high} across ${faab.prices.sample}.`
-        : ' No winning bids recorded in this league yet.'}
-      <div>{faab.losingBids}</div>
+    <Sheet title="About Waivers" onClose={onClose} testId="waivers-info">
+      <WaiversInfoBody faab={faab} rule={rule} window={window} />
+    </Sheet>
+  );
+}
+
+export function WaiversInfoBody({ faab, rule, window }: { faab: FaabAdvice | null; rule: string | null; window: { weeks: number[]; weights: number[] } | null }) {
+  const sections: { key: string; title: string; lines: string[] }[] = [
+    { key: 'chip', title: 'The points chip', lines: chipLines(window) },
+    {
+      key: 'tiers',
+      title: 'The lists',
+      lines: window
+        ? ['Do this: fills a hole or adds a lot. Make the move.', 'Worth considering: a real gain, your call.', 'Watch list: better on paper; no move needed now.']
+        : [],
+    },
+    { key: 'rule', title: 'Waiver rules', lines: ruleLines(rule) },
+    { key: 'budget', title: 'Budget and bids', lines: budgetLines(faab) },
+  ];
+  return (
+    <div className="weekly waivers-info" data-testid="waivers-info-body">
+      {sections
+        .filter((sec) => sec.lines.length > 0)
+        .map((sec) => (
+          <section key={sec.key} data-testid={sec.key === 'budget' ? 'faab-budget' : sec.key === 'rule' ? 'waivers-free-agent-rule' : `waivers-info-${sec.key}`}>
+            <div className="detail-label">{sec.title}</div>
+            <ul className="waivers-info-lines">
+              {sec.lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      <div className="faint">Advisory only. Add, drop or bid in Sleeper; this app never makes a transaction.</div>
     </div>
   );
 }
 
 /**
- * The best few players to cut for a claim, cheapest first: a small muted
- * label, then one numbered line each, `Tre' Harris  WR · 1.2 pts`. Name in
- * normal weight, the stat muted; no clauses. With `onOpen` the whole block is
- * a button onto the claim's sheet, where the full reasons are. Without it
- * (inside a row that is itself a button) it is plain text and the row opens
- * the sheet. Nothing here drops anybody: Alex makes the cut in Sleeper.
+ * The "Do this" summary, only when the claims depend on each other: one
+ * numbered line each, names only, in the order to enter them. A single claim,
+ * or claims that each stand alone, need no summary: the cards say it.
  */
-export function BestDrops({
-  items,
-  onOpen,
-  hint = true,
-}: {
-  items: readonly { playerId: string; name: string; position?: string; stat?: string }[];
-  onOpen?: () => void;
-  hint?: boolean;
-}) {
-  const body = (
-    <>
-      <span className="best-drops-label" data-testid="best-drops-label">
-        Best drops{hint ? ' (tap for why)' : ''}
-      </span>
-      {items.slice(0, 3).map((c, i) => (
-        <span className="best-drops-line" key={c.playerId} data-testid="best-drop" data-player-id={c.playerId}>
-          <span className="best-drops-rank">{i + 1}.</span>
-          <span className="best-drops-text">
-            <span className="best-drops-name">{c.name}</span>{' '}
-            <span className="best-drops-stat">{[c.position, c.stat].filter(Boolean).join(' \u00b7 ')}</span>
-          </span>
-        </span>
-      ))}
-    </>
+export function DependentClaims({ plan }: { plan: WaiverClaimPlan | null | undefined }) {
+  if (!plan?.surface || !claimsDepend(plan)) return null;
+  return (
+    <div className="card claim-plan" data-testid="waiver-plan" data-state={plan.state}>
+      <ol className="claim-plan-list" data-testid="waiver-plan-claims">
+        {plan.claims.map((claim) => (
+          <li key={claim.claimId} className="claim-plan-claim" data-testid="waiver-plan-claim" data-rank={claim.rank} data-relation={claim.relation}>
+            <span className="claim-plan-headline">{claimLine(claim)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
-  return onOpen ? (
-    <button type="button" className="best-drops best-drops-tap" data-testid="best-drops" onClick={onOpen}>
-      {body}
-    </button>
-  ) : (
-    <span className="best-drops" data-testid="best-drops">
-      {body}
-    </span>
-  );
+}
+
+/** Two or more claims where one only runs if another loses, or two spend one drop. */
+export function claimsDepend(plan: Pick<WaiverClaimPlan, 'claims'>): boolean {
+  if (plan.claims.length < 2) return false;
+  const drops = plan.claims.map((c) => c.dropPlayerId).filter((d): d is string => d != null);
+  return plan.claims.some((c) => c.qualifier != null || c.relation === 'fallback') || new Set(drops).size < drops.length;
+}
+
+/** `Add Allen, drop Wright, if 1 loses`. */
+export function claimLine(claim: Pick<WaiverClaimLine, 'addName' | 'dropName' | 'qualifier'>): string {
+  const parts = [`Add ${surname(claim.addName)}`];
+  if (claim.dropName) parts.push(`drop ${surname(claim.dropName)}`);
+  if (claim.qualifier) parts.push(claim.qualifier.replace(/^Only if/i, 'if'));
+  return parts.join(', ');
 }

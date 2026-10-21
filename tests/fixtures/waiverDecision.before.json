@@ -1,0 +1,226 @@
+{
+ "rows": [
+  {
+   "playerId": "1010",
+   "name": "Rhys Donnelly",
+   "tier": "do_this",
+   "reasonCode": "hole_empty",
+   "reason": "Nobody on your roster can start at QB in week 1",
+   "gain": 55.15,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 22.06
+    },
+    {
+     "week": 2,
+     "change": 22.06
+    },
+    {
+     "week": 3,
+     "change": 22.06
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [
+    "Trey Halloran"
+   ],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  },
+  {
+   "playerId": "1012",
+   "name": "Bo Ashworth",
+   "tier": "do_this",
+   "reasonCode": "hole_empty",
+   "reason": "Nobody on your roster can start at RB in week 1",
+   "gain": 38.65,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 15.46
+    },
+    {
+     "week": 2,
+     "change": 15.46
+    },
+    {
+     "week": 3,
+     "change": 15.46
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  },
+  {
+   "playerId": "1019",
+   "name": "Grant Aldous",
+   "tier": "do_this",
+   "reasonCode": "hole_empty",
+   "reason": "Nobody on your roster can start at TE in week 1",
+   "gain": 27.82,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 11.13
+    },
+    {
+     "week": 2,
+     "change": 11.13
+    },
+    {
+     "week": 3,
+     "change": 11.13
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [
+    "Miles Barrowman"
+   ],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  },
+  {
+   "playerId": "1007",
+   "name": "Owen Fitzgerald",
+   "tier": "do_this",
+   "reasonCode": "hole_empty",
+   "reason": "Nobody on your roster can start at WR in week 1",
+   "gain": 26.83,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 10.73
+    },
+    {
+     "week": 2,
+     "change": 10.73
+    },
+    {
+     "week": 3,
+     "change": 10.73
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [
+    "Kai Brennan"
+   ],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  },
+  {
+   "playerId": "1006",
+   "name": "Julian Reyes",
+   "tier": "consider",
+   "reasonCode": "bye_depth",
+   "reason": "Nobody on your roster can start at RB in week 3",
+   "gain": 14.3,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 0
+    },
+    {
+     "week": 2,
+     "change": 7.15
+    },
+    {
+     "week": 3,
+     "change": 14.3
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  }
+ ],
+ "dropReady": [],
+ "window": {
+  "weeks": [
+   1,
+   2,
+   3
+  ],
+  "weights": [
+   1,
+   1,
+   0.5
+  ]
+ },
+ "freeAgentRule": "In this league a dropped player is on waivers for 2 days, and a player whose game has started waits for the Wednesday run; anyone else is an instant add.",
+ "claims": [
+  {
+   "rank": 1,
+   "headline": "Add Rhys Donnelly · free agent",
+   "detail": "Nobody on your roster can start at QB in week 1 · +55.1 pts",
+   "qualifier": null
+  },
+  {
+   "rank": 2,
+   "headline": "Add Bo Ashworth · free agent",
+   "detail": "Nobody on your roster can start at RB in week 1 · +38.6 pts",
+   "qualifier": null
+  },
+  {
+   "rank": 3,
+   "headline": "Add Grant Aldous · free agent",
+   "detail": "Nobody on your roster can start at TE in week 1 · +27.8 pts",
+   "qualifier": null
+  },
+  {
+   "rank": 4,
+   "headline": "Add Owen Fitzgerald · free agent",
+   "detail": "Nobody on your roster can start at WR in week 1 · +26.8 pts",
+   "qualifier": null
+  }
+ ],
+ "groups": [
+  "Open roster spot: this one needs no drop",
+  "Open roster spot: this one needs no drop",
+  "Open roster spot: this one needs no drop",
+  "Open roster spot: this one needs no drop"
+ ]
+}

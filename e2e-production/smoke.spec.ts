@@ -2054,12 +2054,31 @@ test.describe('the season features', () => {
      */
     const id = await selectedLeagueId(page);
     const waivers = id
-      ? await apiJson<{ found: boolean; claimPlan: { surface?: boolean } | null }>(page, `/api/leagues/${id}/waivers`)
+      ? await apiJson<{
+          found: boolean;
+          claimPlan: { surface?: boolean; claims?: { dropPlayerId: string | null; qualifier: string | null; relation: string }[] } | null;
+          tiers?: unknown;
+        }>(page, `/api/leagues/${id}/waivers`)
       : null;
     test.skip(!waivers?.found, 'no roster on this deployment');
     test.skip(!waivers!.claimPlan?.surface, 'this deployment produced no plan to draw');
 
     await open(page, 'waivers');
+    /*
+     * Since 21 October 2026 the numbered summary is drawn only when one claim
+     * depends on another (a fallback, or two claims spending one drop). Claims
+     * that each stand alone are drawn as their "Do this" cards, one each.
+     */
+    const claims = waivers!.claimPlan!.claims ?? [];
+    const drops = claims.map((c) => c.dropPlayerId).filter((d): d is string => d != null);
+    const depend =
+      claims.length >= 2 && (claims.some((c) => c.qualifier != null || c.relation === 'fallback') || new Set(drops).size < drops.length);
+    if (waivers!.tiers && !depend) {
+      const cards = page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row');
+      await expect(cards.first(), 'the data carries a plan and the screen drew no "Do this" card').toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
+      return;
+    }
     // A bounded wait, and a failure rather than a skip when it runs out: the
     // data says there is a plan, so a screen that never draws one is a defect.
     const card = page.getByTestId('waiver-plan');
