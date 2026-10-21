@@ -419,7 +419,7 @@ test.describe('free agent or waiver claim, on the board', () => {
     await expect(free.locator('[data-chip="bid"]')).toHaveCount(0);
     await expect(free).not.toContainText('FAAB');
     const claim = page.locator('[data-chip="waivers"]');
-    if ((await claim.count()) > 0) await expect(claim.first()).toHaveText(/^Waivers until \w+$/);
+    if ((await claim.count()) > 0) await expect(claim.first()).toHaveText(/^Waivers until \w+( \S+)?$/);
   });
 });
 

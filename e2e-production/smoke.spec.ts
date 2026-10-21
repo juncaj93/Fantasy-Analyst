@@ -60,6 +60,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { swipeSheetAway } from '../e2e/helpers.ts';
 
 /**
  * How a starter row speaks its figure. Kept as one literal so
@@ -1150,49 +1151,21 @@ test.describe('the deployed app', () => {
     });
 
     /*
-     * A scroll, not a drag — and this file was left behind by that change for
-     * the second time.
+     * A touch drag from the grip, the same gesture `e2e/sheet-swipe.spec.ts`
+     * proves in CI on every push.
      *
-     * A sheet's layer is a scroller now, and dismissing a card *is* scrolling
-     * that layer to its other end. `page.mouse.down()` and a series of moves is
-     * not a scroll and never was, so the drag this test used to make expressed
-     * nothing the layer could hear: it passed against a build where the
-     * dismissal was a transform the app applied, and failed the moment the
-     * deploy carried a build where it is not. `ci.yml` does not run
-     * `e2e-production/`, so the mismatch could only ever surface after a
-     * deploy — which is how it surfaced last time too, and the note that used to
-     * be here said so.
-     *
-     * What the test is for is unchanged and is the half that matters: the card
-     * goes, and the pull surface behind it neither arms, moves, nor fetches.
-     * Which part of the card the finger starts on was never the subject — the
-     * middle of it is now a fair place to start, which is the whole point of the
-     * rebuild, so that is where this starts.
-     *
-     * Delivered as a run of wheels rather than one large one. The rAF sampler
-     * above forces a style recalculation every frame, and a synthetic wheel
-     * scrolls markedly less under it — measured, the same wheel that moves the
-     * layer 675px moves it 50 — so a single one is a nudge, and a nudge
-     * correctly springs back. They have to arrive closer together than the
-     * settle waits, which is also what a finger does.
+     * This used to scroll `.sheet-scroller` with a run of wheels. #374 replaced
+     * that layer with the shared swipe hook and the class went with it, so
+     * from 18 October the daily sweep waited 45 seconds for an element that no
+     * longer exists. `ci.yml` does not run `e2e-production/`, which is why it
+     * only showed up here. Using the shared helper keeps this file on whatever
+     * gesture the app's own tests use.
      *
      * The settle before it is not decoration: a box measured while the sheet is
-     * still rising puts the pointer somewhere the card no longer is.
+     * still rising puts the finger somewhere the grip no longer is.
      */
     await stopsMoving(page, 'sheet-grip');
-    const card = (await page.getByTestId('player-sheet').boundingBox())!;
-    const port = (await page.locator('.sheet-scroller').boundingBox())!;
-    const x = card.x + card.width / 2;
-    const y = Math.min(
-      Math.max(card.y + Math.min(card.height / 2, 120), port.y + 8),
-      port.y + port.height - 8,
-    );
-    await page.mouse.move(x, y);
-    for (let i = 0; i < 10; i++) {
-      if ((await page.locator('.sheet-scroller').count()) === 0) break;
-      await page.mouse.wheel(0, -400);
-      await page.waitForTimeout(30);
-    }
+    await swipeSheetAway(page, { over: '.sheet-grip' });
 
     await expect(page.getByTestId('player-sheet')).toHaveCount(0);
     const seen = await page.evaluate(() => {
@@ -2037,6 +2010,64 @@ test.describe('the season features', () => {
    * held to and this is the surface closest to breaking it. Its one button,
    * `See why`, was removed on 1 October 2026 at the owner's request.
    */
+  /*
+   * The waiver cards, live, on every deploy (tagged for the deploy gate on 22
+   * October 2026). The local suites prove the layout against fixtures; this
+   * proves the deployed bundle draws the real tiers that way: no photo on a
+   * card, the pill and logo before the name, one chip line, and the "Do this"
+   * summary only when one claim depends on another.
+   */
+  test('the waiver cards draw the live tiers with no photo and one chip line @critical', async ({ page }) => {
+    await page.goto('/');
+    const tabs = await expectedTabs(page);
+    test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
+    const id = await selectedLeagueId(page);
+    const waivers = id
+      ? await apiJson<{
+          found: boolean;
+          tiers?: { doThese?: unknown[]; doThis?: unknown; consider: unknown[]; watch: unknown[] } | null;
+          claimPlan?: { surface?: boolean; claims?: { dropPlayerId: string | null; qualifier: string | null; relation: string }[] } | null;
+        }>(page, `/api/leagues/${id}/waivers`)
+      : null;
+    test.skip(!waivers?.found, 'no roster on this deployment');
+    const t = waivers!.tiers;
+    const count = t ? (t.doThese?.length ?? (t.doThis ? 1 : 0)) + t.consider.length + t.watch.length : 0;
+    test.skip(count === 0, 'this deployment has no waiver moves to draw');
+
+    await open(page, 'waivers');
+    const cards = page.getByTestId('waiver-tier-row');
+    await expect(cards.first(), 'the data carries waiver moves and the screen drew none').toBeVisible({ timeout: 20_000 });
+    expect(await cards.count()).toBe(count);
+    const read = await cards.evaluateAll((els) =>
+      els.map((el) => {
+        const name = el.querySelector('.player-name')!.getBoundingClientRect();
+        const pill = el.querySelector('.pos-pill')!.getBoundingClientRect();
+        const chips = [...el.querySelectorAll('[data-testid="wcard-chip"]')].map((c) => {
+          const r = c.getBoundingClientRect();
+          return Math.round((r.top + r.bottom) / 2);
+        });
+        return {
+          photos: el.querySelectorAll('img.player-face, .player-face, .cmp2-face').length,
+          pillFirst: pill.right <= name.left + 1,
+          chipRows: new Set(chips).size,
+          height: el.getBoundingClientRect().height,
+        };
+      }),
+    );
+    for (const card of read) {
+      expect(card.photos, 'a photo on a waiver card').toBe(0);
+      expect(card.pillFirst, 'the pill is not before the name').toBe(true);
+      expect(card.chipRows, 'the chip line wrapped').toBeLessThanOrEqual(1);
+      expect(card.height).toBeGreaterThanOrEqual(44);
+    }
+    const claims = waivers!.claimPlan?.surface ? (waivers!.claimPlan.claims ?? []) : [];
+    const drops = claims.map((c) => c.dropPlayerId).filter((d): d is string => d != null);
+    const depend = claims.length >= 2 && (claims.some((c) => c.qualifier != null || c.relation === 'fallback') || new Set(drops).size < drops.length);
+    await expect(page.getByTestId('waiver-plan')).toHaveCount(depend ? 1 : 0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, 'Waivers scrolls sideways').toBeLessThanOrEqual(0);
+  });
+
   test('the waiver plan offers no control, and nothing that would transact', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);

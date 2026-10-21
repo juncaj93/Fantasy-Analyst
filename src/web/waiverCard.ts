@@ -113,17 +113,26 @@ function bidLabel(bid: TierRow['bid']): string | null {
   return `$${bid.recommended}`;
 }
 
+/** `Waivers until Wed $3–7`, `Waivers $0–1` when the day is unknown, `Waivers until Wed` with no price. */
+export function waiverChip(until: string | null, band: string | null): string {
+  return [until ? `Waivers until ${clearDay(until)}` : 'Waivers', band].filter(Boolean).join(' ');
+}
+
 /** The card for one tier move. */
 export function tierCard(row: TierRow): WaiverCardModel {
   const all: CardChip[] = [];
+  /*
+   * One chip for a claim: the waiver status and the bid band together,
+   * `Waivers until Wed $3–7` (Alex, 22 October 2026), so neither gives way to
+   * the other. The bid history stays on the sheet.
+   */
+  const bid = bidLabel(row.bid);
   if (row.bid.kind === 'free') all.push({ key: 'free', label: 'Free agent' });
-  else if (row.bid.kind === 'claim' && row.bid.until) all.push({ key: 'waivers', label: `Waivers until ${clearDay(row.bid.until)}` });
+  else if (row.bid.kind === 'claim') all.push({ key: 'waivers', label: waiverChip(row.bid.until, bid) });
   if (row.needsSpot) all.push(row.tier === 'do_this' ? { key: 'pick', label: 'Pick your drop' } : { key: 'needs', label: 'Needs a drop' });
   else if (row.drop?.viaReserve) all.push({ key: 'ir', label: `IR: ${surname(row.drop.name)}` });
   else if (row.drop) all.push({ key: 'drop', label: `Drop: ${surname(row.drop.name)}` });
   else all.push({ key: 'open', label: 'Open spot' });
-  const bid = bidLabel(row.bid);
-  if (bid) all.push({ key: 'bid', label: bid });
   if (row.reasonCode === 'hole_injury') all.push({ key: 'starter', label: 'Starter out' });
   const gain = gainChip(row);
   return {
@@ -139,6 +148,23 @@ export function tierCard(row: TierRow): WaiverCardModel {
     reason: shortReason(row),
     fullReason: row.reason || null,
   };
+}
+
+/**
+ * A tier, highest gain chip first.
+ *
+ * The engine ranks Worth considering and the Watch list by each move's gain
+ * with its first-choice drop, then shares the drops out, which can change a
+ * move's gain; a tie joins the list whatever its gain. So the list could read
+ * +3.9, +2.4, +3.3, +0.0 (Alex, 22 October 2026). Sorted here by the number
+ * the chip shows, stable, so equal gains keep the engine's order. "Do this"
+ * is never resorted: its order is the order to enter the claims.
+ */
+export function byGain<T extends Pick<TierRow, 'gain'>>(rows: readonly T[]): T[] {
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => Math.max(0, b.row.gain) - Math.max(0, a.row.gain) || a.i - b.i)
+    .map(({ row }) => row);
 }
 
 /** `Questionable` → `Q`, `Out` → `O`, `IR` → `IR`. Anything else stays off the chip and on the sheet. */
@@ -172,10 +198,10 @@ export function faabBand(faab: NonNullable<WaiverBoardRow['faab']>): string | nu
  */
 export function boardCard(row: WaiverBoardRow, reason: string | null, tone: string): WaiverCardModel {
   const all: CardChip[] = [];
-  if (row.pickup?.state === 'free') all.push({ key: 'free', label: 'Free agent' });
-  else if (row.pickup?.state === 'waivers') all.push({ key: 'waivers', label: `Waivers until ${clearDay(row.pickup.until)}` });
   const band = row.pickup?.state !== 'free' && row.faab ? faabBand(row.faab) : null;
-  if (band) all.push({ key: 'bid', label: band });
+  if (row.pickup?.state === 'free') all.push({ key: 'free', label: 'Free agent' });
+  else if (row.pickup?.state === 'waivers') all.push({ key: 'waivers', label: waiverChip(row.pickup.until, band) });
+  else if (band) all.push({ key: 'bid', label: band });
   const letter = injuryLetter(row.statusFlag);
   /* The injury letter is the one chip that never gives way: it is a warning. */
   const chips = letter ? [...all.slice(0, CARD_CHIPS_MAX - 1), { key: 'injury' as const, label: letter }] : all.slice(0, CARD_CHIPS_MAX);

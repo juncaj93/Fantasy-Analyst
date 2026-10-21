@@ -14,7 +14,7 @@ import type { WeekSource } from '../../core/waivers/aheadWeeks.ts';
 import { PlayerSheetTitle } from './common.tsx';
 import { Sheet } from './native.tsx';
 import { WaiverCard } from './waiverCard.tsx';
-import { alsoText, pickupText, tierCard } from '../waiverCard.ts';
+import { alsoText, byGain, pickupText, tierCard } from '../waiverCard.ts';
 import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN } from '../sleeperFallback.ts';
 
 /**
@@ -91,7 +91,7 @@ export function TierSections({
             Worth considering
           </div>
           <section data-testid="tier-consider">
-            {tiers.consider.map((row) => (
+            {byGain(tiers.consider).map((row) => (
               <TierRowButton key={row.playerId} row={row} onOpen={() => onOpen(row)} />
             ))}
             {afterConsider}
@@ -104,7 +104,7 @@ export function TierSections({
             Watch list
           </div>
           <section data-testid="tier-watch">
-            {tiers.watch.map((row) => (
+            {byGain(tiers.watch).map((row) => (
               <TierRowButton key={row.playerId} row={row} onOpen={() => onOpen(row)} />
             ))}
           </section>

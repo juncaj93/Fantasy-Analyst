@@ -212,23 +212,14 @@ test.describe('Team reaches a face, and its lists do not', () => {
     */
     await page.getByTestId('bench-toggle').click();
     await page.waitForTimeout(400);
-    /*
-      The waiver cards under the roster carry a face since 21 October 2026
-      (Alex: "add the player's headshot next to each card"); the roster rows
-      still do not.
-    */
-    const rosterIds = await page.locator('[data-testid="starter-row"], [data-testid="bench-row"]').evaluateAll((els) =>
-      els.map((el) => el.getAttribute('data-player-id')).filter((id): id is string => !!id),
-    );
-    const forRoster = () => asked.filter((url) => rosterIds.some((id) => url.endsWith(`/${id}.jpg`)));
-    expect(forRoster(), 'the Team roster requested portraits').toHaveLength(0);
+    expect(asked, 'the Team roster requested portraits').toHaveLength(0);
 
     const starter = page.locator('[data-testid="starter-row"][data-starter="true"]').first();
     const starterId = (await starter.getAttribute('data-player-id'))!;
     await starter.click();
     await expect(page.getByTestId('weekly-sheet')).toBeVisible();
     await assertFocusedFace(page, 'weekly-sheet', starterId);
-    expect(forRoster(), 'the weekly card asked for more than the one player it is about').toHaveLength(1);
+    expect(asked, 'the weekly card asked for more than the one player it is about').toHaveLength(1);
 
     /*
       The identity moved into the header, so the body does not say it twice.
@@ -254,8 +245,7 @@ test.describe('Team reaches a face, and its lists do not', () => {
     await waiver.click();
     await expect(page.getByTestId('tier-detail')).toBeVisible();
     await assertFocusedFace(page, 'tier-detail', waiverId);
-    /* The card already shows his face (21 October 2026), so the sheet may reuse it rather than ask again. */
-    expect(asked.some((url) => url.endsWith(`/${waiverId}.jpg`)), 'nobody asked for the waiver player’s face').toBe(true);
+    expect(asked, 'the waiver detail did not ask for its own player').toHaveLength(2);
 
     assertBareIds(asked);
   });
@@ -307,17 +297,7 @@ test.describe('Waivers reaches a face, and the board does not', () => {
     await expect(page.getByTestId('waivers-nav')).toBeVisible();
     await expect(page.getByTestId('waiver-tier-row').first()).toBeVisible();
     await page.waitForTimeout(400);
-    /*
-      Each card carries a face since 21 October 2026, and a refused one falls
-      back to position-tinted initials on the card too: at most one request per
-      card, and none repeated.
-    */
-    const cards = await page.getByTestId('waiver-tier-row').count();
-    expect(asked.length, 'more requests than cards').toBeLessThanOrEqual(cards);
-    expect(new Set(asked).size, 'a refused portrait was asked for twice').toBe(asked.length);
-    const cardFace = page.getByTestId('waiver-tier-row').first().getByTestId('compare-face');
-    await expect(cardFace).toHaveAttribute('data-fallback', 'yes');
-    const before = asked.length;
+    expect(asked, 'the waivers board requested portraits').toHaveLength(0);
 
     const row = page.getByTestId('waiver-tier-row').first();
     const playerId = (await row.getAttribute('data-player-id'))!;
@@ -336,7 +316,7 @@ test.describe('Waivers reaches a face, and the board does not', () => {
         word,
       );
     }
-    expect(asked.length - before, 'a refused portrait was requested again for the sheet').toBe(0);
+    expect(asked.length, 'a refused portrait was requested more than once').toBeLessThanOrEqual(1);
     assertBareIds(asked);
 
     /*
