@@ -671,7 +671,7 @@ export function WaiversInfoBody({ faab, rule, window }: { faab: FaabAdvice | nul
       key: 'tiers',
       title: 'The lists',
       lines: window
-        ? ['Do this: fills a hole or adds a lot. Make the move.', 'Worth considering: a real gain, your call.', 'Watch list: better on paper; no move needed now.']
+        ? ['Do this: fills a hole or adds a lot. Make the move.', 'Worth considering: a real gain, your call.', 'Watch list: better on paper; no move needed now.', 'Highest chip first; Do this runs in the order to enter claims.']
         : [],
     },
     { key: 'rule', title: 'Waiver rules', lines: ruleLines(rule) },

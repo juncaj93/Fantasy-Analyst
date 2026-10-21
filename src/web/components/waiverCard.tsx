@@ -1,16 +1,18 @@
 /**
  * One waiver card, for every place a waiver move is drawn.
  *
- * Face, name and gain on the first line; position, club and at most two chips
- * on the second, which never wraps; one short reason on a third line when there
- * is one. The whole card is one button onto the detail sheet, and nothing on it
- * is a second tap target. What goes on it is `web/waiverCard.ts`.
+ * The Team row's look (22 October 2026: Alex wants no photos on a list, as on
+ * Team and Matchup): position pill, team logo, name and the gain chip on the
+ * first line; at most two chips on the second, which never wraps; one short
+ * reason on a third line when there is one. The face is on the sheet. The
+ * whole card is one button onto the detail sheet, and nothing on it is a
+ * second tap target. What goes on it is `web/waiverCard.ts`.
  *
  * Nothing here adds, drops or bids: Alex makes every move in Sleeper.
  */
 
 import type { WaiverCardModel } from '../waiverCard.ts';
-import { CompactFace, PlayerIdentity } from './common.tsx';
+import { PlayerIdentity } from './common.tsx';
 
 export function WaiverCard({
   model,
@@ -43,25 +45,23 @@ export function WaiverCard({
       onClick={onOpen}
       {...data}
     >
-      <span className={`wcard-face pos-${pos}`}>
-        <CompactFace playerId={model.playerId} name={model.name} position={pos} team={model.team} size={44} />
-      </span>
       <span className="wcard-main">
         <span className="wcard-top">
+          <PlayerIdentity position={model.position} team={model.team} />
           <span className="player-name">{model.name}</span>
           <span className={`tag waiver-strength ${model.gainTone}`} data-testid={gainTestId}>
             {model.gain}
           </span>
         </span>
-        <span className="wcard-chips" data-testid="wcard-chips">
-          {/* A defence's face is already its club, so the chip line does not draw the club twice. */}
-          <PlayerIdentity position={model.position} {...(pos === 'DEF' ? {} : { team: model.team })} />
-          {model.chips.map((chip) => (
-            <span key={chip.key} className={`tag tag-mini${chip.key === 'injury' ? ' badge-warn' : ''}`} data-testid="wcard-chip" data-chip={chip.key}>
-              {chip.label}
-            </span>
-          ))}
-        </span>
+        {model.chips.length > 0 ? (
+          <span className="wcard-chips" data-testid="wcard-chips">
+            {model.chips.map((chip) => (
+              <span key={chip.key} className={`tag tag-mini${chip.key === 'injury' ? ' badge-warn' : ''}`} data-testid="wcard-chip" data-chip={chip.key}>
+                {chip.label}
+              </span>
+            ))}
+          </span>
+        ) : null}
         {model.reason ? (
           <span className={`wcard-reason${reasonWarn ? ' waiver-notes-warn' : ''}`} data-testid={reasonTestId}>
             {model.reason}

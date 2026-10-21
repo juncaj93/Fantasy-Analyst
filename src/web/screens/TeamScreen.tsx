@@ -49,6 +49,7 @@ import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/i
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
+import { byGain } from '../waiverCard.ts';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { PickupStartMove, PickupStartPlan } from '../../core/waivers/pickupStart.ts';
 import { orderPositions } from '../../core/sleeper/eligibility.ts';
@@ -1572,7 +1573,7 @@ function WaiverSection({
    * two, "Do this" first. A week with neither says so in one line.
    */
   if (tiers) {
-    const top = [...(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])), ...tiers.consider].slice(0, TEAM_WAIVER_ROWS);
+    const top = [...(tiers.doThese ?? (tiers.doThis ? [tiers.doThis] : [])), ...byGain(tiers.consider)].slice(0, TEAM_WAIVER_ROWS);
     if (top.length === 0) {
       return (
         <div className="card card-tight" data-testid="waiver-card">

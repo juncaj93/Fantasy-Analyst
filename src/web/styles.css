@@ -10825,22 +10825,13 @@ div.matchup-result {
 .best-move-chip { flex: 0 0 auto; }
 
 /*
- * The waiver card (21 October 2026): a 44px face, the name and the gain, one
- * line of chips that never wraps, one short reason. Same 12px inner padding as
- * Team's cards and 8px between cards. Position-tinted initials when Sleeper
- * has no face.
+ * The waiver card: Team's row look (22 October 2026), no photo. Pill, logo,
+ * name and gain on one line, one chip line that never wraps, one short
+ * reason. 12px inside, 8px between cards.
  */
-.wcard {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 12px;
-  margin-bottom: 8px;
-}
-.wcard-face { flex: none; }
-.wcard-face .player-face-fallback { background: var(--pos-tint-bg); color: var(--pos-line); }
-.wcard-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.wcard-top { display: flex; align-items: flex-start; gap: 8px; }
+.wcard { padding: 12px; margin-bottom: 8px; }
+.wcard-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wcard-top { display: flex; align-items: center; gap: 8px; }
 .wcard-top .player-name { flex: 1; min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wcard-top .waiver-strength { flex: none; font-size: 0.72rem; }
 .wcard-chips { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; min-width: 0; }

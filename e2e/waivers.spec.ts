@@ -160,7 +160,7 @@ test.describe('the waivers page, as an older payload draws it', () => {
     // One line of at most two chips: the pickup state, the cost band, an injury letter.
     const chips = await row.getByTestId('wcard-chip').allInnerTexts();
     expect(chips.length).toBeLessThanOrEqual(2);
-    for (const chip of chips) expect(chip).toMatch(/^(Free agent|Waivers until \w+|\$?\d+(–\d+)?%?\+?|≤\$?\d+%?|Q|D|O|IR|PUP|SUS)$/);
+    for (const chip of chips) expect(chip).toMatch(/^(Free agent|Waivers( until \w+)?( (\$?\d+(–\d+)?%?\+?|≤\$?\d+%?))?|\$?\d+(–\d+)?%?\+?|≤\$?\d+%?|Q|D|O|IR|PUP|SUS)$/);
 
     // At most one reason, never several joined together.
     const count = await rows.count();

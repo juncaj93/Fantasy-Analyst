@@ -25,7 +25,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { captureDemoWaivers, decisionDigest, tierRows, type CapturedWaivers } from './helpers/waiverDecision.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
-import { CARD_CHIPS_MAX, CARD_REASON_MAX, clearDay, shortReason, tierCard } from '../src/web/waiverCard.ts';
+import { byGain, CARD_CHIPS_MAX, CARD_REASON_MAX, clearDay, shortReason, tierCard, waiverChip } from '../src/web/waiverCard.ts';
+import { WaiverCard } from '../src/web/components/waiverCard.tsx';
 import { tierBadge, TierDetailBody } from '../src/web/components/waiverTiers.tsx';
 import { budgetLines, claimLine, claimsDepend, WaiversInfoBody } from '../src/web/components/waivers.tsx';
 import type { TierRow, WaiverTiersView } from '../src/core/waivers/tierPlan.ts';
@@ -129,6 +130,36 @@ describe('the waiver card round changes nothing that is recommended', () => {
       const sheet = text(renderToStaticMarkup(createElement(TierDetailBody, { row, tiers: captured.tiers as WaiverTiersView })));
       for (const line of oldCardLines(row)) expect(sheet, `${row.name}: "${line}" is not on the sheet`).toContain(line);
     }
+  });
+});
+
+describe('the card, 22 October 2026', () => {
+  it('carries no photo: pill, logo, name, gain, chips, reason', async () => {
+    const { tiers } = await captureDemoWaivers();
+    for (const row of tierRows(tiers)) {
+      const html = renderToStaticMarkup(
+        createElement(WaiverCard, { model: tierCard(row), onOpen: () => {}, testId: 't', gainTestId: 'g', reasonTestId: 'r' }),
+      );
+      expect(html).not.toMatch(/player-face|cmp2-face|<img[^>]+sleepercdn/);
+      expect(html.indexOf('pos-pill')).toBeLessThan(html.indexOf('player-name'));
+    }
+  });
+
+  it('says a claim in one chip: the waiver status and the bid band', () => {
+    expect(waiverChip('2026-10-14T19:10:00.000Z', '$3–7')).toMatch(/^Waivers until \w{3} \$3–7$/);
+    expect(waiverChip(null, '$0–1')).toBe('Waivers $0–1');
+    expect(waiverChip('2026-10-14T19:10:00.000Z', null)).toMatch(/^Waivers until \w{3}$/);
+  });
+
+  it('sorts a tier by the gain on its chip, keeping the engine order for equal gains', () => {
+    const rows = [
+      { name: 'Andrews', gain: 3.9 },
+      { name: 'Henry', gain: 2.4 },
+      { name: 'Strange', gain: 3.3 },
+      { name: 'Mayer', gain: 0 },
+      { name: 'Ertz', gain: 2.4 },
+    ];
+    expect(byGain(rows).map((r) => r.name)).toEqual(['Andrews', 'Strange', 'Henry', 'Ertz', 'Mayer']);
   });
 });
 

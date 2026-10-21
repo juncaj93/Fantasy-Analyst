@@ -181,7 +181,7 @@ async function noSidewaysScroll(page: Page) {
 }
 
 /** The fixed set of chips a waiver card may carry (21 October 2026). */
-const CHIP = /^(Free agent|Waivers until \w+|Open spot|Needs a drop|Pick your drop|Drop: .+|IR: .+|\$\d+(–\d+)?|Starter out|Q|D|O|IR|PUP|SUS)$/;
+const CHIP = /^(Free agent|Waivers( until \w+)?( \$\d+(–\d+)?)?|Open spot|Needs a drop|Pick your drop|Drop: .+|IR: .+|\$\d+(–\d+)?|Starter out|Q|D|O|IR|PUP|SUS)$/;
 
 /** Every control on the screen, read for a transaction word. A card's status chips are labels, read on their own. */
 async function noTransactionControl(page: Page) {
@@ -286,7 +286,8 @@ test.describe('the tiers as a layout', () => {
     expect(name.width).toBeGreaterThan(100);
 
     const claim = page.locator('[data-testid="waiver-tier-row"][data-player-id="t2"]');
-    await expect(claim.getByTestId('wcard-chip')).toHaveText([/^Waivers until \w+$/, 'Drop: Miller']);
+    /* One chip for the claim: the waiver status and the bid band together (22 October 2026). */
+    await expect(claim.getByTestId('wcard-chip')).toHaveText([/^Waivers until \w+ \$64–100$/, 'Drop: Miller']);
     const box = (await claim.boundingBox())!;
     expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(110);
     await noSidewaysScroll(page);
@@ -494,7 +495,7 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
   test('labels a stash with no known return on the Watch list, at $0 to $1', async ({ page }) => {
     const row = page.locator('[data-testid="waiver-tier-row"][data-player-id="r3"]');
     await expect(row.getByTestId('tier-gain')).toHaveText('Return unknown');
-    await expect(row.locator('[data-chip="bid"]')).toHaveText('$0–1');
+    await expect(row.locator('[data-chip="waivers"]')).toHaveText('Waivers $0–1');
     await row.click();
     await expect(page.getByTestId('tier-detail-pickup')).toHaveText('Pickup$0 to stash · in for Ladd McConkey');
     await noSidewaysScroll(page);
@@ -631,7 +632,7 @@ test.describe('the waiver card on a phone', () => {
     await openWaivers(page);
   });
 
-  test('two lines, three with a reason; nothing wraps, clips sideways or squashes', async ({ page }) => {
+  test('two lines, three with a reason; no photo; nothing wraps or clips sideways', async ({ page }) => {
     const cards = page.getByTestId('waiver-tier-row');
     await expect(cards.first()).toBeVisible();
     const width = page.viewportSize()!.width;
@@ -639,7 +640,7 @@ test.describe('the waiver card on a phone', () => {
       els.map((el) => {
         const box = el.getBoundingClientRect();
         const style = getComputedStyle(el);
-        const face = el.querySelector('.wcard-face .player-face, .wcard-face .cmp2-face')!.getBoundingClientRect();
+        const faces = el.querySelectorAll('img.player-face, .player-face, .cmp2-face').length;
         const top = el.querySelector('.wcard-top')!.getBoundingClientRect();
         const name = el.querySelector('.wcard-top .player-name')!.getBoundingClientRect();
         const chips = el.querySelector('.wcard-chips') as HTMLElement;
@@ -653,7 +654,12 @@ test.describe('the waiver card on a phone', () => {
           bottom: box.bottom,
           padding: [style.paddingTop, style.paddingLeft, style.paddingRight, style.paddingBottom].map(parseFloat),
           marginBottom: parseFloat(style.marginBottom),
-          face: [face.width, face.height],
+          faces,
+          identityBeforeName: (() => {
+            const pill = el.querySelector('.wcard-top .pos-pill')!.getBoundingClientRect();
+            const logo = el.querySelector('.wcard-top .team-logo, .wcard-top .team-code')?.getBoundingClientRect();
+            return pill.right <= (logo?.left ?? name.left) + 1 && (logo ? logo.right <= name.left + 1 : true);
+          })(),
           topHeight: top.height,
           nameHeight: name.height,
           nameLineHeight: parseFloat(getComputedStyle(el.querySelector('.wcard-top .player-name')!).lineHeight) || 20,
@@ -671,13 +677,14 @@ test.describe('the waiver card on a phone', () => {
       expect(card.height, 'a tap target under 44px').toBeGreaterThanOrEqual(44);
       expect(card.padding).toEqual([12, 12, 12, 12]);
       expect(card.marginBottom).toBe(8);
-      expect(card.face, 'the face is a 44px circle').toEqual([44, 44]);
+      expect(card.faces, 'a photo on a list card (22 October 2026: photos only on the sheet)').toBe(0);
+      expect(card.identityBeforeName, 'pill, logo, then name, as on Team').toBe(true);
       expect(card.nameHeight, 'the name wrapped').toBeLessThanOrEqual(card.nameLineHeight * 1.5);
       /* One line of chips: every chip on the same row, none past the card. */
       expect(new Set(card.childTops).size, 'the chip line wrapped').toBe(1);
       for (const r of card.childRights) expect(r).toBeLessThanOrEqual(card.right - 12 + 0.5);
       /* 12 + face row + chip line + optional reason + 12: two lines, or three with a reason. */
-      expect(card.height).toBeLessThanOrEqual(card.hasReason ? 100 : 80);
+      expect(card.height).toBeLessThanOrEqual(card.hasReason ? 92 : 72);
     }
     /* 8px between cards in one list. */
     for (let i = 1; i < measured.length; i++) {
@@ -700,9 +707,19 @@ test.describe('the waiver card on a phone', () => {
     const lines = await card.evaluate((el) => {
       const chips = [...el.querySelectorAll('.wcard-chips > *')].map((c) => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); });
       const name = el.querySelector('.wcard-top .player-name') as HTMLElement;
-      return { chipRows: new Set(chips).size, nameClipped: name.scrollWidth > name.clientWidth, nameWraps: name.getBoundingClientRect().height > 30 };
+      const waivers = el.querySelector('[data-chip="waivers"]') as HTMLElement;
+      return {
+        chipRows: new Set(chips).size,
+        nameClipped: name.scrollWidth > name.clientWidth,
+        nameWraps: name.getBoundingClientRect().height > 30,
+        waivers: waivers.textContent,
+        waiversClipped: waivers.scrollWidth > waivers.clientWidth + 0.5,
+      };
     });
     expect(lines.chipRows).toBe(1);
+    /* "Waivers until Wed $5–14" fits whole on one line at every width, beside the longest drop. */
+    expect(lines.waivers).toMatch(/^Waivers until \w+ \$5–14$/);
+    expect(lines.waiversClipped, 'the waiver chip was cut off').toBe(false);
     expect(lines.nameWraps).toBe(false);
     await noSidewaysScroll(page);
   });
