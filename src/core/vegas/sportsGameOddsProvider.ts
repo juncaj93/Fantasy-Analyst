@@ -611,7 +611,7 @@ export class SportsGameOddsProvider implements VegasProvider {
       note:
         quotes.length > 0
           ? null
-          : `${this.name} publishes no season-long NFL player markets: every NFL event is a single game, and its market catalogue has no season period.`,
+          : `${this.name} publishes no season-long NFL player markets: every NFL event is a single game, and its market catalog has no season period.`,
       raw: { events: events.length },
     };
   }

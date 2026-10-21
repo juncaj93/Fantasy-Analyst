@@ -251,7 +251,7 @@ export function importTally(
     `${evidence.length} matched to a player (${applied} applied, ${review} sent for review).`,
   ];
   if (ambiguous.length) parts.push(`${ambiguous.length} name(s) matched more than one player.`);
-  if (unmatched.length) parts.push(`${unmatched.length} name(s) were not recognised.`);
+  if (unmatched.length) parts.push(`${unmatched.length} name(s) were not recognized.`);
   if (conflicts.length) parts.push(`${conflicts.length} contradiction(s) found.`);
 
   return {

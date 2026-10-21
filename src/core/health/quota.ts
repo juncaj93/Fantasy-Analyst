@@ -134,7 +134,7 @@ export function describeQuota(
       headline: unconfigured ? 'Not connected' : 'Could not be read',
       detail: unconfigured
         ? 'Cloudflare can report how much of the daily database allowance today has used, but this deployment has no analytics token to ask with. See docs/DATA_HEALTH.md.'
-        : (input.reason ?? 'Cloudflare did not answer, or answered in a shape this app does not recognise.'),
+        : (input.reason ?? 'Cloudflare did not answer, or answered in a shape this app does not recognize.'),
       percentUsed: null,
       projectedPercent: null,
       reading: null,
@@ -176,8 +176,8 @@ export function describeQuota(
     state,
     headline: `${percentUsed}% of today's rows`,
     detail:
-      `${reading.rowsRead.toLocaleString('en-GB')} of ${D1_DAILY_ROWS_READ.toLocaleString('en-GB')} rows read ` +
-      `across ${reading.readQueries.toLocaleString('en-GB')} queries. ${paceSentence}${yesterday}`,
+      `${reading.rowsRead.toLocaleString('en-US')} of ${D1_DAILY_ROWS_READ.toLocaleString('en-US')} rows read ` +
+      `across ${reading.readQueries.toLocaleString('en-US')} queries. ${paceSentence}${yesterday}`,
     percentUsed,
     projectedPercent,
     reading,

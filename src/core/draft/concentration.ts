@@ -119,7 +119,7 @@ const NEUTRAL: ConcentrationResult = {
   skillCount: 0,
   hasQuarterback: false,
   isQuarterbackOfOwned: false,
-  display: 'no overlap with an NFL offence you already own',
+  display: 'no overlap with an NFL offense you already own',
   driver: null,
 };
 
@@ -198,7 +198,7 @@ export function assessConcentration(input: ConcentrationInput): ConcentrationRes
       hasQuarterback,
       display:
         skillCount === 0
-          ? 'no overlap with an NFL offence you already own'
+          ? 'no overlap with an NFL offense you already own'
           : `${describeRostered(sameTeam)} from ${team} already rostered, and the stack offsets it`,
     };
   }

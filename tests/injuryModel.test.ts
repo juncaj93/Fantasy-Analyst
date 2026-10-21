@@ -197,7 +197,7 @@ describe('resolving several sources into one state', () => {
     );
     expect(state.conflict).toBe(false);
     expect(state.confidence).toBe('high');
-    expect(injuryLine(state)).toBe('Q · practised fully');
+    expect(injuryLine(state)).toBe('Q · practiced fully');
   });
 
   it('flags two sources that disagree about severity, and says who said what', () => {

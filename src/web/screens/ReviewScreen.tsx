@@ -217,7 +217,7 @@ export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onB
           </>
         )
       ) : identity.length === 0 ? (
-        <Empty>No unrecognised names.</Empty>
+        <Empty>No unrecognized names.</Empty>
       ) : (
         <>
           <div className="faint" style={{ margin: '0 2px 6px' }}>

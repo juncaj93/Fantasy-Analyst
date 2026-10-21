@@ -164,7 +164,7 @@ export function buildExpectation(
   const coverage = expected.length === 0 ? 0 : round3((expected.length - missingMarkets.length) / expected.length);
 
   if (position === 'QB' && byMarket.has('rush_yards')) {
-    notes.push('QB rushing TDs are not modelled; expectation is slightly conservative');
+    notes.push('QB rushing TDs are not modeled; expectation is slightly conservative');
   }
   if (missingMarkets.length > 0) {
     notes.push(`missing market(s): ${missingMarkets.join(', ')}`);

@@ -146,7 +146,7 @@ export function DraftDestinationsMenu({
   const unavailable = board.picksMade > 0
     ? 'Not while the draft is live — a rehearsal ends the moment the real draft starts'
     : demoSession()
-      ? 'Not in Demo Mode — a mock draft practises against your own league'
+      ? 'Not in Demo Mode — a mock draft practices against your own league'
       : null;
 
   return createPortal(

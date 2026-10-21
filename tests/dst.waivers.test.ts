@@ -338,7 +338,7 @@ describe('the planner’s inputs, assembled from what is stored', () => {
 
     const reason = plan!.current?.unavailableReason;
     expect(reason).not.toBe('is on bye');
-    expect(reason).toContain('no fixture');
+    expect(reason).toContain('no game');
   });
 
   it('says a game with no quoted line cannot be scored, which is a different sentence', async () => {

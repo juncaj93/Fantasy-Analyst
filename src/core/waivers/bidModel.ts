@@ -399,8 +399,8 @@ function rivalWhy(context: RivalContext, interest: number, pos: string, t: Rival
   if (need && (need.state === 'hole' || need.state === 'soon' || need.state === 'surplus')) return need.reason;
   if (context.remaining != null && context.remaining < 1) return 'no FAAB left, $0 bids only';
   if (context.remaining != null && context.remaining <= 5) return `only $${context.remaining} left`;
-  if (interest <= 0.5 && pos) return `rarely bids on ${pos === 'DEF' ? 'defences' : `${pos}s`}`;
-  if (interest >= 1.6 && pos) return `often bids on ${pos === 'DEF' ? 'defences' : `${pos}s`}`;
+  if (interest <= 0.5 && pos) return `rarely bids on ${pos === 'DEF' ? 'defenses' : `${pos}s`}`;
+  if (interest >= 1.6 && pos) return `often bids on ${pos === 'DEF' ? 'defenses' : `${pos}s`}`;
   if (need) return need.reason;
   return t.rate >= 0.2 ? 'bids often' : t.rate <= 0.06 ? 'rarely bids' : 'bids now and then';
 }

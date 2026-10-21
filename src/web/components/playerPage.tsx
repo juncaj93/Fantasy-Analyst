@@ -1057,7 +1057,7 @@ export function EvidenceRow({ item, quoted = false }: { item: EvidenceItem; quot
         </span>
         {quoted ? <span data-testid="evidence-quoted">quoted above</span> : null}
         <span>mag {item.userOverride?.magnitude ?? item.magnitude}</span>
-        <span>{item.category ?? 'uncategorised'}</span>
+        <span>{item.category ?? 'uncategorized'}</span>
         <span>{formatDate(item.sourceDate)}</span>
         <span>{item.reviewStatus}</span>
       </div>

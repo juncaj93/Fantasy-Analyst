@@ -99,7 +99,7 @@ describe('the tie-break', () => {
 
   it('says why in one line', () => {
     expect(tiebreakSentence('underdog')).toBe("Close call. You're the underdog, so the higher ceiling gets the nod.");
-    expect(tiebreakSentence('favourite')).toMatch(/favourite, so the safer floor/);
+    expect(tiebreakSentence('favourite')).toMatch(/favorite, so the safer floor/);
   });
 });
 

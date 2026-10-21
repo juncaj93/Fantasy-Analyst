@@ -168,11 +168,11 @@ function availabilityOf(evaluation: YardstickEvaluation): { charge: number; note
   }
   if (latest === 'dnp' && injured) {
     charge = Math.max(charge, DOUBTFUL_OR_DNP_CHARGE);
-    notes.push('did not practise');
+    notes.push('did not practice');
   }
 
   const practice =
-    latest === 'full' ? 'practised fully' : latest === 'limited' ? 'limited in practice' : latest === 'dnp' ? 'did not practise' : null;
+    latest === 'full' ? 'practiced fully' : latest === 'limited' ? 'limited in practice' : latest === 'dnp' ? 'did not practice' : null;
   return { charge: charge === 0 ? 0 : -charge, note: notes.length > 0 ? notes.join(', ') : null, practice };
 }
 

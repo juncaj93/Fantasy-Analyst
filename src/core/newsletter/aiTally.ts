@@ -474,7 +474,7 @@ export function importAiTally(
   const parts: string[] = [`${parsed.rows.length} row(s) read.`];
   parts.push(`${evidence.length} matched to a player (${applied} ready to apply).`);
   if (ambiguous.length) parts.push(`${ambiguous.length} name(s) matched more than one player.`);
-  if (unmatched.length) parts.push(`${unmatched.length} name(s) were not recognised.`);
+  if (unmatched.length) parts.push(`${unmatched.length} name(s) were not recognized.`);
   if (conflicts.length) parts.push(`${conflicts.length} contradiction(s) found.`);
   if (parsed.rejected.length) parts.push(`${parsed.rejected.length} line(s) could not be read.`);
 

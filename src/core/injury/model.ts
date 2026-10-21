@@ -161,10 +161,10 @@ export function practiceTrend(reports: (PracticeStatus | null | undefined)[]): P
   if (days.length === 0) return { trend: 'unknown', days, latest, label: null };
 
   if (days.every((d) => d === 'full')) {
-    return { trend: 'full_participant', days, latest, label: 'practised fully' };
+    return { trend: 'full_participant', days, latest, label: 'practiced fully' };
   }
   if (days.every((d) => d === 'dnp')) {
-    return { trend: 'not_practising', days, latest, label: 'has not practised' };
+    return { trend: 'not_practising', days, latest, label: 'has not practiced' };
   }
   if (days.length === 1) {
     return {

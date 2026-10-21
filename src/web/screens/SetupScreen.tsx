@@ -1664,7 +1664,7 @@ function SleeperPanel({ status, onDone }: { status: SetupStatus; onDone: () => v
         </button>
       </div>
       <div className="faint" style={{ marginTop: 6 }}>
-        The player list is how Fantasy Analyst recognises names in your newsletter. Update it once
+        The player list is how Fantasy Analyst recognizes names in your newsletter. Update it once
         before your draft, and occasionally during the season.
         {status.sleeper.playersSynced > 0 ? ` Currently ${status.sleeper.playersSynced} players.` : ''}
       </div>
@@ -1848,7 +1848,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
           <div className="faint">
             Captured {formatDate(status.adp.capturedAt)} · {status.adp.matched} of {status.adp.totalRows} players
             matched
-            {status.adp.unresolved > 0 ? ` · ${status.adp.unresolved} not recognised` : ''}
+            {status.adp.unresolved > 0 ? ` · ${status.adp.unresolved} not recognized` : ''}
           </div>
         </div>
       ) : null}
@@ -1918,7 +1918,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
                 <td>{result.ambiguous}</td>
               </tr>
               <tr>
-                <td>Not recognised</td>
+                <td>Not recognized</td>
                 <td>{result.unmatched}</td>
               </tr>
               <tr>
@@ -1934,7 +1934,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
             </div>
           ) : null}
           <div className="faint" style={{ marginTop: 6 }}>
-            Unrecognised players are kept, not thrown away — they simply have no ranking until you
+            Unrecognized players are kept, not thrown away — they simply have no ranking until you
             match them.
           </div>
         </div>
@@ -2045,7 +2045,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
             Accept mail from this sender
           </button>
           <div className="faint" style={{ marginTop: 4 }}>
-            Only do this if you recognise it as your newsletter. The issue that was ignored is not
+            Only do this if you recognize it as your newsletter. The issue that was ignored is not
             read retrospectively; the next one will be.
           </div>
         </div>
@@ -2917,7 +2917,7 @@ function UsageSourceHealth({
       setNote(
         result?.outcome === 'ok'
           ? `Week ${result.week ?? result.latestWeek}: ${result.matchedById + result.matchedByName} players mapped, ` +
-            `${result.unmatched} not recognised, ${result.rowsWritten} row(s) written.`
+            `${result.unmatched} not recognized, ${result.rowsWritten} row(s) written.`
           : (result?.note ?? 'Nothing came back.'),
       );
       onDone();
@@ -3038,7 +3038,7 @@ function InjurySourceHealth({
       const result = await api.post<SetupStatus['injury']['lastRun']>('/api/injuries/refresh');
       setNote(
         result?.outcome === 'ok'
-          ? `Week ${result.latestWeek}: ${result.matchedById + result.matchedByName} players mapped, ${result.unmatched} not recognised.`
+          ? `Week ${result.latestWeek}: ${result.matchedById + result.matchedByName} players mapped, ${result.unmatched} not recognized.`
           : (result?.note ?? 'Nothing came back.'),
       );
       onDone();

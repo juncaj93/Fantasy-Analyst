@@ -226,7 +226,7 @@ async function expectNotAConsole(page: Page): Promise<void> {
     expect(text, `"${gone}" is back on the expanded card`).not.toContain(gone);
   }
   expect(text, 'the magnitude is back on the card').not.toMatch(/\bmag \d/);
-  expect(text, 'the category-debug label is back on the card').not.toContain('uncategorised');
+  expect(text, 'the category-debug label is back on the card').not.toMatch(/uncategori[sz]ed/);
   expect(text).not.toContain('auto_applied');
   expect(text).not.toMatch(/\brule: /);
   expect(text).not.toMatch(/confidence: /);

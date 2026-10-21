@@ -223,7 +223,7 @@ export async function startSitInputsFor(
        * stays `unknown`, exactly as it was.
        */
       ...(context.indoor.get((player.team ?? '').toUpperCase())
-        ? { weather: { indoor: true, source: 'fixture list' } }
+        ? { weather: { indoor: true, source: 'schedule' } }
         : indoorFromTable(player.team, game?.opponent ?? null, context)
           ? { weather: { indoor: true, source: 'stadium table' } }
           : {}),

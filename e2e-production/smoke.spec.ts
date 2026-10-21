@@ -1034,7 +1034,7 @@ test.describe('the deployed app', () => {
        */
       const text = await page.getByTestId('player-page-snapshot').innerText();
       expect(text, 'the magnitude is back on the card').not.toMatch(/\bmag \d/);
-      expect(text, 'the category-debug label is back on the card').not.toContain('uncategorised');
+      expect(text, 'the category-debug label is back on the card').not.toMatch(/uncategori[sz]ed/);
       expect(text).not.toContain('auto_applied');
       for (const gone of ['News by window', 'Vegas props', 'Categories', 'Draft market']) {
         expect(text, `"${gone}" is back on the expanded card`).not.toContain(gone);

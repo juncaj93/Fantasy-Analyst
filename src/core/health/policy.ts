@@ -314,7 +314,7 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     severity: 'important',
     measure: 'attempt',
     cadence: 'Checked daily, and again after the league announces flexed games',
-    impact: 'Byes and future opponents come from the last stored fixture list.',
+    impact: 'Byes and future opponents come from the last stored schedule.',
   },
   {
     id: 'nflverse',

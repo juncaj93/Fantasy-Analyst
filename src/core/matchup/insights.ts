@@ -499,7 +499,7 @@ function calmCard(
     headline:
       strength === 'a coin flip'
         ? `This is a coin flip · ${percent(winNow)} win odds`
-        : `You remain ${strength} ${favourite ? 'favourite' : 'underdog'} · ${percent(winNow)} win odds`,
+        : `You remain ${strength} ${favourite ? 'favorite' : 'underdog'} · ${percent(winNow)} win odds`,
     detail:
       input.phase === 'pregame'
         ? 'Nothing has kicked off yet.'
