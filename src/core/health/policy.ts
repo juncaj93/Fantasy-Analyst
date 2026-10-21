@@ -250,7 +250,7 @@ export const SOURCE_POLICIES: readonly SourcePolicy[] = [
     measure: 'attempt',
     cadence: 'Synced daily, and on every pull to refresh',
     impact:
-      'Adds, drops and waiver claims made in Sleeper are missing, so every screen is reasoning about a squad you no longer have.',
+      'Adds, drops and waiver claims made in Sleeper are missing, so every screen is reasoning about a roster you no longer have.',
   },
   {
     id: 'injuries',

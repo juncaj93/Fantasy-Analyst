@@ -224,7 +224,7 @@ export const FEATURE_CLASSIFICATIONS: readonly FeatureClassification[] = [
     why:
       'Being listed first is not evidence and §15 names this case directly: "Never narrow uncertainty just ' +
       'because a player is listed first on a depth chart." So the effect is asymmetric — being listed *outside* ' +
-      'the spots his club fields widens, and being listed inside them does nothing at all.',
+      'the spots his team fields widens, and being listed inside them does nothing at all.',
   },
 
   // ------------------------------------------------------------------- C ---

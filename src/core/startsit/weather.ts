@@ -212,14 +212,22 @@ function describeConditions(
   const bits: string[] = [];
   if (wind != null) bits.push(`${Math.round(wind)} mph wind`);
   if (snow) bits.push('snow');
-  else if (rain != null && rain >= WEATHER.rainOnset) bits.push(`${rain.toFixed(1)} mm/h rain`);
+  else if (rain != null && rain >= WEATHER.rainOnset) bits.push(`${rainInches(rain)} rain`);
   if (temperatureC != null && temperatureC <= 0) bits.push(`${Math.round(temperatureC)}°C`);
   return bits.join(' · ');
 }
 
+/**
+ * Rain as the card says it. The feed and every threshold above stay in mm/h so
+ * no score can move; only the words convert, to inches an hour, one decimal.
+ */
+export function rainInches(mmPerHour: number): string {
+  return `${(mmPerHour / 25.4).toFixed(1)} in/h`;
+}
+
 function driverOf(points: number, wind: number | null, rain: number | null, snow: boolean): string | null {
   if (Math.abs(points) < 0.3) return null;
-  const cause = wind != null && wind >= WEATHER.windOnset ? `${Math.round(wind)} mph wind` : snow ? 'snow' : `${(rain ?? 0).toFixed(1)} mm/h rain`;
+  const cause = wind != null && wind >= WEATHER.windOnset ? `${Math.round(wind)} mph wind` : snow ? 'snow' : `${rainInches(rain ?? 0)} rain`;
   return points < 0 ? `Wind-sensitive role · ${cause}` : `Weather pushes this offense toward the run · ${cause}`;
 }
 

@@ -51,6 +51,11 @@ const BRITISH = new RegExp(
     '\\bper cent\\b',
     '\\bmaths\\b',
     '\\bfixtures?\\b',
+    // Not spellings: words an American fan would not use for these things.
+    '\\bsquads?\\b',
+    '\\bclubs?\\b',
+    '\\b(?:tipsters?|punters?)\\b',
+    '\\bmm/h\\b',
   ].join('|'),
   'i',
 );
@@ -66,6 +71,7 @@ const ALLOWED: Record<string, string> = {
   defence_planner: 'pickup audit status code for the support snapshot; never rendered',
   'fixture-chip': 'CSS class name and test id on the Team screen',
   'fixture-chip-verdict': 'test id on the Team screen',
+  'roster-line-club': 'test id on the Team screen',
   fixtures: 'a support snapshot field name, the test-data sense of the word',
   'demo fixtures': 'Demo Mode names its canned test data, not a game',
   'tests/fixtures/support': 'a directory path',
@@ -157,7 +163,7 @@ describe('American spelling in user-visible text', () => {
   });
 
   it('still catches the words it was written for', () => {
-    for (const word of ['did not practise', 'a defence', 'Favourite', 'not recognised', 'greyed out', 'per cent', 'labelled']) {
+    for (const word of ['did not practise', 'a defence', 'Favourite', 'not recognised', 'greyed out', 'per cent', 'labelled', 'a squad', 'his club', '2.5 mm/h rain', 'a punter']) {
       expect(BRITISH.test(word), word).toBe(true);
     }
     for (const word of ['did not practice', 'a defense', 'otherwise', 'precise', 'analyses', 'Greyson', 'DEF']) {

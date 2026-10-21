@@ -210,7 +210,7 @@ export function assessRoleChange(input: {
         reasons.push(
           fact
             ? `a player ranked ${ahead.rank} ahead of him is listed ${fact.status} rather than active`
-            : `a player ranked ${ahead.rank} ahead of him is no longer on the club's roster`,
+            : `a player ranked ${ahead.rank} ahead of him is no longer on the team's roster`,
         );
         break;
       }
