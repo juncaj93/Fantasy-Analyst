@@ -167,7 +167,7 @@ export function buildProjectionImport(
 
   const unresolvedTeams = [...new Set(rows.filter((r) => r.sourceTeam && !r.teamCode).map((r) => r.sourceTeam!))];
   if (unresolvedTeams.length > 0) {
-    warnings.push(`could not place ${unresolvedTeams.length} club name(s): ${unresolvedTeams.join(', ')}`);
+    warnings.push(`could not place ${unresolvedTeams.length} team name(s): ${unresolvedTeams.join(', ')}`);
   }
 
   return {

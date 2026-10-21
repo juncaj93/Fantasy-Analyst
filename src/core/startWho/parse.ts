@@ -155,7 +155,7 @@ export function parseStartWho(text: string): StartWhoSnapshot {
     if (!detail) {
       malformed.push({
         rowNumber,
-        reason: `no position/club/points line for "${playerName}"`,
+        reason: `no position/team/points line for "${playerName}"`,
         text: body.join(' / '),
       });
       return;

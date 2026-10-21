@@ -160,7 +160,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     id: 'sunday-pregame',
     label: 'Sunday, 11:40am',
     description:
-      'An hour and a bit before the one o’clock kickoffs in week 6, with the London game already gone. One flex decision is genuinely close, Floor and Ceiling disagree about it, and the matchup card is forecasting a week nothing has happened in yet.',
+      'A little over an hour before the one o’clock kickoffs in week 6, with the London game already gone. One flex decision is genuinely close, Floor and Ceiling disagree about it, and the matchup card is forecasting a week nothing has happened in yet.',
     group: 'weekly',
     lifecycle: 'regular_season',
     week: 6,

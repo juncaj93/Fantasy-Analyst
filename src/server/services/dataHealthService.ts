@@ -319,8 +319,8 @@ export class DataHealthService {
         last == null
           ? `${league.name} has never been read from Sleeper.`
           : last.status === 'error'
-            ? 'The last roster sync did not finish, so the squad below may be out of date.'
-            : `${held} player(s) on your squad in ${league.name}.`,
+            ? 'The last roster sync did not finish, so the roster below may be out of date.'
+            : `${held} player(s) on your roster in ${league.name}.`,
       technical: { lastOutcome: last?.status ?? null },
     };
   }

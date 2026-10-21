@@ -370,7 +370,7 @@ export function uncertaintyFor(input: UncertaintyInput): UncertaintyModel {
    * a form somebody filled in.
    */
   if (input.outsideFieldedSpots) {
-    add('uncertainty.depth_role', 1.08, 'the depth chart lists him outside the spots his club fields');
+    add('uncertainty.depth_role', 1.08, 'the depth chart lists him outside the spots his team fields');
   }
   if (input.roleChange && input.roleChange.state !== 'none') {
     add(
@@ -416,7 +416,7 @@ export function uncertaintyFor(input: UncertaintyInput): UncertaintyModel {
   }
   if (input.outsideFieldedSpots) {
     bust += 0.03;
-    bustReasons.push('the depth chart lists him outside the spots his club fields');
+    bustReasons.push('the depth chart lists him outside the spots his team fields');
   }
 
   return {
