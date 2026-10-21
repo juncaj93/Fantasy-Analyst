@@ -5112,35 +5112,6 @@ table.compact tr:last-child td {
  * loudest treatment is reserved for the two states that stop a reader:
  * take-now and avoid.
  */
-/*
- * The verdict badge shrinks before the player's name does.
- *
- * It sits after the name in a flex row where the name is the item with the
- * slack, so without a floor of its own the badge would hold its full width and
- * the name would clip first. `min-width: 0` lets it be squeezed and its own
- * ellipsis finish the job.
- */
-.waiver-strength {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: inline-block;
-}
-
-/*
- * Options, not recommendations.
- *
- * The Waivers screen splits its board: the rows the plan claims sit under
- * `Recommended move`, and the rest under `Other options to consider`. A tinted
- * verdict badge on every option made each one read as a recommendation, so
- * inside that section the badge takes the plain tag colours. Scoped to the
- * section's class, so the Team screen's rows keep theirs.
- */
-.waivers-others .waiver-strength {
-  background: var(--surface-sunken);
-  color: var(--text-dim);
-}
-
 .waivers-others-note {
   margin: 0 var(--sp-1) var(--sp-2);
   font-size: 0.78rem;
@@ -6066,7 +6037,8 @@ table.compact tr:last-child td {
  * tall.
  */
 .starter-row .player-row-top,
-.bench-row .player-row-top {
+.bench-row .player-row-top,
+.waiver-row .player-row-top {
   min-height: 32px;
 }
 
@@ -10825,17 +10797,10 @@ div.matchup-result {
 .best-move-chip { flex: 0 0 auto; }
 
 /*
- * The waiver card: Team's row look (22 October 2026), no photo. Pill, logo,
- * name and gain on one line, one chip line that never wraps, one short
- * reason. 12px inside, 8px between cards.
+ * A waiver row's chips: Team's own sub-line (`verdict-line`) holding Team's
+ * pills (`fixture-chip`), on one line. The last chip gives way first.
  */
-.wcard { padding: 12px; margin-bottom: 8px; }
-.wcard-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.wcard-top { display: flex; align-items: center; gap: 8px; }
-.wcard-top .player-name { flex: 1; min-width: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wcard-top .waiver-strength { flex: none; font-size: 0.72rem; }
-.wcard-chips { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; min-width: 0; }
-.wcard-chips > * { flex: none; }
-.wcard-chips > .tag:last-child { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wcard-reason { font-size: 0.76rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.waivers-info-lines { margin: 2px 0 12px; padding-inline-start: 1.1em; font-size: 0.86rem; line-height: 1.4; }
+.wrow-chips { display: flex; align-items: center; gap: var(--sp-1); }
+.wrow-chips > * { flex: none; }
+.wrow-chips > :last-child { flex: 0 1 auto; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; }
+.waivers-info-lines { margin: 2px 0 12px; padding-inline-start: 1.1em; font-size: 0.85rem; line-height: 1.4; }

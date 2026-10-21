@@ -50,6 +50,7 @@ import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
 import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
 import { byGain } from '../waiverCard.ts';
+import { WaiverRowGroup } from '../components/waiverCard.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { PickupStartMove, PickupStartPlan } from '../../core/waivers/pickupStart.ts';
 import { orderPositions } from '../../core/sleeper/eligibility.ts';
@@ -1591,9 +1592,12 @@ function WaiverSection({
           Waiver moves
         </div>
         {line}
-        {top.map((row) => (
-          <TierRowButton key={row.playerId} row={row} onOpen={() => onOpenTier?.(row)} />
-        ))}
+        {/* The same rows and the same card as "Your lineup" above (22 October 2026). */}
+        <WaiverRowGroup>
+          {top.map((row) => (
+            <TierRowButton key={row.playerId} row={row} onOpen={() => onOpenTier?.(row)} />
+          ))}
+        </WaiverRowGroup>
       </div>
     );
   }
@@ -1637,9 +1641,11 @@ function WaiverSection({
         question than "is there somebody better on the wire".
       */}
       {line}
-      {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
-        <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
-      ))}
+      <WaiverRowGroup>
+        {rows.slice(0, TEAM_WAIVER_ROWS).map((row) => (
+          <WaiverRow key={row.playerId} row={row} onOpen={() => onOpen(row)} />
+        ))}
+      </WaiverRowGroup>
       {/*
         The wallet is not on this screen, and the reason is what this section is.
 

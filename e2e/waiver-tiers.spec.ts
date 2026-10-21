@@ -622,8 +622,10 @@ test.describe('round 2 follow-up: an IR move, and the best drops under Andrews',
 /*
  * The waiver card (21 October 2026), at each of the four widths the projects
  * run: a 44px face that is never squashed, a name line and a chip line that
- * never wrap, a third line only for a reason, 12px inside and 8px between
- * cards, a 44px tap target, and no "Sleeper" drawn beside a number.
+ * never wrap, a third line only for a reason, rows in one card with hairline
+ * dividers like "Your lineup" (22 October 2026; the padding, type and sizes
+ * are the parity test's below), a 44px tap target, and no "Sleeper" drawn
+ * beside a number.
  */
 test.describe('the waiver card on a phone', () => {
   test.beforeEach(async ({ page }) => {
@@ -641,28 +643,28 @@ test.describe('the waiver card on a phone', () => {
         const box = el.getBoundingClientRect();
         const style = getComputedStyle(el);
         const faces = el.querySelectorAll('img.player-face, .player-face, .cmp2-face').length;
-        const top = el.querySelector('.wcard-top')!.getBoundingClientRect();
-        const name = el.querySelector('.wcard-top .player-name')!.getBoundingClientRect();
-        const chips = el.querySelector('.wcard-chips') as HTMLElement;
+        const top = el.querySelector('.player-row-top')!.getBoundingClientRect();
+        const name = el.querySelector('.player-row-top .player-name')!.getBoundingClientRect();
+        const chips = el.querySelector('[data-testid="wcard-chips"]') as HTMLElement;
         const chipsBox = chips.getBoundingClientRect();
         const kids = [...chips.children].map((c) => c.getBoundingClientRect());
-        const reason = el.querySelector('.wcard-reason');
+        const reason = el.querySelector('[data-testid="tier-reason"]');
         return {
           left: box.left,
           right: box.right,
           height: box.height,
           bottom: box.bottom,
           padding: [style.paddingTop, style.paddingLeft, style.paddingRight, style.paddingBottom].map(parseFloat),
-          marginBottom: parseFloat(style.marginBottom),
+          inGroup: el.parentElement?.classList.contains('slot-group') ?? false,
           faces,
           identityBeforeName: (() => {
-            const pill = el.querySelector('.wcard-top .pos-pill')!.getBoundingClientRect();
-            const logo = el.querySelector('.wcard-top .team-logo, .wcard-top .team-code')?.getBoundingClientRect();
+            const pill = el.querySelector('.player-row-top .pos-pill')!.getBoundingClientRect();
+            const logo = el.querySelector('.player-row-top .team-logo, .player-row-top .team-code')?.getBoundingClientRect();
             return pill.right <= (logo?.left ?? name.left) + 1 && (logo ? logo.right <= name.left + 1 : true);
           })(),
           topHeight: top.height,
           nameHeight: name.height,
-          nameLineHeight: parseFloat(getComputedStyle(el.querySelector('.wcard-top .player-name')!).lineHeight) || 20,
+          nameLineHeight: parseFloat(getComputedStyle(el.querySelector('.player-row-top .player-name')!).lineHeight) || 20,
           chipsHeight: chipsBox.height,
           chipRight: chipsBox.right,
           childTops: kids.map((k) => Math.round((k.top + k.bottom) / 2)),
@@ -675,21 +677,20 @@ test.describe('the waiver card on a phone', () => {
       expect(card.left).toBeGreaterThanOrEqual(0);
       expect(card.right).toBeLessThanOrEqual(width);
       expect(card.height, 'a tap target under 44px').toBeGreaterThanOrEqual(44);
-      expect(card.padding).toEqual([12, 12, 12, 12]);
-      expect(card.marginBottom).toBe(8);
+      expect(card.inGroup, 'a row outside the one card').toBe(true);
       expect(card.faces, 'a photo on a list card (22 October 2026: photos only on the sheet)').toBe(0);
       expect(card.identityBeforeName, 'pill, logo, then name, as on Team').toBe(true);
       expect(card.nameHeight, 'the name wrapped').toBeLessThanOrEqual(card.nameLineHeight * 1.5);
       /* One line of chips: every chip on the same row, none past the card. */
       expect(new Set(card.childTops).size, 'the chip line wrapped').toBe(1);
-      for (const r of card.childRights) expect(r).toBeLessThanOrEqual(card.right - 12 + 0.5);
-      /* 12 + face row + chip line + optional reason + 12: two lines, or three with a reason. */
-      expect(card.height).toBeLessThanOrEqual(card.hasReason ? 92 : 72);
+      for (const r of card.childRights) expect(r).toBeLessThanOrEqual(card.right - card.padding[2]! + 0.5);
+      /* The lineup row's first line, then the chip line and at most one reason line. */
+      expect(card.height).toBeLessThanOrEqual(card.hasReason ? 84 : 66);
     }
-    /* 8px between cards in one list. */
+    /* Rows in one card touch: a hairline between them, no gap. */
     for (let i = 1; i < measured.length; i++) {
       const gap = (await cards.nth(i).boundingBox())!.y - measured[i - 1]!.bottom;
-      if (gap >= 0 && gap < 20) expect(Math.round(gap)).toBe(8);
+      if (gap >= 0 && gap < 20) expect(Math.round(gap)).toBe(0);
     }
     const drawn = await cards.evaluateAll((els) => els.map((el) => el.textContent ?? '').join(' '));
     expect(drawn, 'no "Sleeper" beside a number').not.toMatch(/sleeper\s*\d|\d\s*sleeper/i);
@@ -705,8 +706,8 @@ test.describe('the waiver card on a phone', () => {
     const card = page.getByTestId('waiver-tier-row').first();
     await expect(card).toContainText('Christopher');
     const lines = await card.evaluate((el) => {
-      const chips = [...el.querySelectorAll('.wcard-chips > *')].map((c) => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); });
-      const name = el.querySelector('.wcard-top .player-name') as HTMLElement;
+      const chips = [...el.querySelectorAll('[data-testid="wcard-chips"] > *')].map((c) => { const r = c.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); });
+      const name = el.querySelector('.player-row-top .player-name') as HTMLElement;
       const waivers = el.querySelector('[data-chip="waivers"]') as HTMLElement;
       return {
         chipRows: new Set(chips).size,
@@ -792,5 +793,92 @@ test.describe('the "Do this" summary', () => {
     await expect(box.getByTestId('waiver-plan-claim')).toHaveText(['Add Allen, drop Wright', 'Add Spears, drop Wright, if 1 loses']);
     await expect(box.getByRole('button')).toHaveCount(0);
     await noSidewaysScroll(page);
+  });
+});
+
+/*
+ * Style parity (22 October 2026): Alex compared Waivers with Team and they
+ * "looked like two different apps". A waiver row is a variant of the Team
+ * lineup row, and this reads the computed styles off both, at every width the
+ * projects run, and fails naming the property and the two values.
+ */
+type Look = Record<string, string>;
+
+async function lookOf(page: Page, row: string, group: string): Promise<Look> {
+  return page.evaluate(
+    ({ row, group }) => {
+      const r = document.querySelector(row) as HTMLElement;
+      const g = r.closest(group) as HTMLElement;
+      const second = g.querySelectorAll(':scope > .player-row')[1] as HTMLElement | undefined;
+      const name = getComputedStyle(r.querySelector('.player-name')!);
+      const pill = r.querySelector('.pos-pill')!.getBoundingClientRect();
+      const logo = r.querySelector('.team-logo, .team-code')!.getBoundingClientRect();
+      const chip = r.querySelector('.fixture-chip')!.getBoundingClientRect();
+      const top = r.querySelector('.player-row-top')!.getBoundingClientRect();
+      const rs = getComputedStyle(r);
+      const gs = getComputedStyle(g);
+      return {
+        'name font-family': name.fontFamily,
+        'name font-size': name.fontSize,
+        'name font-weight': name.fontWeight,
+        'name color': name.color,
+        'pill size': `${Math.round(pill.width)}x${Math.round(pill.height)}`,
+        'logo size': `${Math.round(logo.width)}x${Math.round(logo.height)}`,
+        'chip height': `${Math.round(chip.height)}`,
+        'first line height': `${Math.round(top.height)}`,
+        'row padding-left': rs.paddingLeft,
+        'row padding-right': rs.paddingRight,
+        'divider color': second ? getComputedStyle(second).borderTopColor : 'none',
+        'card radius': gs.borderRadius,
+        'card background': gs.backgroundColor,
+      };
+    },
+    { row, group },
+  );
+}
+
+function sameLook(a: Look, b: Look, what: string) {
+  /* A one-row card has no divider to read; the two-row cards above it carry the check. */
+  const differ = Object.keys(a)
+    .filter((k) => a[k] !== b[k] && !(k === 'divider color' && b[k] === 'none'))
+    .map((k) => `${k}: Team ${a[k]} vs ${what} ${b[k]}`);
+  expect(differ, `style differs between a Team lineup row and ${what}`).toEqual([]);
+}
+
+test.describe('style parity with the Team lineup', () => {
+  test('a waiver row, on Waivers and on Team, matches a Team lineup row', async ({ page }, testInfo) => {
+    await inSeason(page);
+    await serve(page, { tiers: round2Fixture(), claimPlan: ROUND2_PLAN });
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    await expect(page.getByTestId('starters-group')).toBeVisible();
+    await expect(page.getByTestId('waiver-card').getByTestId('waiver-tier-row').first()).toBeVisible();
+    /* A starter row with a fixture chip, so both rows carry one. */
+    const starter = '[data-testid="starters-group"] > [data-starter="true"]:has(.fixture-chip):has(.team-logo)';
+    await expect(page.locator(starter).first()).toBeVisible();
+    const team = await lookOf(page, starter, '.slot-group');
+    const teamWaiver = await lookOf(page, '[data-testid="waiver-card"] [data-testid="waiver-tier-row"]', '.slot-group');
+    sameLook(team, teamWaiver, 'a Team "Waiver moves" row');
+    expect(teamWaiver['divider color'], 'the Waiver moves card should hold two rows here').not.toBe('none');
+
+    /* The side-by-side picture: the lineup and the waiver moves under it. */
+    if (testInfo.project.name.endsWith('390')) {
+      const lineup = (await page.getByTestId('starters-group').boundingBox())!;
+      await page.getByTestId('waiver-card').scrollIntoViewIfNeeded();
+      const shot = await page.screenshot({ fullPage: true, path: testInfo.outputPath('team-390.png') });
+      await testInfo.attach('team-lineup-and-waiver-moves', { body: shot, contentType: 'image/png' });
+      expect(lineup.height).toBeGreaterThan(0);
+    }
+
+    await page.getByTestId('tab-waivers').click();
+    const waiver = '[data-testid="waivers-recommended"] [data-testid="waiver-tier-row"]';
+    await expect(page.locator(waiver).first()).toBeVisible();
+    const doThis = await lookOf(page, waiver, '.slot-group');
+    expect(doThis['divider color'], 'the Do this card should hold two rows here').not.toBe('none');
+    sameLook(team, doThis, 'a Waivers row');
+    sameLook(team, await lookOf(page, '[data-testid="tier-watch"] [data-testid="waiver-tier-row"]', '.slot-group'), 'a Watch list row');
+    if (testInfo.project.name.endsWith('390')) {
+      await testInfo.attach('waivers', { body: await page.screenshot({ fullPage: true, path: testInfo.outputPath('waivers-390.png') }), contentType: 'image/png' });
+    }
   });
 });
