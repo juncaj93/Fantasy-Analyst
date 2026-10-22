@@ -108,12 +108,9 @@ test.describe('a week with no claim', () => {
     const card = page.getByTestId('waivers-no-move');
     await expect(card).toBeVisible();
     await expect(page.getByTestId('waivers-no-move-headline')).toHaveText('No move this week');
-    await expect(page.getByTestId('waivers-no-move-detail')).toHaveText(
-      'None of the 42 free agents this app could compare beats your roster by enough to be worth a roster spot.',
-    );
-    await expect(page.getByTestId('waivers-no-move-nearest')).toHaveText(
-      'Closest: KC Concepcion, 0.3 pts more than Kendre Miller on your bench, on Sleeper’s projection. Replacing a bench player needs 1.0 on Sleeper’s projection, 0.5 on betting lines.',
-    );
+    /* The answer only: the explaining sentences left the screen (22 October 2026). */
+    await expect(page.getByTestId('waivers-no-move-detail')).toHaveCount(0);
+    await expect(page.getByTestId('waivers-no-move-nearest')).toHaveCount(0);
 
     /* The card sits under the heading it answers, and the false note is gone. */
     const title = await page.getByTestId('waivers-recommended-title').boundingBox();
@@ -122,11 +119,10 @@ test.describe('a week with no claim', () => {
     await expect(page.getByTestId('waivers-others-note')).toHaveCount(0);
     await expect(page.getByText(/beats someone on your bench on paper/)).toHaveCount(0);
 
-    /* The unscored adds under their own heading, with the reasons said once each. */
-    await expect(page.getByTestId('waivers-unscored-title')).toBeVisible();
-    const note = page.getByTestId('waivers-unscored-note');
-    await expect(note).toContainText('Aaron Rodgers and C.J. Stroud: Sleeper’s quarterback projection');
-    await expect(note).toContainText('Joe Mixon: not on an NFL team');
+    /* The unscored adds, folded under "Trending (n)" with no sentence (22 October 2026). */
+    await expect(page.getByTestId('waivers-unscored-title')).toHaveText('Trending (3)');
+    await expect(page.getByTestId('waivers-unscored-note')).toHaveCount(0);
+    await page.getByTestId('waivers-unscored-toggle').click();
     await expect(page.getByTestId('waivers-unscored').getByTestId('waiver-row')).toHaveCount(3);
 
     const viewport = page.viewportSize()!;

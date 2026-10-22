@@ -2035,6 +2035,12 @@ test.describe('the season features', () => {
     test.skip(count === 0, 'this deployment has no waiver moves to draw');
 
     await open(page, 'waivers');
+    /* Worth considering shows three, then "Show all"; the Watch list starts folded (22 October 2026). Open both to count every move. */
+    await expect(page.getByTestId('waivers-recommended-title'), 'the Waivers screen did not draw').toBeVisible({ timeout: 20_000 });
+    const more = page.getByTestId('tier-consider-more');
+    if ((await more.count()) > 0) await more.click();
+    const closed = page.locator('.wfold .bench-toggle[aria-expanded="false"]');
+    while ((await closed.count()) > 0) await closed.first().click();
     const cards = page.getByTestId('waiver-tier-row');
     await expect(cards.first(), 'the data carries waiver moves and the screen drew none').toBeVisible({ timeout: 20_000 });
     expect(await cards.count()).toBe(count);

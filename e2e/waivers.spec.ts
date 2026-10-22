@@ -121,9 +121,10 @@ test.describe('the waivers page, as an older payload draws it', () => {
     const rows = page.getByTestId('waiver-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows.first().getByTestId('wcard-chips')).toBeVisible();
-    /* The projection moved off the card (21 October 2026) to the sheet's "This week". */
+    /* The projection is on the sheet: this week's comparison (22 October 2026). */
     await rows.first().click();
-    await expect(page.getByTestId('waiver-detail')).toContainText(/Proj|\d+\.\d/);
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
+    await expect(page.getByTestId('tier-detail-body')).toHaveAttribute('data-period', 'this');
   });
 
   /**
@@ -204,19 +205,12 @@ test.describe('the waivers page, as an older payload draws it', () => {
     }
 
     await page.getByTestId('waiver-row').first().click();
-    const sheet = page.getByTestId('waiver-detail');
+    const sheet = page.getByTestId('tier-detail');
     await expect(sheet).toBeVisible();
     const sheetText = await sheet.innerText();
     for (const phrase of forbidden) {
       expect(sheetText, `the sheet says "${phrase}"`).not.toContain(phrase);
     }
-
-    // Why we like him: at most three rows, each led by a pill.
-    const reasons = sheet.getByTestId('waiver-reasons').locator('li');
-    const count = await reasons.count();
-    expect(count).toBeGreaterThan(0);
-    expect(count, 'a sheet is an argument, not the engine’s working').toBeLessThanOrEqual(3);
-    await expect(reasons.first().locator('.tag')).toHaveCount(1);
   });
 
   /**
@@ -238,42 +232,16 @@ test.describe('the waivers page, as an older payload draws it', () => {
     const row = page.getByTestId('waiver-row').first();
     const playerId = (await row.getAttribute('data-player-id'))!;
 
-    // A row the pricing pass could not price shows a dash that explains itself
-    // rather than a number somebody could act on.
-    if (!priced.has(playerId)) {
-      expect(await row.getByTestId('waiver-cost').innerText()).not.toMatch(/\d/);
-      await expect(page.getByTestId('waivers-pending')).toContainText('shown as unknown rather than estimated');
-    }
-
+    // A row the pricing pass could not price carries no number that reads as a bid,
+    // on the row or on the sheet.
     await row.click();
-    const sheet = page.getByTestId('waiver-detail');
+    const sheet = page.getByTestId('tier-detail');
     await expect(sheet).toBeVisible();
-    for (const field of ['Expected cost', 'Competition', 'Beyond this week']) {
-      await expect(sheet).toContainText(field);
-    }
-    /*
-     * Competition has a supplier now, so it says something.
-     *
-     * Asserted as "not the unknown mark" rather than against a particular
-     * sentence: the label is that pass's to word, and pinning it here would make
-     * this spec fail on a rewording rather than on a regression.
-     *
-     * Its two neighbours are deliberately not asserted, because both are
-     * legitimately unknown against seeded data: the price needs bid history in
-     * the league, and multi-week value needs stored usage — `waiverMultiWeek`
-     * declines without it and says so. Requiring them would pin behaviour that
-     * is only correct once two separate feeds have run.
-     */
-    const competition = sheet.locator('.weekly-line').filter({ hasText: 'Competition' }).first();
-    await expect(competition.getByTestId('waiver-unknown')).toHaveCount(0);
-    expect((await competition.innerText()).replace('Competition', '').trim().length).toBeGreaterThan(0);
-
-    // And the price, which has no history behind it in this league, still reads
-    // as unknown rather than borrowing confidence from the fields beside it.
     if (!priced.has(playerId)) {
-      const cost = sheet.locator('.weekly-line').filter({ hasText: 'Expected cost' }).first();
-      await expect(cost.getByTestId('waiver-unknown')).toHaveCount(1);
+      await expect(row.locator('[data-chip="bid"]')).toHaveCount(0);
+      for (const chip of await sheet.getByTestId('wsheet-chips').locator('[data-chip]').allInnerTexts()) expect(chip).not.toMatch(/\$\d/);
     }
+    for (const gone of ['Expected cost', 'Competition', 'Beyond this week']) await expect(sheet).not.toContainText(gone);
   });
 
   /*
@@ -431,8 +399,7 @@ test.describe('the league wallet', () => {
 
   test('states the budget it priced against, from the league settings, in the header', async ({ page }) => {
     await expect(page.getByTestId('waivers-budget')).toContainText('FAAB $65 of $100');
-    await page.getByTestId('waivers-info-button').click();
-    await expect(page.getByTestId('faab-budget')).toContainText('$65 of $100 left');
+    await expect(page.getByTestId('waivers-info-button')).toHaveCount(0);
   });
 
   test('is not a paragraph at the foot of the board any more', async ({ page }) => {
@@ -468,10 +435,9 @@ test.describe('the rest-of-season signal', () => {
     await expect(page.getByTestId('waiver-season')).toHaveCount(0);
   });
 
-  test('says the column is unknown rather than blank, in the sheet', async ({ page }) => {
+  test('is not on the sheet either: the sheet is the comparison and nothing else', async ({ page }) => {
     await page.getByTestId('waiver-row').first().click();
-    const line = page.getByTestId('waiver-season-line');
-    await expect(line).toBeVisible();
-    await expect(line, 'a missing season reads as unknown, never as nothing').not.toBeEmpty();
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
+    await expect(page.getByTestId('waiver-season-line')).toHaveCount(0);
   });
 });

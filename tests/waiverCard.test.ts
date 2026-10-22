@@ -25,55 +25,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { captureDemoWaivers, decisionDigest, tierRows, type CapturedWaivers } from './helpers/waiverDecision.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
-import { byGain, CARD_CHIPS_MAX, CARD_REASON_MAX, clearDay, shortReason, tierCard, waiverChip } from '../src/web/waiverCard.ts';
+import { byGain, CARD_CHIPS_MAX, CARD_REASON_MAX, currentWeekOf, sheetDrops, sheetPartner, sheetPeriod, shortReason, tierCard, tierSheet, waiverChip } from '../src/web/waiverCard.ts';
 import { WaiverCard } from '../src/web/components/waiverCard.tsx';
-import { tierBadge, TierDetailBody } from '../src/web/components/waiverTiers.tsx';
-import { budgetLines, claimLine, claimsDepend, WaiversInfoBody } from '../src/web/components/waivers.tsx';
+import { tierBadge } from '../src/web/components/waiverTiers.tsx';
+import { claimLine, claimsDepend } from '../src/web/components/waivers.tsx';
 import type { TierRow, WaiverTiersView } from '../src/core/waivers/tierPlan.ts';
-import type { FaabAdvice } from '../src/web/api.ts';
 
 const before = JSON.parse(readFileSync('tests/fixtures/waiverDecision.before.json', 'utf8'));
-
-/** Rendered markup, as the words a reader sees. */
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ');
-}
-
-/**
- * The lines the card printed before this round, rebuilt from the code it ran
- * (`PickupLine`, the reason, the `extra` line, Team's `BestDrops`). Kept here
- * on purpose, apart from the shipped code, so the test cannot agree with
- * itself.
- */
-function oldCardLines(row: TierRow): string[] {
-  const bid = row.bid;
-  const pickup: string[] = [];
-  if (bid.kind === 'free') pickup.push('Free agent');
-  if (bid.kind === 'claim') {
-    if (bid.until) pickup.push(`On waivers until ${clearDay(bid.until)}`);
-    pickup.push(`$${bid.recommended} to ${bid.posture === 'stash' ? 'stash' : 'win'}`);
-  }
-  pickup.push(
-    row.needsSpot
-      ? row.tier === 'watch'
-        ? 'needs a roster spot'
-        : row.tier === 'do_this'
-          ? 'you pick the spot'
-          : 'needs a spot first'
-      : row.drop?.viaReserve
-        ? `${row.drop.name} to IR first`
-        : row.drop
-          ? `in for ${row.drop.name}`
-          : 'uses an open spot',
-  );
-  const extra = row.alternatives.length > 0 ? `Or ${row.alternatives.join(', ')}` : row.competesWith.length > 0 ? `Same spot as ${row.competesWith.join(', ')}` : null;
-  return [pickup.join(' · '), row.reason, ...(extra ? [extra] : []), ...(row.bestDrops ?? []).slice(0, 3).map((c) => c.name)];
-}
 
 /** Hand-made rows for the cases the seeded league does not reach: a claim, a stash, an IR move, best drops. */
 function edgeRows(base: TierRow): TierRow[] {
@@ -124,12 +82,20 @@ describe('the waiver card round changes nothing that is recommended', () => {
     }
   });
 
-  it('puts every line the old card printed in the move’s detail sheet', () => {
-    const rows = tierRows(captured.tiers);
-    for (const row of [...rows, ...edgeRows(rows[0]!)]) {
-      const sheet = text(renderToStaticMarkup(createElement(TierDetailBody, { row, tiers: captured.tiers as WaiverTiersView })));
-      for (const line of oldCardLines(row)) expect(sheet, `${row.name}: "${line}" is not on the sheet`).toContain(line);
+  it('opens every move on a two-player comparison, with figures for both players across the window', () => {
+    const tiers = captured.tiers as WaiverTiersView;
+    const figures = tiers.weekFigures!;
+    for (const row of tierRows(tiers)) {
+      const sheet = tierSheet(row, tiers, null);
+      expect(sheet.drops.length).toBeLessThanOrEqual(3);
+      if (!sheet.partner) continue;
+      expect(sheet.partner.playerId).not.toBe(row.playerId);
+      for (const id of [row.playerId, sheet.partner.playerId]) {
+        expect(figures[id], `${row.name}: no figures for ${id}`).toBeDefined();
+        expect(figures[id]!.weeks.map((w) => w.week)).toEqual(tiers.window.weeks);
+      }
     }
+    for (const row of edgeRows(tierRows(tiers)[0]!)) expect(tierSheet(row, tiers, null).drops.length).toBeLessThanOrEqual(3);
   });
 });
 
@@ -185,29 +151,69 @@ describe('the card’s few words', () => {
   });
 });
 
-describe('the info sheet holds what left the screen', () => {
-  const faab = {
-    rule: { total: 100, usesFaab: true, provenance: 'League settings' },
-    mine: { remaining: 77 },
-    prices: { sample: 45, low: 0, high: 5 },
-    losingBids: 'Highest losing bid seen: $11 (other managers’ failed claims are not all published).',
-  } as unknown as FaabAdvice;
-  const rule = 'In this league a dropped player is on waivers for 2 days, and a player whose game has started waits for the Wednesday run; anyone else is an instant add.';
+describe('the detail sheet: who and which week', () => {
+  const thisWeek = { weeks: [6, 7, 8], weights: [1, 1, 0.5] };
+  const underWay = { weeks: [7, 8, 9], weights: [1, 0.5, 0.5] };
+  const figures = {
+    ba: { name: 'Braelon Allen', position: 'RB', team: 'NYJ', weeks: [] },
+    sl: { name: 'Sam LaPorta', position: 'TE', team: 'DET', weeks: [] },
+  };
+  let base: TierRow;
+  beforeAll(async () => {
+    base = tierRows((await captureDemoWaivers()).tiers)[0]!;
+  });
+  const row = (over: Partial<TierRow>): TierRow => ({ ...base, drop: null, needsSpot: undefined, bestDrops: undefined, byWeek: [], ...over }) as TierRow;
 
-  it('says the rule, the wallet, the Watch list and the chip, in lines', () => {
-    const sheet = text(renderToStaticMarkup(createElement(WaiversInfoBody, { faab, rule, window: { weeks: [6, 7, 8], weights: [1, 0.5, 0.5] } })));
-    for (const line of [
-      'on waivers for 2 days',
-      'waits for the Wednesday run',
-      'instant add',
-      '$77 of $100 left.',
-      'Winning bids here have run $0–5 across 45.',
-      'Highest losing bid seen: $11',
-      'Watch list: better on paper; no move needed now.',
-      'what the move adds to your best lineup over weeks 6–8',
-      'Week 6 counts in full; weeks 7 and 8 count half.',
-    ]) expect(sheet).toContain(line);
-    expect(budgetLines(faab)).toHaveLength(3);
+  it('knows this week from the window', () => {
+    expect(currentWeekOf(thisWeek)).toBe(6);
+    expect(currentWeekOf(underWay)).toBe(6);
+  });
+
+  it('compares a pickup-and-start with the player he moves out of the lineup', () => {
+    const r = row({ playerId: 'k', reasonCode: 'start_now', reason: 'Starts this week: +0.9 pts on your best lineup' });
+    const pickup = { start: { playerId: 'k', displaces: { playerId: 'ba', name: 'Braelon Allen' } }, consider: [] };
+    expect(sheetPartner(r, figures, pickup)).toEqual({ playerId: 'ba', name: 'Braelon Allen' });
+    expect(sheetPeriod(r, thisWeek)).toBe('this');
+  });
+
+  it('compares with the starter his reason names, before the drop', () => {
+    const r = row({ playerId: 'm', reasonCode: 'hole_bye', reason: 'Your TE Sam LaPorta is on bye in week 7', drop: { playerId: 'h', name: "Tre' Harris", position: 'WR' } });
+    expect(sheetPartner(r, figures, null)).toEqual({ playerId: 'sl', name: 'Sam LaPorta' });
+    expect(sheetPeriod(r, thisWeek)).toBe('next');
+    const tie = row({ playerId: 'y', reasonCode: 'start_tie', reason: 'Ties Braelon Allen this week' });
+    expect(sheetPartner(tie, figures, null)).toEqual({ playerId: 'ba', name: 'Braelon Allen' });
+  });
+
+  it('falls back to the drop, then the first drop option, then nobody', () => {
+    expect(sheetPartner(row({ reasonCode: 'depth', reason: 'Better depth than what you hold; he would not start yet', drop: { playerId: 'h', name: "Tre' Harris", position: 'WR' } }), figures, null)).toEqual({ playerId: 'h', name: "Tre' Harris" });
+    expect(sheetPartner(row({ reasonCode: 'depth', reason: 'x', needsSpot: [{ playerId: 'w', name: 'Jaylen Wright', position: 'RB', stat: '0.4 pts', reason: '' }] }), figures, null)).toEqual({ playerId: 'w', name: 'Jaylen Wright' });
+    expect(sheetPartner(row({ reasonCode: 'depth', reason: 'x' }), figures, null)).toBeNull();
+  });
+
+  it('opens a long-view move on three weeks, and a move two weeks out on three weeks', () => {
+    expect(sheetPeriod(row({ reasonCode: 'depth', reason: 'x' }), thisWeek)).toBe('three');
+    expect(sheetPeriod(row({ reasonCode: 'ir_stash', reason: 'x' }), thisWeek)).toBe('three');
+    expect(sheetPeriod(row({ reasonCode: 'upgrade', reason: 'Starts over Braelon Allen, +1.7 pts in week 8' }), thisWeek)).toBe('three');
+    expect(sheetPeriod(row({ reasonCode: 'upgrade', reason: 'Starts over Braelon Allen, +1.7 pts in week 6' }), thisWeek)).toBe('this');
+  });
+
+  it('lists up to three drop options, only when a drop is needed', () => {
+    expect(sheetDrops(row({ drop: { playerId: 's', name: 'Will Shipley', position: 'RB', viaReserve: true } }))).toEqual([]);
+    expect(sheetDrops(row({}))).toEqual([]);
+    const four = ['a', 'b', 'c', 'd'].map((id) => ({ playerId: id, name: id, position: 'WR', stat: '1.2 pts', reason: '' }));
+    const drops = sheetDrops(row({ needsSpot: four }));
+    expect(drops).toHaveLength(3);
+    expect(drops[0]).toEqual({ playerId: 'a', name: 'a', position: 'WR', points: '1.2 pts' });
+    expect(sheetDrops(row({ drop: { playerId: 'b', name: 'Brian Robinson', position: 'RB' }, bestDrops: [{ playerId: 'b', name: 'Brian Robinson', position: 'RB', stat: 'handcuff', reason: '' }] }))[0]!.points).toBeNull();
+  });
+});
+
+describe('a tie says who and when', () => {
+  it.each([
+    ['Ties Braelon Allen this week', 'Ties B. Allen this week'],
+    ['Ties your best lineup this week', 'Ties your lineup this week'],
+  ])('%s', (reason, short) => {
+    expect(shortReason({ reason, reasonCode: 'start_tie', stashLabel: null })).toBe(short);
   });
 });
 

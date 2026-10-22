@@ -467,7 +467,7 @@ export function SetupScreen({
         <UnlockCard onUnlocked={onUnlocked} />
       ) : (
         <Notice>
-          This site is view-only: no passphrase has been set up, so settings cannot be changed here.
+          View-only: no passphrase set.
         </Notice>
       )}
 
@@ -1612,9 +1612,6 @@ function SleeperPanel({ status, onDone }: { status: SetupStatus; onDone: () => v
 
   return (
     <div className="card" data-testid="panel-sleeper">
-      <div className="faint" style={{ marginBottom: 8 }}>
-        Fantasy Analyst reads your league from Sleeper. It never makes picks or changes your lineup.
-      </div>
       {banner}
 
       <div className="field">

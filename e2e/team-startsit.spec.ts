@@ -485,7 +485,9 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
     await expect(row.getByTestId('wcard-chips')).toBeVisible();
     await expect(row.getByTestId('waiver-strength')).not.toBeEmpty();
     await row.click();
-    await expect(page.getByTestId('waiver-detail')).toContainText('This week');
+    /* The sheet is the comparison this week (22 October 2026). */
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
+    await expect(page.getByTestId('tier-detail-body')).toHaveAttribute('data-period', 'this');
   });
 
   /**
@@ -533,15 +535,12 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
     }
   });
 
-  /** Everything the row left out is one tap away, and still not a transaction. */
+  /** A tap opens the comparison and nothing else: no help text, no rules, no transaction. */
   test('opens the detail on tap', async ({ page }) => {
     await page.locator('[data-testid="waiver-row"]').first().click();
-    const sheet = page.getByTestId('waiver-detail');
+    const sheet = page.getByTestId('tier-detail');
     await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText('Expected cost');
-    await expect(sheet).toContainText('Competition');
-    await expect(sheet).toContainText('Beyond this week');
-    await expect(sheet).toContainText('add, drop or bid in Sleeper');
+    for (const gone of ['Expected cost', 'Competition', 'Beyond this week', 'add, drop or bid in Sleeper']) await expect(sheet).not.toContainText(gone);
   });
 
   /**
@@ -600,29 +599,15 @@ test.describe('waiver upgrades, as an older payload draws them', () => {
    * beside it stops being advice.
    */
   test('quotes a bid without offering to place it', async ({ page }) => {
-    // The three figures live in the detail sheet now: the row has room for the
-    // expected range and nothing else, and the rest opens on tap.
+    // The bid band is a chip on the row and on the sheet: a label, never a control.
     const row = page.locator('[data-testid="waiver-row"]').first();
-    const free = (await row.locator('[data-chip="free"]').count()) > 0;
     await row.click();
-    await expect(page.getByTestId('waiver-detail')).toBeVisible();
-    const bid = page.getByTestId('faab-bid').first();
-    // A free agent outside the waiver window has no bid to quote at all.
-    if (free) {
-      await expect(page.getByTestId('waiver-detail-cost')).toContainText('free agent');
-      await expect(page.getByTestId('faab-bid')).toHaveCount(0);
-      return;
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet).toBeVisible();
+    for (const chip of await sheet.getByTestId('wsheet-chips').locator('[data-chip]').all()) {
+      expect(await chip.evaluate((el) => el.closest('button') === null), 'a chip must not sit in a control').toBe(true);
     }
-    const withheld = page.getByTestId('faab-withheld').first();
-    // A league with no FAAB says so instead; either is a valid state.
-    if (await withheld.isVisible().catch(() => false)) {
-      await expect(withheld).not.toBeEmpty();
-      return;
-    }
-    await expect(bid).toBeVisible();
-    await expect(bid).toContainText('Expected $');
-    await expect(bid).toContainText('Do not exceed $');
-    expect(await bid.getByRole('button').count(), 'a bid must carry no control at all').toBe(0);
+    await expect(page.getByTestId('faab-bid')).toHaveCount(0);
   });
 
   /*
@@ -1380,8 +1365,8 @@ test.describe('a borrowed projection says whose it is', () => {
      * starts only where no player with Vegas lines can. The older "ranked a
      * little below" survived nothing; this assertion names the current rule.
      */
-    await expect(provenance).toContainText(/only starts him where no player with Vegas lines can/i);
-    await expect(provenance).not.toContainText(/not used to rank/i);
+    // A label, not a rule paragraph (22 October 2026).
+    await expect(provenance).toHaveText('Rotowire projection');
   });
 
   test('and nowhere else, because the row is where the claim belongs', async ({ page }) => {

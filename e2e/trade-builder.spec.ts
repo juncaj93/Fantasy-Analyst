@@ -420,7 +420,7 @@ test.describe('build a trade: card and sheet', () => {
     await sheet.getByTestId('builder-more').click();
     await expect(sheet.getByTestId('builder-more-body')).toBeVisible();
     await expect(sheet.getByTestId('builder-activity')).toHaveText('Has made 4 trades this season, 2 before');
-    await expect(sheet.getByTestId('builder-advisory')).toContainText('never sends, proposes or accepts');
+    await expect(sheet.getByTestId('builder-advisory')).not.toContainText('never sends');
     expect(await sheet.textContent()).not.toMatch(/\d+%/);
     expect(await horizontalOverflow(page)).toBe(0);
   });

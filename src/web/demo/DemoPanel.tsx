@@ -54,11 +54,6 @@ export function DemoPanel() {
         {active ? <span className="demo-badge demo-badge-small">ON</span> : null}
       </summary>
 
-      <div className="faint" style={{ margin: '8px 0 12px' }}>
-        A read-only look at the app with a sample league instead of yours. Nothing in a demo can
-        change a lineup, a claim, a bid or a trade, and nothing it shows is ever stored.
-      </div>
-
       {error ? <Notice tone="error">{error}</Notice> : null}
 
       <ul className="demo-list">

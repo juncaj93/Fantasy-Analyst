@@ -5104,19 +5104,7 @@ table.compact tr:last-child td {
   border-bottom: none;
 }
 
-/* ====================================================== decision quality */
-/*
- * Tags that change a pick. Every one carries a word and a glyph as well as a
- * colour, so none of them depends on colour vision to be read — and they are
- * deliberately not all the same shape. A row is allowed at most two, and the
- * loudest treatment is reserved for the two states that stop a reader:
- * take-now and avoid.
- */
-.waivers-others-note {
-  margin: 0 var(--sp-1) var(--sp-2);
-  font-size: 0.78rem;
-  line-height: 1.35;
-}
+
 
 .tag {
   display: inline-flex;
@@ -6455,14 +6443,17 @@ table.compact tr:last-child td {
  * cards: no shadow of their own, divided by a hairline, so an open bench reads
  * as the control having grown rather than as eight new objects.
  */
-.bench [data-testid='bench-rows'] .bench-row {
+.bench [data-testid='bench-rows'] .bench-row,
+.wfold .player-row {
   border-radius: 0;
   box-shadow: none;
   margin-bottom: 0;
   background: none;
 }
 
-.bench [data-testid='bench-rows'] .bench-row + .bench-row {
+.bench [data-testid='bench-rows'] .bench-row + .bench-row,
+.wfold .player-row + .player-row,
+.wfold .bench-toggle + * > .player-row:first-child {
   border-top: 1px solid var(--separator-soft);
 }
 
@@ -9326,16 +9317,9 @@ div.matchup-result {
   color: var(--text-dim);
 }
 
-/* Likely rivals on the waiver detail sheet: one per line, name and percent kept together. */
-.tier-rivals {
-  list-style: none;
-  padding-inline-start: 0;
-  margin: 2px 0 0;
-}
 
-.tier-rivals li {
-  margin: 1px 0;
-}
+
+
 
 .waiver-notes-warn {
   color: var(--warn);
@@ -9528,10 +9512,7 @@ div.matchup-result {
   color: var(--text-faint);
 }
 
-.mock-team-note {
-  margin: 0 2px var(--sp-2);
-  font-size: 0.78rem;
-}
+
 
 .mock-team-slot {
   padding: var(--sp-2) var(--sp-3);
@@ -10179,20 +10160,11 @@ div.matchup-result {
   transition: opacity var(--dur-fast) var(--ease);
 }
 
-/* A move's best drops on its detail sheet, each with its full reason under it. */
-.best-drops-why {
-  margin: 4px 0 0;
-  padding-inline-start: 1.3em;
-}
 
-.best-drops-why li {
-  margin: 2px 0;
-}
 
-.best-drops-reason {
-  display: block;
-  font-size: 0.76rem;
-}
+
+
+
 
 /*
  * Build a trade, compact (Alex, 15 October 2026): wrapped chips instead of
@@ -10799,4 +10771,10 @@ div.matchup-result {
 
 /* A waiver row's gain sits where Team prints a score; a Do this gain is green. */
 .proj-gain-take { color: var(--pos); }
-.waivers-info-lines { margin: 2px 0 12px; padding-inline-start: 1.1em; font-size: 0.85rem; line-height: 1.4; }
+
+/* The waiver sheet (22 October 2026): the card's chips, then Compare. */
+.wsheet-chips { display: flex; gap: var(--sp-1); margin: 0 0 var(--sp-2); }
+.wsheet .filter-row { margin-bottom: var(--sp-2); }
+.wsheet-drops { margin-top: var(--sp-3); }
+.cmp2-better { font-size: 0.72rem; font-weight: 700; color: var(--text-dim); }
+.wrow-more { min-height: var(--tap); text-align: center; font-weight: 600; color: var(--accent); }

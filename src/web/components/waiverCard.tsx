@@ -21,7 +21,8 @@
  * Nothing here adds, drops or bids: Alex makes every move in Sleeper.
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { DisclosureChevronIcon } from './icons.tsx';
 import type { CardChip, WaiverCardModel } from '../waiverCard.ts';
 import { PlayerIdentity, positionAccentClass } from './common.tsx';
 
@@ -129,6 +130,29 @@ export function WaiverRowGroup({ children, testId }: { children: ReactNode; test
   return (
     <div className="slot-group" data-testid={testId}>
       {rows}
+    </div>
+  );
+}
+
+/**
+ * A list folded into one row, exactly Team's "Bench (7)": the label and count,
+ * a chevron, and the rows in place when tapped. Watch list, Drop-ready and
+ * Trending on Waivers (22 October 2026: the page fits one screen).
+ */
+export function FoldedGroup({ label, count, testId, children }: { label: string; count: number; testId: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (count === 0) return null;
+  return (
+    <div className="bench wfold" data-testid={`${testId}-fold`} data-open={open ? 'true' : 'false'}>
+      <button type="button" className="bench-toggle" data-testid={`${testId}-toggle`} aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+        <span className="bench-label" data-testid={`${testId}-title`}>
+          {label} ({count})
+        </span>
+        <span className="bench-chevron" aria-hidden="true">
+          <DisclosureChevronIcon open={open} />
+        </span>
+      </button>
+      {open ? children : null}
     </div>
   );
 }

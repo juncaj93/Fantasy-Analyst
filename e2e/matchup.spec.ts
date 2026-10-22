@@ -197,10 +197,10 @@ test.describe('the real matchup', () => {
     await expect(page.getByTestId('weekly-verdict')).toBeVisible();
   });
 
-  test('explains the odds one tap away, and says it never edits a lineup', async ({ page }) => {
+  test('explains the odds one tap away, with no disclaimer', async ({ page }) => {
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('odds-sheet')).toContainText('never edits a lineup');
+    await expect(page.getByTestId('odds-sheet')).not.toContainText('never edits a lineup');
   });
 
   /**
@@ -609,7 +609,7 @@ test.describe('the states of an afternoon', () => {
     await expect(degraded).toBeVisible();
     await expect(degraded).toContainText("57% of your opponent's");
     await expect(degraded).toContainText('counts as zero');
-    await expect(degraded, 'the score beside it is still Sleeper’s').toContainText('unaffected');
+    /* The reassurance that Sleeper's score is unaffected left with the sweep (22 October 2026). */
     await expect(page.getByTestId('matchup-win')).toHaveCount(0);
     await expect(page.getByTestId('matchup-proj-mine')).toContainText('no forecast');
     // The lineup is still drawn: it is Sleeper's, and Sleeper is fine.
@@ -929,7 +929,7 @@ test.describe('no advice on Matchup', () => {
 
     await page.getByTestId('matchup-win').click();
     await expect(page.getByTestId('odds-sheet')).toBeVisible();
-    await expect(page.getByTestId('odds-sheet')).toContainText('never edits a lineup');
+    await expect(page.getByTestId('odds-sheet')).not.toContainText('never edits a lineup');
     await page.getByTestId('sheet-close').click();
 
     await page.getByTestId('bench-toggle').click();

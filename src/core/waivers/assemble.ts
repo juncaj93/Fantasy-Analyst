@@ -72,7 +72,7 @@ import { planWaiverTiers, type StartNowCall, type WaiverTierPlan } from './tiers
 import { planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
 import { evaluatePlayer } from '../startsit/engine.ts';
 import { decisionPoints } from '../startsit/decisionPoints.ts';
-import { buildTiersView, tierClaimPlan, type WaiverTiersView } from './tierPlan.ts';
+import { buildTiersView, tierClaimPlan, type TierWeekFigure, type WaiverTiersView } from './tierPlan.ts';
 import { blendRivalTendency, seedTendency, type RivalSeasonAggregate } from './rivalHistory.ts';
 import { positionNeed } from './rivalNeed.ts';
 import { seedFor } from './managerSeeds.ts';
@@ -817,7 +817,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           run: `week ${o.week}`,
         }));
       const lastWeek = request.lastWeekPoints ?? null;
-      return buildTiersView({
+      const view = buildTiersView({
         plan,
         pickup,
         rules: request.waiverWindow?.rules ?? null,
@@ -839,6 +839,30 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         finalWeek: request.history?.finalWeek ?? request.strategy?.finalWeek ?? 14,
         rivalsFor,
       });
+      /*
+       * The window figures the planner already valued every player on, for the
+       * detail sheet's week-by-week view: the roster and every offered move.
+       * Read off the request; nothing below decides on them.
+       */
+      const offered = new Set([...(view.doThese ?? []), ...view.consider, ...view.watch].map((r) => r.playerId));
+      const weekFigures: NonNullable<WaiverTiersView['weekFigures']> = {};
+      for (const p of [...inputs.request.roster, ...inputs.request.candidates.filter((c) => offered.has(c.playerId))]) {
+        weekFigures[p.playerId] = {
+          name: p.name,
+          position: p.position,
+          team: p.team,
+          weeks: inputs.window.weeks.map(
+            (week, k): TierWeekFigure => ({
+              week,
+              points: p.weekValues?.[k] ?? p.rate ?? null,
+              source: p.weekSources?.[k] ?? 'this_week',
+              bye: p.byeWeek === week,
+              out: p.byeWeek !== week && (p.weekly[k] ?? 1) === 0,
+            }),
+          ),
+        };
+      }
+      return { ...view, weekFigures };
     } catch {
       return null;
     }

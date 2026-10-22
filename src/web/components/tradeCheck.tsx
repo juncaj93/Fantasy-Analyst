@@ -98,7 +98,7 @@ export function resultRows(evaluation: TradeEvaluation): ResultRow[] {
 
 /** What the card says about the deadline, or nothing. */
 export function horizonLine(horizon: TradeHorizonView): string {
-  const season = `Rest of the season: week ${horizon.currentWeek} to week ${horizon.lastWeek}, through the playoffs.`;
+  const season = `Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoffs included.`;
   if (horizon.deadlineWeek == null) return season;
   if (horizon.deadlinePassed) return `${season} The trade deadline was week ${horizon.deadlineWeek}.`;
   const left = horizon.weeksToDeadline ?? 0;
@@ -376,8 +376,7 @@ function ResultBody({ state }: { state: Load<TradeCheckResponse> }) {
       <Details evaluation={ev} />
 
       <div className="faint" style={{ marginTop: 8 }} data-testid="trade-check-advisory">
-        Points are projected fantasy points above what a free agent would give the same lineup. The gap in the headline
-        is one side\u2019s change minus the other\u2019s. {view.advisory}
+        Points above a free agent
       </div>
     </div>
   );

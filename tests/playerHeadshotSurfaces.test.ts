@@ -139,7 +139,7 @@ describe('only the surfaces that were argued for draw a face', () => {
    * shared component instead. Each of these is a sheet about exactly one
    * player, reached because the reader chose him.
    */
-  const FOCUSED = ['web/components/playerPage.tsx', 'web/components/weekly.tsx', 'web/components/waivers.tsx'];
+  const FOCUSED = ['web/components/playerPage.tsx', 'web/components/weekly.tsx', 'web/components/waiverSheet.tsx'];
 
   /**
    * Where a portrait is forbidden, by name rather than by omission.

@@ -636,8 +636,7 @@ export function PlayerDossier({
         {section === 'outlook' ? (
           detailFailed ? (
             <Empty>
-              His outlook could not be read just now. It is published by a third party through Sleeper, so this is
-              usually temporary — everything else on this page is unaffected.
+              Outlook unavailable right now.
             </Empty>
           ) : (
             <SeasonOutlook detail={detail} failed={detailFailed} />

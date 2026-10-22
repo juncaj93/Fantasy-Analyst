@@ -99,7 +99,7 @@ describe('the wording helpers', () => {
 
   it('states the horizon and the deadline from the league’s own settings', () => {
     const base = { currentWeek: 5, lastWeek: 17, weeks: 13, playoffWeeks: [15, 16, 17], deadlineWeek: 11, deadlinePassed: false, weeksToDeadline: 7 };
-    expect(horizonLine(base)).toBe('Rest of the season: week 5 to week 17, through the playoffs. Trades close after week 11 (7 weeks left).');
+    expect(horizonLine(base)).toBe('Weeks 5–17, playoffs included. Trades close after week 11 (7 weeks left).');
     expect(horizonLine({ ...base, weeksToDeadline: 1 })).toMatch(/\(1 week left\)/);
     expect(horizonLine({ ...base, deadlinePassed: true })).toMatch(/deadline was week 11/);
     expect(horizonLine({ ...base, deadlineWeek: null, weeksToDeadline: null })).not.toMatch(/deadline|close/);

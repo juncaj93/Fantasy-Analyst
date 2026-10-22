@@ -16,6 +16,7 @@ import { myBudget } from '../faab/budget.ts';
 import type { PriceSummary } from '../faab/bids.ts';
 import { adviseBid, type BidPosture, type BidSignals, type ClaimRecord, type RivalContext, type RivalSeat, buildRivalProfiles } from './bidModel.ts';
 import { STYLE_PRIORS } from './managerSeeds.ts';
+import type { WeekSource } from './aheadWeeks.ts';
 import type { DeadSpot, TierMove, WaiverTierPlan } from './tiers.ts';
 import type { PickupState, WaiverRules } from './clearWindow.ts';
 import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from './claimPlan.ts';
@@ -63,6 +64,16 @@ export interface BidTrace {
   bidders: { name: string; style: string; chance: number; likelyBid: number; why?: string | null; parts?: unknown }[];
 }
 
+export interface TierWeekFigure {
+  week: number;
+  /** Points for that game before availability; null when there is no number. */
+  points: number | null;
+  source: WeekSource;
+  bye: boolean;
+  /** Not expected to play that week for another reason (Out, IR). */
+  out: boolean;
+}
+
 export interface TierRow extends TierMove {
   bid: TierBid;
   lastWeekPoints: number | null;
@@ -105,6 +116,14 @@ export interface WaiverTiersView {
   excluded?: WaiverTierPlan['excluded'];
   /** Each bench player's drop score, lowest first. Not drawn; the sheet shows the drop's own reason. */
   dropScores?: WaiverTierPlan['dropScores'];
+  /**
+   * Display only: each rostered and offered player's figure for every window
+   * week, the same numbers the planner valued them on (`weekValues`, Sleeper's
+   * later-week projection or this week's number), with byes and ruled-out
+   * weeks marked. The detail sheet's Next week and 3 weeks views read it.
+   * Nothing decides on it. Absent on older responses.
+   */
+  weekFigures?: Record<string, { name: string; position: string; team: string; weeks: TierWeekFigure[] }>;
   /** The rival read, per manager: record, need is per player. Not drawn. */
   bidderReads?: { name: string; rate: number; seasons: string[]; source: 'history' | 'seed'; remaining: number | null; interest: Record<string, number>; chase: number }[];
 }

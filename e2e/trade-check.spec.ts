@@ -356,7 +356,7 @@ test.describe('check a trade: what it says', () => {
     await page.getByTestId('trade-check-details-toggle').click();
     const text = await page.getByTestId('trade-check').innerText();
     expect(text).not.toMatch(/\b(propos\w*|offer\w*|accept\w*|declin\w*|submit\w*|send|sent|sends|added|adding|dropped|dropping|claimed|claiming)\b/i);
-    await expect(page.getByTestId('trade-check-advisory')).toContainText('does not make a trade for anyone');
+    await expect(page.getByTestId('trade-check-advisory')).toHaveText('Points above a free agent');
   });
 
   test('draws Alex’s habits as a labeled line, not as part of the lineup', async ({ page }) => {

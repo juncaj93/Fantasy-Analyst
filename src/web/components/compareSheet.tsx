@@ -470,13 +470,22 @@ function rankedColumns(comparison: StartSitComparison): StartSitEvaluation[] {
  * pick is a second choice: dashed grey outline, the fallback marker on his
  * number, no check and no green.
  */
-function Verdict({ comparison }: { comparison: StartSitComparison }) {
+export function Verdict({
+  comparison,
+  pickLabel = 'Start',
+  faceSize: faceOverride,
+}: {
+  comparison: StartSitComparison;
+  /** `Better` on the waiver sheet, where the question is the pickup, not the start (22 October 2026). */
+  pickLabel?: 'Start' | 'Better';
+  faceSize?: number;
+}) {
   const columns = rankedColumns(comparison);
   const comparable = comparison.slot?.comparable ?? true;
   const pick = comparable ? comparison.recommendedPlayerId : null;
   const second = comparable ? comparison.sleeperOnly ?? null : null;
   /* Photos scale with the room each card has: largest for two, still well up for four. */
-  const faceSize = columns.length <= 2 ? 96 : columns.length === 3 ? 76 : 56;
+  const faceSize = faceOverride ?? (columns.length <= 2 ? 96 : columns.length === 3 ? 76 : 56);
   return (
     <section className="cmp2-verdict" aria-label="Verdict" data-testid="comparison" data-columns={columns.length}>
       <ul
@@ -511,7 +520,11 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
               </span>
               {/* One foot row on every card, so the rows line up across them. */}
               <span className="cmp2-col-foot">
-                {lead ? (
+                {lead && pickLabel === 'Better' ? (
+                  <span className="cmp2-better" data-testid="compare-better">
+                    Better
+                  </span>
+                ) : lead ? (
                   <span className="cmp2-start">
                     <CheckIcon size={12} /> Start
                   </span>
@@ -536,7 +549,7 @@ function Verdict({ comparison }: { comparison: StartSitComparison }) {
  * paragraphs (15 October 2026): the lines say what Vegas thinks, and a grey
  * cell is a number on Sleeper's week or a line nobody has posted.
  */
-function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
+export function ScoreTable({ comparison }: { comparison: StartSitComparison }) {
   const columns = rankedColumns(comparison);
   const { rows, score } = compareTable(columns);
   const wide = columns.length > 3;

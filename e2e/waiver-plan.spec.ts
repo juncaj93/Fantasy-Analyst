@@ -175,8 +175,9 @@ test.describe('the plan the deployment actually computes', () => {
     const row = page.getByTestId('waiver-row').filter({ hasText: claim.addName }).first();
     await expect(row).toBeVisible();
     await row.click();
-    await expect(page.getByTestId('waiver-detail')).toBeVisible();
-    await expect(page.getByTestId('waiver-drop-hint')).toContainText(`Drop ${claim.dropName}`);
+    /* The sheet weighs him against the cut. */
+    await expect(page.getByTestId('tier-detail')).toBeVisible();
+    await expect(page.getByTestId('tier-detail-body')).toHaveAttribute('data-partner-id', claim.dropPlayerId);
   });
 });
 
@@ -420,10 +421,11 @@ test.describe('free agent or waiver claim, on the board', () => {
     await expect(free).not.toContainText('FAAB');
     const claim = page.locator('[data-chip="waivers"]');
     if ((await claim.count()) > 0) {
-      /* The row says "Waivers $x–y"; the day it clears is on the sheet (22 October 2026). */
+      /* The row says "Waivers $x–y", and the sheet carries the same chip (22 October 2026). */
       await expect(claim.first()).toHaveText(/^Waivers( until \w+)?( \S+)?$/);
+      const text = await claim.first().innerText();
       await page.locator('[data-testid="waiver-row"]:has([data-chip="waivers"])').first().click();
-      await expect(page.getByTestId('waiver-detail-window')).toContainText('On waivers until');
+      await expect(page.getByTestId('tier-detail').getByTestId('wsheet-chips').locator('[data-chip="waivers"]')).toHaveText(text);
     }
   });
 });
