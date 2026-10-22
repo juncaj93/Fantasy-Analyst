@@ -216,7 +216,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       ) : loading && !advice ? (
         <SkeletonRows rows={6} testId="waivers-skeleton" />
-      ) : !advice?.found ? (
+      ) : !advice ? null : !advice.found ? (
         <Empty>Your roster was not found in this league. Check the connected Sleeper user.</Empty>
       ) : (
         <>
