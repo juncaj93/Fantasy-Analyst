@@ -582,7 +582,10 @@ test.describe('the market inventory', () => {
     expect(onScreen, 'the fold changed which players are in which section').toEqual(fromApi);
 
     // The sentence about what was swept is inside the thing it describes.
-    await expect(page.getByTestId('market-fold-body').getByTestId('trades-considered')).toBeVisible();
+    const considered = page.getByTestId('market-fold-body').getByTestId('trades-considered');
+    await expect(considered).toBeVisible();
+    // A count, with no explanation after it.
+    await expect(considered).toHaveText(/^\d+ players? considered$/);
   });
 
   /** It shuts again, which is what makes it a fold rather than a one-way door. */

@@ -449,11 +449,14 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
           rather than filed under hold — so it belongs with the inventory, and
           a sentence about players considered floating under a collapsed fold
           would be a footnote to something the reader cannot see.
+
+          A count and nothing else (October 2026 audit): the second sentence,
+          why an unwritten-about player is absent, was explanation the reader
+          does not need.
         */}
         {board.considered > 0 ? (
           <div className="faint" style={{ margin: '8px 12px' }} data-testid="trades-considered">
-            {board.considered} player{board.considered === 1 ? '' : 's'} with evidence were considered. Players nobody
-            has written about recently are left out rather than listed as holds.
+            {board.considered} player{board.considered === 1 ? '' : 's'} considered
           </div>
         ) : null}
         </Fold>
