@@ -125,7 +125,7 @@ export function partnerRead(partner: LadderPartner | null): PartnerRead {
       confident: false,
       headline: null,
       notes: [],
-      absence: 'No trade history has been read for this manager yet, so nothing is claimed about how he deals.',
+      absence: 'No trade history yet',
     };
   }
 
@@ -147,8 +147,8 @@ export function partnerRead(partner: LadderPartner | null): PartnerRead {
       notes: [],
       absence:
         profile.sample > 0
-          ? `${profile.sample} completed trade${profile.sample === 1 ? '' : 's'} on record — too few to describe a tendency.`
-          : 'No completed trade is on record for this manager, so nothing is claimed about how he deals.',
+          ? `${profile.sample} completed trade${profile.sample === 1 ? '' : 's'}`
+          : 'No completed trades',
     };
   }
 
@@ -311,8 +311,7 @@ function TradeLadderBody({
             a negotiation card is exactly that unless the unit is named.
           */}
           <div className="faint" style={{ marginTop: 6 }} data-testid={`${testId}-unit`}>
-            Weekly starting-lineup points, on the same scale as the Team screen. Advisory only — nothing here is ever
-            sent.
+            Weekly lineup points
           </div>
         </>
       )}

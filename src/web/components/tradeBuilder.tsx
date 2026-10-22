@@ -175,7 +175,7 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
             <InfoLine
               testId="trade-builder-deadline"
               text={closed ? `Trades closed after week ${horizon.deadlineWeek}` : `Trades close after week ${horizon.deadlineWeek} · ${horizon.weeksToDeadline ?? 0} wks left`}
-              detail={`Read from your league's settings. Packages count week ${horizon.currentWeek} to week ${horizon.lastWeek}, playoffs included.`}
+              detail={`Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoffs included`}
             />
           ) : null}
 
@@ -567,7 +567,7 @@ function PackageSheet({ pkg, meta, onClose }: { pkg: BuiltPackage; meta: Builder
               </>
             ) : null}
             <div className="faint" style={{ marginTop: 8 }} data-testid="builder-advisory">
-              {meta.willingness} {meta.advisory}
+              {meta.willingness}
             </div>
           </div>
         ) : null}

@@ -329,7 +329,7 @@ function OddsSheet({
       ) : null}
 
       <div className="faint" style={{ margin: '10px 2px 0' }}>
-        Model {forecast.modelVersion}. This app never edits a lineup.
+        Model {forecast.modelVersion}
       </div>
     </Sheet>
   );

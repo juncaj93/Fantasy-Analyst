@@ -207,8 +207,7 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
             </ListGroup>
           ) : (
             <Notice tone="ok">
-              Every input behind a recommendation is current, waiting on a source that has not published yet, or
-              deliberately running in the background. Nothing needs you.
+              Nothing needs you.
             </Notice>
           )}
 

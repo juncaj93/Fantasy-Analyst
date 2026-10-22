@@ -710,8 +710,7 @@ export function UnlockCard({ onUnlocked }: { onUnlocked: () => void }) {
         Unlock to make changes
       </div>
       <div className="faint" style={{ marginBottom: 8 }}>
-        Anyone can look at this page. Changing settings needs your passphrase — that stops a
-        stranger from editing your data. You only need to do this once on this phone.
+        Passphrase
       </div>
       <form onSubmit={submit}>
         <div className="field">

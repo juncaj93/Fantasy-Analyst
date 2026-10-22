@@ -346,12 +346,12 @@ function sideLine(args: {
 function evidenceLine(offer: OfferEvaluation): string {
   const e = offer.managerFit.evidence;
   if (e.sample === 0 && e.seasonsObserved === 0) {
-    return 'No league trade history has been read for this manager yet, so the idea rests on roster fit alone.';
+    return 'No trade history yet';
   }
   if (!e.historyComplete) {
-    return `Based on ${e.sample} trade(s); this league's history is still being read.`;
+    return `${e.sample} trade${e.sample === 1 ? '' : 's'} so far`;
   }
-  return `Based on ${e.sample} trade(s) across ${e.seasonsObserved} fully read season(s).`;
+  return `${e.sample} trade${e.sample === 1 ? '' : 's'}, ${e.seasonsObserved} season${e.seasonsObserved === 1 ? '' : 's'}`;
 }
 
 function names(players: { name: string }[]): string {

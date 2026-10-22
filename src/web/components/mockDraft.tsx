@@ -670,7 +670,7 @@ export function MockDraftScreen({
         look identical, saying so quietly would not be saying it.
       */}
       <div className="mock-banner" data-testid="mock-banner" role="status">
-        Practice only. Nothing here reaches Sleeper, your real draft or your queue.
+        Practice only
       </div>
 
       <div className="mock-body">
@@ -946,10 +946,10 @@ function MockSetup({
       </div>
       <div className="mock-setup-note">
         {chosen == null
-          ? 'Your seat in this league could not be identified, so the room will draft around you where it can.'
+          ? 'Seat unknown'
           : chosen === mySlot
-            ? `Seat ${chosen} of ${teams} — the one you actually have.`
-            : `Seat ${chosen} of ${teams}. Practice only: your real seat is unchanged.`}
+            ? `Seat ${chosen} of ${teams} (yours)`
+            : `Seat ${chosen} of ${teams}`}
       </div>
     </div>
   );
@@ -975,9 +975,6 @@ function MockTeamSheet({ board, onClose }: { board: DraftBoard; onClose: () => v
 
   return (
     <Sheet title="Your team" onClose={onClose} testId="mock-team">
-      <div className="mock-team-note faint">
-        A rehearsal's roster. Nothing here is on your real team.
-      </div>
       <div className="list-group">
         {rows.map((row) => (
           <div className="mock-team-slot" data-testid={`mock-team-slot-${row.slot}`} key={row.slot}>

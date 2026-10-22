@@ -372,8 +372,7 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
 
       {board.sections.length === 0 ? (
         <Empty>
-          Nothing to suggest yet. Trade ideas come from newsletter evidence moving in the last 30 days — once a few
-          issues have been read, this fills in.
+          Nothing to suggest yet.
         </Empty>
       ) : (
         /*

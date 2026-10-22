@@ -99,8 +99,7 @@ export function WeeklyCardSheet({
         */}
         {card.projectionSource === 'sleeper' ? (
           <p className="weekly-provenance" data-testid="weekly-projection-source">
-            Projection published by Rotowire, via Sleeper — shown because no betting market has priced him. The
-            lineup only starts him where no player with Vegas lines can.
+            Rotowire projection
           </p>
         ) : null}
 

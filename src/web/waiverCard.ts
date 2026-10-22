@@ -97,7 +97,8 @@ export function shortReason(row: Pick<TierRow, 'reason' | 'reasonCode' | 'stashL
   if ((m = r.match(/^Backup for your [A-Z/]+ (.+?), who is/))) return clip(`Backs up ${surname(m[1]!)}`);
   if ((m = r.match(/^Better depth than (.+?); he would not start yet$/))) return clip(m[1] === 'what you hold' ? 'Bench depth' : `Depth over ${initialled(m[1]!)}`);
   if (/^Starts this week:/.test(r)) return 'Starts this week';
-  if ((m = r.match(/^Ties (.+) this week$/))) return clip(m[1] === 'your best lineup' ? 'Ties your lineup' : `Ties ${initialled(m[1]!)}`);
+  /* A tie is about this week, and the gain beside it is three weeks: say which (22 October 2026). */
+  if ((m = r.match(/^Ties (.+) this week$/))) return clip(m[1] === 'your best lineup' ? 'Ties your lineup this week' : `Ties ${initialled(m[1]!)} this week`);
   if (row.reasonCode === 'ir_stash') {
     if (row.stashLabel === 'return unknown') return 'Out now, return unknown';
     return row.stashLabel ? clip(`IR stash, ${row.stashLabel}`) : 'IR stash, out now';
@@ -232,38 +233,147 @@ export function boardCard(row: WaiverBoardRow, reason: string | null, tone: stri
   };
 }
 
-/**
- * The pickup line the tier cards used to print, word for word. It now heads the
- * detail sheet: `Free agent · in for Kendre Miller`, `On waivers until Wed · $1
- * to stash · needs a roster spot`.
- */
-export function pickupText(row: TierRow): string {
-  const bid = row.bid;
-  const parts: string[] = [];
-  if (bid.kind === 'free') parts.push('Free agent');
-  else if (bid.kind === 'claim') {
-    if (bid.until) parts.push(`On waivers until ${clearDay(bid.until)}`);
-    parts.push(`$${bid.recommended} to ${bid.posture === 'stash' ? 'stash' : 'win'}`);
-  }
-  parts.push(
-    row.needsSpot
-      ? row.tier === 'watch'
-        ? 'needs a roster spot'
-        : row.tier === 'do_this'
-          ? 'you pick the spot'
-          : 'needs a spot first'
-      : row.drop?.viaReserve
-        ? `${row.drop.name} to IR first`
-        : row.drop
-          ? `in for ${row.drop.name}`
-          : 'uses an open spot',
-  );
-  return parts.join(' · ');
+/* ---------------------------------------------------------- the detail sheet */
+
+export type SheetPeriod = 'this' | 'next' | 'three';
+
+/** A drop option on the sheet: name, position and season points, nothing else. */
+export interface SheetDrop {
+  playerId: string;
+  name: string;
+  position: string;
+  /** `1.2 pts`, season points, or null when the planner gave none. */
+  points: string | null;
 }
 
-/** `Or A, B` or `Same spot as A`: the line under the old card's reason. */
-export function alsoText(row: Pick<TierRow, 'alternatives' | 'competesWith'>): string | null {
-  if (row.alternatives.length > 0) return `Or ${row.alternatives.join(', ')}`;
-  if (row.competesWith.length > 0) return `Same spot as ${row.competesWith.join(', ')}`;
+/** What the waiver detail sheet opens on (22 October 2026: the sheet is a comparison and nothing else). */
+export interface WaiverSheetModel {
+  playerId: string;
+  name: string;
+  position: string;
+  team: string;
+  /** The status or bid chip, then the drop chip, as on the card. */
+  chips: CardChip[];
+  /** Who he is compared with; null when there is nobody (an open spot). */
+  partner: { playerId: string; name: string } | null;
+  period: SheetPeriod;
+  /** Up to three, only when a drop is needed. */
+  drops: SheetDrop[];
+}
+
+type Figures = NonNullable<import('../core/waivers/tierPlan.ts').WaiverTiersView['weekFigures']>;
+type PickupStart = { start: { playerId: string; displaces?: { playerId: string; name: string } | null; over?: { playerId: string; name: string } | null } | null; consider: { playerId: string; displaces?: { playerId: string; name: string } | null; over?: { playerId: string; name: string } | null }[] } | null | undefined;
+
+/**
+ * The week the tiers' window treats as "this week": the window starts this
+ * week while its games are still ahead (weights 1, 1, 0.5) and next week once
+ * they are under way (weights 1, 0.5, 0.5). See `tierWindow`.
+ */
+export function currentWeekOf(window: { weeks: number[]; weights: number[] }): number {
+  const first = window.weeks[0] ?? 0;
+  return window.weights[1] === 1 ? first : first - 1;
+}
+
+/** The roster player named in a reason: `Starts over Braelon Allen`, `Your TE Sam LaPorta is on bye`, `Ties B. Allen`. */
+function namedInReason(reason: string): string | null {
+  const m =
+    reason.match(/^Starts over (.+?)(?:,|$)/) ??
+    reason.match(/^Your [A-Z/]+ (.+?) is /) ??
+    reason.match(/^Backup for your [A-Z/]+ (.+?), who is/) ??
+    reason.match(/^Ties (.+?) this week$/);
+  return m && m[1] !== 'your best lineup' ? m[1]! : null;
+}
+
+function byName(figures: Figures | undefined, name: string | null): { playerId: string; name: string } | null {
+  if (!figures || !name) return null;
+  for (const [playerId, f] of Object.entries(figures)) if (f.name === name) return { playerId, name: f.name };
   return null;
+}
+
+/**
+ * Who the move is weighed against, one rule for every card:
+ *  1. the lineup player the add displaces (Pick up and start: the player who
+ *     leaves the best lineup; otherwise the starter his reason names, the one
+ *     he "starts over" or the one on bye or hurt);
+ *  2. if he displaces nobody (depth, an IR stash, an empty slot), the player
+ *     in the Drop chip, or the first of "Pick your drop";
+ *  3. nobody, when the spot is open.
+ * When the displaced player and the drop differ, the comparison is with the
+ * displaced player and the drop is in the chip line only.
+ */
+export function sheetPartner(row: TierRow, figures: Figures | undefined, pickup: PickupStart): { playerId: string; name: string } | null {
+  if (row.reasonCode === 'start_now' || row.reasonCode === 'start_tie') {
+    const move = [pickup?.start, ...(pickup?.consider ?? [])].find((m) => m?.playerId === row.playerId);
+    const who = move?.displaces ?? move?.over ?? null;
+    if (who) return { playerId: who.playerId, name: who.name };
+  }
+  const displaced = byName(figures, namedInReason(row.reason));
+  if (displaced && displaced.playerId !== row.playerId) return displaced;
+  if (row.drop) return { playerId: row.drop.playerId, name: row.drop.name };
+  const first = (row.bestDrops ?? row.needsSpot ?? [])[0];
+  return first ? { playerId: first.playerId, name: first.name } : null;
+}
+
+/**
+ * Which period the sheet opens on, from the card: a "this week" move opens
+ * this week; a move whose reason is about a later week opens that week when it
+ * is next week; anything longer (depth, a stash, a week after next) opens the
+ * three-week view.
+ */
+export function sheetPeriod(row: TierRow, window: { weeks: number[]; weights: number[] }): SheetPeriod {
+  if (row.reasonCode === 'start_now' || row.reasonCode === 'start_tie') return 'this';
+  const weekly = new Set(['hole_bye', 'hole_injury', 'hole_empty', 'bye_depth', 'upgrade', 'big_upgrade']);
+  if (!weekly.has(row.reasonCode)) return 'three';
+  const named = row.reason.match(/week (\d+)/);
+  let focus = named ? Number(named[1]) : null;
+  if (focus == null) {
+    const k = row.byWeek.reduce((best, w, i) => (w.change > (row.byWeek[best]?.change ?? -Infinity) ? i : best), 0);
+    focus = row.byWeek[k]?.week ?? null;
+  }
+  const now = currentWeekOf(window);
+  if (focus === now) return 'this';
+  if (focus === now + 1) return 'next';
+  return 'three';
+}
+
+/** The drop options, only when a drop is needed or Alex picks one: up to three. */
+export function sheetDrops(row: TierRow): SheetDrop[] {
+  const needs = row.needsSpot != null || (row.drop != null && !row.drop.viaReserve);
+  if (!needs) return [];
+  const list = row.bestDrops ?? row.needsSpot ?? [];
+  const options = list.length > 0 ? list : row.drop ? [{ playerId: row.drop.playerId, name: row.drop.name, position: row.drop.position, stat: undefined }] : [];
+  return options.slice(0, 3).map((c) => ({
+    playerId: c.playerId,
+    name: c.name,
+    position: c.position ?? '',
+    points: c.stat && /^\d+(\.\d+)? pts$/.test(c.stat) ? c.stat : null,
+  }));
+}
+
+export function tierSheet(row: TierRow, tiers: { window: { weeks: number[]; weights: number[] }; weekFigures?: Figures }, pickup: PickupStart): WaiverSheetModel {
+  return {
+    playerId: row.playerId,
+    name: row.name,
+    position: row.position,
+    team: row.team,
+    chips: tierCard(row).chips.filter((c) => c.key !== 'starter'),
+    partner: sheetPartner(row, tiers.weekFigures, pickup),
+    period: sheetPeriod(row, tiers.window),
+    drops: sheetDrops(row),
+  };
+}
+
+/** A board row's sheet (a defense, a trending player, an older league): this week, against the cut when there is one. */
+export function boardSheet(row: WaiverBoardRow): WaiverSheetModel {
+  const card = boardCard(row, null, '');
+  return {
+    playerId: row.playerId,
+    name: row.name,
+    position: row.position ?? '',
+    team: row.team ?? '',
+    chips: card.chips,
+    partner: row.cut ? { playerId: row.cut.playerId, name: row.cut.name } : null,
+    period: 'this',
+    drops: [],
+  };
 }

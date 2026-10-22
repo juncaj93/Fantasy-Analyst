@@ -92,8 +92,7 @@ export function ScoreCard({
           unexplained absence looks like from the outside.
         */
         <div className="matchup-degraded" data-testid="matchup-degraded">
-          {forecast.degradedReason ?? 'Fantasy Analyst has no forecast for this matchup.'}{' '}
-          The score above is Sleeper’s and is unaffected.
+          {forecast.degradedReason ?? 'No forecast for this matchup.'}
         </div>
       ) : final ? (
         /* The odds go, the margin arrives, and the recap is the card below. */

@@ -175,6 +175,12 @@ async function openWaivers(page: Page) {
   await expect(page.getByTestId('waivers-nav')).toBeVisible();
 }
 
+/** Unfold Watch list, Drop-ready and Trending, which open collapsed (22 October 2026). */
+async function openFolds(page: Page) {
+  const closed = page.locator('.wfold .bench-toggle[aria-expanded="false"]');
+  while ((await closed.count()) > 0) await closed.first().click();
+}
+
 async function noSidewaysScroll(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
@@ -188,7 +194,8 @@ async function noTransactionControl(page: Page) {
   for (const chip of await page.locator('button:visible [data-testid="wcard-chip"]').allInnerTexts()) expect(chip.trim()).toMatch(CHIP);
   const texts = (
     await page.locator('button:visible').evaluateAll((els) =>
-      els.map((el) => {
+      /* A folded list's toggle names the list ("Drop-ready (2)"); it opens rows, nothing else. */
+      els.filter((el) => !el.classList.contains('bench-toggle')).map((el) => {
         const copy = el.cloneNode(true) as HTMLElement;
         copy.querySelectorAll('[data-testid="wcard-chip"]').forEach((n) => n.remove());
         return `${copy.textContent ?? ''} ${el.getAttribute('aria-label') ?? ''}`;
@@ -222,38 +229,42 @@ test.describe('the tiers the deployment computes', () => {
     await noTransactionControl(page);
   });
 
-  test('opens a move into its lineup arithmetic, its spot and its price', async ({ page }) => {
+  test('opens a move on two players side by side, and nothing else', async ({ page }) => {
     await page.getByTestId('waiver-tier-row').first().click();
     const sheet = page.getByTestId('tier-detail');
     await expect(sheet).toBeVisible();
-    for (const label of ['Why', 'Lineup', 'Your spot', 'Last week']) await expect(sheet).toContainText(label);
-    await expect(sheet.getByTestId('tier-detail-weeks')).toContainText('Wk ');
-    await expect(sheet.getByTestId('tier-detail-bid')).toBeVisible();
-    await expect(sheet).toContainText('this app never makes a transaction');
+    /* The seeded moves fill open spots, so the other column is the empty slot. */
+    const view = sheet.getByTestId('wsheet-compare').or(sheet.getByTestId('wsheet-weeks'));
+    await expect(view).toBeVisible();
+    for (const gone of ['Why', 'Lineup', 'Your spot', 'Last week', 'His numbers', 'Also fits', 'never makes a transaction', 'Advisory']) {
+      await expect(sheet).not.toContainText(gone);
+    }
   });
 
-  test('says each week’s number and where it came from, inside the phone', async ({ page }) => {
+  test('adds three weeks up week by week, and marks a Sleeper week without the word', async ({ page }) => {
     await page.getByTestId('waiver-tier-row').first().click();
-    const numbers = page.getByTestId('tier-detail').getByTestId('tier-detail-numbers');
-    /*
-     * Three weeks, each with its number and its source. A Sleeper week has no
-     * word since 16 October 2026: its number wears the fallback marker, and
-     * the words are for a screen reader (they are in the text, not drawn).
-     */
-    const week = '\\d+\\.\\d(, Sleeper projection| this week| this week’s number)';
-    await expect(numbers).toHaveText(new RegExp(`^His numbersWk \\d+ ${week}( · Wk \\d+ ${week}){2}$`));
-    for (const marked of await numbers.locator('.num-sleeper').all()) {
+    const sheet = page.getByTestId('tier-detail');
+    await sheet.getByTestId('wsheet-period-three').click();
+    const weeks = sheet.getByTestId('wsheet-week');
+    await expect(weeks).toHaveCount(3);
+    for (const col of [0, 1]) {
+      let sum = 0;
+      for (const row of await weeks.all()) sum += Number(await row.getByTestId('wsheet-cell').nth(col).getAttribute('data-points'));
+      const total = Number(await sheet.getByTestId('wsheet-total-cell').nth(col).getAttribute('data-points'));
+      expect(total).toBeCloseTo(sum, 6);
+      expect(await sheet.getByTestId('wsheet-total-cell').nth(col).innerText()).toBe(sum.toFixed(1));
+    }
+    for (const marked of await sheet.locator('[data-testid="wsheet-cell"].num-sleeper').all()) {
       await expect(marked.locator('.sr-only')).toHaveText(', Sleeper projection');
       expect(await marked.evaluate((el) => getComputedStyle(el).fontStyle)).toBe('italic');
     }
-    const drawn = await numbers.evaluate((el) => {
+    const drawn = await sheet.getByTestId('wsheet-weeks').evaluate((el) => {
       const copy = el.cloneNode(true) as HTMLElement;
       copy.querySelectorAll('.sr-only').forEach((n) => n.remove());
       return copy.textContent ?? '';
     });
     expect(drawn, 'no "Sleeper" drawn beside a number').not.toMatch(/sleeper/i);
-    const box = (await numbers.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
+    const box = (await sheet.getByTestId('wsheet-weeks').boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await noSidewaysScroll(page);
   });
@@ -293,16 +304,12 @@ test.describe('the tiers as a layout', () => {
     await noSidewaysScroll(page);
     await noTransactionControl(page);
 
-    /* What left the card is on the sheet, word for word. */
+    /* The sheet carries the card's chips: the status or bid, then the drop. */
     await claim.click();
-    const sheet = page.getByTestId('tier-detail');
-    await expect(sheet.getByTestId('tier-detail-pickup')).toHaveText(/^PickupOn waivers until \w+ · \$100 to win · in for Kendre Miller$/);
-    await sheet.getByRole('button', { name: 'Done' }).click();
-    await first.click();
-    await expect(page.getByTestId('tier-detail').getByTestId('tier-detail-also')).toHaveText('Also fitsOr C.J. Stroud, Jordan Love, Sam Darnold');
+    await expect(page.getByTestId('tier-detail').getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $64–100', 'Drop: Miller']);
   });
 
-  test('says each tier under its own heading, in order', async ({ page }) => {
+  test('says each tier under its own heading, in order, the long lists folded', async ({ page }) => {
     const titles = ['waivers-recommended-title', 'tier-consider-title', 'tier-watch-title', 'drop-ready-title'];
     let last = -1;
     for (const id of titles) {
@@ -311,7 +318,13 @@ test.describe('the tiers as a layout', () => {
       last = y;
     }
     await expect(page.getByTestId('tier-consider-title')).toHaveText('Worth considering');
-    await expect(page.getByTestId('tier-watch-title')).toHaveText('Watch list');
+    await expect(page.getByTestId('tier-watch-title')).toHaveText(/^Watch list \(\d+\)$/);
+    await expect(page.getByTestId('drop-ready-title')).toHaveText('Drop-ready (1)');
+    /* Folded until tapped, like Team's bench. */
+    await expect(page.getByTestId('tier-watch-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('drop-ready-row')).toHaveCount(0);
+    await openFolds(page);
+    await expect(page.getByTestId('tier-watch-toggle')).toHaveAttribute('aria-expanded', 'true');
     /* A stash has no points: Team's dash in the score column, the words on the arrow line. */
     await expect(page.locator('[data-player-id="t3"]').getByTestId('tier-gain')).toHaveText('—');
     await expect(page.locator('[data-player-id="t3"]').getByTestId('tier-reason')).toHaveText('IR stash, out now');
@@ -319,32 +332,12 @@ test.describe('the tiers as a layout', () => {
     await expect(page.getByTestId('drop-ready').getByRole('button')).toHaveCount(0);
   });
 
-  test('puts the bid, its reason and the likely rivals in the sheet', async ({ page }) => {
-    await page.locator('[data-testid="waiver-tier-row"][data-player-id="t2"]').click();
-    const bid = page.getByTestId('tier-detail-bid');
-    await expect(bid).toContainText('Bid $100 · likely $64–100');
-    await expect(bid).toContainText('to win about 1 time in 2');
-    const rivals = page.getByTestId('tier-detail-rival');
-    await expect(rivals).toHaveText(['RonJonathan 62% · often bids on WRs', 'jfletcher433 31% · WR on bye in week 6, no healthy backup']);
-    for (const line of await rivals.all()) {
-      const box = (await line.boundingBox())!;
-      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    }
-    await noSidewaysScroll(page);
-  });
-
-  test('says a free agent needs no bid, and the league rule once', async ({ page }) => {
+  test('says a free agent in a chip, and no rule or help text anywhere', async ({ page }) => {
     await expect(page.getByTestId('waiver-tier-row').first().locator('[data-chip="free"]')).toHaveText('Free agent');
-    /* The rule moved off the screen and onto the info sheet, one fact a line. */
     await expect(page.getByTestId('waivers-free-agent-rule')).toHaveCount(0);
-    await page.getByTestId('waivers-info-button').click();
-    const rule = page.getByTestId('waivers-free-agent-rule');
-    await expect(rule).toHaveCount(1);
-    await expect(rule.locator('li')).toHaveText([
-      'A dropped player is on waivers for 2 days.',
-      'A player whose game has started waits for the Wednesday run.',
-      'Anyone else is an instant add.',
-    ]);
+    await expect(page.getByTestId('waivers-info-button')).toHaveCount(0);
+    await openFolds(page);
+    for (const gone of ['Advisory', 'never makes', 'instant add', 'not scored here', 'what the move adds']) await expect(page.locator('main')).not.toContainText(gone);
   });
 });
 
@@ -356,6 +349,8 @@ test.describe('a week with nothing to do', () => {
     await openWaivers(page);
     await expect(page.getByTestId('waivers-no-move-headline')).toHaveText('No must-do move this week');
     await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
+    await expect(page.getByTestId('drop-ready-title')).toHaveText('Drop-ready (1)');
+    await openFolds(page);
     await expect(page.getByTestId('drop-ready-row')).toHaveCount(1);
     await noSidewaysScroll(page);
   });
@@ -485,6 +480,7 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     /* Two claims, each with its own drop: neither depends on the other, so no summary box. */
     await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
     /* Andrews is a hole fill: never on the Watch list. */
+    await openFolds(page);
     await expect(page.getByTestId('tier-watch')).not.toContainText('Mark Andrews');
     for (const row of await rows.all()) {
       const box = (await row.boundingBox())!;
@@ -495,27 +491,26 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
   });
 
   test('labels a stash with no known return on the Watch list, at $0 to $1', async ({ page }) => {
+    await openFolds(page);
     const row = page.locator('[data-testid="waiver-tier-row"][data-player-id="r3"]');
     await expect(row.getByTestId('tier-gain')).toHaveText('—');
     await expect(row.getByTestId('tier-reason')).toHaveText('Out now, return unknown');
     await expect(row.locator('[data-chip="waivers"]')).toHaveText('Waivers $0–1');
     await row.click();
-    await expect(page.getByTestId('tier-detail-pickup')).toHaveText('Pickup$0 to stash · in for Ladd McConkey');
+    const sheet = page.getByTestId('tier-detail');
+    await expect(sheet.getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $0–1', 'Drop: McConkey']);
+    /* This payload carries no week figures, so the sheet has this week only (the three-week default for a stash is a unit test). */
     await noSidewaysScroll(page);
   });
 
-  test('says why the drop, who it is not cutting, and each rival’s reason, inside the phone', async ({ page }) => {
+  test('lists the drop on the sheet by name, pill and season points, and no reasons', async ({ page }) => {
     await page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row').first().click();
     const sheet = page.getByTestId('tier-detail');
-    await expect(sheet.getByTestId('tier-detail-drop')).toContainText('Drop Will Shipley · out now, least points lately on your bench (2.3 a week), held 2 weeks');
-    await expect(sheet.getByTestId('tier-detail-kept')).toHaveText('Not cuttingEmmett Johnson (handcuff), Brian Robinson (handcuff)');
-    await expect(sheet.getByTestId('tier-detail-rival')).toHaveText(['jfletcher433 41% · QB on bye in week 6, no backup', 'MattLee04 12% · rarely bids']);
-    await expect(sheet.getByTestId('tier-detail-bid')).toContainText('Bid $9 · likely $5–14');
-    for (const id of ['tier-detail-drop', 'tier-detail-kept', 'tier-detail-rivals']) {
-      const box = (await sheet.getByTestId(id).boundingBox())!;
-      expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width, `${id} runs off the phone`).toBeLessThanOrEqual(page.viewportSize()!.width);
-    }
+    await expect(sheet.getByTestId('tier-detail-best-drop')).toHaveCount(1);
+    await expect(sheet.getByTestId('tier-detail-best-drop')).toContainText('Will Shipley');
+    for (const gone of ['Not cutting', 'jfletcher433', 'least points lately', 'Bid $9']) await expect(sheet).not.toContainText(gone);
+    const box = (await sheet.getByTestId('wsheet-drops').boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await noSidewaysScroll(page);
   });
 
@@ -583,24 +578,27 @@ test.describe('round 2 follow-up: an IR move, and the best drops under Andrews',
     await expect(page.getByTestId('waiver-plan')).toHaveCount(0);
     await expect(page.getByTestId('best-drops')).toHaveCount(0);
     /* A Watch list name never borrows a spot another row uses. */
+    await openFolds(page);
     const watchRow = page.locator('[data-testid="waiver-tier-row"][data-player-id="r5"]');
     await expect(watchRow.locator('[data-chip="needs"]')).toHaveText('Needs a drop');
     await expect(watchRow).not.toContainText('Shipley');
     await noSidewaysScroll(page);
     await noTransactionControl(page);
     await watchRow.click();
-    await expect(page.getByTestId('tier-detail-pickup')).toHaveText('PickupFree agent · needs a roster spot');
+    await expect(page.getByTestId('tier-detail').getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Free agent', 'Needs a drop']);
   });
 
-  test('opens Andrews into the best drops with their full reasons, inside the phone', async ({ page }) => {
+  test('opens Andrews onto three drop options: name, pill and season points, no reasons', async ({ page }) => {
     await page.getByTestId('waivers-recommended').getByTestId('waiver-tier-row').nth(1).click();
     const sheet = page.getByTestId('tier-detail');
     await expect(sheet).toContainText('Mark Andrews');
     const items = sheet.getByTestId('tier-detail-best-drop');
     await expect(items).toHaveCount(3);
     await expect(items.nth(0)).toContainText("Tre' Harris");
-    await expect(items.nth(0)).toContainText('lowest season points on your bench (1.2)');
-    await expect(items.nth(1)).toContainText('handcuff to Bijan Robinson');
+    await expect(items.nth(0)).toContainText('1.2 pts');
+    await expect(items.nth(1)).toContainText('Brian Robinson');
+    await expect(sheet).not.toContainText('lowest season points');
+    await expect(sheet).not.toContainText('handcuff to');
     for (let i = 0; i < 3; i++) {
       const box = (await items.nth(i).boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
@@ -728,30 +726,14 @@ test.describe('the waiver card on a phone', () => {
     await noSidewaysScroll(page);
   });
 
-  test('the info button opens what moved off the screen, and the budget sits in the header', async ({ page }) => {
-    const button = page.getByTestId('waivers-info-button');
-    const refresh = page.getByTestId('waivers-refresh');
-    const [a, b] = [(await button.boundingBox())!, (await refresh.boundingBox())!];
-    expect(a.width).toBeGreaterThanOrEqual(44);
-    expect(a.height).toBeGreaterThanOrEqual(44);
-    expect([a.width, a.height]).toEqual([b.width, b.height]);
+  test('the header is the title, the update time, the budget and refresh: no info button', async ({ page }) => {
+    await expect(page.getByTestId('waivers-info-button')).toHaveCount(0);
+    const refresh = (await page.getByTestId('waivers-refresh').boundingBox())!;
+    expect(refresh.width).toBeGreaterThanOrEqual(44);
+    expect(refresh.height).toBeGreaterThanOrEqual(44);
     await expect(page.getByTestId('waivers-budget')).toHaveText(/^ · FAAB \$\d+ of \$\d+$/);
-    /* Nothing of it is left at the foot of the screen. */
     await expect(page.getByTestId('faab-budget')).toHaveCount(0);
     await expect(page.getByTestId('tier-watch-note')).toHaveCount(0);
-
-    await button.click();
-    const sheet = page.getByTestId('waivers-info');
-    await expect(sheet).toBeVisible();
-    await expect(sheet.getByTestId('waivers-info-chip')).toContainText('what the move adds to your best lineup over weeks 5–7');
-    await expect(sheet.getByTestId('waivers-info-chip')).toContainText('Weeks 5 and 6 count in full; week 7 counts half.');
-    await expect(sheet.getByTestId('waivers-info-tiers')).toContainText('Watch list: better on paper; no move needed now.');
-    await expect(sheet.getByTestId('faab-budget')).toContainText(/\$\d+ of \$\d+ left\./);
-    await expect(sheet.getByTestId('waivers-free-agent-rule')).toContainText('instant add');
-    for (const li of await sheet.locator('li').all()) {
-      const box = (await li.boundingBox())!;
-      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    }
     await noSidewaysScroll(page);
   });
 
@@ -879,7 +861,8 @@ test.describe('style parity with the Team lineup', () => {
     const doThis = await lookOf(page, waiver, '.slot-group');
     expect(doThis['divider color'], 'the Do this card should hold two rows here').not.toBe('none');
     sameLook(team, doThis, 'a Waivers row');
-    sameLook(team, await lookOf(page, '[data-testid="tier-watch"] [data-testid="waiver-tier-row"]', '.slot-group'), 'a Watch list row');
+    await openFolds(page);
+    sameLook(team, await lookOf(page, '[data-testid="tier-watch"] [data-testid="waiver-tier-row"]', '.wfold'), 'a Watch list row');
     if (testInfo.project.name.endsWith('390')) {
       await testInfo.attach('waivers', { body: await page.screenshot({ fullPage: true, path: testInfo.outputPath('waivers-390.png') }), contentType: 'image/png' });
     }

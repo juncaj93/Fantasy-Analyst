@@ -47,9 +47,10 @@ import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN, isSleeperSource, sleeperClass, weekI
 import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
 import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
-import { WaiverDetailSheet, WaiverRow } from '../components/waivers.tsx';
-import { TierDetailSheet, TierRowButton } from '../components/waiverTiers.tsx';
-import { byGain } from '../waiverCard.ts';
+import { WaiverRow } from '../components/waivers.tsx';
+import { TierRowButton } from '../components/waiverTiers.tsx';
+import { WaiverSheet } from '../components/waiverSheet.tsx';
+import { boardSheet, byGain, tierSheet } from '../waiverCard.ts';
 import { WaiverRowGroup } from '../components/waiverCard.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { PickupStartMove, PickupStartPlan } from '../../core/waivers/pickupStart.ts';
@@ -742,20 +743,16 @@ export function TeamScreen({
         />
       ) : null}
 
-      {tierDetail && waivers?.tiers ? (
-        <TierDetailSheet row={tierDetail} tiers={waivers.tiers} onClose={() => setTierDetail(null)} />
-      ) : null}
-      {waiverDetail ? (
-        <WaiverDetailSheet
-          row={waiverDetail}
-          onClose={() => setWaiverDetail(null)}
-          onCompare={() => {
-            const row = waiverDetail;
-            setWaiverDetail(null);
-            setCompare({ slot: row.fit.slot, seed: [row.playerId] });
-          }}
+      {tierDetail && waivers?.found && waivers.tiers && selected ? (
+        <WaiverSheet
+          model={tierSheet(tierDetail, waivers.tiers, waivers.pickupStart)}
+          leagueId={selected.id}
+          figures={waivers.tiers.weekFigures ?? null}
+          window={waivers.tiers.window}
+          onClose={() => setTierDetail(null)}
         />
       ) : null}
+      {waiverDetail && selected ? <WaiverSheet model={boardSheet(waiverDetail)} leagueId={selected.id} onClose={() => setWaiverDetail(null)} /> : null}
 
       {compare && selected ? (
         <CompareSheet

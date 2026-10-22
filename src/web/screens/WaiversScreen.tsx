@@ -24,14 +24,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type LeagueSummary, type WaiverAdvice, type WaiverRefreshReport } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
-import { budgetChip, DependentClaims, NoMoveCard, WaiverDetailSheet, WaiverPlanCard, WaiverRow, WaiversInfoSheet } from '../components/waivers.tsx';
+import { budgetChip, DependentClaims, NoMoveCard, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
 import { DstLine } from '../components/dst.tsx';
 import { buildWaiverBoard, offeredPositions, rowMatches, type WaiverBoardRow } from '../../core/waivers/board.ts';
-import { noMoveSummary, unscoredNotes } from '../../core/waivers/noMove.ts';
+import { noMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
-import { InfoIcon, RefreshIcon } from '../components/icons.tsx';
-import { TierDetailSheet, TierRowButton, TierSections } from '../components/waiverTiers.tsx';
-import { WaiverRowGroup } from '../components/waiverCard.tsx';
+import { RefreshIcon } from '../components/icons.tsx';
+import { TierRowButton, TierSections } from '../components/waiverTiers.tsx';
+import { WaiverSheet } from '../components/waiverSheet.tsx';
+import { boardSheet, tierSheet } from '../waiverCard.ts';
+import { FoldedGroup, WaiverRowGroup } from '../components/waiverCard.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
 
@@ -45,7 +47,6 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [open, setOpen] = useState<WaiverBoardRow | null>(null);
   const [openTier, setOpenTier] = useState<TierRow | null>(null);
-  const [info, setInfo] = useState(false);
 
   /*
    * Tapping Waivers while already on Waivers.
@@ -60,7 +61,6 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
       { when: openTier != null, undo: () => setOpenTier(null) },
-      { when: info, undo: () => setInfo(false) },
       { when: filter !== ALL_FILTER, undo: () => setFilter(ALL_FILTER) },
     ]);
   }, [resetNonce]);
@@ -150,7 +150,6 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   /* The chips narrow the scored options, which is the only list long enough to need them. */
   const segments = useMemo(() => [ALL_FILTER, ...offeredPositions(scoredOthers)], [scoredOthers]);
   const rows = useMemo(() => scoredOthers.filter((row) => rowMatches(row, filter)), [scoredOthers, filter]);
-  const planMoves = (advice?.claimPlan?.claims.length ?? 0) > 0;
   /*
    * No claim and nobody recommended: the empty answer, said where the plan
    * would be. When the defence line below carries an answer of its own, the
@@ -169,18 +168,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const dstHole = dstNamed.filter((row) => row.dst?.decision === 'add');
   const dstConsider = dstNamed.filter((row) => row.dst?.decision !== 'add');
 
-  /*
-   * Who this roster would cut for each target, by player.
-   *
-   * Computed on the server beside the plan itself and merely looked up here —
-   * the sheet must never be able to name a different cut from the plan card at
-   * the top of the same screen, and the only way to guarantee that is for both
-   * to be reading one answer.
-   */
-  const dropHints = useMemo(
-    () => new Map((advice?.claimPlan?.dropHints ?? []).map((hint) => [hint.addPlayerId, hint.label])),
-    [advice],
-  );
+
 
   return (
     <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull" live={advice?.gameWindow?.live ?? false}>
@@ -199,7 +187,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               <span data-testid="waivers-updated">
                 {advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}
               </span>
-              {/* The wallet, one muted fact beside the time; the bid history is behind the info button. */}
+              {/* The wallet, one muted fact beside the time. */}
               {budgetChip(advice.faab ?? null) ? <span data-testid="waivers-budget"> · {budgetChip(advice.faab ?? null)}</span> : null}
             </>
           ) : undefined
@@ -207,17 +195,6 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
         trailing={
           selected ? (
             <span className="nav-actions-group">
-              {advice?.found ? (
-                <button
-                  className="btn btn-icon"
-                  data-testid="waivers-info-button"
-                  aria-label="About Waivers: the points chip, waiver rules and bids"
-                  title="About"
-                  onClick={() => setInfo(true)}
-                >
-                  <InfoIcon />
-                </button>
-              ) : null}
               <button
                 className="btn btn-icon"
                 data-testid="waivers-refresh"
@@ -328,11 +305,6 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                   "not part of the plan above" was removed on 1 October 2026.
                   With no plan, the note is the reason nothing is recommended.
                 */}
-                {planMoves ? null : (
-                  <div className="faint waivers-others-note" data-testid="waivers-others-note">
-                    Each beats someone on your bench on paper, but none is worth a roster move this week.
-                  </div>
-                )}
                 {segments.length > 1 ? (
                   <SegmentedControl
                     label="Filter by position"
@@ -355,76 +327,27 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
             </>
           )}
 
-          {/*
-            Popular adds this app cannot rate, under their own heading, with
-            the reason said once per reason rather than `Not scored` alone on
-            every row.
-          */}
-          {unscored.length > 0 ? (
-            <>
-              <div className="section-title" data-testid="waivers-unscored-title">
-                Being added across Sleeper, not scored here
-              </div>
-              <div className="faint waivers-others-note" data-testid="waivers-unscored-note">
-                {unscoredNotes(unscored).map((note) => (
-                  <div key={note}>{note}</div>
-                ))}
-              </div>
-              <section className="slot-group" data-testid="waivers-unscored">
-                {unscored.map((row) => (
-                  <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
-                ))}
-              </section>
-            </>
-          ) : null}
-
-          {/*
-            What the page knows it does not know — and nothing about its own
-            bookkeeping.
-
-            Three lines used to close this screen: how many players were
-            checked, which fields are missing, and a sentence promising the app
-            never transacts. Only the middle one changes a decision, because it
-            says a blank means *unknown* rather than *zero*; it is kept, without
-            the count in front of it. A tally of how many free agents were
-            considered is the engine describing its own work to a reader who
-            came here to decide on two names.
-
-            The promise is not deleted from the app — it is on the detail sheet
-            beside the bid it qualifies, which is where somebody about to act
-            actually is. And it is enforced by something stronger than a
-            sentence: there is no control on this screen that could transact,
-            which `e2e-production/smoke.spec.ts` asserts by reading every button
-            on it.
-          */}
-          {!tiers && board && board.pending.length > 0 ? (
-            <div className="faint" data-testid="waivers-pending" style={{ margin: '4px 4px 8px' }}>
-              {joinFields(board.pending)} {board.pending.length === 1 ? 'arrives' : 'arrive'} with league
-              intelligence — shown as unknown rather than estimated.
-            </div>
-          ) : null}
-
-          {(board?.notes ?? []).map((note) => (
-            <div className="faint" key={note} style={{ margin: '0 4px 4px' }}>
-              {note}
-            </div>
-          ))}
-
+          {/* Players the rest of Sleeper is adding that the app cannot rate, folded like Team's Bench (22 October 2026). */}
+          <FoldedGroup label="Trending" count={unscored.length} testId="waivers-unscored">
+            <section data-testid="waivers-unscored">
+              {unscored.map((row) => (
+                <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />
+              ))}
+            </section>
+          </FoldedGroup>
         </>
       )}
 
-      {info && advice?.found ? (
-        <WaiversInfoSheet
-          faab={advice.faab ?? null}
-          rule={tiers?.freeAgentRule ?? null}
-          window={tiers?.window ?? null}
-          onClose={() => setInfo(false)}
+      {openTier && tiers && selected ? (
+        <WaiverSheet
+          model={tierSheet(openTier, tiers, advice?.found ? advice.pickupStart : null)}
+          leagueId={selected.id}
+          figures={tiers.weekFigures ?? null}
+          window={tiers.window}
+          onClose={() => setOpenTier(null)}
         />
       ) : null}
-      {openTier && tiers ? <TierDetailSheet row={openTier} tiers={tiers} onClose={() => setOpenTier(null)} /> : null}
-      {open ? (
-        <WaiverDetailSheet row={open} onClose={() => setOpen(null)} dropHint={dropHints.get(open.playerId) ?? null} />
-      ) : null}
+      {open && selected ? <WaiverSheet model={boardSheet(open)} leagueId={selected.id} onClose={() => setOpen(null)} /> : null}
     </PullToRefresh>
   );
 }
@@ -459,20 +382,4 @@ export function formatUpdated(iso: string, now: Date = new Date()): string {
   const days = (now.getTime() - at.getTime()) / 86_400_000;
   if (days < 6) return `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
   return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-/**
- * The columns still waiting, in a sentence.
- *
- * Read from the board rather than hardcoded, because they arrive separately:
- * competition and multi-week value land with the league-intelligence pass and
- * expected cost needs bid history behind it as well. A fixed list of three goes
- * on claiming a field is missing after it has arrived, which is the one thing
- * this line must never do — it is the page's own statement about what it knows.
- */
-function joinFields(pending: string[]): string {
-  const labels = pending.map((p) => (p === 'expected cost' ? 'Expected cost' : p));
-  if (labels.length === 1) return labels[0]!;
-  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }

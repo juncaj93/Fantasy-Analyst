@@ -237,7 +237,7 @@ describe('what may be said about the manager holding him', () => {
     expect(read.confident).toBe(false);
     expect(read.headline).toBeNull();
     expect(read.notes).toEqual([]);
-    expect(read.absence!.toLowerCase()).toContain('no trade history has been read');
+    expect(read.absence!.toLowerCase()).toContain('no trade history yet');
   });
 
   /**
@@ -257,7 +257,7 @@ describe('what may be said about the manager holding him', () => {
     expect(read.headline).toBeNull();
     expect(read.notes).toEqual([]);
     expect(read.absence).toContain(String(thin.sample));
-    expect(read.absence!.toLowerCase()).toContain('too few');
+    expect(read.absence!.toLowerCase()).toContain('completed trade');
   });
 
   it('reads a manager the league has genuinely measured', () => {

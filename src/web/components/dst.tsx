@@ -119,7 +119,7 @@ export function DstSheet({ plan, onClose }: { plan: DstPlan; onClose: () => void
 
         {plan.temporary ? (
           <div className="faint" data-testid="dst-temporary" style={{ margin: '0 2px 8px' }}>
-            One week only — this covers a week without a game and does not replace the defense you hold.
+            One week only
           </div>
         ) : null}
 
