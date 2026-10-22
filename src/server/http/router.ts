@@ -96,6 +96,12 @@ export class Router<Env> {
         return await route.handler(ctx);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        /*
+         * Written down as well as answered. A caught exception never reaches
+         * the Workers log on its own, so without this line the only trace of
+         * a screen that failed to load was the response the phone threw away.
+         */
+        console.error(`${request.method.toUpperCase()} ${url.pathname} failed`, err);
         return jsonResponse({ error: message }, 500);
       }
     }

@@ -12,7 +12,7 @@
  * is JSON, including the ones nobody meant to send.**
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import workerEntry from '../src/worker/index.ts';
 import { Router, jsonResponse } from '../src/server/http/router.ts';
 import type { WorkerEnv } from '../src/worker/index.ts';
@@ -57,6 +57,26 @@ describe('the router', () => {
     expect(await expectJson(res)).toEqual({ error: 'session check failed' });
   });
 
+  it('writes a thrown handler error to the log, with the request it failed', async () => {
+    /*
+     * A caught exception is invisible to the Workers log unless something
+     * writes it there, so a screen that failed to load left no trace anywhere
+     * but the phone.
+     */
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const router = new Router<Record<string, never>>();
+      const boom = new Error('handler exploded');
+      router.get('/api/boom', () => {
+        throw boom;
+      });
+      await router.handle(api('/api/boom'), {});
+      expect(logged).toHaveBeenCalledWith('GET /api/boom failed', boom);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it('still lets a middleware answer early', async () => {
     const router = new Router<Record<string, never>>();
     router.use(async () => jsonResponse({ error: 'Unlock in Setup to make changes.' }, 401));
@@ -89,9 +109,15 @@ describe('the worker', () => {
       },
     } as unknown as WorkerEnv;
 
-    const res = await workerEntry.fetch(api(), env);
-    expect(res.status).toBe(500);
-    expect(await expectJson(res)).toEqual({ error: 'D1 binding unavailable' });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = await workerEntry.fetch(api(), env);
+      expect(res.status).toBe(500);
+      expect(await expectJson(res)).toEqual({ error: 'D1 binding unavailable' });
+      expect(logged.mock.calls[0]?.[0]).toBe('GET /api/overview failed before routing');
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('does not answer for a path that is not the API', async () => {
