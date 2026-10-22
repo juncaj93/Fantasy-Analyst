@@ -36,7 +36,18 @@ describe('the router', () => {
       throw new Error('handler exploded');
     });
     const body = await expectJson(await router.handle(api('/api/boom'), {}));
-    expect(body).toEqual({ error: 'handler exploded' });
+    // A read's exception stays out of `error`, so a screen shows its own line.
+    expect(body).toEqual({ detail: 'handler exploded' });
+  });
+
+  it('keeps a failed write’s own words, which Setup shows as they are', async () => {
+    const router = new Router<Record<string, never>>();
+    router.post('/api/sleeper/connect', () => {
+      throw new Error('Sleeper user "nobody" not found');
+    });
+    const res = await router.handle(new Request('https://app.test/api/sleeper/connect', { method: 'POST' }), {});
+    expect(res.status).toBe(500);
+    expect(await expectJson(res)).toEqual({ error: 'Sleeper user "nobody" not found' });
   });
 
   it('answers a throwing middleware with JSON rather than letting it escape', async () => {
@@ -54,7 +65,7 @@ describe('the router', () => {
 
     const res = await router.handle(api(), {});
     expect(res.status).toBe(500);
-    expect(await expectJson(res)).toEqual({ error: 'session check failed' });
+    expect(await expectJson(res)).toEqual({ detail: 'session check failed' });
   });
 
   it('writes a thrown handler error to the log, with the request it failed', async () => {
@@ -113,7 +124,7 @@ describe('the worker', () => {
     try {
       const res = await workerEntry.fetch(api(), env);
       expect(res.status).toBe(500);
-      expect(await expectJson(res)).toEqual({ error: 'D1 binding unavailable' });
+      expect(await expectJson(res)).toEqual({ detail: 'D1 binding unavailable' });
       expect(logged.mock.calls[0]?.[0]).toBe('GET /api/overview failed before routing');
     } finally {
       logged.mockRestore();

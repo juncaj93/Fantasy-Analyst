@@ -28,6 +28,7 @@ import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
 import { SportsGameOddsProvider } from '../core/vegas/sportsGameOddsProvider.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import { createApp, type AppEnv } from '../server/app.ts';
+import { uncaughtBody } from '../server/http/router.ts';
 import type { Database } from '../server/db.ts';
 import { NewsletterService } from '../server/services/newsletterService.ts';
 import { SleeperSyncService } from '../server/services/sleeperSync.ts';
@@ -196,7 +197,7 @@ export default {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`${request.method.toUpperCase()} ${new URL(request.url).pathname} failed before routing`, err);
-        return new Response(JSON.stringify({ error: message }), {
+        return new Response(JSON.stringify(uncaughtBody(request.method, message)), {
           status: 500,
           headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
         });

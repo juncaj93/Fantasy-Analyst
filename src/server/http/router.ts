@@ -102,7 +102,7 @@ export class Router<Env> {
          * a screen that failed to load was the response the phone threw away.
          */
         console.error(`${request.method.toUpperCase()} ${url.pathname} failed`, err);
-        return jsonResponse({ error: message }, 500);
+        return jsonResponse(uncaughtBody(request.method, message), 500);
       }
     }
     return jsonResponse({ error: 'not found', path: url.pathname }, 404);
@@ -134,4 +134,22 @@ export function jsonResponse(body: unknown, status = 200, headers: Record<string
 
 export function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ error: message }, status);
+}
+
+/**
+ * The body of a 500 nobody meant to send.
+ *
+ * A read that throws is a screen failing to load, and the exception's own
+ * words ("Cannot read properties of undefined", "D1_ERROR …") are not
+ * something to put in front of a reader. With no `error` string, the client
+ * shows its own line ("Couldn’t load this yet. Pull to refresh or try
+ * again."); the message stays in `detail` for diagnostics and in the log.
+ *
+ * A write keeps the message as `error`, because Setup's actions say their
+ * own failures that way (connecting an unknown Sleeper username, an import
+ * the parser refused) and those words are the useful part.
+ */
+export function uncaughtBody(method: string, message: string): { error: string } | { detail: string } {
+  const verb = method.toUpperCase();
+  return verb === 'GET' || verb === 'HEAD' ? { detail: message } : { error: message };
 }
