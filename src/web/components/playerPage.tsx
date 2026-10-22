@@ -54,6 +54,7 @@ import {
   formatDate,
 } from './common.tsx';
 import { ListGroup, ListRow, PushScreen, SegmentedControl, Sheet, SkeletonRows } from './native.tsx';
+import { SLEEPER_NUM_CLASS } from '../sleeperFallback.ts';
 import {
   InjuryDetail,
   LatestNews,
@@ -787,9 +788,20 @@ function Market({
         <>
           <DetailLabel>Draft market</DetailLabel>
           <div className="season-line" data-testid="player-page-adp">
+            {/*
+              Sleeper's own draft rank, marked the way every Sleeper number in
+              the app is (italic, dotted underline) rather than named beside it.
+            */}
             <span className="metric">
-              Sleeper{' '}
-              {player.draftRank == null ? <Unknown what="Sleeper draft rank" /> : <strong>{player.draftRank}</strong>}
+              Rank{' '}
+              {player.draftRank == null ? (
+                <Unknown what="Sleeper draft rank" />
+              ) : (
+                <strong className={SLEEPER_NUM_CLASS}>
+                  {player.draftRank}
+                  <span className="sr-only">, Sleeper draft rank</span>
+                </strong>
+              )}
             </span>
             <span className="metric">
               Here{' '}
