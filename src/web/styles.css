@@ -82,11 +82,12 @@
   /*
    * Tertiary text, and no quieter than this.
    *
-   * It reads at 4.5:1 against both the page and a card, which is the floor for
+   * It reads at 4.5:1 against the page, a card and the sunken grey of a chip
+   * or a header band (tests/colorContrast.test.ts), which is the floor for
    * text this size. A greyer one looked calmer on a desk and disappeared on a
    * phone in daylight — minimalism is not allowed to cost legibility.
    */
-  --text-faint: #64707f;
+  --text-faint: #5f6a79;
 
   /* -- semantic states --------------------------------------------------- */
   --accent: #2a5fd8;
@@ -94,7 +95,7 @@
   --accent-tint: #e6edff;
   --on-accent: #ffffff;
 
-  --pos: #157a4c;
+  --pos: #15784a;
   --pos-tint: #e2f4ea;
   --neg: #c02828;
   --neg-tint: #fceaea;
@@ -112,10 +113,10 @@
    */
   --status-neutral: #4a5567;
   --on-status-neutral: #ffffff;
-  --live: #157a4c;
+  --live: #15784a;
   --live-tint: var(--pos-tint);
-  --locked: #64707f;
-  --confidence: #64707f;
+  --locked: #5f6a79;
+  --confidence: #5f6a79;
 
   /*
    * Paper: the compare sheet's warm palette, from the approved redesign
