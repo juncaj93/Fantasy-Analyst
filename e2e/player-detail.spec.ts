@@ -709,3 +709,25 @@ test.describe('the same expanded player, opened from Trades', () => {
     await expect(injury, 'the designation is on the card twice').not.toContainText('OUT');
   });
 });
+
+/**
+ * Sleeper's draft rank on the full page wears the Sleeper-number marker
+ * instead of the word "Sleeper" beside it (October 2026 audit, B8).
+ */
+test('the Draft market line marks Sleeper’s rank, and never names Sleeper beside it', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('tab-players').click();
+  await page.locator('[data-testid="player-search-row"][data-player-id="1004"]').click();
+  await page.getByTestId('player-full-profile').click();
+  await page.getByTestId('player-page-sections').getByRole('button', { name: 'Market' }).click();
+
+  const line = page.getByTestId('player-page-adp');
+  await expect(line).toBeVisible();
+  const visible = await line.evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('.sr-only').forEach((n) => n.remove());
+    return copy.textContent ?? '';
+  });
+  expect(visible).not.toMatch(/Sleeper/);
+  await expect(line.locator('.num-sleeper')).toHaveCount(1);
+});
