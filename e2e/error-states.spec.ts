@@ -1,10 +1,10 @@
 /**
- * What a season screen says when its own read fails.
+ * What a screen says when its own read fails.
  *
  * The error notice is the whole answer, and it stays until there is something
- * to show in its place. A line under it that reads as a fact
- * about the data ("Your roster was not found", "No players found") is false:
- * nothing was found or not found, because nothing arrived.
+ * to show in its place. A line under it that reads as a fact about the data
+ * ("Your roster was not found", "No players found") is false: nothing was
+ * found or not found, because nothing arrived.
  */
 
 import { expect, test, type Page } from '@playwright/test';
