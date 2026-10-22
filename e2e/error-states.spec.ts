@@ -23,7 +23,7 @@ async function seasonBar(page: Page): Promise<void> {
   });
 }
 
-test.describe('a season screen whose read fails', () => {
+test.describe('a screen whose read fails', () => {
   test('Waivers shows the error and nothing about a missing roster', async ({ page }) => {
     await seasonBar(page);
     await page.route('**/api/leagues/*/waivers', (route) => route.abort('failed'));
