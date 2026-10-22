@@ -426,7 +426,7 @@ test.describe('a mock draft', () => {
     await openMock(page);
 
     await expect(page.getByTestId('mock-subtitle')).toContainText('your pick');
-    await expect(page.getByTestId('mock-banner')).toContainText('Nothing here reaches Sleeper');
+    await expect(page.getByTestId('mock-banner')).toHaveText('Practice only');
     await expect(page.locator('[data-testid^="mock-row-"]').first()).toBeVisible();
     expect(double.requests()[0]!.action).toBe('start');
   });
