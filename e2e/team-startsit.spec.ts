@@ -1407,6 +1407,31 @@ test.describe('a borrowed projection says whose it is', () => {
  * which is the property that was actually broken — a test pinned to McConkey
  * and Walker would pass again the moment the demo roster changed.
  */
+/**
+ * One change written into the demo week's own answer.
+ *
+ * The demo lineup suggests nothing, so without this the three swap-row tests
+ * below skipped on every run at every width and checked nothing. Sleeper has
+ * Nate Kowalski (on injured reserve) in FLEX and Cal Whitfield on the bench;
+ * the answer here starts Whitfield in FLEX instead, the swap the seed's IR
+ * starter exists to provoke. Install before `openTeam`, which reloads.
+ */
+async function withOneSwap(page: Page): Promise<void> {
+  await page.route('**/api/leagues/*/lineup', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const slots = (body.slots as { slot: string; playerId: string | null }[]).map((s) =>
+      s.slot === 'FLEX'
+        ? { ...s, playerId: '1011', name: 'Cal Whitfield', position: 'WR', alreadyStarting: false }
+        : s.playerId === '1011'
+          ? { ...s, playerId: null, name: null, position: null }
+          : s,
+    );
+    const swap = { slot: 'FLEX', inPlayerId: '1011', inName: 'Cal Whitfield', outPlayerId: '1009', outName: 'Nate Kowalski', gain: 1.25, reason: 'test' };
+    await route.fulfill({ response, body: JSON.stringify({ ...body, slots, swaps: [swap], fills: [] }) });
+  });
+}
+
 test.describe('the row and the card are about the same player', () => {
   test.beforeEach(async ({ page }) => openTeam(page));
 
@@ -1447,8 +1472,10 @@ test.describe('the row and the card are about the same player', () => {
   });
 
   test('opens the comparison, holding both men, from a row that names two', async ({ page }) => {
+    await withOneSwap(page);
+    await openTeam(page);
     const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
-    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+    await expect(swap).toHaveCount(1);
 
     const incumbent = await swap.getAttribute('data-player-id');
     const challenger = await swap.getAttribute('data-recommended-player-id');
@@ -1461,13 +1488,15 @@ test.describe('the row and the card are about the same player', () => {
   });
 
   test('answers the question it was opened with, without a second tap', async ({ page }) => {
+    await withOneSwap(page);
+    await openTeam(page);
     /*
      * Tapping `Start A over B` and then being asked to tap `Compare 2 players`
      * is a step with nothing in it: the reader chose nobody, the sheet chose
      * both, and the button's only job was to confirm a selection nobody made.
      */
     const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
-    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+    await expect(swap).toHaveCount(1);
     await swap.click();
 
     const grid = page.getByTestId('compare-grid');
@@ -1476,8 +1505,10 @@ test.describe('the row and the card are about the same player', () => {
   });
 
   test('takes the answer away the moment a chip is removed', async ({ page }) => {
+    await withOneSwap(page);
+    await openTeam(page);
     const swap = page.locator('[data-testid="starter-row"][data-verdict="swap"]').first();
-    if ((await swap.count()) === 0) test.skip(true, 'the demo lineup has no swap this week');
+    await expect(swap).toHaveCount(1);
     await swap.click();
     await expect(page.getByTestId('compare-grid')).toBeVisible();
 
