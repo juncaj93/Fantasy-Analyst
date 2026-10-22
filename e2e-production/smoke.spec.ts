@@ -2075,7 +2075,12 @@ test.describe('the season features', () => {
     expect(overflow, 'Waivers scrolls sideways').toBeLessThanOrEqual(0);
   });
 
-  test('the waiver plan offers no control, and nothing that would transact', async ({ page }) => {
+  /*
+   * On the deploy gate since 22 October 2026 (audit C3): the plan is the
+   * answer the Waivers screen exists for, and the cards test above proves the
+   * tiers but not that a plan the data carries is drawn.
+   */
+  test('the waiver plan offers no control, and nothing that would transact @critical', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
@@ -2124,6 +2129,39 @@ test.describe('the season features', () => {
 
     await expect(card.getByRole('button')).toHaveCount(0);
     await expect(card).not.toContainText('Keeping ');
+  });
+});
+
+/**
+ * Matchup, live, on every deploy (audit C3, 22 October 2026).
+ *
+ * The deploy gate opened every other season screen's content and never
+ * Matchup's. Whatever the week holds is asked of the API first, so the check
+ * is that the screen draws it: a score and one row per starting slot when
+ * there is a matchup, and the API's own reason when there is not.
+ */
+test.describe('the matchup', () => {
+  test('draws the score and one row per starting slot, or says why not @critical', async ({ page }) => {
+    await page.goto('/');
+    const tabs = await expectedTabs(page);
+    test.skip(!tabs.includes('matchup'), 'no Matchup tab this week');
+    const id = await selectedLeagueId(page);
+    const matchup = id
+      ? await apiJson<{ found: boolean; reason: string | null; forecast: { slots: unknown[] } | null }>(
+          page,
+          `/api/leagues/${id}/matchup`,
+        )
+      : null;
+    test.skip(!matchup, 'no league on this deployment');
+
+    await open(page, 'matchup');
+    if (!matchup!.found || !matchup!.forecast) {
+      await expect(page.getByText(matchup!.reason ?? 'No matchup to show for this week.')).toBeVisible({ timeout: 20_000 });
+      return;
+    }
+    await expect(page.getByTestId('matchup-score')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('matchup-row')).toHaveCount(matchup!.forecast.slots.length);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   });
 });
 
