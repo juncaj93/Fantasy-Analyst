@@ -195,6 +195,7 @@ export default {
         return await app(request, toAppEnv(env, undefined, ctx));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        console.error(`${request.method.toUpperCase()} ${new URL(request.url).pathname} failed before routing`, err);
         return new Response(JSON.stringify({ error: message }), {
           status: 500,
           headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
