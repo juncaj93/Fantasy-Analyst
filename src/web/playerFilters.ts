@@ -200,9 +200,10 @@ export function ownerPillLabel(
  * manager is the *subject* of his own empty roster — because `Chris's` and
  * `Chris'` is an argument nobody should have to have with a fixture.
  *
- * "Run a Sleeper player sync" appears in exactly one case and deliberately: the
- * unfiltered list. With any filter on, an empty list is a fact about the filter,
- * and sending the reader to Setup would be advice about the wrong problem.
+ * The unfiltered list says only that it is empty. It used to add "Run a Sleeper
+ * player sync from the Team screen", which named a screen with no such control
+ * (the player list is refreshed on Setup's Sleeper step) and was help text the
+ * reader does not need.
  */
 export function playersEmptyLine(opts: {
   query: string;
@@ -226,6 +227,6 @@ export function playersEmptyLine(opts: {
 
   if (query) return `Nobody matching “${query}”${under}.`;
   return position === ALL_FILTER
-    ? 'No players found. Run a Sleeper player sync from the Team screen.'
+    ? 'No players found.'
     : `No ${position} players found.`;
 }
