@@ -43,7 +43,11 @@ const snapshot = JSON.parse(readFileSync(snapshotFile, 'utf8')) as any;
 const { request } = waiverRequestFromSnapshot(snapshot);
 
 /* Real names, by roster id, from Sleeper's public league data. */
-const rootLeague = process.env.SLEEPER_LEAGUE_ID || '1385016656425668608';
+const rootLeague = process.env.SLEEPER_LEAGUE_ID ?? '';
+if (!rootLeague) {
+  console.error('SLEEPER_LEAGUE_ID is not set. It is a repository secret: see docs/SETUP.md, "The league ID secret".');
+  process.exit(1);
+}
 const users = read<{ user_id: string; display_name: string }[]>(`users_${rootLeague}.json`);
 const rosters = read<{ roster_id: number; owner_id: string }[]>(`rosters_${rootLeague}.json`);
 const nameOfUser = new Map(users.map((u) => [u.user_id, u.display_name]));

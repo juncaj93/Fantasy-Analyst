@@ -22,7 +22,11 @@ import { dirname, join } from 'node:path';
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
 const SLEEPER = 'https://api.sleeper.app';
-const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID || '1385016656425668608';
+const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID ?? '';
+if (!SLEEPER_LEAGUE) {
+  console.error('SLEEPER_LEAGUE_ID is not set. It is a repository secret: see docs/SETUP.md, "The league ID secret".');
+  process.exit(1);
+}
 /* main when this round started building: #381. */
 const BEFORE_SHA = process.env.BEFORE_SHA ?? 'a322a10be3218f4145635ab8e40d7a0cd513a4dc';
 const dir = mkdtempSync(join(tmpdir(), 'pickup-start-'));

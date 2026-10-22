@@ -12,7 +12,7 @@
  *   node scripts/probe-sleeper-draft-history.mjs <league_id> [username]
  *
  * What the first run established, against a real ten-team league
- * (`1385016656425668608`, "Tony's Pizza Fantasy", 2026):
+ * (Tony's Pizza Fantasy, 2026):
  *
  *   - The chain is three seasons deep — 2026, 2025, 2024 — and then ends with a
  *     null `previous_league_id`. Each hop is one `GET /league/<id>`. Two of the
