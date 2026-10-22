@@ -170,7 +170,12 @@ export function TeamScreen({
       { when: weekly != null, undo: () => setWeekly(null) },
       { when: waiverDetail != null, undo: () => setWaiverDetail(null) },
       { when: tierDetail != null, undo: () => setTierDetail(null) },
-      { when: message != null, undo: () => setMessage(null) },
+      /*
+       * Not while the roster never arrived: the message is then the only thing
+       * on screen saying why, and clearing it left placeholder rows with no
+       * explanation and nothing loading behind them.
+       */
+      { when: message != null && roster != null, undo: () => setMessage(null) },
     ]);
   }, [resetNonce]);
 
