@@ -2017,7 +2017,7 @@ test.describe('the season features', () => {
    * card, the pill and logo before the name, one chip line, and the "Do this"
    * summary only when one claim depends on another.
    */
-  test('the waiver cards draw the live tiers with no photo and one chip line @critical', async ({ page }) => {
+  test('the waiver cards draw the live tiers with no photo and one line of pills @critical', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
@@ -2042,7 +2042,8 @@ test.describe('the season features', () => {
       els.map((el) => {
         const name = el.querySelector('.player-name')!.getBoundingClientRect();
         const pill = el.querySelector('.pos-pill')!.getBoundingClientRect();
-        const chips = [...el.querySelectorAll('[data-testid="wcard-chip"]')].map((c) => {
+        /* The status pill rides the name line and the drop the arrow line, each one line. */
+        const chips = [...el.querySelectorAll('[data-testid="wcard-chips"] [data-testid="wcard-chip"]')].map((c) => {
           const r = c.getBoundingClientRect();
           return Math.round((r.top + r.bottom) / 2);
         });

@@ -145,8 +145,8 @@ describe('the card, 22 October 2026', () => {
     }
   });
 
-  it('says a claim in one chip: the waiver status and the bid band', () => {
-    expect(waiverChip('2026-10-14T19:10:00.000Z', '$3–7')).toMatch(/^Waivers until \w{3} \$3–7$/);
+  it('says a claim in one short chip: the waiver status and the bid band, the day on the sheet', () => {
+    expect(waiverChip('2026-10-14T19:10:00.000Z', '$3–7')).toBe('Waivers $3–7');
     expect(waiverChip(null, '$0–1')).toBe('Waivers $0–1');
     expect(waiverChip('2026-10-14T19:10:00.000Z', null)).toMatch(/^Waivers until \w{3}$/);
   });

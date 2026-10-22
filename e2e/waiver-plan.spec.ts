@@ -419,7 +419,12 @@ test.describe('free agent or waiver claim, on the board', () => {
     await expect(free.locator('[data-chip="bid"]')).toHaveCount(0);
     await expect(free).not.toContainText('FAAB');
     const claim = page.locator('[data-chip="waivers"]');
-    if ((await claim.count()) > 0) await expect(claim.first()).toHaveText(/^Waivers until \w+( \S+)?$/);
+    if ((await claim.count()) > 0) {
+      /* The row says "Waivers $x–y"; the day it clears is on the sheet (22 October 2026). */
+      await expect(claim.first()).toHaveText(/^Waivers( until \w+)?( \S+)?$/);
+      await page.locator('[data-testid="waiver-row"]:has([data-chip="waivers"])').first().click();
+      await expect(page.getByTestId('waiver-detail-window')).toContainText('On waivers until');
+    }
   });
 });
 
