@@ -25,6 +25,7 @@ import {
   D1_DAILY_ROWS_READ,
   describeQuota,
   fractionOfUtcDay,
+  resetLabel,
   type D1QuotaReading,
 } from '../src/core/health/quota.ts';
 import { D1QuotaService, forgetQuotaReadings, pickMetric } from '../src/server/services/d1QuotaService.ts';
@@ -85,6 +86,14 @@ describe("the day's arithmetic", () => {
     expect(view.headline).toBe("20% of today's rows");
   });
 
+  it('names the reset in Eastern time, with the UTC anchor, on either side of daylight saving', () => {
+    expect(resetLabel(new Date('2026-10-22T18:00:00.000Z'))).toBe('8 PM ET (00:00 UTC)');
+    expect(resetLabel(new Date('2026-11-02T18:00:00.000Z'))).toBe('7 PM ET (00:00 UTC)');
+    const view = describeQuota({ availability: 'reading', reading: reading({ rowsRead: 1_000_000 }) }, NOON);
+    expect(view.detail).toContain('On pace for 40% by the 8 PM ET (00:00 UTC) reset.');
+    expect(view.detail).not.toContain('midnight UTC');
+  });
+
   it('refuses to project from the first minutes of a day', () => {
     const early = new Date('2026-09-08T00:30:00.000Z');
     const view = describeQuota({ availability: 'reading', reading: reading({ rowsRead: 200_000 }) }, early);
@@ -98,7 +107,7 @@ describe("the day's arithmetic", () => {
     expect(view.percentUsed, 'barely half, and nothing is wrong yet').toBe(52);
     expect(view.projectedPercent).toBe(104);
     expect(view.state, 'except that this day ends in an outage').toBe('critical');
-    expect(view.detail).toContain('runs out before midnight');
+    expect(view.detail).toContain('runs out before the 8 PM ET (00:00 UTC) reset');
   });
 
   it('is critical on the number alone once the day is nearly spent', () => {

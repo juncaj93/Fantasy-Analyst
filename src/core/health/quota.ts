@@ -112,6 +112,19 @@ export function fractionOfUtcDay(at: Date): number {
   return Math.min(1, Math.max(0, ms / 86_400_000));
 }
 
+/**
+ * When the allowance resets, in Alex's time with the UTC anchor beside it:
+ * `8 PM ET (00:00 UTC)`, and `7 PM ET` once daylight saving has ended. Read
+ * from the date, never a fixed offset.
+ */
+export function resetLabel(at: Date): string {
+  const next = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1);
+  const eastern = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: true }).format(
+    new Date(next),
+  );
+  return `${eastern.replace(/\s+/g, ' ')} ET (00:00 UTC)`;
+}
+
 function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
@@ -159,12 +172,13 @@ export function describeQuota(
   if (percentUsed >= CRITICAL_AT_PERCENT || (projectedPercent ?? 0) >= 100) state = 'critical';
   else if (percentUsed >= WATCH_AT_PERCENT || (projectedPercent ?? 0) >= PACE_WATCH_PERCENT) state = 'watch';
 
+  const reset = resetLabel(now);
   const paceSentence =
     projectedPercent == null
-      ? 'Too early in the UTC day to say where it lands.'
+      ? 'Too early in the day to say where it lands.'
       : projectedPercent >= 100
-        ? `At this rate today runs out before midnight UTC (on pace for ${projectedPercent}%).`
-        : `On pace for ${projectedPercent}% by midnight UTC.`;
+        ? `At this rate today runs out before the ${reset} reset, on pace for ${projectedPercent}%.`
+        : `On pace for ${projectedPercent}% by the ${reset} reset.`;
 
   const yesterday =
     reading.previousDayRowsRead == null
