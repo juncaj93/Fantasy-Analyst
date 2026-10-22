@@ -43,7 +43,7 @@ import {
   playersEmptyLine,
   teamLabel,
 } from '../playerFilters.ts';
-import { Empty, SignedValue } from '../components/common.tsx';
+import { Empty, Notice, SignedValue } from '../components/common.tsx';
 import { ListGroup, ListRow, NavBar, SearchField, SegmentedControl, Sheet, SkeletonRows } from '../components/native.tsx';
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
@@ -207,6 +207,8 @@ export function PlayersScreen({
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Why the first page did not arrive. Shown instead of an empty-list line, which would be a claim about the data. */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [flagging, setFlagging] = useState<string | null>(null);
   /** Whose page is open on top of the list, and nothing about the list itself. */
   const [openId, setOpenId] = useState<string | null>(null);
@@ -363,6 +365,9 @@ export function PlayersScreen({
         });
         if (cancelled) return;
         applyFirstPage(res);
+        setLoadError(null);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -617,10 +622,11 @@ export function PlayersScreen({
           </ListGroup>
         </Sheet>
       ) : null}
+      {loadError ? <Notice tone="error">{loadError}</Notice> : null}
       {loading && players.length === 0 ? (
         <SkeletonRows rows={8} testId="players-skeleton" />
       ) : players.length === 0 ? (
-        <Empty>{playersEmptyLine({ query, position, owner: ownerFilter, ownerLabel })}</Empty>
+        loadError ? null : <Empty>{playersEmptyLine({ query, position, owner: ownerFilter, ownerLabel })}</Empty>
       ) : (
         <>
           {/*

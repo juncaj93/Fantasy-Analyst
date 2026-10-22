@@ -1,9 +1,9 @@
 /**
  * What a season screen says when its own read fails.
  *
- * The error notice is the whole answer. A second line under it that reads as a
- * fact about the league ("Your roster was not found") is false: nothing was
- * found or not found, because nothing arrived.
+ * The error notice is the whole answer. A line under it that reads as a fact
+ * about the data ("Your roster was not found", "No players found") is false:
+ * nothing was found or not found, because nothing arrived.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -23,7 +23,7 @@ async function seasonBar(page: Page): Promise<void> {
   });
 }
 
-test.describe('a season screen whose read fails', () => {
+test.describe('a screen whose read fails', () => {
   test('Waivers shows the error and nothing about a missing roster', async ({ page }) => {
     await seasonBar(page);
     await page.route('**/api/leagues/*/waivers', (route) => route.abort('failed'));
@@ -32,5 +32,17 @@ test.describe('a season screen whose read fails', () => {
 
     await expect(page.getByText('Couldn’t load this yet. Pull to refresh or try again.')).toBeVisible();
     await expect(page.getByText('Your roster was not found in this league.', { exact: false })).toHaveCount(0);
+  });
+
+  test('Players shows the error, not an empty list, and throws nothing', async ({ page }) => {
+    const thrown: string[] = [];
+    page.on('pageerror', (e) => thrown.push(e.message));
+    await page.route('**/api/players?*', (route) => route.abort('failed'));
+    await page.goto('/');
+    await page.getByTestId('tab-players').click();
+
+    await expect(page.getByText('Couldn’t load this yet. Pull to refresh or try again.')).toBeVisible();
+    await expect(page.getByText('No players found.')).toHaveCount(0);
+    expect(thrown, 'the failed read escaped as an unhandled error').toEqual([]);
   });
 });
