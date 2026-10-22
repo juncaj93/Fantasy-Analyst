@@ -36,7 +36,7 @@
  * narrowing it.
  */
 
-import { TRAILING_FILTER_POSITIONS, orderFilterChips, orderPositions } from '../core/sleeper/eligibility.ts';
+import { orderFilterChips, orderPositions } from '../core/sleeper/eligibility.ts';
 import {
   ANYONE_OWNER,
   AVAILABLE_OWNER,
@@ -46,17 +46,6 @@ import {
 
 /** Everything, the chip the list opens on. */
 export const ALL_FILTER = 'ALL';
-
-/**
- * The two chips that follow the flex view, in the order they follow it.
- *
- * Re-exported rather than redeclared: the draft board, the compare picker and
- * the draft screen's roster strip all read the same constant, and a second copy
- * of it here is exactly how two rows end up disagreeing about where a defence
- * goes. See `TRAILING_FILTER_POSITIONS` for why these two and why the kicker
- * entry is inert today.
- */
-export const TRAILING_FILTERS = TRAILING_FILTER_POSITIONS;
 
 /**
  * `ALL · QB · RB · WR · TE · FLX · K · DEF`, from what the league actually

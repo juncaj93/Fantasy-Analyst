@@ -1891,22 +1891,6 @@ body,
   padding-left: 0;
 }
 
-.metric-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-/* Three columns wrap on threes, so the rule above has to be undone and redone
-   here rather than inherited — a first-in-row cell is a count, not a class. */
-.metric-grid-3 > .stat:nth-child(4n + 1) {
-  border-left: 1px solid var(--separator-soft);
-  padding-left: var(--sp-2);
-}
-
-.metric-grid-3 > .stat:nth-child(3n + 1) {
-  border-left: 0;
-  padding-left: 0;
-}
-
 /*
  * A status line, not a banner.
  *
@@ -1986,10 +1970,6 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.stat-value .sig {
-  font-size: 0.9rem;
 }
 
 /*
@@ -3065,24 +3045,6 @@ body,
   margin: 0 -1px;
 }
 
-/* Positive/negative always pair colour with a glyph + word. */
-.sig {
-  font-weight: 620;
-  white-space: nowrap;
-}
-
-.sig-pos {
-  color: var(--pos);
-}
-
-.sig-neg {
-  color: var(--neg);
-}
-
-.sig-none {
-  color: var(--text-faint);
-}
-
 /*
  * A market delta, and the one place in this app where a `+` is red.
  *
@@ -3135,14 +3097,6 @@ body,
 }
 
 .metric strong.delta[data-band='costly'] {
-  color: var(--neg);
-}
-
-.metric strong.sig-pos {
-  color: var(--pos);
-}
-
-.metric strong.sig-neg {
   color: var(--neg);
 }
 
