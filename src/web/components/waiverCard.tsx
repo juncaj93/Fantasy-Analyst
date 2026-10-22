@@ -22,8 +22,11 @@
  */
 
 import type { ReactNode } from 'react';
-import type { WaiverCardModel } from '../waiverCard.ts';
+import type { CardChip, WaiverCardModel } from '../waiverCard.ts';
 import { PlayerIdentity, positionAccentClass } from './common.tsx';
+
+/** The chips that sit on the first line, after the name, like Team's matchup pill. */
+const INLINE: ReadonlySet<CardChip['key']> = new Set(['free', 'waivers', 'bid', 'injury']);
 
 export function WaiverCard({
   model,
@@ -45,6 +48,16 @@ export function WaiverCard({
   data?: Record<string, string>;
 }) {
   const pos = model.position.toUpperCase();
+  /*
+   * Laid out exactly like a lineup row (Alex, 22 October 2026: "follow the
+   * same style and spacing as the team page"): one line with the status pill
+   * after the name and the gain where Team prints a score, then at most one
+   * arrow line, like "→ Start KC Concepcion instead", carrying the spot and
+   * the short reason.
+   */
+  const inline = model.chips.filter((chip) => INLINE.has(chip.key));
+  const spot = model.chips.filter((chip) => !INLINE.has(chip.key));
+  const sub = spot.length > 0 || model.reason != null;
   return (
     <button
       type="button"
@@ -52,6 +65,7 @@ export function WaiverCard({
       data-testid={testId}
       data-player-id={model.playerId}
       data-position={pos}
+      data-sub={sub ? 'yes' : undefined}
       aria-label={[model.name, model.gainSpoken, model.fullReason].filter(Boolean).join(', ')}
       onClick={onOpen}
       {...data}
@@ -59,30 +73,49 @@ export function WaiverCard({
       <div className="player-row-top">
         <PlayerIdentity position={model.position} team={model.team} />
         <span className="player-name">{model.name}</span>
+        {inline.length > 0 ? (
+          <span className="row-tags" data-testid="wcard-chips">
+            {inline.map((chip) => (
+              <span
+                key={chip.key}
+                className="fixture-chip"
+                data-rating={chip.key === 'injury' ? 'tough' : chip.key === 'free' ? 'neutral' : undefined}
+                data-testid="wcard-chip"
+                data-chip={chip.key}
+              >
+                {chip.label}
+              </span>
+            ))}
+          </span>
+        ) : null}
         <span className="row-value">
-          <span className="fixture-chip" data-rating={model.gainTone === 'tag-take' ? 'soft' : undefined} data-testid={gainTestId}>
-            {model.gain}
+          {/* A stash has no points yet: Team's dash, with the words on the arrow line. */}
+          <span
+            className={`proj${model.stash ? ' proj-out' : model.gainTone === 'tag-take' ? ' proj-gain-take' : ''}`}
+            data-testid={gainTestId}
+            data-label={model.gain}
+          >
+            {model.stash ? '—' : model.gain}
           </span>
         </span>
       </div>
-      {model.chips.length > 0 ? (
-        <div className="verdict-line wrow-chips" data-testid="wcard-chips">
-          {model.chips.map((chip) => (
-            <span
-              key={chip.key}
-              className="fixture-chip"
-              data-rating={chip.key === 'injury' ? 'tough' : undefined}
-              data-testid="wcard-chip"
-              data-chip={chip.key}
-            >
-              {chip.label}
+      {sub ? (
+        <div className="verdict-line" data-testid="wcard-sub">
+          <span className="verdict-arrow" aria-hidden="true">→</span>{' '}
+          {spot.map((chip, i) => (
+            <span key={chip.key}>
+              {i > 0 ? ' · ' : ''}
+              <span className="verdict-name" data-testid="wcard-chip" data-chip={chip.key}>
+                {chip.label}
+              </span>
             </span>
           ))}
-        </div>
-      ) : null}
-      {model.reason ? (
-        <div className={`verdict-line faint${reasonWarn ? ' waiver-notes-warn' : ''}`} data-testid={reasonTestId}>
-          {model.reason}
+          {model.reason ? (
+            <span className={reasonWarn ? 'waiver-notes-warn' : 'faint'}>
+              {spot.length > 0 ? ' · ' : ''}
+              <span data-testid={reasonTestId}>{model.reason}</span>
+            </span>
+          ) : null}
         </div>
       ) : null}
     </button>

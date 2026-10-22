@@ -216,7 +216,7 @@ test.describe('the tiers the deployment computes', () => {
     for (const row of await rows.all()) {
       /* At most one short reason; the full sentence is the sheet's "Why". */
       for (const reason of await row.getByTestId('tier-reason').allInnerTexts()) expect(reason.trim().length).toBeLessThanOrEqual(32);
-      expect(await row.getByTestId('tier-gain').innerText()).toMatch(/^\+\d+\.\d$|^IR stash$|^Return unknown$/);
+      expect(await row.getByTestId('tier-gain').innerText()).toMatch(/^\+\d+\.\d$|^—$/);
     }
     await noSidewaysScroll(page);
     await noTransactionControl(page);
@@ -287,7 +287,7 @@ test.describe('the tiers as a layout', () => {
 
     const claim = page.locator('[data-testid="waiver-tier-row"][data-player-id="t2"]');
     /* One chip for the claim: the waiver status and the bid band together (22 October 2026). */
-    await expect(claim.getByTestId('wcard-chip')).toHaveText([/^Waivers until \w+ \$64–100$/, 'Drop: Miller']);
+    await expect(claim.getByTestId('wcard-chip')).toHaveText(['Waivers $64–100', 'Drop: Miller']);
     const box = (await claim.boundingBox())!;
     expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(110);
     await noSidewaysScroll(page);
@@ -312,7 +312,9 @@ test.describe('the tiers as a layout', () => {
     }
     await expect(page.getByTestId('tier-consider-title')).toHaveText('Worth considering');
     await expect(page.getByTestId('tier-watch-title')).toHaveText('Watch list');
-    await expect(page.locator('[data-player-id="t3"]').getByTestId('tier-gain')).toHaveText('IR stash');
+    /* A stash has no points: Team's dash in the score column, the words on the arrow line. */
+    await expect(page.locator('[data-player-id="t3"]').getByTestId('tier-gain')).toHaveText('—');
+    await expect(page.locator('[data-player-id="t3"]').getByTestId('tier-reason')).toHaveText('IR stash, out now');
     await expect(page.getByTestId('drop-ready-row')).toHaveText(/Kendre Miller.*No start in weeks 5 to 7/);
     await expect(page.getByTestId('drop-ready').getByRole('button')).toHaveCount(0);
   });
@@ -494,7 +496,8 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
 
   test('labels a stash with no known return on the Watch list, at $0 to $1', async ({ page }) => {
     const row = page.locator('[data-testid="waiver-tier-row"][data-player-id="r3"]');
-    await expect(row.getByTestId('tier-gain')).toHaveText('Return unknown');
+    await expect(row.getByTestId('tier-gain')).toHaveText('—');
+    await expect(row.getByTestId('tier-reason')).toHaveText('Out now, return unknown');
     await expect(row.locator('[data-chip="waivers"]')).toHaveText('Waivers $0–1');
     await row.click();
     await expect(page.getByTestId('tier-detail-pickup')).toHaveText('Pickup$0 to stash · in for Ladd McConkey');
@@ -718,8 +721,8 @@ test.describe('the waiver card on a phone', () => {
       };
     });
     expect(lines.chipRows).toBe(1);
-    /* "Waivers until Wed $5–14" fits whole on one line at every width, beside the longest drop. */
-    expect(lines.waivers).toMatch(/^Waivers until \w+ \$5–14$/);
+    /* "Waivers $5–14" fits whole beside the name at every width. */
+    expect(lines.waivers).toBe('Waivers $5–14');
     expect(lines.waiversClipped, 'the waiver chip was cut off').toBe(false);
     expect(lines.nameWraps).toBe(false);
     await noSidewaysScroll(page);

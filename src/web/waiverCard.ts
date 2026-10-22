@@ -35,6 +35,8 @@ export interface WaiverCardModel {
   chips: CardChip[];
   /** The chips that did not fit; the sheet carries what they say. */
   overflow: CardChip[];
+  /** An injured-reserve stash: no points to print, so the score column shows Team's dash. */
+  stash?: boolean;
   /** One short reason, about 32 characters, or none. */
   reason: string | null;
   /** The full reason, for the accessible name and the sheet. */
@@ -96,7 +98,10 @@ export function shortReason(row: Pick<TierRow, 'reason' | 'reasonCode' | 'stashL
   if ((m = r.match(/^Better depth than (.+?); he would not start yet$/))) return clip(m[1] === 'what you hold' ? 'Bench depth' : `Depth over ${initialled(m[1]!)}`);
   if (/^Starts this week:/.test(r)) return 'Starts this week';
   if ((m = r.match(/^Ties (.+) this week$/))) return clip(m[1] === 'your best lineup' ? 'Ties your lineup' : `Ties ${initialled(m[1]!)}`);
-  if (row.reasonCode === 'ir_stash') return row.stashLabel && row.stashLabel !== 'return unknown' ? clip(`Out now, ${row.stashLabel}`) : 'Out now';
+  if (row.reasonCode === 'ir_stash') {
+    if (row.stashLabel === 'return unknown') return 'Out now, return unknown';
+    return row.stashLabel ? clip(`IR stash, ${row.stashLabel}`) : 'IR stash, out now';
+  }
   return r ? clip(r) : null;
 }
 
@@ -113,9 +118,14 @@ function bidLabel(bid: TierRow['bid']): string | null {
   return `$${bid.recommended}`;
 }
 
-/** `Waivers until Wed $3–7`, `Waivers $0–1` when the day is unknown, `Waivers until Wed` with no price. */
+/**
+ * `Waivers $3–7`, or `Waivers until Wed` with no price. Short, because it sits
+ * on the name line like Team's matchup pill (22 October 2026); the day the
+ * claim clears is on the sheet's pickup line.
+ */
 export function waiverChip(until: string | null, band: string | null): string {
-  return [until ? `Waivers until ${clearDay(until)}` : 'Waivers', band].filter(Boolean).join(' ');
+  if (band) return `Waivers ${band}`;
+  return until ? `Waivers until ${clearDay(until)}` : 'Waivers';
 }
 
 /** The card for one tier move. */
@@ -143,6 +153,7 @@ export function tierCard(row: TierRow): WaiverCardModel {
     gain,
     gainSpoken: gain.startsWith('+') ? `${gain} points` : gain,
     gainTone: TIER_TONE[row.tier],
+    ...(row.reasonCode === 'ir_stash' ? { stash: true } : {}),
     chips: all.slice(0, CARD_CHIPS_MAX),
     overflow: all.slice(CARD_CHIPS_MAX),
     reason: shortReason(row),

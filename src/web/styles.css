@@ -6174,6 +6174,7 @@ table.compact tr:last-child td {
  * it is one clause, and a clause that wrapped to a third line would push the
  * defence off the bottom.
  */
+.slot-group > .waiver-row[data-sub='yes'],
 .slot-group > [data-verdict='swap'],
 .slot-group > [data-verdict='fill'],
 .slot-group > [data-verdict='no_pick'] {
@@ -10796,11 +10797,6 @@ div.matchup-result {
 .best-move-row .best-move-pickup-names { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .best-move-chip { flex: 0 0 auto; }
 
-/*
- * A waiver row's chips: Team's own sub-line (`verdict-line`) holding Team's
- * pills (`fixture-chip`), on one line. The last chip gives way first.
- */
-.wrow-chips { display: flex; align-items: center; gap: var(--sp-1); }
-.wrow-chips > * { flex: none; }
-.wrow-chips > :last-child { flex: 0 1 auto; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; }
+/* A waiver row's gain sits where Team prints a score; a Do this gain is green. */
+.proj-gain-take { color: var(--pos); }
 .waivers-info-lines { margin: 2px 0 12px; padding-inline-start: 1.1em; font-size: 0.85rem; line-height: 1.4; }
