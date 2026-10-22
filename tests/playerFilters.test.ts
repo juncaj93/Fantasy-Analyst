@@ -168,12 +168,11 @@ describe('what an empty Players list is allowed to say', () => {
   const empty = { query: '', position: ALL_FILTER, owner: ANY_OWNER, ownerLabel: null };
 
   /**
-   * The one case that sends the reader to Setup, and it has to stay the one
-   * case: with a filter on, an empty list is a fact about the filter, and
-   * advising a player sync would be advice about the wrong problem.
+   * The unfiltered list says it is empty and nothing more. It once sent the
+   * reader to a player sync on the Team screen, which has no such control.
    */
-  it('blames the data only when nothing is narrowing the list', () => {
-    expect(playersEmptyLine(empty)).toContain('Sleeper player sync');
+  it('says the unfiltered list is empty, with no advice', () => {
+    expect(playersEmptyLine(empty)).toBe('No players found.');
     expect(playersEmptyLine({ ...empty, position: 'QB' })).toBe('No QB players found.');
     expect(playersEmptyLine({ ...empty, owner: { kind: 'available' } })).not.toContain('sync');
   });
