@@ -1,7 +1,8 @@
 /**
  * What a season screen says when its own read fails.
  *
- * The error notice is the whole answer. A line under it that reads as a fact
+ * The error notice is the whole answer, and it stays until there is something
+ * to show in its place. A line under it that reads as a fact
  * about the data ("Your roster was not found", "No players found") is false:
  * nothing was found or not found, because nothing arrived.
  */
@@ -44,5 +45,16 @@ test.describe('a screen whose read fails', () => {
     await expect(page.getByText('Couldn’t load this yet. Pull to refresh or try again.')).toBeVisible();
     await expect(page.getByText('No players found.')).toHaveCount(0);
     expect(thrown, 'the failed read escaped as an unhandled error').toEqual([]);
+  });
+
+  test('Team keeps the error on screen when its tab is tapped again', async ({ page }) => {
+    await page.route('**/api/leagues/*/roster', (route) => route.abort('failed'));
+    await page.goto('/');
+    await page.getByTestId('tab-team').click();
+    const error = page.getByText('Couldn’t load this yet. Pull to refresh or try again.');
+    await expect(error).toBeVisible();
+
+    await page.getByTestId('tab-team').click();
+    await expect(error).toBeVisible();
   });
 });
