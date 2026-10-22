@@ -89,19 +89,6 @@ export function InjuryTag({ status }: { status: string | null | undefined }) {
   );
 }
 
-export function Signal({ net, items, label }: { net: number; items?: number; label?: string }) {
-  const cls = net > 0 ? 'sig sig-pos' : net < 0 ? 'sig sig-neg' : 'sig sig-none';
-  const glyph = net > 0 ? '▲' : net < 0 ? '▼' : '–';
-  const word = net > 0 ? 'pos' : net < 0 ? 'neg' : 'flat';
-  const value = net === 0 ? '0' : `${net > 0 ? '+' : ''}${net}`;
-  return (
-    <span className={cls} title={`${label ?? 'news signal'}: ${value} net${items != null ? ` over ${items} item(s)` : ''}`}>
-      {glyph} {value} {word}
-      {items != null && items > 0 ? <span className="faint"> ({items})</span> : null}
-    </span>
-  );
-}
-
 /**
  * The tally, as small as it can be and still mean something: `+6` or `-2`.
  *
@@ -809,11 +796,6 @@ export function Stat({
       ) : null}
     </div>
   );
-}
-
-/** The at-a-glance row of key numbers used at the top of any player detail. */
-export function MetricGrid({ children, columns = 4 }: { children: ReactNode; columns?: 3 | 4 }) {
-  return <div className={columns === 3 ? 'metric-grid metric-grid-3' : 'metric-grid'}>{children}</div>;
 }
 
 /** A small uppercase label introducing a block inside a detail view. */

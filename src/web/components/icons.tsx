@@ -145,17 +145,6 @@ export function RefreshIcon({ size = 20, className }: IconProps) {
   );
 }
 
-/** About: an "i" in a ring, for a sheet that explains the screen. */
-export function InfoIcon({ size = 20, className }: IconProps) {
-  return (
-    <svg {...svgProps(size)} className={className}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 11v6" />
-      <path d="M12 7.5v.01" />
-    </svg>
-  );
-}
-
 /** Players: search. */
 export function SearchIcon({ size = 24, className }: IconProps) {
   return (
@@ -545,24 +534,6 @@ export function InstallIcon({ size = 18, className }: IconProps) {
     <svg {...svgProps(size)} className={className}>
       <path d="M12 15.5V4.25M8.5 7.5 12 4l3.5 3.5" />
       <path d="M5 13.5v4.75a1.75 1.75 0 0 0 1.75 1.75h10.5A1.75 1.75 0 0 0 19 18.25V13.5" />
-    </svg>
-  );
-}
-
-/** Swap one player for another: two arrows passing in opposite directions. */
-export function SwapIcon({ size = 18, className }: IconProps) {
-  return (
-    <svg {...svgProps(size)} className={className} strokeWidth={2}>
-      <path d="M17 3l4 4-4 4M21 7H9M7 21l-4-4 4-4M3 17h12" />
-    </svg>
-  );
-}
-
-/** Filled star, for the one mark that says "on your team". */
-export function StarIcon({ size = 13, className }: IconProps) {
-  return (
-    <svg {...svgProps(size)} className={className} fill="currentColor" stroke="none">
-      <path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.8-6.2 3.8 1.6-7L2 9.2l7.1-.6z" />
     </svg>
   );
 }

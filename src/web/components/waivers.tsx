@@ -257,18 +257,6 @@ export function WaiverRow({ row, onOpen }: { row: WaiverBoardRow; onOpen: () => 
 
 export { clearDay };
 
-/** `12–18%` / `$4–7` / `unknown`. Never a single number pretending to be a bid. */
-export function formatFaab(faab: NonNullable<WaiverBoardRow['faab']>): string {
-  const unit = faab.unit ?? 'percent';
-  const suffix = unit === 'percent' ? '%' : '';
-  const prefix = unit === 'dollar' ? '$' : '';
-  if (faab.low == null && faab.high == null) return 'unknown';
-  if (faab.low == null) return `up to ${prefix}${faab.high}${suffix}`;
-  if (faab.high == null) return `${prefix}${faab.low}${suffix}+`;
-  if (faab.low === faab.high) return `${prefix}${faab.low}${suffix}`;
-  return `${prefix}${faab.low}–${faab.high}${suffix}`;
-}
-
 /** `FAAB $77 of $100`, for the header. Null when the league does not bid or the wallet is unknown. */
 export function budgetChip(faab: FaabAdvice | null): string | null {
   if (!faab?.rule.usesFaab || faab.mine?.remaining == null || faab.rule.total == null) return null;
