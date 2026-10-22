@@ -224,6 +224,18 @@ jobs:
       # and below — rather than a fourth raise.
       - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
         timeout-minutes: 18
+
+      # The production suite, against a freshly seeded local server.
+      #
+      # `e2e-production/` only ever ran after a deploy, so a UI change that
+      # broke one of its assertions showed up as the nightly sweep going red
+      # (8 of 12 nights between 13 and 21 October 2026, both times a test that
+      # had gone stale). One width, one shard: the question is whether the
+      # suite still matches the app, not how it lays out. No production reads.
+      - name: Production suite against the seeded server
+        if: matrix.project == 'webkit-iphone-390' && matrix.shard == 1
+        timeout-minutes: 8
+        run: FA_LOCAL_SMOKE=1 npx playwright test --config playwright.production.config.ts --project=webkit-iphone-390
       - uses: actions/upload-artifact@v6
         if: failure()
         with:
