@@ -45,7 +45,7 @@ import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
 import { tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
-import { completeFirst, type SleeperOnlyNote } from './completeFirst.ts';
+import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -323,8 +323,8 @@ export interface StartSitComparison {
    */
   tiebreak?: TiebreakNote;
   /**
-   * The best Sleeper-only player, when he projects above the pick: shown as a
-   * second choice, never recommended. See `completeFirst.ts`.
+   * The best Sleeper-only player who shows a higher number than the pick and
+   * lost on the two-point discount: the second choice. See `pickOrder.ts`.
    */
   sleeperOnly?: SleeperOnlyNote;
   /**
@@ -1137,11 +1137,12 @@ export function compareStartSit(
 
   const ranked = [...scored].sort((a, b) => pointsOf(b) - pointsOf(a) || a.name.localeCompare(b.name));
   /*
-   * A complete market leads a Sleeper-only number (16 October 2026): when the
-   * group mixes the two, only a complete player can be the pick, and the best
-   * Sleeper-only player ahead of him is named instead. See `completeFirst.ts`.
+   * The shared ranking rule (23 October 2026): a Sleeper-only number ranks two
+   * points lower, as on Team, Best move and Matchup. When that keeps a
+   * Sleeper-only player with the higher number off the pick, he is named as
+   * the second choice. See `pickOrder.ts`.
    */
-  const { order: sorted, sleeperOnly } = completeFirst(ranked);
+  const { order: sorted, sleeperOnly } = pickOrder(ranked);
   /*
    * The pill tie-break, the same rule the lineup applies: inside the close-call
    * band, the player whose week has the shape this matchup wants goes first.

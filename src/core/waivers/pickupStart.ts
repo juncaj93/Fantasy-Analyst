@@ -15,7 +15,7 @@
  *
  * Never one slot against one player. The best legal full lineup with him is
  * compared with the best legal full lineup without him, both solved by
- * `solveLineup` (the Team lineup's own assignment, Vegas first), so players
+ * `solveLineup` (the Team lineup's own assignment, a Sleeper-only number two points lower), so players
  * move between slots: a receiver slides from FLEX to WR3 and the back takes
  * FLEX. And "without him" is the best lineup the roster can already make, not
  * Sleeper's current one: a free agent who only matches a player already on the

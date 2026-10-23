@@ -67,7 +67,7 @@ import { assessReplacement, type ReplacementAssessment } from './replacement.ts'
 import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
-import { decisionPoints, settleOnPublishedWeek } from './decisionPoints.ts';
+import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
 import { PILL_TIEBREAK_BAND, tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
 import type { MatchupAssessment } from './defense.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
@@ -383,15 +383,6 @@ export function recommendLineup(
      * Absent or null means no tie-break: see `tiebreak.ts`.
      */
     posture?: Posture | null;
-    /**
-     * Vegas first (16 October 2026, Alex): a Sleeper-only player is never
-     * started over a fully priced one; he takes a slot only when no priced
-     * player can. The Team screen's lineup turns this on (`assembleLineup`),
-     * so its Best move agrees with Compare (`completeFirst.ts`). Off for the
-     * waiver planner and the trade engine, which keep the
-     * {@link BORROWED_RANKING_DISCOUNT} ranking.
-     */
-    vegasFirst?: boolean;
   } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
@@ -506,7 +497,6 @@ export function recommendLineup(
     openSlots.map((o) => o.spec),
     currentStarters,
     opts.published,
-    opts.vegasFirst === true,
   );
 
   const assignment = new Map<number, StartSitEvaluation>(reserved);
@@ -608,7 +598,6 @@ export function recommendLineup(
     minGain,
     opts.published,
     tiebreaks,
-    opts.vegasFirst === true,
   );
 
   /*
@@ -644,9 +633,7 @@ export function recommendLineup(
     if (borrowed.length > 0) {
       notes.push(
         `No betting market has priced ${borrowed.length} of your ${scored.length} players yet, so ${borrowed.length === 1 ? 'that row uses' : 'those rows use'} ` +
-          (opts.vegasFirst
-            ? 'Rotowire’s published figure, and only starts where no player with Vegas lines can.'
-            : 'Rotowire’s published figure. It is ranked slightly below a number this app worked out itself, because the two come from different models.'),
+          'Rotowire’s published figure. It is ranked slightly below a number this app worked out itself, because the two come from different models.',
       );
     }
     if (unrankable.length > 0) {
@@ -1269,7 +1256,6 @@ function assignBest(
    */
   currentStarters: ReadonlySet<string> | null = null,
   published?: ReadonlyMap<string, number>,
-  vegasFirst = false,
 ): Map<number, StartSitEvaluation> {
   /*
    * Rankable, then unrankable-and-starting, then unrankable-and-benched.
@@ -1293,7 +1279,7 @@ function assignBest(
    * handed would not be transitive and `sort` would be free to return
    * anything.
    */
-  const keyOf = new Map(players.map((e) => [e.playerId, rankingKey(e, published, vegasFirst)]));
+  const keyOf = new Map(players.map((e) => [e.playerId, rankingKey(e, published)]));
   const tier = (e: StartSitEvaluation): number =>
     keyOf.get(e.playerId) != null ? 0 : currentStarters?.has(e.playerId) ? 1 : 2;
   const order = [...players].sort(
@@ -1400,7 +1386,6 @@ function buildSwaps(
   minGain: number,
   published?: ReadonlyMap<string, number>,
   tiebreaks: ReadonlyMap<string, { outPlayerId: string; note: TiebreakNote }> = new Map(),
-  vegasFirst = false,
 ): { swaps: LineupSwap[]; fills: LineupFill[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
@@ -1496,14 +1481,7 @@ function buildSwaps(
      */
     const tiebreak = tiebreaks.get(incoming.playerId);
     const byTiebreak = tiebreak != null && tiebreak.outPlayerId === outgoing.playerId;
-    /*
-     * Vegas first: a priced player replacing a Sleeper-only starter is the
-     * change itself, whatever the two numbers say, so the card names it as the
-     * lineup row does. The gain is still the honest difference, and may be
-     * negative.
-     */
-    const byVegasFirst = vegasFirst && !incomingBasis.borrowed && outgoingBasis?.borrowed === true;
-    if (gain < minGain && !byTiebreak && !byVegasFirst) continue;
+    if (gain < minGain && !byTiebreak) continue;
     used.add(outgoing.playerId);
     lineup.delete(outgoing.playerId);
     lineup.add(incoming.playerId);
@@ -1515,11 +1493,7 @@ function buildSwaps(
       outPlayerId: outgoing.playerId,
       outName: outgoing.name,
       gain,
-      reason: byTiebreak
-        ? tiebreak.note.sentence
-        : byVegasFirst && gain < minGain
-          ? `${incoming.name} has a full set of Vegas lines; ${outgoing.name} has only Sleeper's projection`
-          : swapReason(incoming, outgoing),
+      reason: byTiebreak ? tiebreak.note.sentence : swapReason(incoming, outgoing),
       ...(byTiebreak ? { tiebreak: tiebreak.note } : {}),
     });
   }
@@ -1549,7 +1523,7 @@ export interface SolvablePlayer {
   position: string;
   /** The decision number (`decisionPoints`). */
   points: number;
-  /** A Sleeper-only number: under Vegas first it ranks below every priced player. */
+  /** A Sleeper-only number: it ranks two points lower ({@link rankingNumber}). */
   borrowed: boolean;
   /** Seated before anyone else: a locked starter, or a player being tested in the lineup. */
   forced?: boolean;
@@ -1566,9 +1540,9 @@ export interface SolvedLineup {
 /**
  * The best legal lineup from a set of players, for a whole-lineup comparison.
  *
- * The same assignment {@link recommendLineup} makes under Vegas first, without
- * the passes that only explain a lineup to a reader: players are taken in
- * order (forced first, then priced by number, then Sleeper-only by number) and
+ * The same assignment {@link recommendLineup} makes, without the passes that
+ * only explain a lineup to a reader: players are taken in order (forced first,
+ * then by {@link rankingNumber}: a Sleeper-only number two points lower) and
  * each is seated with {@link tryAssign}, which moves the players already seated
  * between the slots that accept them. Sets of players a league can seat form a
  * matroid, so that greedy order gives the best lineup there is, with every
@@ -1579,7 +1553,7 @@ export interface SolvedLineup {
  */
 export function solveLineup(players: readonly SolvablePlayer[], shape: RosterShape): SolvedLineup {
   const slots = buildSlots(shape);
-  const key = (p: SolvablePlayer) => (p.forced ? 1e6 : 0) + p.points - (p.borrowed ? VEGAS_FIRST_OFFSET : 0);
+  const key = (p: SolvablePlayer) => (p.forced ? 1e6 : 0) + rankingNumber(p.points, p.borrowed);
   const order = [...players].sort((a, b) => key(b) - key(a) || a.name.localeCompare(b.name) || a.playerId.localeCompare(b.playerId));
   const bySlot = new Map<number, SolvablePlayer>();
   for (const player of order) tryAssign(player, slots, bySlot, new Set<number>());
@@ -1630,23 +1604,8 @@ function hasCompleteMarket(evaluation: StartSitEvaluation): boolean {
   return hasMarket(evaluation) && marketIsComplete(evaluation);
 }
 
-/**
- * What a borrowed weekly figure is docked before it may rank anybody.
- *
- * Two points. Rotowire's model and this app's are two different models, fitted
- * on different data, and nothing here has ever validated that a 10.9 from one
- * means the same thing as a 10.9 from the other. So the borrowed number enters
- * the ranking at a discount: it is trusted enough to say *this player is a
- * starter and that one is not*, and not enough to win a close call against a
- * number this app computed itself.
- *
- * The size is set by what it has to be able to do. Measured on production on 16
- * September, the two comparisons at stake were 10.89 against 7.16 — a gap of
- * 3.7, which a reader can see is real and which this must not swallow — and
- * 8.28 against 6.77, a gap of 1.5 between two different models, which is
- * noise and which this must swallow. Two points sits between them.
- */
-export const BORROWED_RANKING_DISCOUNT = 2;
+/** What a borrowed weekly figure is docked before it may rank anybody; see `decisionPoints.ts`. */
+export { BORROWED_RANKING_DISCOUNT };
 
 /**
  * The number this player may be *ranked* on, and where it came from.
@@ -1703,26 +1662,17 @@ function rankingPoints(
 }
 
 /**
- * How far below every priced player a Sleeper-only one ranks under Vegas first.
- * Larger than any week's points, so a borrowed figure can never pass a priced one,
- * while two borrowed figures still order by their own numbers.
- */
-const VEGAS_FIRST_OFFSET = 1000;
-
-/**
- * The same, already discounted, which is the form the ordering uses. Under
- * `vegasFirst` the discount is replaced by {@link VEGAS_FIRST_OFFSET}: a
- * published week then ranks below every priced player, not 2 points below him.
+ * The same, already discounted, which is the form the ordering uses: the
+ * shared {@link rankingNumber}, so Team, Compare, Best move and Matchup rank a
+ * Sleeper-only player the same way.
  */
 function rankingKey(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
-  vegasFirst = false,
 ): number | null {
   const basis = rankingPoints(evaluation, published, { rosterRisk: true });
   if (basis == null) return null;
-  if (!basis.borrowed) return basis.points;
-  return basis.points - (vegasFirst ? VEGAS_FIRST_OFFSET : BORROWED_RANKING_DISCOUNT);
+  return rankingNumber(basis.points, basis.borrowed);
 }
 
 function worstConfidence(evaluations: StartSitEvaluation[]): 'high' | 'medium' | 'low' {
