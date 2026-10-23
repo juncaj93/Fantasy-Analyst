@@ -232,7 +232,14 @@ export function CompareSheet({
     return [...ids].sort((a, b) => place(a) - place(b));
   }, [ids, rankedOrder]);
 
-  const subtitle = [comparison?.week != null ? `Week ${comparison.week}` : null, slot ? `${slot} slot` : null]
+  /*
+   * The slot is the server's answer once there is one, not the row this was
+   * opened from (23 October 2026): a TE added to a Compare opened on a WR row
+   * is a FLEX comparison, and a pair that shares no slot shows no slot at all.
+   * Before the first answer (one player chosen) it is the row's slot.
+   */
+  const answeredSlot = comparison ? (comparison.slot?.comparable ? comparison.slot.slot : null) : slot;
+  const subtitle = [comparison?.week != null ? `Week ${comparison.week}` : null, answeredSlot ? `${answeredSlot} slot` : null]
     .filter(Boolean)
     .join(' · ');
 
