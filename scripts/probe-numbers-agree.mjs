@@ -9,6 +9,10 @@
  *   - GET support-snapshot?context=lineup|matchup|waiver-plan
  *   - Cloudflare's D1 analytics (free, no SQL): rows read per statement over
  *     the last 24 hours, for rows per Team and Matchup load
+ *   - for the Questionable backtest: Sleeper's public state, league and weekly
+ *     stats, and through the read-only D1 adapter the stored prop snapshots
+ *     (`startsit-round2-build.ts`, the existing harness) and the weekly
+ *     injury reports (`numbers-agree-backtest.ts`)
  *
  * then, with no further network, runs `scripts/numbers-agree-report.ts` on
  * the code before the round (BEFORE_SHA, 41058f5) and on this checkout, and
@@ -75,6 +79,33 @@ const a = new Set(before.split('\n'));
 const b = new Set(after.split('\n'));
 for (const l of before.split('\n').filter((l) => !b.has(l))) console.log(`- ${l}`);
 for (const l of after.split('\n').filter((l) => !a.has(l))) console.log(`+ ${l}`);
+
+/* The Questionable backtest, on the existing harness's player-weeks. */
+console.log('\n## Backtest: Questionable at full value against discounted');
+const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID ?? '';
+if (!SLEEPER_LEAGUE || !process.env.CLOUDFLARE_API_TOKEN) {
+  console.log('skipped: SLEEPER_LEAGUE_ID or the Cloudflare token is not set in this run');
+} else {
+  try {
+    const get = async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+      return res.text();
+    };
+    const state = JSON.parse(await get('https://api.sleeper.app/v1/state/nfl'));
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(state));
+    writeFileSync(join(dir, 'league.json'), await get(`https://api.sleeper.app/v1/league/${SLEEPER_LEAGUE}`));
+    for (let w = 1; w < Number(state.week); w++) {
+      writeFileSync(join(dir, `stats${w}.json`), await get(`https://api.sleeper.app/v1/stats/nfl/regular/${state.season}/${w}`));
+    }
+    const ts = (script) =>
+      execFileSync('node', ['--experimental-transform-types', '--no-warnings', script, dir], { encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
+    console.log(ts('scripts/startsit-round2-build.ts'));
+    console.log(ts('scripts/numbers-agree-backtest.ts'));
+  } catch (err) {
+    console.log(`backtest failed: ${String(err).slice(0, 600)}`);
+  }
+}
 
 /* D1 rows read per statement, last 24 hours (Cloudflare analytics, free). */
 const token = process.env.CLOUDFLARE_API_TOKEN;
