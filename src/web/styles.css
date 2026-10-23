@@ -4054,6 +4054,35 @@ button.btn-primary {
   color: var(--on-accent);
 }
 
+/*
+ * Every button reaches the 44px tap floor, whatever it is drawn at
+ * (October 2026 audit). The box keeps its size so no row moves; a transparent
+ * ::after extends what a finger can hit: 4px above and below a 36px .btn,
+ * 6px for a 32px .btn-sm, a text link and the round info button. :where()
+ * keeps `position: relative` from overriding any class that already places
+ * the button.
+ */
+:where(button.btn, button.link-button, button.info-line-button) {
+  position: relative;
+}
+
+button.btn::after,
+button.link-button::after,
+button.info-line-button::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+button.btn-sm::after,
+button.link-button::after {
+  inset: -6px 0;
+}
+
+button.info-line-button::after {
+  inset: -6px;
+}
+
 button.btn-sm {
   min-height: 32px;
   padding: var(--sp-1) var(--sp-2);
