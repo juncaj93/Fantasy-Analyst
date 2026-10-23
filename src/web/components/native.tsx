@@ -493,7 +493,7 @@ export function SearchFilterRow({
  *
  * Rises from the bottom, dims what is behind it, and can be swiped down: from
  * the grip or the header at any time, and from the middle of what you are
- * reading once that is scrolled to its top. Escape, a tap above it and Done
+ * reading once that is scrolled to its top. Escape, a tap above it and the X
  * close it too, because a gesture must never be the only way out of anything.
  * Every way out leaves the same way — see `useSheetDrag` in `sheetDrag.ts`,
  * which is the one implementation of the gesture for every sheet in the app.
@@ -513,7 +513,6 @@ export function Sheet({
   children,
   testId,
   className,
-  close = 'done',
   headerAction,
 }: {
   title: ReactNode;
@@ -531,12 +530,6 @@ export function Sheet({
   testId?: string;
   /** An extra class on the card, for a sheet that re-values the palette's roles. */
   className?: string;
-  /**
-   * How the header closes the sheet: the word `Done` (every sheet until
-   * October 2026) or an X with the accessible name "Close" (Compare, 16
-   * October 2026). Escape, a tap outside and a swipe down work either way.
-   */
-  close?: 'done' | 'x';
   /** One control in the header row, before the close button, so a sheet keeps a one-row header. */
   headerAction?: ReactNode;
 }) {
@@ -585,15 +578,15 @@ export function Sheet({
         <div className="sheet-header" {...{ [HANDLE_ATTRIBUTE]: '' }}>
           <div className="sheet-title">{title}</div>
           {headerAction}
-          {close === 'x' ? (
-            <button type="button" className="sheet-close-x" onClick={dismiss} data-testid="sheet-close" aria-label="Close">
-              <CloseIcon size={18} />
-            </button>
-          ) : (
-            <button type="button" className="btn btn-sm" onClick={dismiss} data-testid="sheet-close">
-              Done
-            </button>
-          )}
+          {/*
+            One way out on every sheet: the X in a grey rounded square at the
+            top right, 44px, named "Close" for a screen reader. Compare had it
+            from 16 October 2026; the word Done on every other sheet went on
+            23 October 2026. Escape, a tap outside and a swipe down still work.
+          */}
+          <button type="button" className="sheet-close-x" onClick={dismiss} data-testid="sheet-close" aria-label="Close">
+            <CloseIcon size={18} />
+          </button>
         </div>
         <div className="sheet-body">{children}</div>
       </div>

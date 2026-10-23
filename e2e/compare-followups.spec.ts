@@ -5,7 +5,7 @@
  *  1. photos scale with the number of players, and 2 to 4 still fit one screen;
  *  2. no preview of the answer while choosing;
  *  3. an X closes Compare (44px, "Close"), the header is one row, the picker's
- *     sections sit about 8px apart; other sheets keep Done;
+ *     sections sit about 8px apart; every other sheet has the same X;
  *  4. the first tab reads "My team";
  *  5. a Sleeper-only player is a marked second choice, never a second Start;
  *  6. up to four chips on one line with nothing cut off.
@@ -163,13 +163,17 @@ test('an X closes Compare, the header is one row, and the picker is tight', asyn
   await expect(page.getByTestId('compare-sheet')).toHaveCount(0);
 });
 
-test('other sheets keep Done', async ({ page }) => {
+test('the Team player sheet closes with the same X as Compare', async ({ page }) => {
   await inSeason(page);
   await page.goto('/');
   await page.getByTestId('tab-team').click();
   await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
   await expect(page.getByTestId('weekly-sheet')).toBeVisible();
-  await expect(page.getByTestId('weekly-sheet').getByTestId('sheet-close')).toHaveText('Done');
+  const close = page.getByTestId('weekly-sheet').getByTestId('sheet-close');
+  await expect(close).toHaveAttribute('aria-label', 'Close');
+  await expect(close).toHaveText('');
+  await close.click();
+  await expect(page.getByTestId('weekly-sheet')).toHaveCount(0);
 });
 
 test('a Sleeper-only player ahead is a marked second choice, never a second Start', async ({ page }) => {

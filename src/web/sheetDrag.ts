@@ -183,7 +183,7 @@ const SAMPLE_LIMIT = 12;
  * Attach the gesture to a sheet.
  *
  * `onClosed` runs once the card has left the screen; the caller unmounts it
- * there. `dismiss` is the same exit for Done, a tap outside and Escape, so a
+ * there. `dismiss` is the same exit for the X, a tap outside and Escape, so a
  * card leaves the same way however it was asked to.
  */
 export function useSheetDrag({

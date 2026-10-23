@@ -71,7 +71,6 @@ export function WaiverSheet({
       accessibleLabel={model.name}
       onClose={onClose}
       testId="tier-detail"
-      close="x"
     >
       <div className="wsheet" data-testid="tier-detail-body" data-player-id={model.playerId} data-partner-id={model.partner?.playerId ?? ''} data-period={period}>
         {model.chips.length > 0 ? (

@@ -265,7 +265,6 @@ export function CompareSheet({
       className="sheet-compare"
       onClose={onClose}
       testId="compare-sheet"
-      close="x"
       headerAction={action}
     >
       {/* 1. The strip: pinned to the top of the sheet's scroll. Up to four chips share its width. */}
