@@ -15,7 +15,7 @@ Status words: **FIXED in PR #n**, **NOT DONE** (with the fix and its size), or
 | Source | What it showed |
 |---|---|
 | `probe-audit-round2.mjs` (new), run 39876202484, 8:07 PM (00:07 UTC) | every season screen read once from production, Sleeper's roster and matchup feeds, every number per player, the injured-reserve check |
-| `probe-audit-d1.mjs` (new), run 39878008681 | D1's own rows read per statement for the last 24 hours (Cloudflare analytics, no SQL) |
+| `probe-audit-d1.mjs` (new), runs 39878008681 and 39899476947 | D1's own rows read per statement for the last 24 hours, and per deploy (Cloudflare analytics, no SQL) |
 | Local seeded server, every screen walked with a statement meter | D1 statements per cold screen load |
 | CI and the daily sweep's run history, last 12 nights | why the sweep was red |
 | Error-state sweep: each screen with its read forced to fail or return empty | what a failed load draws |
@@ -102,9 +102,10 @@ Trades, Matchup, Team, Players, Setup.
 | B12 | Matchup, Trades | An empty response body draws "Week undefined" on Matchup and crashes Trades. | Error-state sweep with `{}`. | Low | NOT DONE | Only reachable if the server sends `{}`. Small. |
 | B13 | Team vs Matchup | Matchup's player card shows the raw Vegas number; Team and Compare show it after the game-script, matchup and usage nudges. | Production: Stroud 21.12 on Team, 20.17 on Matchup; up to 0.95 points across Alex's starters. | Low-medium | NEEDS ALEX | Show the adjusted number on the Matchup card, or label the two. Small. |
 | B14 | D1 reads | The full player list (3,310 rows) is read on every Team, Waivers, Trades and Players load. | 721,580 rows in 24 hours, 22% of the day's reads. | Medium | NOT DONE | Keep the list in the Worker's memory between requests, or narrow the read to the players a screen needs. Medium. |
+| B15 | D1 reads | Each deploy window reads far more than its smoke gate should: 64,021 to 418,443 rows across six deploys on the evening of 22 October, and the same gate swings sixfold between runs. Something else lands in those minutes: the release job's first-run checks, the scheduled refreshes, or Alex's own use. With 16 deploys this round, that is a real share of the day's 3.26 million. | `probe-audit-d1` per-deploy totals, run 39899476947. | Medium | NOT DONE | Measure one deploy's window by statement (the probe already reads per statement; narrow it to one window) before changing anything. Small to find, size of fix unknown. |
 | C1 | Privacy | The repo is public and 8 probe scripts carried the real Sleeper league ID as a default. | Code search. | Medium | FIXED in PR #408 | Read from the `SLEEPER_LEAGUE_ID` secret, no default; a test fails if the ID returns to any tracked file. Alex adds the secret (`docs/SETUP.md`). |
 | C2 | Offline | No service worker, so reopening the app with no signal shows the phone's offline page. | By design. | Low | Kept as is | |
-| C3 | Deploy gate | The deploy gate never opened Matchup's content and ran the waiver plan check only in the nightly sweep. | `smoke.yml` @critical list. | Medium | FIXED in PR #407 | One Matchup content check and the waiver plan check on every deploy. Extra D1 rows per deploy: TBD. |
+| C3 | Deploy gate | The deploy gate never opened Matchup's content and ran the waiver plan check only in the nightly sweep. | `smoke.yml` @critical list. | Medium | FIXED in PR #407 | One Matchup content check and the waiver plan check on every deploy; both passed on their first live run (4.5 s and 5.2 s). Extra D1 rows per deploy, estimated from the per-screen table: about 22,500 for the plan check (an app open on Team plus Waivers) and an app open plus two Matchup reads for the other, about 25,000 to 50,000 in all (0.5% to 1% of the daily allowance). Not measurable directly: whole deploy windows read 64,021 to 418,443 rows before the change and 133,259 to 189,985 after (B15), so the checks sit inside the noise. |
 
 ## Not changed, on purpose
 
