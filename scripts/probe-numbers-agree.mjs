@@ -1,0 +1,104 @@
+/**
+ * The "numbers agree" round's one combined production read (23 October 2026).
+ *
+ * Reads once, after the D1 daily reset (8:05 PM ET, 00:05 UTC):
+ *
+ *   - GET /api/health                                 the production SHA
+ *   - GET /api/leagues                                the selected league
+ *   - GET /api/leagues/:id/lineup                     the projected margin (posture, D5)
+ *   - GET support-snapshot?context=lineup|matchup|waiver-plan
+ *   - Cloudflare's D1 analytics (free, no SQL): rows read per statement over
+ *     the last 24 hours, for rows per Team and Matchup load
+ *
+ * then, with no further network, runs `scripts/numbers-agree-report.ts` on
+ * the code before the round (BEFORE_SHA, 41058f5) and on this checkout, and
+ * prints both and the lines that changed: every player's number on Team,
+ * Matchup, Waivers, Trades and Compare, the lineup, Best move, Matchup's
+ * decision, the waiver plan, the Compare slot, close calls and kickoff ties.
+ *
+ * Reads only. No odds are bought, nothing is written.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
+const BEFORE_SHA = process.env.BEFORE_SHA || '41058f5f696832be4cd024b4754f57e3c5724427';
+const dir = mkdtempSync(join(tmpdir(), 'numbers-agree-'));
+const et = (d) => d.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true }) + ' ET';
+
+console.log(`started ${et(new Date())} (${new Date().toISOString()})`);
+const health = await fetch(`${APP}/api/health`).then((r) => r.json()).catch(() => null);
+console.log(`production sha: ${health?.release?.gitSha ?? '?'}; before = ${BEFORE_SHA.slice(0, 7)}`);
+const leagues = await fetch(`${APP}/api/leagues`).then((r) => r.json());
+const leagueId = process.env.LEAGUE_ID || leagues?.leagues?.find((l) => l.isSelected)?.id;
+if (!leagueId) throw new Error('no selected league');
+
+const lineup = await fetch(`${APP}/api/leagues/${leagueId}/lineup`).then((r) => r.json()).catch(() => null);
+const s = lineup?.modeSuggestion;
+console.log(`\n## D5 posture: ${s?.detail ?? '?'} (margin ${s?.margin ?? 'unknown'}, state ${s?.state ?? '?'}, auto ${s?.auto ?? '?'})`);
+for (const r of s?.reasons ?? []) console.log(`  ${r}`);
+console.log(`  mine: ${s?.mine ? `${s.mine.slotsPriced}/${s.mine.slotsTotal} slots priced, coverage ${s.mine.coverage}` : 'not projected'}; opponent: ${s?.opponent ? `${s.opponent.slotsPriced}/${s.opponent.slotsTotal}, coverage ${s.opponent.coverage}` : 'not projected'}`);
+
+for (const context of ['lineup', 'matchup', 'waiver-plan']) {
+  const res = await fetch(`${APP}/api/leagues/${leagueId}/support-snapshot?context=${context}`);
+  console.log(`GET support-snapshot (${context}) -> HTTP ${res.status}`);
+  if (res.ok) writeFileSync(join(dir, `${context}.json`), await res.text());
+}
+
+const report = 'scripts/numbers-agree-report.ts';
+const run = (cwd) => {
+  try {
+    return execFileSync('node', ['--experimental-transform-types', '--no-warnings', report, dir], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  } catch (err) {
+    return `(failed: ${String(err.stdout ?? '')}${String(err.stderr ?? err).slice(0, 2000)})`;
+  }
+};
+let before = '(unavailable)';
+try {
+  execFileSync('git', ['fetch', '--depth=1', 'origin', BEFORE_SHA], { stdio: 'ignore' });
+  const tree = join(dir, 'before');
+  execFileSync('git', ['worktree', 'add', '--detach', tree, BEFORE_SHA], { stdio: 'ignore' });
+  execFileSync('npm', ['ci', '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: tree, stdio: 'ignore' });
+  copyFileSync(report, join(tree, report));
+  before = run(tree);
+} catch (err) {
+  before = `(failed: ${String(err).slice(0, 400)})`;
+}
+const after = run(process.cwd());
+console.log(`\n================ BEFORE (${BEFORE_SHA.slice(0, 7)}) ================\n${before}`);
+console.log(`\n================ AFTER (this checkout) ================\n${after}`);
+console.log('\n================ WHAT CHANGED ================');
+const a = new Set(before.split('\n'));
+const b = new Set(after.split('\n'));
+for (const l of before.split('\n').filter((l) => !b.has(l))) console.log(`- ${l}`);
+for (const l of after.split('\n').filter((l) => !a.has(l))) console.log(`+ ${l}`);
+
+/* D1 rows read per statement, last 24 hours (Cloudflare analytics, free). */
+const token = process.env.CLOUDFLARE_API_TOKEN;
+const account = process.env.ACCOUNT_ID;
+if (token && account) {
+  const to = new Date();
+  const from = new Date(to.getTime() - 24 * 3600 * 1000);
+  const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+        d1QueriesAdaptiveGroups(limit: 10000, filter: { datetime_geq: $from, datetime_lt: $to }, orderBy: [sum_rowsRead_DESC]) {
+          count dimensions { query } sum { rowsRead } } } } }`,
+      variables: { a: account, from: from.toISOString(), to: to.toISOString() },
+    }),
+  }).then((r) => r.json()).catch(() => null);
+  const rows = res?.data?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? [];
+  const total = rows.reduce((sum, r) => sum + Number(r.sum?.rowsRead ?? 0), 0);
+  console.log(`\n## D1, last 24 hours to ${et(to)}: ${total} rows read across ${rows.length} statements (${Math.round((total / 5_000_000) * 100)}% of 5,000,000)`);
+  for (const r of rows.slice(0, 25)) {
+    const per = Number(r.count) ? Math.round(Number(r.sum.rowsRead) / Number(r.count)) : 0;
+    console.log(`  ${r.count} calls, ${r.sum.rowsRead} rows (${per}/call): ${String(r.dimensions.query).replace(/\s+/g, ' ').slice(0, 140)}`);
+  }
+} else {
+  console.log('\n## D1: no Cloudflare token in this run');
+}
