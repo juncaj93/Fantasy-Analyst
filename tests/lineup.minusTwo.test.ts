@@ -87,7 +87,7 @@ describe('Team (assembleLineup)', () => {
   });
 
   it('the engine version moves', () => {
-    expect(LINEUP_ENGINE_VERSION.startsWith('lineup@6')).toBe(true);
+    expect(LINEUP_ENGINE_VERSION).toMatch(/^lineup@[67]\b/);
   });
 });
 

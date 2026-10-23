@@ -8,7 +8,7 @@ import { buildExpectation } from '../src/core/startsit/expectation.ts';
 import { compareStartSit, evaluatePlayer, type StartSitInput } from '../src/core/startsit/engine.ts';
 import { LINEUP_PREFERENCE_TOLERANCE, recommendLineup } from '../src/core/startsit/lineup.ts';
 import { pillFor } from '../src/core/startsit/pills.ts';
-import { PILL_TIEBREAK_BAND, postureFrom, tiebreakFavours, tiebreakSentence } from '../src/core/startsit/tiebreak.ts';
+import { TIE_BAND, isTie, postureFrom, tieLine } from '../src/core/startsit/tiebreak.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
 import { player } from './helpers/players.ts';
 
@@ -76,9 +76,10 @@ describe('reading a pill off the lines', () => {
   });
 });
 
-describe('the tie-break', () => {
-  it('uses the lineup’s own close-call band', () => {
-    expect(PILL_TIEBREAK_BAND).toBe(LINEUP_PREFERENCE_TOLERANCE);
+describe('the tie (23 October 2026)', () => {
+  it('uses the lineup’s own close-call band, 0.6 points', () => {
+    expect(TIE_BAND).toBe(LINEUP_PREFERENCE_TOLERANCE);
+    expect(TIE_BAND).toBe(0.6);
   });
 
   it('reads posture off the projected margin, and nothing when it is unknown', () => {
@@ -88,22 +89,19 @@ describe('the tie-break', () => {
     expect(postureFrom(0)).toBeNull();
   });
 
-  it('lets the wanted pill win only inside the band', () => {
-    const holder = { points: 10.4, pill: null };
-    const explosive = { points: 10.0, pill: { pill: 'explosive' as const } };
-    expect(tiebreakFavours(holder, explosive, 'underdog')?.pill).toBe('explosive');
-    expect(tiebreakFavours(holder, explosive, 'favourite')).toBeNull();
-    expect(tiebreakFavours({ points: 10.7, pill: null }, explosive, 'underdog')).toBeNull();
-    expect(tiebreakFavours(holder, explosive, null)).toBeNull();
+  it('is a tie inside the band and a lead outside it', () => {
+    expect(isTie(10.4, 10.0)).toBe(true);
+    expect(isTie(10.6, 10.0)).toBe(true);
+    expect(isTie(10.7, 10.0)).toBe(false);
+    expect(isTie(10.0, null)).toBe(false);
   });
 
-  it('says why in one line', () => {
-    expect(tiebreakSentence('underdog')).toBe("Close call. You're the underdog, so the higher ceiling gets the nod.");
-    expect(tiebreakSentence('favourite')).toMatch(/favorite, so the safer floor/);
+  it('says it in the words Waivers uses', () => {
+    expect(tieLine('Braelon Allen')).toBe('Ties Braelon Allen this week');
   });
 });
 
-describe('the tie-break in a comparison and in the lineup', () => {
+describe('a close call in a comparison and in the lineup', () => {
   /* Steady slot receiver a few tenths ahead of the deep threat. */
   const steady = (): StartSitInput => ({ player: player({ id: 'slot', fullName: 'Slot Guy', position: 'WR', team: 'NE' }), props: SLOT, signal: null });
   const deep = (): StartSitInput => ({
@@ -118,34 +116,30 @@ describe('the tie-break in a comparison and in the lineup', () => {
     expect(a.pill?.pill).toBe('steady');
     expect(b.pill?.pill).toBe('explosive');
     expect(a.score! - b.score!).toBeGreaterThan(0);
-    expect(a.score! - b.score!).toBeLessThanOrEqual(PILL_TIEBREAK_BAND);
+    expect(a.score! - b.score!).toBeLessThanOrEqual(TIE_BAND);
   });
 
-  it('gives the underdog the higher ceiling, and says so', () => {
-    const out = compareStartSit([steady(), deep()], LEAGUE, { posture: 'underdog' });
-    expect(out.recommendedPlayerId).toBe('deep');
-    expect(out.tiebreak?.sentence).toBe(tiebreakSentence('underdog'));
-    expect(out.reasons[0]).toBe(tiebreakSentence('underdog'));
+  it('Compare claims no winner: no pick, and the tie line naming the other player', () => {
+    const out = compareStartSit([steady(), deep()], LEAGUE);
+    expect(out.recommendedPlayerId).toBeNull();
+    expect(out.tie).toEqual({ playerId: 'deep', name: 'Deep Guy', line: 'Ties Deep Guy this week' });
+    expect(out.reasons.join(' ')).not.toMatch(/close call|gets the nod/i);
   });
 
-  it('leaves the favourite on the numbers, which already agree with Steady', () => {
-    const out = compareStartSit([steady(), deep()], LEAGUE, { posture: 'favourite' });
+  it('Compare still picks a lead outside the band', () => {
+    const far = (): StartSitInput => ({
+      player: player({ id: 'far', fullName: 'Far Guy', position: 'WR', team: 'BUF' }),
+      props: [prop('receiving_yards', 30.5), prop('receptions', 2.5), prop('anytime_td', null, 0.1)],
+      signal: null,
+    });
+    const out = compareStartSit([steady(), far()], LEAGUE);
     expect(out.recommendedPlayerId).toBe('slot');
-    expect(out.tiebreak).toBeUndefined();
+    expect(out.tie).toBeUndefined();
   });
 
-  it('makes the same call in the lineup, and names it as a tie-break swap', () => {
+  it('the lineup suggests no change inside the band', () => {
     const shape = buildRosterShape(['WR', 'BN']);
-    const out = recommendLineup([steady(), deep()], shape, LEAGUE, { currentStarterIds: ['slot'], posture: 'underdog' });
-    expect(out.slots[0]!.playerId).toBe('deep');
-    const swap = out.swaps[0]!;
-    expect(swap.inPlayerId).toBe('deep');
-    expect(swap.tiebreak?.pill).toBe('explosive');
-    expect(swap.gain).toBeLessThan(0);
-    expect(swap.reason).toBe(tiebreakSentence('underdog'));
-
-    const none = recommendLineup([steady(), deep()], shape, LEAGUE, { currentStarterIds: ['slot'] });
-    expect(none.slots[0]!.playerId).toBe('slot');
-    expect(none.swaps).toEqual([]);
+    const out = recommendLineup([steady(), deep()], shape, LEAGUE, { currentStarterIds: ['deep'] });
+    expect(out.swaps).toEqual([]);
   });
 });

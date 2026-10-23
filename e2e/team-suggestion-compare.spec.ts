@@ -79,16 +79,15 @@ test.describe('the Team round of 30 September', () => {
 
   /*
    * Best move (October 2026): the Matchup row's grammar on Team. Label in gray,
-   * names in the text colour, numbers in gray, the priced count kept, and the
-   * close-call line when the week's posture settled it.
+   * names in the text colour, numbers in gray, the priced count kept. Since 23
+   * October 2026 no close-call sentence: a close call is a tie on Compare.
    */
-  test('Best move reads like the Matchup row, and says why on a close call', async ({ page }) => {
+  test('Best move reads like the Matchup row, with no close-call sentence', async ({ page }) => {
     await page.route('**/api/leagues/*/lineup', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       const swap = {
-        slot: 'FLEX', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1001', outName: 'Marcus Vance', gain: -0.3, reason: 'x',
-        tiebreak: { pill: 'explosive', posture: 'underdog', sentence: "Close call. You're the underdog, so the higher ceiling gets the nod." },
+        slot: 'FLEX', inPlayerId: '1004', inName: 'Andre Sotelo', outPlayerId: '1001', outName: 'Marcus Vance', gain: 1.3, reason: 'x',
       };
       await route.fulfill({ response, body: JSON.stringify({ ...body, swaps: [swap], fills: [] }) });
     });
@@ -99,7 +98,7 @@ test.describe('the Team round of 30 September', () => {
     await expect(card).not.toContainText('Changes to consider');
     await expect(page.getByTestId('lineup-sourcing')).toHaveText(/^\d+\/\d+ priced$/);
     await expect(page.getByTestId('best-move-points')).toContainText('projected');
-    await expect(page.getByTestId('best-move-tiebreak')).toHaveText("Close call. You're the underdog, so the higher ceiling gets the nod.");
+    await expect(card).not.toContainText(/Close call|gets the nod/);
     const colours = await card.evaluate((el) => ({
       label: getComputedStyle(el.querySelector('.matchup-best-move-label')!).color,
       names: getComputedStyle(el.querySelector('.matchup-best-move-names')!).color,

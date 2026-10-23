@@ -1309,8 +1309,7 @@ export interface StartSitEvaluation {
 export type StartSitMode = 'balanced' | 'floor' | 'ceiling';
 import type { ModeSuggestion } from '../core/startsit/modeSuggest.ts';
 import type { PillReading } from '../core/startsit/pills.ts';
-import type { TiebreakNote } from '../core/startsit/tiebreak.ts';
-export type { ModeSuggestion, PillReading, TiebreakNote };
+export type { ModeSuggestion, PillReading };
 
 /** Which lineup spot a comparison is actually about. */
 export interface ComparisonSlot {
@@ -1329,11 +1328,15 @@ export interface StartSitComparison {
   evaluations: StartSitEvaluation[];
   recommendedPlayerId: string | null;
   margin: number | null;
-  /** Set when the pill tie-break chose the recommendation. */
-  tiebreak?: TiebreakNote;
   /**
-   * The best Sleeper-only player, when he projects above the pick: a marked
-   * second choice that cannot win (16 October 2026). Absent from older workers.
+   * The top two within 0.6 pts: who the leader ties and the line shown where
+   * the Start pick would be. `recommendedPlayerId` is null then. Absent from
+   * older workers.
+   */
+  tie?: { playerId: string; name: string; line: string };
+  /**
+   * The best Sleeper-only player who shows a higher number than the pick and
+   * lost on the two-point discount: a marked second choice. Absent from older workers.
    */
   sleeperOnly?: { playerId: string; name: string; aheadBy: number };
   confidence: string;
@@ -1470,8 +1473,6 @@ export interface LineupSwap {
   outName: string;
   gain: number;
   reason: string;
-  /** Set when a close call was settled by the week's posture rather than the points. */
-  tiebreak?: TiebreakNote;
 }
 
 /** An empty Sleeper slot this lineup fills. Names nobody to bench. */

@@ -44,7 +44,7 @@ import { decisionPoints, settleOnPublishedWeek, type DecisionPoints } from './de
 import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
-import { tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
+import { isTie, tieLine } from './tiebreak.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
 export interface StartSitInput {
@@ -318,10 +318,11 @@ export interface StartSitComparison {
   /** Whether the betting market would make the same choice. */
   market: MarketAgreement;
   /**
-   * Set when the pill tie-break picked the recommendation over a player a few
-   * tenths ahead: the pill, the posture and the one-line reason.
+   * Set when the top two are within `TIE_BAND` (0.6 pts): who the leader ties
+   * and the line Compare shows where the Start pick would be. There is no
+   * recommendation then (`recommendedPlayerId` is null). See `tiebreak.ts`.
    */
-  tiebreak?: TiebreakNote;
+  tie?: { playerId: string; name: string; line: string };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
    * lost on the two-point discount: the second choice. See `pickOrder.ts`.
@@ -1081,8 +1082,6 @@ export function compareStartSit(
      * Without it, the ranking is `score`, as it always was.
      */
     published?: ReadonlyMap<string, number>;
-    /** Underdog or favourite this week, for the pill tie-break. See `tiebreak.ts`. */
-    posture?: Posture | null;
   } = {},
 ): StartSitComparison {
   const minMargin = opts.minMargin ?? 0.75;
@@ -1143,30 +1142,24 @@ export function compareStartSit(
    * the second choice. See `pickOrder.ts`.
    */
   const { order: sorted, sleeperOnly } = pickOrder(ranked);
-  /*
-   * The pill tie-break, the same rule the lineup applies: inside the close-call
-   * band, the player whose week has the shape this matchup wants goes first.
-   * Only between fully priced players, because a pill is read off the lines.
-   */
-  const priced = (e: StartSitEvaluation) => e.decision?.basis === 'market';
-  const tiebreak =
-    sorted[1] && priced(sorted[0]!) && priced(sorted[1])
-      ? tiebreakFavours(
-          { points: pointsOf(sorted[0]!), pill: sorted[0]!.pill ?? null },
-          { points: pointsOf(sorted[1]), pill: sorted[1].pill ?? null },
-          opts.posture ?? null,
-        )
-      : null;
-  if (tiebreak) sorted.splice(0, 2, sorted[1]!, sorted[0]!);
   const best = sorted[0]!;
   const runnerUp = sorted[1];
   /* Behind the pick on points, or there is no margin to speak of: a Sleeper-only player ahead is not one. */
   const gap = runnerUp ? round2(pointsOf(best) - pointsOf(runnerUp)) : null;
   const margin = gap != null && gap >= 0 ? gap : null;
+  /*
+   * A tie, said as one (23 October 2026): two numbers within `TIE_BAND` are
+   * not a pick. Only between two real weeks, a full market or Sleeper's week,
+   * and never with a ruled-out player in it.
+   */
+  const weekOf = (e: StartSitEvaluation | undefined) =>
+    e && !e.ruledOut && (e.decision?.basis === 'market' || e.decision?.basis === 'published') ? e.decision.points : null;
+  const tie = runnerUp && isTie(weekOf(best), weekOf(runnerUp))
+    ? { playerId: runnerUp.playerId, name: runnerUp.name, line: tieLine(runnerUp.name) }
+    : null;
   if (sleeperOnly) {
     reasons.push(`${sleeperOnly.name} projects ${sleeperOnly.aheadBy.toFixed(1)} higher on Sleeper only, with no complete Vegas market yet`);
   }
-  if (tiebreak) reasons.push(tiebreak.sentence);
 
   const missingVegas = evaluations.filter((e) => e.expectation.points == null);
   if (missingVegas.length > 0) {
@@ -1207,7 +1200,7 @@ export function compareStartSit(
   }
   if (margin != null && margin < minMargin) {
     confidence = confidence === 'high' ? 'medium' : 'low';
-    if (!tiebreak) reasons.push(`close call: only ${margin} pts separates the top two`);
+    if (!tie) reasons.push(`close call: only ${margin} pts separates the top two`);
   }
   if (missingVegas.length > 0 && confidence === 'high') confidence = 'medium';
 
@@ -1317,7 +1310,7 @@ export function compareStartSit(
 
   return {
     evaluations: sorted.concat(evaluations.filter((e) => e.score == null)),
-    recommendedPlayerId: best.playerId,
+    recommendedPlayerId: tie ? null : best.playerId,
     margin,
     confidence,
     reasons,
@@ -1326,7 +1319,7 @@ export function compareStartSit(
     mode,
     market,
     comparability,
-    ...(tiebreak ? { tiebreak } : {}),
+    ...(tie ? { tie } : {}),
     ...(sleeperOnly ? { sleeperOnly } : {}),
   };
 }

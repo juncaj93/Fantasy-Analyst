@@ -68,7 +68,6 @@ import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
-import { PILL_TIEBREAK_BAND, tiebreakFavours, type Posture, type TiebreakNote } from './tiebreak.ts';
 import type { MatchupAssessment } from './defense.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -247,18 +246,9 @@ export interface LineupSwap {
   inName: string;
   outPlayerId: string;
   outName: string;
-  /**
-   * Points gained by making this change. Positive, except on a tie-break swap
-   * (see {@link tiebreak}), which may give up a few tenths on purpose.
-   */
+  /** Points gained by making this change. */
   gain: number;
   reason: string;
-  /**
-   * Set when this change was made by the pill tie-break rather than by the
-   * numbers: the two were a close call and the week's posture chose. The
-   * sentence is the one line the Best move card prints. See `tiebreak.ts`.
-   */
-  tiebreak?: TiebreakNote;
 }
 
 /** A slot Sleeper has left empty, and the player this lineup puts in it. */
@@ -378,11 +368,6 @@ export function recommendLineup(
      * of each other.
      */
     opponentExposure?: ReadonlyMap<string, OpponentExposure>;
-    /**
-     * Underdog or favourite in this week's matchup, for the pill tie-break.
-     * Absent or null means no tie-break: see `tiebreak.ts`.
-     */
-    posture?: Posture | null;
   } = {},
 ): LineupRecommendation {
   const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
@@ -537,7 +522,6 @@ export function recommendLineup(
     lockedIds,
     opts.opponentExposure ?? new Map(),
   );
-  const tiebreaks = applyPillTiebreak(assignment, slots, playable, lockedIds, opts.posture ?? null);
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
   notes.push(...preferenceNotes, ...placementNotes);
 
@@ -597,7 +581,6 @@ export function recommendLineup(
     evaluations,
     minGain,
     opts.published,
-    tiebreaks,
   );
 
   /*
@@ -906,48 +889,6 @@ function applyLineupPreferences(
     }
   }
   return notes;
-}
-
-/**
- * The pill tie-break, over a lineup that is already chosen.
- *
- * For each slot, a bench player within {@link PILL_TIEBREAK_BAND} points of the
- * starter takes the slot when he carries the pill this week's posture wants
- * and the starter does not (`tiebreak.ts`). Only fully priced players on both
- * sides, the same rule the preference pass above keeps, because a pill is read
- * off the lines. Returns who came in for whom, so the swap card can say why.
- */
-function applyPillTiebreak(
-  assignment: Map<number, StartSitEvaluation>,
-  slots: SlotSpec[],
-  playable: StartSitEvaluation[],
-  lockedIds: Set<string>,
-  posture: Posture | null,
-): Map<string, { outPlayerId: string; note: TiebreakNote }> {
-  const chosen = new Map<string, { outPlayerId: string; note: TiebreakNote }>();
-  if (posture == null) return chosen;
-  const started = new Set([...assignment.values()].map((e) => e.playerId));
-  for (const [index, current] of [...assignment.entries()]) {
-    if (lockedIds.has(current.playerId) || !hasCompleteMarket(current)) continue;
-    const spec = slots[index]!;
-    let best: { player: StartSitEvaluation; note: TiebreakNote } | null = null;
-    for (const candidate of playable) {
-      if (started.has(candidate.playerId) || lockedIds.has(candidate.playerId)) continue;
-      if (!spec.accepts.includes(candidate.position) || !hasCompleteMarket(candidate)) continue;
-      const note = tiebreakFavours(
-        { points: current.score, pill: current.pill ?? null },
-        { points: candidate.score, pill: candidate.pill ?? null },
-        posture,
-      );
-      if (note && (!best || (candidate.score ?? 0) > (best.player.score ?? 0))) best = { player: candidate, note };
-    }
-    if (!best) continue;
-    assignment.set(index, best.player);
-    started.delete(current.playerId);
-    started.add(best.player.playerId);
-    chosen.set(best.player.playerId, { outPlayerId: current.playerId, note: best.note });
-  }
-  return chosen;
 }
 
 /**
@@ -1385,7 +1326,6 @@ function buildSwaps(
   evaluations: StartSitEvaluation[],
   minGain: number,
   published?: ReadonlyMap<string, number>,
-  tiebreaks: ReadonlyMap<string, { outPlayerId: string; note: TiebreakNote }> = new Map(),
 ): { swaps: LineupSwap[]; fills: LineupFill[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
@@ -1474,14 +1414,7 @@ function buildSwaps(
      */
     const outgoingBasis = rankingPoints(outgoing, published);
     const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
-    /*
-     * A close call the pill tie-break settled is a change worth naming even
-     * below the usual threshold, because the reason is not the points. Only
-     * for the exact pair the tie-break chose.
-     */
-    const tiebreak = tiebreaks.get(incoming.playerId);
-    const byTiebreak = tiebreak != null && tiebreak.outPlayerId === outgoing.playerId;
-    if (gain < minGain && !byTiebreak) continue;
+    if (gain < minGain) continue;
     used.add(outgoing.playerId);
     lineup.delete(outgoing.playerId);
     lineup.add(incoming.playerId);
@@ -1493,8 +1426,7 @@ function buildSwaps(
       outPlayerId: outgoing.playerId,
       outName: outgoing.name,
       gain,
-      reason: byTiebreak ? tiebreak.note.sentence : swapReason(incoming, outgoing),
-      ...(byTiebreak ? { tiebreak: tiebreak.note } : {}),
+      reason: swapReason(incoming, outgoing),
     });
   }
 

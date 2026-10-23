@@ -1,23 +1,27 @@
 /**
- * Breaking a close call with the shape of each player's week.
+ * A close call is a tie, said as one, and never a pick (Alex's decision, 23 October 2026).
  *
- * Pills (`pills.ts`) never change a score. They are allowed to decide between
- * two players only when the scores are inside {@link PILL_TIEBREAK_BAND}, the
- * same band inside which the lineup already lets Floor and Ceiling choose
- * (`LINEUP_PREFERENCE_TOLERANCE`), and only in one direction per week:
+ * When two players are within {@link TIE_BAND} points, Compare shows the
+ * line Waivers already uses ("Ties B. Allen this week") where the Start pick
+ * would be, and nothing claims a winner.
  *
- *  - **an underdog** in his matchup wants the higher ceiling: Explosive;
- *  - **a favourite** wants the safer floor: Steady.
- *
- * Which one he is comes from the projected margin of his matchup, the same
- * reading the lineup's posture is built from (`modeSuggest.ts`). Unknown means
- * no tie-break at all, never a guess.
+ * This replaced the pill tie-break of 16 October 2026, which broke the same
+ * close calls by the week's posture (underdog: the Explosive player;
+ * favourite: the Steady one) and printed "Close call. You're the underdog, so
+ * the higher ceiling gets the nod." It never fired on production: it needed
+ * the posture, which is empty whenever Team has not yet seen this week's
+ * opponent (the pairing is written when the Matchup screen is opened) or fewer
+ * than 60% of either side's starting slots carry a number, and even then it
+ * needed the bench player to carry the wanted pill and the starter not to.
+ * The posture is still read and recorded with each support snapshot; it no
+ * longer decides anything.
  */
 
-import type { Pill } from './pills.ts';
-
-/** Points inside which two players are a close call. Equal to `LINEUP_PREFERENCE_TOLERANCE`. */
-export const PILL_TIEBREAK_BAND = 0.6;
+/**
+ * Points inside which two players tie. The band the old tie-break and the
+ * lineup's Floor/Ceiling preference already used (`LINEUP_PREFERENCE_TOLERANCE`).
+ */
+export const TIE_BAND = 0.6;
 
 export type Posture = 'underdog' | 'favourite';
 
@@ -27,39 +31,14 @@ export function postureFrom(margin: number | null | undefined): Posture | null {
   return margin < 0 ? 'underdog' : 'favourite';
 }
 
-export function wantedPill(posture: Posture): Pill {
-  return posture === 'underdog' ? 'explosive' : 'steady';
+/** The tie line, in the words the waiver tiers use (`startNowReason`). */
+export function tieLine(name: string): string {
+  return `Ties ${name} this week`;
 }
 
-/** The one line the Best move card and the Compare verdict print. */
-export function tiebreakSentence(posture: Posture): string {
-  return posture === 'underdog'
-    ? "Close call. You're the underdog, so the higher ceiling gets the nod."
-    : "Close call. You're the favorite, so the safer floor gets the nod.";
-}
-
-export interface TiebreakNote {
-  pill: Pill;
-  posture: Posture;
-  sentence: string;
-}
-
-/**
- * Whether `challenger` should take the spot from `holder` on the tie-break.
- *
- * Both need a number; the gap (holder minus challenger) must be inside the
- * band; the challenger must carry the pill this week wants and the holder
- * must not.
- */
-export function tiebreakFavours(
-  holder: { points: number | null; pill?: { pill: Pill } | null | undefined },
-  challenger: { points: number | null; pill?: { pill: Pill } | null | undefined },
-  posture: Posture | null,
-): TiebreakNote | null {
-  if (posture == null) return null;
-  if (holder.points == null || challenger.points == null) return null;
-  if (holder.points - challenger.points > PILL_TIEBREAK_BAND) return null;
-  const wanted = wantedPill(posture);
-  if (challenger.pill?.pill !== wanted || holder.pill?.pill === wanted) return null;
-  return { pill: wanted, posture, sentence: tiebreakSentence(posture) };
+/** Whether a lead is a tie: both numbers known and the gap inside {@link TIE_BAND}. */
+export function isTie(leader: number | null | undefined, runnerUp: number | null | undefined): boolean {
+  if (leader == null || runnerUp == null) return false;
+  const gap = leader - runnerUp;
+  return gap >= 0 && gap <= TIE_BAND + 1e-9;
 }

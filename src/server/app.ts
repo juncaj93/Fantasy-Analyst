@@ -161,7 +161,6 @@ import { PlayerDetailService } from './services/playerDetailService.ts';
 import { DataHealthService } from './services/dataHealthService.ts';
 import { toSnapshotHealth } from '../core/health/snapshot.ts';
 import type { SnapshotDataHealth } from '../core/support/schema.ts';
-import { postureFrom } from '../core/startsit/tiebreak.ts';
 import { comparePool, parsePoolTab } from './services/comparePool.ts';
 
 export interface AppEnv extends AuthEnv {
@@ -919,7 +918,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       profile,
       currentStarterIds: mine.starterIds,
       mode,
-      posture: postureFrom(modeSuggestion.margin),
       published,
       publishedRefusal,
       unknownPlayers,
@@ -3413,8 +3411,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       playerIds?: string[];
       slot?: string | null;
       mode?: string | null;
-      /** Underdog or favourite this week, as the lineup read it; for the pill tie-break. */
-      posture?: string | null;
     }>();
     const requested = body?.playerIds ?? [];
     if (requested.length < 2) return errorResponse('at least two playerIds required', 400);
@@ -3496,10 +3492,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * `decisionPoints`, so a suggestion and the sheet it opens are the same
      * arithmetic.
      */
-    const posture = body?.posture === 'underdog' || body?.posture === 'favourite' ? body.posture : null;
     const comparison = compareStartSit(inputs, profile, {
       mode,
-      posture,
       ...(display ? { published: display.published } : {}),
     });
 

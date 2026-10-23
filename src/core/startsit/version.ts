@@ -83,4 +83,9 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * (`rankingNumber` in `decisionPoints.ts`), so he can be started over a priced
  * player when that is still higher. Scores are unchanged.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@6', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@7`, 23 October 2026: no pill tie-break. Two players within 0.6
+ * points are a tie: Compare shows "Ties <name> this week" and no pick, and
+ * the lineup suggests no change between them. See `tiebreak.ts`.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@7', STARTSIT_ENGINE_VERSION);

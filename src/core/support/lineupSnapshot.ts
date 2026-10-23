@@ -114,7 +114,6 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
     profile: input.profile,
     currentStarterIds: input.mine.starterIds,
     mode: input.mode,
-    posture: input.posture ?? null,
     published: input.published,
     unknownPlayers: input.mine.playerIds.length - input.inputs.length,
     now: input.now,
@@ -209,7 +208,6 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
     profile,
     currentStarterIds: inputs.currentStarterIds,
     mode: inputs.mode,
-    posture: inputs.posture ?? null,
     published: new Map(Object.entries(inputs.published)),
     unknownPlayers: inputs.unknownPlayers,
     /*

@@ -47,3 +47,38 @@ test('a TE added to a Compare opened on a WR row is a FLEX comparison, with a St
   const header = (await sheet.locator('.cmp-title').boundingBox())!;
   expect(header.x + header.width, 'the title fits the sheet').toBeLessThanOrEqual(page.viewportSize()!.width);
 });
+
+/*
+ * A tie (23 October 2026): two players within 0.6 points. The leader's card
+ * says "Ties <name> this week" in the Waivers card's words, and nobody gets Start.
+ */
+test('a close call is a tie line, not a Start pick', async ({ page }) => {
+  await page.route('**/api/startsit/compare', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const [lead, other] = body.evaluations as { playerId: string; name: string }[];
+    await route.fulfill({
+      response,
+      body: JSON.stringify({ ...body, recommendedPlayerId: null, tie: { playerId: other!.playerId, name: other!.name, line: `Ties ${other!.name} this week` }, evaluations: [lead, other, ...body.evaluations.slice(2)] }),
+    });
+  });
+  await inSeason(page);
+  await page.goto('/');
+  await page.getByTestId('tab-team').click();
+  await expect(page.getByTestId('starters-title')).toBeVisible();
+  await page.getByTestId('compare-open').click();
+  await page.getByTestId('compare-tab-all').click();
+  /* Two players who have a number this week, so both cards can show one. */
+  const priced = page.locator('[data-testid="compare-candidate"][aria-label*=" projected"]');
+  await expect(priced.nth(1)).toBeVisible();
+  for (const i of [0, 1]) await priced.nth(i).click();
+  await page.getByTestId('compare-add').click();
+  await expect(page.getByTestId('comparison')).toBeVisible();
+  await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveCount(0);
+  await expect(page.getByTestId('compare-tie')).toHaveText(/^Ties [A-Z]\. .+ this week$/);
+  /* Both numbers stay on the cards; only the Start pick is withheld. */
+  const scores = page.getByTestId('compare-column').getByTestId('compare-score');
+  await expect(scores).toHaveCount(2);
+  for (const score of await scores.all()) await expect(score).toHaveText(/\d/);
+  await expect(page.getByTestId('compare-sheet')).not.toContainText('Start');
+});
