@@ -45,6 +45,8 @@ export interface CrossScreen {
   waivers: Json;
   trade: Json;
   compare: Json;
+  /** A Compare of exactly these players, the sheet's own request. */
+  compareOf(playerIds: string[]): Promise<Json>;
 }
 
 export async function readEveryScreen(): Promise<CrossScreen> {
@@ -100,16 +102,18 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   const waivers = await get(`/api/leagues/${LEAGUE}/waivers`);
   const asked = [QUESTIONABLE, DOUBTFUL, SLEEPER_ONLY, HEALTHY];
   const trade = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${asked.join(',')}&get=t_rb1`);
-  const compare = (await (
-    await app(
-      new Request('https://app.test/api/startsit/compare', {
-        method: 'POST',
-        body: JSON.stringify({ leagueId: LEAGUE, playerIds: asked }),
-        headers: { 'content-type': 'application/json' },
-      }),
-      env,
-    )
-  ).json()) as Json;
+  const compareOf = async (playerIds: string[]): Promise<Json> =>
+    (await (
+      await app(
+        new Request('https://app.test/api/startsit/compare', {
+          method: 'POST',
+          body: JSON.stringify({ leagueId: LEAGUE, playerIds }),
+          headers: { 'content-type': 'application/json' },
+        }),
+        env,
+      )
+    ).json()) as Json;
+  const compare = await compareOf(asked);
 
   const teamEvaluations: StartSitEvaluation[] = [...lineup.starters, ...lineup.bench, ...lineup.undecidable];
   const matchupPlayers: Json[] = [
@@ -124,6 +128,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     waivers,
     trade,
     compare,
+    compareOf,
     numbers(playerId) {
       /* Team: the row's figure, exactly as the row draws it (`rowFigure`). */
       const e = teamEvaluations.find((x) => x.playerId === playerId);

@@ -76,5 +76,11 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * one; he takes a slot only when no priced player can. Replaces the 2-point
  * discount there (`assembleLineup` turns it on; the waiver planner and trade
  * engine still use the discount). Scores are unchanged, so `startsit@6` is.
+ *
+ * `lineup@6`, 23 October 2026: the minus-2 rule everywhere (Alex's decision),
+ * reversing `lineup@5`. A Sleeper-only player ranks at his number less 2 on
+ * Team, Compare and Best move's pick-up test, one shared function
+ * (`rankingNumber` in `decisionPoints.ts`), so he can be started over a priced
+ * player when that is still higher. Scores are unchanged.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@5', STARTSIT_ENGINE_VERSION);
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@6', STARTSIT_ENGINE_VERSION);

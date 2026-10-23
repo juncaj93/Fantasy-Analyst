@@ -42,3 +42,19 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
     expectAgree(SLEEPER_ONLY, 16);
   });
 });
+
+describe('the minus-2 rule decides the same way on every screen that picks', () => {
+  /* M_SL: 16 on Sleeper's week, 14 after the discount. M_WR5: 12.5 on a full market. */
+  it('Team starts the Sleeper-only receiver at FLEX over the priced 12.5', () => {
+    const flex = screens.lineup.slots.filter((s: { slot: string }) => s.slot === 'FLEX').map((s: { playerId: string }) => s.playerId);
+    expect(flex).toContain(SLEEPER_ONLY);
+    expect(screens.lineup.bench.map((e: { playerId: string }) => e.playerId)).toContain('m_wr5');
+  });
+
+  it('Compare picks him over the priced 12.5, and the priced 15 over him', async () => {
+    expect((await screens.compareOf([SLEEPER_ONLY, 'm_wr5'])).recommendedPlayerId).toBe(SLEEPER_ONLY);
+    const closer = await screens.compareOf([SLEEPER_ONLY, 'm_wr2']);
+    expect(closer.recommendedPlayerId).toBe('m_wr2');
+    expect(closer.sleeperOnly?.playerId).toBe(SLEEPER_ONLY);
+  });
+});

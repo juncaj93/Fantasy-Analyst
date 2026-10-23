@@ -46,6 +46,40 @@
 import { budgetAdjustments, BUDGETED_KEYS } from './adjustmentBudget.ts';
 import { marketIsComplete } from './projection.ts';
 
+/**
+ * What a borrowed weekly figure is docked before it may rank anybody.
+ *
+ * Two points. Rotowire's model and this app's are two different models, fitted
+ * on different data, and nothing here has ever validated that a 10.9 from one
+ * means the same thing as a 10.9 from the other. So the borrowed number enters
+ * the ranking at a discount: trusted enough to say *this player is a starter
+ * and that one is not*, and not enough to win a close call against a number
+ * this app computed itself.
+ *
+ * The size is set by what it has to be able to do. Measured on production on 16
+ * September, the two comparisons at stake were 10.89 against 7.16 (a gap of
+ * 3.7, which a reader can see is real and which this must not swallow) and
+ * 8.28 against 6.77 (a gap of 1.5 between two different models, which is
+ * noise and which this must swallow). Two points sits between them.
+ */
+export const BORROWED_RANKING_DISCOUNT = 2;
+
+/**
+ * The number a player is ranked on: his decision number, two points lower when
+ * it is Sleeper's week (Rotowire's, by way of Sleeper) rather than a full set
+ * of Vegas lines.
+ *
+ * The one rule on every screen that picks between players this week (Alex's
+ * decision, 23 October 2026): Team's lineup and swaps, Best move's pick-up
+ * test, Compare's pick and Matchup's decision. It replaced Team's and
+ * Compare's "Vegas first" (`lineup@5`, 16 October 2026), under which a
+ * Sleeper-only player could never be started over a priced one. Ranking only:
+ * the number a screen shows is the undocked one, with the fallback marker.
+ */
+export function rankingNumber(points: number, borrowed: boolean): number {
+  return borrowed ? points - BORROWED_RANKING_DISCOUNT : points;
+}
+
 /** Where the base of a decision number came from. */
 export type DecisionBasis = 'market' | 'published' | 'partial' | 'unpriced';
 

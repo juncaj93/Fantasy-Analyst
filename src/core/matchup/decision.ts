@@ -31,7 +31,7 @@
 import { winProbabilityWithSwap, type SimulationResult } from './simulate.ts';
 import type { PlayerDistribution } from './distribution.ts';
 import type { MatchupPlayerInput } from './types.ts';
-import { BORROWED_RANKING_DISCOUNT } from '../startsit/lineup.ts';
+import { rankingNumber } from '../startsit/decisionPoints.ts';
 
 /**
  * How much win probability a swap has to be worth before it is *offered*.
@@ -337,9 +337,9 @@ function outrankedByAPricedRival(
   return legal.some((rival) => rival.playerId !== candidate.playerId && rankedPoints(rival) > mine);
 }
 
-/** The same arithmetic `rankingKey` does in `lineup.ts`, on the same figures. */
+/** The shared ranking rule (`rankingNumber`), the one `lineup.ts` ranks with. */
 function rankedPoints(player: MatchupPlayerInput): number {
-  return (player.projection ?? 0) - (player.projectionBorrowed ? BORROWED_RANKING_DISCOUNT : 0);
+  return rankingNumber(player.projection ?? 0, player.projectionBorrowed === true);
 }
 
 /**

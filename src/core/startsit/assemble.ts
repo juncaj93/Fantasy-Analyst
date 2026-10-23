@@ -120,8 +120,6 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
     ...(request.opponentExposure === undefined ? {} : { opponentExposure: request.opponentExposure }),
     ...(request.posture ? { posture: request.posture } : {}),
     ...(request.now === undefined ? {} : { now: request.now }),
-    /* Team's lineup: a Sleeper-only player is never started over a priced one (16 October 2026). */
-    vegasFirst: true,
   });
 
   /*
