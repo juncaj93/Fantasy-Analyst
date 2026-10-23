@@ -273,7 +273,23 @@ describe('what a comparison is actually about', () => {
 
     const illegal = resolveComparisonSlot(['RB', 'QB'], ONE_FLEX, 'FLEX');
     expect(illegal.comparable).toBe(false);
-    expect(illegal.detail).toContain('QB');
+    expect(illegal.slot).toBeNull();
+  });
+
+  /* Alex's decision, 23 October 2026: the opening slot gives way to the smallest one they share. */
+  it('falls back to the smallest shared slot when the opening one does not fit both', () => {
+    const teWr = resolveComparisonSlot(['TE', 'WR'], ONE_FLEX, 'WR');
+    expect(teWr).toMatchObject({ slot: 'FLEX', comparable: true });
+    const rbWr = resolveComparisonSlot(['RB', 'WR'], ONE_FLEX, 'RB');
+    expect(rbWr).toMatchObject({ slot: 'FLEX', comparable: true });
+    const qbRb = resolveComparisonSlot(['QB', 'RB'], ONE_FLEX, 'QB');
+    expect(qbRb.comparable).toBe(false);
+    expect(qbRb.slot).toBeNull();
+  });
+
+  it('falls back the same way in a league like Tony’s Pizza Fantasy, two FLEX slots', () => {
+    const tonys = buildRosterShape(['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN']);
+    expect(resolveComparisonSlot(['TE', 'WR'], tonys, 'WR')).toMatchObject({ slot: 'FLEX', comparable: true });
   });
 
   /** Honesty rather than a forced ranking — the rule from the brief. */

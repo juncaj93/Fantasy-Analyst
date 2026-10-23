@@ -114,7 +114,7 @@ export interface ComparisonSlot {
  *
  * When the caller launched from a specific slot that slot is honoured, so
  * "compare for my FLEX" stays about the flex even if every candidate happens to
- * be a running back.
+ * be a running back, as long as it takes every one of them.
  */
 export function resolveComparisonSlot(
   positions: (string | null | undefined)[],
@@ -128,18 +128,22 @@ export function resolveComparisonSlot(
 
   const distinct = [...new Set(wanted)];
 
+  /*
+   * The opening slot, when it takes all of them. When it does not (a TE added
+   * to a Compare opened from a WR row), the comparison falls back to the
+   * smallest slot they share below, FLEX for a TE and a WR, rather than
+   * calling the pair not comparable (Alex's decision, 23 October 2026).
+   */
   if (requestedSlot) {
     const accepts = slotAccepts(requestedSlot);
-    const rejected = distinct.filter((p) => !accepts.includes(p));
-    return {
-      slot: normalizePosition(requestedSlot),
-      accepts,
-      comparable: rejected.length === 0,
-      detail:
-        rejected.length === 0
-          ? `Compared for the ${normalizePosition(requestedSlot)} slot.`
-          : `${rejected.join(', ')} cannot fill a ${normalizePosition(requestedSlot)} slot.`,
-    };
+    if (distinct.every((p) => accepts.includes(p))) {
+      return {
+        slot: normalizePosition(requestedSlot),
+        accepts,
+        comparable: true,
+        detail: `Compared for the ${normalizePosition(requestedSlot)} slot.`,
+      };
+    }
   }
 
   // Most specific first: two running backs in a league with an RB slot are
