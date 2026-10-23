@@ -71,7 +71,6 @@ import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } 
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
-import { postureFrom } from '../../core/startsit/tiebreak.ts';
 
 interface OpenSlot {
   slot: string;
@@ -767,7 +766,6 @@ export function TeamScreen({
           seed={compare.seed}
           nameOf={(id) => compare.names?.[id] ?? byId.get(id)?.name ?? id}
           mode={lineup?.found ? (lineup.mode ?? null) : null}
-          posture={postureFrom(lineup?.modeSuggestion?.margin)}
           note={compare.note ?? null}
           onClose={() => setCompare(null)}
         />
@@ -1899,8 +1897,7 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-swap"
           data-seed={`${best.outPlayerId},${best.inPlayerId}`}
-          data-tiebreak={best.tiebreak ? best.tiebreak.pill : undefined}
-          aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${spoken(best.inPlayerId)} projected` : `${spoken(best.inPlayerId)} against ${spoken(best.outPlayerId)} projected`}.${best.tiebreak ? ` ${best.tiebreak.sentence}` : ''}${warning ? ` ${warning}.` : ''} Compare them.`}
+          aria-label={`Best move: start ${best.inName} over ${best.outName}${outgoingOut ? ', who is Out,' : ''} at ${best.slot}, ${outgoingOut ? `${spoken(best.inPlayerId)} projected` : `${spoken(best.inPlayerId)} against ${spoken(best.outPlayerId)} projected`}.${warning ? ` ${warning}.` : ''} Compare them.`}
           onClick={() => onOpen(best.slot, [best.outPlayerId, best.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
         >
           <span className="matchup-best-move-body">
@@ -1922,11 +1919,6 @@ function LineupCard({
               )}
               <PillChip pill={pillOf(best.inPlayerId)} />
             </span>
-            {best.tiebreak ? (
-              <span className="best-move-why" data-testid="best-move-tiebreak">
-                {best.tiebreak.sentence}
-              </span>
-            ) : null}
             {warningLine}
           </span>
           <span className="dense-chevron" aria-hidden="true">›</span>

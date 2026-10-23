@@ -37,6 +37,7 @@ import { orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
 import { compareTable } from '../compareTable.ts';
+import { shortReason } from '../waiverCard.ts';
 import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 
 /** Up to four fit a 360px phone side by side. Matched by the server. */
@@ -93,7 +94,6 @@ export function CompareSheet({
   seed,
   nameOf,
   mode,
-  posture,
   note,
   onClose,
 }: {
@@ -104,8 +104,6 @@ export function CompareSheet({
   seed: string[];
   nameOf: (id: string) => string;
   mode: string | null;
-  /** Underdog or favourite this week, for the pill tie-break on close calls. */
-  posture: 'underdog' | 'favourite' | null;
   /**
    * Short lines from the Best move that opened this: the drop a pickup needs,
    * or a free agent who ties. Drawn as the sheet's existing notice, one per line.
@@ -171,7 +169,6 @@ export function CompareSheet({
         playerIds: ids,
         slot,
         ...(mode ? { mode } : {}),
-        ...(posture ? { posture } : {}),
       })
       .then((res) => {
         if (request.current === mine) setComparison(res);
@@ -182,7 +179,7 @@ export function CompareSheet({
       .finally(() => {
         if (request.current === mine) setBusy(false);
       });
-  }, [ids, leagueId, slot, mode, posture]);
+  }, [ids, leagueId, slot, mode]);
 
   const toggle = (row: PoolRow) => {
     setNotice(null);
@@ -490,6 +487,9 @@ export function Verdict({
   const comparable = comparison.slot?.comparable ?? true;
   const pick = comparable ? comparison.recommendedPlayerId : null;
   const second = comparable ? comparison.sleeperOnly ?? null : null;
+  /* A tie (top two within 0.6 pts): the leader's card says so where Start would be, and nobody gets Start. */
+  const tie = comparable && pick == null ? comparison.tie ?? null : null;
+  const tieLeader = tie ? (comparison.evaluations.find((x) => x.playerId !== tie.playerId)?.playerId ?? null) : null;
   /* Photos scale with the room each card has: largest for two, still well up for four. */
   const faceSize = faceOverride ?? (columns.length <= 2 ? 96 : columns.length === 3 ? 76 : 56);
   return (
@@ -533,6 +533,10 @@ export function Verdict({
                 ) : lead ? (
                   <span className="cmp2-start">
                     <CheckIcon size={12} /> Start
+                  </span>
+                ) : tie && e.playerId === tieLeader ? (
+                  <span className="cmp2-tie" data-testid="compare-tie">
+                    {shortReason({ reason: tie.line, reasonCode: 'start_tie' }) ?? tie.line}
                   </span>
                 ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />

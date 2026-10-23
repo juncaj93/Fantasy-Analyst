@@ -27,7 +27,7 @@ import { buildExpectation } from '../src/core/startsit/expectation.ts';
 import { pillFor } from '../src/core/startsit/pills.ts';
 import { assembleLineup } from '../src/core/startsit/assemble.ts';
 import { compareStartSit } from '../src/core/startsit/engine.ts';
-import { PILL_TIEBREAK_BAND, type Posture } from '../src/core/startsit/tiebreak.ts';
+import { TIE_BAND as PILL_TIEBREAK_BAND, type Posture } from '../src/core/startsit/tiebreak.ts';
 import { buildLineupVerdicts } from '../src/core/startsit/sleeperLineup.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
@@ -122,7 +122,7 @@ const startSit = rehydrateStartSitInputs(inputs.startSit);
 const published = new Map(Object.entries(inputs.published as Record<string, number>));
 const base = { inputs: startSit, shape, profile, currentStarterIds: inputs.currentStarterIds, mode: inputs.mode, published, unknownPlayers: inputs.unknownPlayers, now: snapshot.capturedAt };
 const without = assembleLineup(base);
-const withPosture = assembleLineup({ ...base, posture });
+const withPosture = assembleLineup({ ...base });
 const all = [...withPosture.starters, ...withPosture.bench];
 const starters = new Set(withPosture.slots.map((s) => s.playerId).filter(Boolean));
 console.log(`week ${snapshot.decision.context.week}, mode ${inputs.mode}`);
@@ -143,9 +143,7 @@ for (const slot of withPosture.slots) {
 }
 console.log(`\nclose calls inside ${PILL_TIEBREAK_BAND} pts between a starter and an eligible bench player: ${close.length}`);
 for (const c of close) console.log(c);
-const fired = withPosture.swaps.filter((s) => s.tiebreak);
-console.log(`\ntie-break swaps: ${fired.length}`);
-for (const s of fired) console.log(`  ${s.slot}: start ${s.inName} over ${s.outName} (${r2(s.gain)}): ${s.tiebreak!.sentence}`);
+/* Since 23 October 2026 a close call is a tie line on Compare, and the lineup has no tie-break swap. */
 const changed = JSON.stringify(without.slots.map((s) => s.playerId)) !== JSON.stringify(withPosture.slots.map((s) => s.playerId));
 console.log(`lineup changed by the posture: ${changed ? 'yes' : 'no'}`);
 console.log(`Best move without posture: ${without.swaps[0] ? `${without.swaps[0].inName} over ${without.swaps[0].outName}` : 'none'}; with: ${withPosture.swaps[0] ? `${withPosture.swaps[0].inName} over ${withPosture.swaps[0].outName}` : 'none'}`);
@@ -158,8 +156,8 @@ for (const slot of withPosture.slots) {
     if (shown >= 3 || !holder?.decision || !b.decision || starters.has(b.playerId) || !accepts(slot, b.position)) continue;
     if (holder.decision.basis !== 'market' || b.decision.basis !== 'market') continue;
     if (Math.abs(holder.decision.points - b.decision.points) > PILL_TIEBREAK_BAND) continue;
-    const cmp = compareStartSit([byId.get(holder.playerId)!, byId.get(b.playerId)!], profile, { mode: inputs.mode, published, posture });
-    console.log(`  Compare ${holder.name} vs ${b.name}: start ${cmp.evaluations.find((e) => e.playerId === cmp.recommendedPlayerId)?.name} (margin ${r2(cmp.margin)})${cmp.tiebreak ? ` · ${cmp.tiebreak.sentence}` : ''}`);
+    const cmp = compareStartSit([byId.get(holder.playerId)!, byId.get(b.playerId)!], profile, { mode: inputs.mode, published });
+    console.log(`  Compare ${holder.name} vs ${b.name}: ${cmp.tie ? cmp.tie.line : `start ${cmp.evaluations.find((e) => e.playerId === cmp.recommendedPlayerId)?.name}`} (margin ${r2(cmp.margin)})`);
     shown++;
   }
 }

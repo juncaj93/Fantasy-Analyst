@@ -55,6 +55,7 @@
  * them.
  */
 
+import { tieLine } from '../startsit/tiebreak.ts';
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import { TRADE_VALUE } from '../tradeValue/evaluate.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
@@ -1044,7 +1045,7 @@ const KEPT_REASONS: ReadonlySet<TierReasonCode> = new Set(['ir_stash', 'big_upgr
 function startNowReason(call: StartNowCall): string {
   /* A small gain under the headline bar is still a gain, and says so (Alex, 20 October 2026). */
   if (call.verdict === 'start' || call.gain >= 0.05) return `Starts this week: +${call.gain.toFixed(1)} pts on your best lineup`;
-  return call.displaces ? `Ties ${call.displaces} this week` : 'Ties your best lineup this week';
+  return call.displaces ? tieLine(call.displaces) : 'Ties your best lineup this week';
 }
 
 function sortKey(m: TierMove): number {

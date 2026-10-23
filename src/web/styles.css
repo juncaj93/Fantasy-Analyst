@@ -9788,12 +9788,11 @@ div.matchup-result {
 .best-move-row .matchup-best-move-names { color: var(--text); }
 /* Team's Best move may wrap: "who is Out" must never be cut off (13 October 2026). */
 .best-move-row .matchup-best-move-names { white-space: normal; overflow: visible; line-height: 1.25; }
-.best-move-why,
 .best-move-warn {
   font-size: 0.76rem;
   line-height: 1.25;
 }
-.best-move-why { color: var(--text-dim); }
+.cmp2-tie { font-size: 0.76rem; line-height: 1.25; color: var(--text-dim); text-align: center; }
 .best-move-warn { font-weight: 600; color: var(--warn); }
 .best-move-hold { grid-template-columns: minmax(0, 1fr); }
 
