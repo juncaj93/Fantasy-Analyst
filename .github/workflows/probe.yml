@@ -68,7 +68,7 @@ jobs:
           # Probes that only read Cloudflare's own numbers (free), and the cheap
           # release-SHA check, never touch the database and are never held back.
           case "$SCRIPT" in
-            probe-deployed-sha.mjs|probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-d1-top-readers.mjs|probe-d1-usage-hours.mjs|probe-audit-d1.mjs)
+            probe-deployed-sha.mjs|probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-d1-top-readers.mjs|probe-d1-usage-hours.mjs)
               GUARDED=no ;;
             *) GUARDED=yes ;;
           esac
@@ -101,7 +101,7 @@ jobs:
           fi
           export DRAFT_ID
           case "$SCRIPT" in
-            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-waiver-reads.mjs|probe-waiver-tiers.mjs|probe-d1-top-readers.mjs|probe-cleanup-d1.mjs|probe-sgo-reset.mjs|probe-startsit-round2.mjs|probe-trades-builder.mjs|probe-compare-vegas.mjs|probe-pickup-start.mjs|probe-pickup-roster.mjs|probe-audit-d1.mjs)
+            probe-cron-outcomes.mjs|probe-cron-watch.mjs|probe-tick-state.mjs|probe-worker-logs.mjs|probe-vegas-weekend.mjs|probe-vegas-manual-spend.mjs|probe-vegas-count-gap.mjs|probe-vegas-clock.mjs|probe-d1-sweep-queries.mjs|probe-d1-query-costs.mjs|probe-waiver-reads.mjs|probe-waiver-tiers.mjs|probe-d1-top-readers.mjs|probe-cleanup-d1.mjs|probe-sgo-reset.mjs|probe-startsit-round2.mjs|probe-trades-builder.mjs|probe-compare-vegas.mjs|probe-pickup-start.mjs|probe-pickup-roster.mjs)
               export CLOUDFLARE_API_TOKEN="$CF_TOKEN" ACCOUNT_ID="$CF_ACCOUNT" ;;
           esac
           unset CF_TOKEN CF_ACCOUNT
