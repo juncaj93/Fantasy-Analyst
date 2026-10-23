@@ -24,4 +24,9 @@ import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
  * player is simulated at full value, a Doubtful one six points down, and the
  * "genuine question" alert is gone with the mix it priced.
  */
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@3', STARTSIT_ENGINE_VERSION);
+/**
+ * `matchup@4`, 23 October 2026: every player is simulated on Team's decision
+ * number (`decisionPoints`: the market or Sleeper's week plus the Opponent and
+ * Recent news nudges), and the card prints that number, not the bare market.
+ */
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@4', STARTSIT_ENGINE_VERSION);

@@ -83,6 +83,9 @@ export interface MatchupPlayerInput {
    * Fantasy Analyst's own full-game projection, in this league's scoring, for
    * the case where he plays his ordinary role.
    *
+   * **It is Team's number** (23 October 2026): the decision number, nudges
+   * included, the same figure Team, Compare and Waivers print.
+   *
    * **Availability is in this number, by Team's rule** (23 October 2026):
    * Questionable at full value, Doubtful six points off, never below zero.
    * One function owns that, `core/injury/weekAvailability.ts`, and there is no

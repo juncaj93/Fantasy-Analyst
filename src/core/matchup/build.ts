@@ -47,7 +47,8 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
 import { completeMarketProjection, marketProjection, weeklyProjection } from '../startsit/projection.ts';
-import { availableWeekPoints } from '../injury/weekAvailability.ts';
+import { decisionPoints } from '../startsit/decisionPoints.ts';
+import { weekPointsBeforeStatus } from '../startsit/weekPoints.ts';
 import { gameWindowFrom, type GameWindow } from '../nfl/gameWindow.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
@@ -767,32 +768,40 @@ type ProjectionTier = 'market' | 'published' | 'preseason' | 'bye' | 'none';
  * beats a confident zero. What it may never do is wear a better tier's clothes,
  * which is what {@link ProjectionTier} is for.
  *
- * Neither borrowed figure is adjusted on the way through — no availability
- * penalty taken off and no nudge added — for the reason
- * `core/startsit/projection.ts` gives about its own fallback: this app's bounded
- * corrections were fitted to this app's own base, and applying them to somebody
- * else's number would be arithmetic nobody has validated. Clamped at zero,
- * because a projection below it is not a statement anybody makes.
+ * The first two are Team's decision number since 23 October 2026, nudges and
+ * availability included (`decisionPoints`), so the card, the simulation and
+ * Team print one figure. The preseason tier is quoted as stored. Clamped at
+ * zero, because a projection below it is not a statement anybody makes.
  */
 function projectionFor(
   evaluation: StartSitEvaluation | undefined,
-  published: number | null,
+  published: ReadonlyMap<string, number>,
   preseasonSeason: number | null,
 ): { points: number | null; tier: ProjectionTier } {
   /*
-   * The arithmetic is not here any more, and that is the fix rather than a
-   * tidy-up.
+   * Team's number first (23 October 2026, Alex's decision): the decision number
+   * Team, Compare and Waivers print, which is the market (or Sleeper's week)
+   * plus the Opponent and Recent news nudges, with Team's availability rule
+   * already in it. Until then this card showed the bare market number, so
+   * C.J. Stroud read 21.12 on Team and 20.17 here.
    *
-   * This function held its own copy of the ladder for a week, which is how the
-   * app ended up answering the same question three ways at once: Matchup had
-   * three tiers, the Team screen's `assembleLineup` had two, and the Compare
-   * sheet had one — so on 22 September 2026 a Compare sheet reported Trey
-   * McBride as `unknown` Vegas with 0% coverage while this league's own
-   * snapshot held 183.7 preseason points for him. One ladder, in the module
-   * that owns what a projection is, and this function is now only the mapping
-   * from its provenance to the tier name the matchup payload has always used.
+   * A ruled-out player keeps the number before his status, as Team's row
+   * does for "if he played"; he scores nothing either way, because
+   * `buildDistribution` settles him on what he has.
    */
-  const projected = weeklyProjection(evaluation, published, preseasonSeason);
+  if (evaluation) {
+    const decision = decisionPoints(evaluation, published);
+    if (decision && (decision.basis === 'market' || decision.basis === 'published')) {
+      const points = evaluation.ruledOut ? (weekPointsBeforeStatus({ ...evaluation, decision }) ?? 0) : decision.points;
+      return { points: Math.max(0, Math.round(points * 100) / 100), tier: decision.basis };
+    }
+  }
+  /*
+   * Below that, the one ladder in `core/startsit/projection.ts`, which since
+   * 22 September 2026 is the only place the tiers are defined: a partial
+   * market or no market drops to the preseason total here, as on Team.
+   */
+  const projected = weeklyProjection(evaluation, published.get(evaluation?.playerId ?? '') ?? null, preseasonSeason);
   if (projected.source === 'market') return { points: projected.points, tier: 'market' };
   if (projected.source === 'sleeper') return { points: projected.points, tier: 'published' };
   if (projected.source === 'preseason') return { points: projected.points, tier: 'preseason' };
@@ -820,7 +829,7 @@ function toPlayer(
    */
   const figure: { points: number | null; tier: ProjectionTier } = onBye
     ? { points: 0, tier: 'bye' }
-    : projectionFor(evaluation, published.get(playerId) ?? null, preseason.get(playerId) ?? null);
+    : projectionFor(evaluation, published, preseason.get(playerId) ?? null);
   return {
     playerId,
     name: evaluation?.name ?? playerId,
@@ -858,16 +867,7 @@ function toPlayer(
      * because "who should I start" is a decision this app makes and a forecast
      * is an estimate it reports.
      */
-    /*
-     * Team's availability rule, from the one function that owns it: a
-     * Questionable player at full value, a Doubtful one six points down. A
-     * ruled-out player keeps his figure here and scores nothing anyway,
-     * because `buildDistribution` settles him on what he has.
-     */
-    projection:
-      figure.points == null || figure.tier === 'bye' || evaluation == null || evaluation.ruledOut
-        ? figure.points
-        : availableWeekPoints(figure.points, evaluation.injury.designation),
+    projection: figure.points,
     /*
      * Which of the three it was, as two mutually exclusive optional booleans.
      *

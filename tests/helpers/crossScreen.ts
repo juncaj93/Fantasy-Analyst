@@ -27,6 +27,8 @@ export const QUESTIONABLE = 'm_wr3';
 export const DOUBTFUL = 'm_bn1';
 export const SLEEPER_ONLY = 'm_sl';
 export const HEALTHY = 'm_wr1';
+/** A priced receiver with good recent news, so his number carries a nudge on top of the market. */
+export const NUDGED = 'm_wr2';
 
 export interface ScreenNumbers {
   team: number | null;
@@ -85,6 +87,22 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     FETCHED_AT,
   );
 
+  /* Good recent news for NUDGED: the "Recent news" nudge Team prints and Matchup used to drop. */
+  for (let i = 0; i < 3; i++) {
+    await db
+      .prepare(
+        `INSERT INTO evidence_items (dedupe_key, player_id, source_type, source_name, source_date, excerpt, category, polarity,
+           magnitude, confidence, confidence_score, review_status, created_at, updated_at)
+         VALUES (?, ?, 'newsletter', 'test', ?, 'Earning more targets.', 'usage', 'positive', 1, 'high', 0.9, 'auto_applied', ?, ?)`,
+      )
+      .bind(`nudge-${i}`, NUDGED, FETCHED_AT, FETCHED_AT, FETCHED_AT)
+      .run();
+  }
+  await db
+    .prepare(`INSERT INTO player_signal_cache (player_id, raw_positive, raw_net, raw_items, updated_at) VALUES (?, 3, 3, 3, ?)`)
+    .bind(NUDGED, FETCHED_AT)
+    .run();
+
   const pairing = [
     { roster_id: 1, matchup_id: 1, points: 0, starters: mineStarters, players: ids, players_points: {} },
     { roster_id: 2, matchup_id: 1, points: 0, starters: theirStarters, players: THEIRS.map((p) => p[0]), players_points: {} },
@@ -102,6 +120,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   const waivers = await get(`/api/leagues/${LEAGUE}/waivers`);
   const asked = [QUESTIONABLE, DOUBTFUL, SLEEPER_ONLY, HEALTHY];
   const trade = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${asked.join(',')}&get=t_rb1`);
+  const tradeNudged = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${NUDGED}&get=t_rb1`);
   const compareOf = async (playerIds: string[]): Promise<Json> =>
     (await (
       await app(
@@ -114,6 +133,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
       )
     ).json()) as Json;
   const compare = await compareOf(asked);
+  const compareNudged = await compareOf([NUDGED, HEALTHY]);
 
   const teamEvaluations: StartSitEvaluation[] = [...lineup.starters, ...lineup.bench, ...lineup.undecidable];
   const matchupPlayers: Json[] = [
@@ -140,10 +160,10 @@ export async function readEveryScreen(): Promise<CrossScreen> {
       const week = waivers.tiers?.weekFigures?.[playerId]?.weeks?.[0];
       const waiverNumber = week == null ? null : week.out ? 0 : week.points;
       /* Trades: this week's rate times this week's share. */
-      const rate = (trade.evaluation?.a?.outgoing ?? []).find((p: Json) => p.playerId === playerId);
+      const rate = [...(trade.evaluation?.a?.outgoing ?? []), ...(tradeNudged.evaluation?.a?.outgoing ?? [])].find((p: Json) => p.playerId === playerId);
       const tradeNumber = rate?.rate == null ? null : Math.round(rate.rate * (rate.weekly?.[0] ?? 1) * 100) / 100;
       /* Compare: the card's number (`weekPointsOf`). */
-      const c = (compare.evaluations ?? []).find((x: Json) => x.playerId === playerId);
+      const c = [...(compare.evaluations ?? []), ...(compareNudged.evaluations ?? [])].find((x: Json) => x.playerId === playerId);
       return {
         team,
         matchup: card?.projectedFinal ?? null,
