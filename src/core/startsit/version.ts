@@ -88,4 +88,9 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * points are a tie: Compare shows "Ties <name> this week" and no pick, and
  * the lineup suggests no change between them. See `tiebreak.ts`.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@7', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@8`, 23 October 2026: kickoff-smart order. When a bench player and a
+ * starter rank within 0.05 points, the lineup with the latest kickoff in FLEX
+ * is preferred; locked games never move and nothing is said.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@8', STARTSIT_ENGINE_VERSION);

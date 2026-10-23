@@ -522,6 +522,7 @@ export function recommendLineup(
     lockedIds,
     opts.opponentExposure ?? new Map(),
   );
+  preferLateFlexOnTies(assignment, slots, playable, lockedIds, opts.published);
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
   notes.push(...preferenceNotes, ...placementNotes);
 
@@ -1005,6 +1006,65 @@ function optimiseSlotPlacement(
     }
   }
   return notes;
+}
+
+/** Two lineups whose ranking totals are this close score the same (Alex, 23 October 2026). */
+export const KICKOFF_TIE = 0.05;
+
+/**
+ * Kickoff-smart order (Alex's decision, 23 October 2026).
+ *
+ * When a bench player and a starter rank within {@link KICKOFF_TIE} of each
+ * other, the two lineups score the same, and the one that leaves the latest
+ * kickoff in a flex slot is preferred: a FLEX filled by the late game can
+ * still be swapped after the early games, a fixed slot cannot. Points are
+ * never traded for it (the band is the tie), a game that has started never
+ * moves, and nothing is said: the effect is the lineup's order only.
+ * `optimiseSlotPlacement` then seats the latest kickoff in the flex slot.
+ */
+function preferLateFlexOnTies(
+  assignment: Map<number, StartSitEvaluation>,
+  slots: SlotSpec[],
+  playable: StartSitEvaluation[],
+  lockedIds: Set<string>,
+  published: ReadonlyMap<string, number> | undefined,
+): void {
+  const keyOf = (e: StartSitEvaluation) => rankingKey(e, published);
+  /* The latest kickoff a flex slot could hold, once the same players are placed for it. */
+  const lateFlex = (a: Map<number, StartSitEvaluation>): number => {
+    const trial = new Map(a);
+    optimiseSlotPlacement(trial, slots, lockedIds);
+    let latest = -Infinity;
+    for (const [index, player] of trial) {
+      if (slots[index]!.accepts.length > 1) latest = Math.max(latest, kickoffMs(player) ?? -Infinity);
+    }
+    return latest;
+  };
+  for (let round = 0; round < slots.length; round++) {
+    let improved = false;
+    const started = new Set([...assignment.values()].map((e) => e.playerId));
+    for (const [index, current] of [...assignment.entries()]) {
+      if (lockedIds.has(current.playerId)) continue;
+      const held = keyOf(current);
+      if (held == null || kickoffMs(current) == null) continue;
+      const before = lateFlex(assignment);
+      for (const candidate of playable) {
+        if (started.has(candidate.playerId) || lockedIds.has(candidate.playerId)) continue;
+        if (!slots[index]!.accepts.includes(candidate.position)) continue;
+        const key = keyOf(candidate);
+        if (key == null || Math.abs(key - held) > KICKOFF_TIE + 1e-9) continue;
+        if ((kickoffMs(candidate) ?? -Infinity) <= (kickoffMs(current) ?? -Infinity)) continue;
+        const trial = new Map(assignment);
+        trial.set(index, candidate);
+        if (lateFlex(trial) <= before) continue;
+        assignment.set(index, candidate);
+        improved = true;
+        break;
+      }
+      if (improved) break;
+    }
+    if (!improved) return;
+  }
 }
 
 function kickoffMs(player: StartSitEvaluation): number | null {
