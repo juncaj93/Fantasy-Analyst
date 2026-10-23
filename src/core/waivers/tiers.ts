@@ -136,7 +136,7 @@ export interface TierPlayer {
   team: string;
   /** Healthy points a game, the Start/Sit decision number. Null: unvalued, never guessed. */
   rate: number | null;
-  /** Availability for each window week, 0 to 1 (bye 0, Out 0, Questionable 0.8). */
+  /** Availability for each window week, 0 to 1 (bye 0, Out 0, Questionable 1; this week is Team's rule). */
   weekly: number[];
   /**
    * Points for each window week's game before availability, when a later week

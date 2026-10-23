@@ -17,15 +17,18 @@
  *   designation never makes a player worse once he is back; it only takes weeks
  *   away.
  *
- * Each week is a fraction between 0 and 1, so a Questionable player is worth a
- * little less this week and nothing less afterwards. The fractions multiply his
- * rate in the lineup, which makes the lineup an expected-points lineup.
+ * Each week is a fraction between 0 and 1. The fractions multiply his rate in
+ * the lineup, which makes the lineup an expected-points lineup. **This week**
+ * is Team's rule, from `core/injury/weekAvailability.ts` (23 October 2026):
+ * a Questionable player is a whole game, a Doubtful one is his rate less six
+ * points. The table below is only the assumption about the weeks after it.
  *
  * Nothing here predicts a future injury. A healthy player is available every
  * week that is not his bye, and no durability opinion is attached to anybody.
  */
 
 import type { Designation } from '../injury/model.ts';
+import { weekShare } from '../injury/weekAvailability.ts';
 
 /**
  * Expected availability by designation, as fractions of a week from now.
@@ -33,8 +36,8 @@ import type { Designation } from '../injury/model.ts';
  * `fromNow[k]` is the week `k` weeks ahead; anything past the end of the array
  * is `after`. Return dates are unknown, so these are deliberately plain:
  *
- *  - Questionable plays about four times in five.
- *  - Doubtful plays about one time in four.
+ *  - Questionable and Doubtful are back to full the week after. This week is
+ *    Team's rule, not this table.
  *  - Out this week is assumed to be out about two weeks.
  *  - IR, PUP and a suspension are assumed to be out four weeks (the NFL's own
  *    minimum for an IR return), and back at 85% after that, because "back" is
@@ -46,8 +49,8 @@ import type { Designation } from '../injury/model.ts';
 export const AVAILABILITY_POLICY: Record<Designation, { fromNow: number[]; after: number; note: string | null }> = {
   healthy: { fromNow: [], after: 1, note: null },
   unknown: { fromNow: [], after: 1, note: null },
-  questionable: { fromNow: [0.8], after: 1, note: 'Questionable this week' },
-  doubtful: { fromNow: [0.25], after: 1, note: 'Doubtful this week' },
+  questionable: { fromNow: [], after: 1, note: 'Questionable this week' },
+  doubtful: { fromNow: [], after: 1, note: 'Doubtful this week' },
   out: { fromNow: [0, 0.5], after: 1, note: 'Out; no return date, counted as about two weeks' },
   ir: { fromNow: [0, 0, 0, 0], after: 0.85, note: 'On injured reserve; no return date, counted out four weeks' },
   pup: { fromNow: [0, 0, 0, 0], after: 0.85, note: 'On PUP; no return date, counted out four weeks' },
@@ -76,6 +79,8 @@ export function weeklyAvailability(opts: {
   onReserve?: boolean;
   weeks: readonly number[];
   byeWeek: number | null;
+  /** His healthy rate, for this week's share under Team's rule. Null: no number, so a charge leaves nothing. */
+  rate?: number | null;
 }): WeeklyAvailability {
   const designation: Designation =
     opts.onReserve && !isOutNow(opts.designation) ? 'out' : opts.designation;
@@ -85,6 +90,7 @@ export function weeklyAvailability(opts: {
   const weekly = opts.weeks.map((week) => {
     if (opts.byeWeek != null && week === opts.byeWeek) return 0;
     const k = week - first;
+    if (k === 0) return weekShare(designation, opts.rate ?? null);
     return policy.fromNow[k] ?? policy.after;
   });
   return {

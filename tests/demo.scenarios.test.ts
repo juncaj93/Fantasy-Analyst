@@ -373,31 +373,23 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     expect(candidates.length).toBeGreaterThan(1);
     expect(candidates.every((c) => c.competition != null)).toBe(true);
 
-    const te = candidates.find((c) => c.position === 'TE');
-    const wr = candidates.find((c) => c.position === 'WR');
-    expect(te, 'a tight end is on the wire').toBeTruthy();
-    expect(wr, 'a receiver is on the wire').toBeTruthy();
-
-    // Three rosters carry one tight end; nobody is short at receiver.
-    expect(te!.competition!.level).toBe('high');
-    expect(wr!.competition!.level).toBe('low');
     /*
-     * And the detail names the people, because the ledger says who they are.
-     *
-     * `withCompetition` replaces the bare count with the named summary exactly
-     * when `waiverLeagueIntel` was able to name anybody — so this asserting a
-     * count would be asserting the state the demo used to be stuck in.
-     *
-     * The count itself is deliberately not pinned. `summarize` reports either
-     * `N likely bidders` or, once the ledger says fewer of the needy actually
-     * claim, `N need him · ~M likely bidders` — and which of the two a fixture
-     * lands on is a property of that fixture's transaction history rather than
-     * of the naming this case is about.
+     * Since 23 October 2026 the wire's tight end (Lamar Coffey, over the
+     * Questionable Chase Delgado) is not on this list: he cleared the bar only
+     * on the half point the yardstick used to charge a Questionable starter,
+     * and Questionable is full value now (Alex's decision). The receiver and the
+     * backs still disagree, and only a roster count can say why.
      */
-    expect(te!.competition!.detail).toMatch(/likely bidders? · /);
+    const rb = candidates.find((c) => c.position === 'RB');
+    const wr = candidates.find((c) => c.position === 'WR');
+    expect(rb, 'a back is on the wire').toBeTruthy();
+    expect(wr, 'a receiver is on the wire').toBeTruthy();
+    expect(rb!.competition!.detail).toMatch(/^0 of \d+ teams need RB/);
+    expect(wr!.competition!.detail).toMatch(/^1 of \d+ teams need WR/);
+    expect(candidates.some((c) => c.position === 'TE')).toBe(false);
 
     // And the multi-week supplier answers for both, off measured usage.
-    for (const c of [te!, wr!]) {
+    for (const c of [rb!, wr!]) {
       expect(c.multiWeek, `${c.name} has a multi-week read`).toBeTruthy();
       expect(c.multiWeek!.label.length).toBeGreaterThan(0);
     }
@@ -429,38 +421,28 @@ describe('the waiver scenarios price a bid with the real engine', () => {
     expect(prices.losingBidsComplete).toBe(false);
 
     /*
-     * `withCompetition` widens a candidate with the league-intelligence columns,
-     * which are not on `WaiverCandidate` itself — the waiver engine does not
-     * know they exist, which is the point of the fold. Read as the screen reads
-     * them.
+     * The contested add is the tight end, and since 23 October 2026 he is on
+     * the tiers only (see the case above). The tiers name his rivals from the
+     * same ledger: a name, a style and a chance for each, never a bare number.
      */
-    const contested = [
-      ...advice.upgrades.flatMap((u) => u.candidates),
-      ...((advice as unknown as { valueAdds?: typeof advice.upgrades[number]['candidates'] }).valueAdds ?? []),
-    ].find((c) => c.position === 'TE') as unknown as {
-      bidders: { displayName: string; remaining: number | null; needReason: string; basis: string; estimate: unknown }[] | null;
-      managerPressure: { rivalsWithHistory: number; detail: string } | null;
-    };
-    expect(contested.bidders, 'the contested add names its rivals').toBeTruthy();
-    expect(contested.bidders!.length).toBeGreaterThan(1);
-    for (const bidder of contested.bidders!) {
-      /* A name, a wallet and a reason — and never a number without a basis. */
-      expect(bidder.displayName.length).toBeGreaterThan(0);
-      expect(bidder.remaining).not.toBeNull();
-      expect(bidder.needReason.length).toBeGreaterThan(0);
-      expect(bidder.estimate == null || bidder.basis.length > 0).toBe(true);
+    const tiers = (advice as unknown as { tiers: { consider: { name: string; position: string; bid: { likely: { name: string; chance: number; style: string }[]; trace: { bidders: { name: string; style: string; chance: number }[] } } | null }[] } }).tiers;
+    const contested = tiers.consider.find((r) => r.position === 'TE');
+    expect(contested, 'the tight end is on the tiers').toBeTruthy();
+    expect(contested!.bid!.likely.length).toBeGreaterThan(0);
+    expect(contested!.bid!.trace.bidders.length).toBeGreaterThan(1);
+    for (const bidder of contested!.bid!.trace.bidders) {
+      expect(bidder.name.length).toBeGreaterThan(0);
+      expect(bidder.style.length).toBeGreaterThan(0);
+      expect(bidder.chance).toBeGreaterThan(0);
     }
 
-    /*
-     * And what those rivals have actually done, which is allowed to disagree
-     * with what they need. The managers short at tight end in this room are the
-     * ones who have barely claimed all season, and the pressure column is the
-     * only place that shows.
-     */
-    const pressure = contested.managerPressure;
-    expect(pressure, 'the pressure column is filled').toBeTruthy();
-    expect(pressure!.rivalsWithHistory).toBeGreaterThan(0);
-    expect(pressure!.detail.length).toBeGreaterThan(0);
+    /* And nobody uncontested is handed a rival he does not have. */
+    for (const c of [
+      ...advice.upgrades.flatMap((u) => u.candidates),
+      ...((advice as unknown as { valueAdds?: typeof advice.upgrades[number]['candidates'] }).valueAdds ?? []),
+    ]) {
+      if (c.competition?.level === 'low') expect((c as unknown as { bidders: unknown }).bidders ?? null).toBeNull();
+    }
   });
 
   /**

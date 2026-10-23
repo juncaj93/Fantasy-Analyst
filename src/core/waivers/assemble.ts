@@ -67,6 +67,7 @@ import { findHandcuffs } from './yardstick.ts';
 import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindow.ts';
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import { buildTierInputs } from './tierInputs.ts';
+import { availableWeekPoints } from '../injury/weekAvailability.ts';
 import type { AheadNumbers } from './aheadWeeks.ts';
 import { planWaiverTiers, type StartNowCall, type WaiverTierPlan } from './tiers.ts';
 import { planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
@@ -851,15 +852,19 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           name: p.name,
           position: p.position,
           team: p.team,
-          weeks: inputs.window.weeks.map(
-            (week, k): TierWeekFigure => ({
+          weeks: inputs.window.weeks.map((week, k): TierWeekFigure => {
+            const before = p.weekValues?.[k] ?? p.rate ?? null;
+            const share = p.weekly[k] ?? 1;
+            /* Doubtful this week is Team's charged number, not "Out" (`weekAvailability.ts`). */
+            const charged = k === 0 && p.designation === 'doubtful' && before != null;
+            return {
               week,
-              points: p.weekValues?.[k] ?? p.rate ?? null,
+              points: charged ? Math.round(availableWeekPoints(before, 'doubtful') * 100) / 100 : before,
               source: p.weekSources?.[k] ?? 'this_week',
               bye: p.byeWeek === week,
-              out: p.byeWeek !== week && (p.weekly[k] ?? 1) === 0,
-            }),
-          ),
+              out: p.byeWeek !== week && share === 0 && !charged,
+            };
+          }),
         };
       }
       return { ...view, weekFigures };

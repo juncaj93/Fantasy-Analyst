@@ -215,17 +215,18 @@ describe('legality', () => {
     }
   });
 
-  it('lets an unresolved injury change the decision', () => {
+  it('does not let a Questionable designation change the decision (23 October 2026)', () => {
     const healthy = [
       ...lineups(),
       bench({ playerId: 'alt', projection: 15 }),
     ];
-    const risky = healthy.map((p) => (p.playerId === 'alt' ? { ...p, availability: 'uncertain' as const } : p));
+    const risky = healthy.map((p) =>
+      p.playerId === 'alt' ? { ...p, availability: 'uncertain' as const, designation: 'questionable' as const } : p,
+    );
     const withHealthy = decide(healthy).decision.options.find((o) => o.inPlayerId === 'alt');
     const withRisk = decide(risky).decision.options.find((o) => o.inPlayerId === 'alt');
     expect(withHealthy).toBeDefined();
-    // A one-in-three chance he does not play makes the same swap worth less,
-    // and frequently not worth offering at all.
-    if (withRisk) expect(withRisk.gain).toBeLessThan(withHealthy!.gain);
+    // Full value plus the chip, exactly as Team counts him: the same swap, worth the same.
+    expect(withRisk?.gain).toBe(withHealthy!.gain);
   });
 });

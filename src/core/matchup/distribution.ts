@@ -43,7 +43,6 @@
  * consequential term in the model.
  */
 
-import type { AvailabilityConfidence } from '../startsit/availabilityConfidence.ts';
 import type { GamePhase, MatchupPlayerInput } from './types.ts';
 
 /**
@@ -160,17 +159,16 @@ export const ROLE_VOLATILITY: Record<string, number> = {
 };
 
 /**
- * The three branches an unresolved availability actually has.
+ * The branches an afternoon can take for one player: his ordinary role, a
+ * reduced one, or not playing.
  *
- * Keyed on the existing `AvailabilityConfidence` state rather than on a raw
- * designation, because that state is already the app's answer to "how much do
- * we believe he plays" and a second answer here would be a second opinion the
- * user could catch disagreeing with the Team screen.
- *
- * `limited` is a real branch and not a rounding of the other two: a player who
- * dresses and plays two thirds of the snaps is the most common outcome of a
- * genuine Questionable, and collapsing him into either neighbour is what makes
- * a questionable star look either fine or absent when he is neither.
+ * Every player is simulated on the first branch since 23 October 2026. A
+ * Questionable player counts at full value, exactly as Team counts him
+ * (Alex's decision), and Doubtful and ruled-out players are already in his
+ * number through `core/injury/weekAvailability.ts`. Until then a Questionable
+ * starter was drawn from a play-chance mix worth 0.616 of his number, so the
+ * same player read 21.01 on Team and 12.94 here. The shape stays because the
+ * simulator draws from it; it no longer carries an opinion of its own.
  */
 export interface InjuryMixture {
   /** Probability he plays his ordinary role. */
@@ -185,19 +183,6 @@ export interface InjuryMixture {
 export const LIMITED_MULTIPLIER = 0.72;
 
 const CERTAIN: InjuryMixture = { normal: 1, limited: 0, inactive: 0 };
-
-export const AVAILABILITY_MIXTURE: Record<AvailabilityConfidence, InjuryMixture> = {
-  high_confidence_active: CERTAIN,
-  // Listed, but the practice week says he is playing. A small tail, not none.
-  moderate_confidence_active: { normal: 0.72, limited: 0.2, inactive: 0.08 },
-  // The case the whole mixture exists for: the app genuinely does not know.
-  uncertain: { normal: 0.4, limited: 0.3, inactive: 0.3 },
-  likely_inactive: { normal: 0.12, limited: 0.2, inactive: 0.68 },
-  inactive: { normal: 0, limited: 0, inactive: 1 },
-  // Nothing published is not the same as a risk. Treated as playing, and
-  // counted in the freshness report so the confidence line can say so.
-  unknown: CERTAIN,
-};
 
 /** Where a player's game is, and how much of it has gone. */
 export interface GameClock {
@@ -380,7 +365,7 @@ export function buildDistribution(
   const remainingSd = fullSd * Math.sqrt(remainingShare);
   const remainingCv = remainingMean <= 0 ? 0 : clamp(remainingSd / remainingMean, MIN_CV, MAX_CV);
 
-  const mixture = mixtureFor(player, clock);
+  const mixture = mixtureFor();
   const quantiles = finalQuantiles(settled, remainingMean, remainingCv, mixture);
 
   return {
@@ -400,17 +385,9 @@ export function buildDistribution(
   };
 }
 
-/**
- * The mixture that applies right now.
- *
- * Only before kickoff. Once a game is running, whether he is playing is no
- * longer a question — the scoreboard is answering it — so §8's branch is
- * collapsed rather than carried, which is also what stops an inactive tail from
- * suppressing the projection of somebody who is visibly on the field.
- */
-function mixtureFor(player: MatchupPlayerInput, clock: GameClock): InjuryMixture {
-  if (clock.phase !== 'not_started') return CERTAIN;
-  return AVAILABILITY_MIXTURE[player.availability] ?? CERTAIN;
+/** Full value, before kickoff and after it; see {@link InjuryMixture}. */
+function mixtureFor(): InjuryMixture {
+  return CERTAIN;
 }
 
 function settledDistribution(

@@ -18,4 +18,10 @@
 import { composeEngineVersion } from '../engineVersion.ts';
 import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
 
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@2', STARTSIT_ENGINE_VERSION);
+/**
+ * `matchup@3`, 23 October 2026: availability is Team's rule
+ * (`core/injury/weekAvailability.ts`). No play-chance mix: a Questionable
+ * player is simulated at full value, a Doubtful one six points down, and the
+ * "genuine question" alert is gone with the mix it priced.
+ */
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@3', STARTSIT_ENGINE_VERSION);

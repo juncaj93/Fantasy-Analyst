@@ -42,6 +42,8 @@
 
 import type { PlayerProp } from '../vegas/types.ts';
 import { marketIsComplete } from '../startsit/projection.ts';
+import { normalizeDesignation } from '../injury/model.ts';
+import { weekAvailability } from '../injury/weekAvailability.ts';
 
 export type YardstickBasis = 'market' | 'sleeper';
 
@@ -56,9 +58,6 @@ export const SLEEPER_BAR = 1;
 /** The any-touchdown line. A 2+ TD line (1.5) is a different market. */
 export const ANY_TD_LINE = 0.5;
 
-/** Points off for a player whose Sunday is in doubt. Ordering and bar only; never a projection. */
-export const QUESTIONABLE_CHARGE = 0.5;
-export const DOUBTFUL_OR_DNP_CHARGE = 1;
 
 /** Positions where "the backup to your starter" is a clear, single role. */
 export const HANDCUFF_POSITIONS: ReadonlySet<string> = new Set(['RB', 'QB', 'TE']);
@@ -91,7 +90,7 @@ export interface YardstickReading {
   market: number | null;
   /** Sleeper's published projection, when there is one. */
   sleeper: number | null;
-  /** Zero or negative. Questionable −0.5; Doubtful or an injured DNP −1. */
+  /** Zero or negative, Team's rule: Questionable 0, Doubtful −6. */
   availability: number;
   /** `Questionable, did not practise`, or null. */
   availabilityNote: string | null;
@@ -146,34 +145,30 @@ export function readYardstick(
 }
 
 /**
- * The availability charge, read off the injury layer the engine already uses.
+ * The availability charge: Team's rule, from `core/injury/weekAvailability.ts`.
  *
- * A DNP counts only for a player carrying an injury. A healthy veteran's
- * Wednesday rest day is a DNP in the report and is not news.
+ * Until 23 October 2026 this file had its own (half a point for Questionable,
+ * a point for Doubtful or an injured player who missed practice). The note
+ * still names the designation and an injured player's missed practice, as a
+ * warning, and costs nothing beyond the rule. A healthy veteran's Wednesday
+ * rest day is a DNP in the report and is not news.
  */
 function availabilityOf(evaluation: YardstickEvaluation): { charge: number; note: string | null; practice: string | null } {
-  const designation = evaluation.injury?.designation ?? 'unknown';
+  const designation = normalizeDesignation(evaluation.injury?.designation).designation;
   const latest = evaluation.injury?.practice?.latest ?? 'unknown';
   const injured =
     designation === 'questionable' || designation === 'doubtful' || (evaluation.injury?.bodyPart ?? null) != null;
 
-  let charge = 0;
+  const rule = weekAvailability(designation);
+  const charge = rule.out ? 0 : rule.charge;
   const notes: string[] = [];
-  if (designation === 'doubtful') {
-    charge = Math.max(charge, DOUBTFUL_OR_DNP_CHARGE);
-    notes.push('Doubtful');
-  } else if (designation === 'questionable') {
-    charge = Math.max(charge, QUESTIONABLE_CHARGE);
-    notes.push('Questionable');
-  }
-  if (latest === 'dnp' && injured) {
-    charge = Math.max(charge, DOUBTFUL_OR_DNP_CHARGE);
-    notes.push('did not practice');
-  }
+  if (designation === 'doubtful') notes.push('Doubtful');
+  else if (designation === 'questionable') notes.push('Questionable');
+  if (latest === 'dnp' && injured) notes.push('did not practice');
 
   const practice =
     latest === 'full' ? 'practiced fully' : latest === 'limited' ? 'limited in practice' : latest === 'dnp' ? 'did not practice' : null;
-  return { charge: charge === 0 ? 0 : -charge, note: notes.length > 0 ? notes.join(', ') : null, practice };
+  return { charge, note: notes.length > 0 ? notes.join(', ') : null, practice };
 }
 
 /** How one add measures against one drop, on one yardstick. */

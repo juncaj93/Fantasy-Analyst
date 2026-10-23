@@ -63,7 +63,8 @@ export function weekPointsFrom(decision: DecisionPoints | null | undefined, rule
   if (decision == null || decision.basis === 'unpriced' || decision.basis === 'partial') {
     return { points: null, basis: 'none', lowerConfidence: true, out: false };
   }
-  return { points: decision.points, basis: decision.basis, lowerConfidence: decision.basis !== 'market', out: false };
+  /* Never below zero: a Doubtful 5 is 0 here, as on Team's row (`rowFigure`). */
+  return { points: Math.max(0, decision.points), basis: decision.basis, lowerConfidence: decision.basis !== 'market', out: false };
 }
 
 /** The same reading straight off an evaluation a screen was handed. */

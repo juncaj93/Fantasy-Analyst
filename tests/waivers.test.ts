@@ -459,13 +459,18 @@ describe('the same intelligence as everywhere else', () => {
     const strong = recommendWaiverUpgrades({ ...base, candidates: [candidate('fa', 'Free End', 'TE', 20)] });
     expect(strong.upgrades[0]!.candidates[0]!.gain).toBeGreaterThan(modest.upgrades[0]!.candidates[0]!.gain);
 
-    // Availability: the same player, listed Questionable, is worth less.
+    // Availability, Team's rule: Questionable is full value with the flag; Doubtful is worth less.
     const questionable = recommendWaiverUpgrades({
       ...base,
       candidates: [candidate('fa', 'Free End', 'TE', 20, { status: 'Questionable' })],
     });
-    expect(questionable.upgrades[0]!.candidates[0]!.gain).toBeLessThan(strong.upgrades[0]!.candidates[0]!.gain);
+    expect(questionable.upgrades[0]!.candidates[0]!.gain).toBe(strong.upgrades[0]!.candidates[0]!.gain);
     expect(questionable.upgrades[0]!.candidates[0]!.statusFlag).toMatch(/Questionable/i);
+    const doubtful = recommendWaiverUpgrades({
+      ...base,
+      candidates: [candidate('fa', 'Free End', 'TE', 20, { status: 'Doubtful' })],
+    });
+    expect(doubtful.upgrades[0]!.candidates[0]!.gain).toBeLessThan(strong.upgrades[0]!.candidates[0]!.gain);
 
     /*
      * The tally does not move a waiver call any more, and that is the point.

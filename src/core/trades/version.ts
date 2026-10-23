@@ -19,4 +19,9 @@
 import { composeEngineVersion } from '../engineVersion.ts';
 import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
 
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@3',LINEUP_ENGINE_VERSION);
+/**
+ * `trade@4`, 23 October 2026: this week's availability is Team's rule
+ * (`core/injury/weekAvailability.ts`): a Questionable player is a whole game,
+ * a Doubtful one his rate less six points. Later weeks keep their assumption.
+ */
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@4',LINEUP_ENGINE_VERSION);

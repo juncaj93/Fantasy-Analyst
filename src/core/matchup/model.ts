@@ -457,7 +457,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
       phase: distribution.phase,
       locked: distribution.locked,
       statusFlag: statusFlagFor(player),
-      availabilityRisky: player.availability === 'uncertain' || player.availability === 'likely_inactive',
+      availabilityRisky: player.designation === 'questionable' || player.designation === 'doubtful',
     };
   };
 
@@ -608,15 +608,24 @@ export function slotKey(slot: string, index: number): string {
   return `${slot}#${index}`;
 }
 
-/** `Q` / `OUT` and friends — a short mark, and only when it changes something. */
+/**
+ * `Q` / `D` / `OUT`: Team's chip, from the designation Team reads.
+ *
+ * Until 23 October 2026 it keyed on the practice-week read, so a Questionable
+ * player who had practiced fully carried no mark here and a chip on Team, and
+ * one who had not practiced read `D` here and Questionable there.
+ */
 function statusFlagFor(player: MatchupPlayerInput): string | null {
   if (player.ruledOut) return 'OUT';
-  switch (player.availability) {
-    case 'likely_inactive':
-      return 'D';
-    case 'uncertain':
+  switch (player.designation) {
+    case 'questionable':
       return 'Q';
-    case 'inactive':
+    case 'doubtful':
+      return 'D';
+    case 'out':
+    case 'ir':
+    case 'pup':
+    case 'suspended':
       return 'OUT';
     default:
       return null;

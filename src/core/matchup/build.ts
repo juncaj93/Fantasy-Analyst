@@ -17,14 +17,12 @@
  * matchup layer turns those into distributions and simulates them. Nothing here
  * scores a player; it asks the thing that already does.
  *
- * ## Availability is passed to the mixture, not to the mean
+ * ## Availability is Team's rule
  *
- * The one adjustment made to an engine score before it becomes a projection:
- * the availability component is subtracted out. The engine charges a
- * Questionable player points for being questionable, and this model carries the
- * same fact as a mixture over playing / playing limited / not playing. Leaving
- * both in would charge him twice, which is the double-counting the brief
- * forbids in §3. Everything else about the score is passed through untouched.
+ * A Questionable player counts at full value and a Doubtful one six points
+ * down, from `core/injury/weekAvailability.ts`, the same function Team,
+ * Waivers, Trades and Compare read (23 October 2026). There is no second
+ * charge in the simulation.
  *
  * ## What it costs
  *
@@ -49,6 +47,7 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../
 import { buildWeeklyCard, type WeeklyCard } from '../startsit/weekCard.ts';
 import { suggestMode, type SidePlayer } from '../startsit/modeSuggest.ts';
 import { completeMarketProjection, marketProjection, weeklyProjection } from '../startsit/projection.ts';
+import { availableWeekPoints } from '../injury/weekAvailability.ts';
 import { gameWindowFrom, type GameWindow } from '../nfl/gameWindow.ts';
 import { advancedLines } from '../contracts/integration.ts';
 import { assessXfp } from '../xfp/model.ts';
@@ -859,7 +858,16 @@ function toPlayer(
      * because "who should I start" is a decision this app makes and a forecast
      * is an estimate it reports.
      */
-    projection: figure.points,
+    /*
+     * Team's availability rule, from the one function that owns it: a
+     * Questionable player at full value, a Doubtful one six points down. A
+     * ruled-out player keeps his figure here and scores nothing anyway,
+     * because `buildDistribution` settles him on what he has.
+     */
+    projection:
+      figure.points == null || figure.tier === 'bye' || evaluation == null || evaluation.ruledOut
+        ? figure.points
+        : availableWeekPoints(figure.points, evaluation.injury.designation),
     /*
      * Which of the three it was, as two mutually exclusive optional booleans.
      *
@@ -878,6 +886,7 @@ function toPlayer(
     kickoff: evaluation?.lock.kickoff ?? null,
     roleBucket: evaluation?.roleProfile.bucket ?? 'unclassified',
     availability: evaluation?.availability.state ?? 'unknown',
+    ...(evaluation ? { designation: evaluation.injury.designation } : {}),
     ruledOut: evaluation?.ruledOut ?? false,
   };
 }

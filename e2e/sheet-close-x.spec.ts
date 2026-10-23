@@ -39,8 +39,9 @@ async function closesWithTheX(page: Page, sheet: Locator) {
 
   const x = (await close.boundingBox())!;
   const card = (await sheet.boundingBox())!;
-  expect(x.width, 'a 44px square').toBeGreaterThanOrEqual(44);
-  expect(x.height, 'a 44px square').toBeGreaterThanOrEqual(44);
+  /* To the pixel: WebKit at 360 reports the 44px square as 43.99998 tall. */
+  expect(Math.round(x.width), 'a 44px square').toBeGreaterThanOrEqual(44);
+  expect(Math.round(x.height), 'a 44px square').toBeGreaterThanOrEqual(44);
   expect(page.viewportSize()!.width - (x.x + x.width), 'at the right edge').toBeLessThanOrEqual(16);
   expect(x.y - card.y, 'in the header row').toBeLessThanOrEqual(64);
   const look = await close.evaluate((el) => {

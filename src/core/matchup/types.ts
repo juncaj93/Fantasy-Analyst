@@ -32,6 +32,7 @@
  */
 
 import type { AvailabilityConfidence } from '../startsit/availabilityConfidence.ts';
+import type { Designation } from '../injury/model.ts';
 
 /**
  * The version of the whole forecast — distributions, correlation, simulation,
@@ -82,13 +83,10 @@ export interface MatchupPlayerInput {
    * Fantasy Analyst's own full-game projection, in this league's scoring, for
    * the case where he plays his ordinary role.
    *
-   * **Availability is deliberately not in this number.** The start/sit score it
-   * comes from carries an availability penalty as a component, and this model
-   * carries availability as a mixture over playing, playing limited and not
-   * playing (§8). Leaving the penalty in would charge the same Questionable
-   * twice — once as points off the mean and again as an inactive branch — which
-   * is precisely the double-counting §3 forbids. The service strips the
-   * component; see `matchupService`.
+   * **Availability is in this number, by Team's rule** (23 October 2026):
+   * Questionable at full value, Doubtful six points off, never below zero.
+   * One function owns that, `core/injury/weekAvailability.ts`, and there is no
+   * second charge in the simulation: every player is drawn at full value.
    *
    * Rotowire's published figure where this app has no market for him, this
    * league's preseason season total over sixteen games where Rotowire has none
@@ -140,8 +138,10 @@ export interface MatchupPlayerInput {
    * genuinely wider distribution than a checkdown back's.
    */
   roleBucket: string;
-  /** The existing availability read, which is what the injury mixture keys on. */
+  /** The existing availability read. Since 23 October 2026 it moves no number. */
   availability: AvailabilityConfidence;
+  /** The designation, for the status mark. Absent reads as no designation. */
+  designation?: Designation;
   /** True when he is Out, IR, PUP or suspended — a fact, not a risk. */
   ruledOut: boolean;
 }

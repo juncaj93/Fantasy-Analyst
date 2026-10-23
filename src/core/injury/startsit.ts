@@ -16,25 +16,15 @@
  * Questionable, and the chip says so whatever the practice week looked like.
  */
 
+import { weekAvailability } from './weekAvailability.ts';
 import {
-  isRuledOut,
   type Confidence,
   type InjuryState,
   type PracticeTrend,
 } from './model.ts';
 
-/**
- * The anchors, unchanged from the table this replaces.
- *
- * `ruledOut` is not a penalty, it is a gate — large enough that no combination
- * of market expectation and news can lift a player over somebody available.
- */
-export const AVAILABILITY = {
-  ruledOut: -99,
-  doubtful: -6,
-  /** Shown, not scored, since 13 October 2026. */
-  questionable: 0,
-} as const;
+/** The anchors live with the rule every screen reads; see `weekAvailability.ts`. */
+export { AVAILABILITY } from './weekAvailability.ts';
 
 /**
  * How much the week's practice says about a Questionable player. It no longer
@@ -97,10 +87,11 @@ export const AVAILABLE: AvailabilityAssessment = {
 export function availabilityPenalty(state: InjuryState): AvailabilityAssessment {
   const { designation } = state;
   if (designation === 'healthy' || designation === 'unknown') return AVAILABLE;
+  const rule = weekAvailability(designation);
 
-  if (isRuledOut(designation)) {
+  if (rule.out) {
     return {
-      points: AVAILABILITY.ruledOut,
+      points: rule.charge,
       gate: true,
       display: describe(state),
       note: `${label(state)} — not a playable starter.`,
@@ -109,7 +100,7 @@ export function availabilityPenalty(state: InjuryState): AvailabilityAssessment 
 
   if (designation === 'doubtful') {
     return {
-      points: AVAILABILITY.doubtful,
+      points: rule.charge,
       gate: false,
       display: describe(state),
       note: `${label(state)} — very unlikely to play.`,
@@ -128,7 +119,7 @@ export function availabilityPenalty(state: InjuryState): AvailabilityAssessment 
   const weight = 1 + (practice - 1) * trust;
 
   return {
-    points: 0,
+    points: rule.charge,
     gate: false,
     display: describe(state),
     note: questionableNote(state, weight),

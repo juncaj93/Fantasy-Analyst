@@ -162,13 +162,13 @@ describe('the yardstick', () => {
     expect(fullyPriced(evaluation(twoPlus), twoPlus.props)).toBe(false);
   });
 
-  it('reads a Questionable player who did not practise as a full point down', () => {
+  it('reads a Questionable player who did not practise at full value, with the note as the warning', () => {
     const r = readYardstick(
       { playerId: 'j', name: 'J', position: 'RB', team: 'MIA', expectation: null, injury: questionableDnp() },
       [],
       3.47,
     );
-    expect(r).toMatchObject({ sleeper: 3.47, market: null, availability: -1, availabilityNote: 'Questionable, did not practice' });
+    expect(r).toMatchObject({ sleeper: 3.47, market: null, availability: 0, availabilityNote: 'Questionable, did not practice' });
   });
 
   it('ignores a healthy veteran\'s rest-day DNP', () => {
