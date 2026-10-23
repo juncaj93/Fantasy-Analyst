@@ -12,7 +12,17 @@
 import { defineConfig, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
-const baseURL = process.env.PRODUCTION_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
+/*
+ * FA_LOCAL_SMOKE=1 runs this suite against a freshly seeded local server
+ * instead of the live site. CI does that on every pull request (ci.yml), so a
+ * UI change that breaks an assertion here is caught before it merges rather
+ * than by the nightly sweep. Nothing in that mode reaches production.
+ */
+const LOCAL_SMOKE = process.env.FA_LOCAL_SMOKE === '1';
+const LOCAL_PORT = 8789;
+const baseURL = LOCAL_SMOKE
+  ? `http://127.0.0.1:${LOCAL_PORT}`
+  : (process.env.PRODUCTION_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev');
 
 /** The same fallback the main config uses where WebKit cannot be downloaded. */
 const CHROMIUM_CANDIDATES = [
@@ -44,6 +54,16 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'on',
   },
+  ...(LOCAL_SMOKE
+    ? {
+        webServer: {
+          command: `npm run build && node scripts/build-server.mjs && FA_SEED=1 FA_INSECURE_COOKIES=1 NEWSLETTER_ADDRESS=fantasy-news@demo.example APP_PASSPHRASE=e2e-passphrase SESSION_SECRET=e2e-session-secret-value-32-chars node scripts/dev-server.mjs --port ${LOCAL_PORT}`,
+          url: `${baseURL}/api/health`,
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
+      }
+    : {}),
   projects: [
     ...VIEWPORTS.map((v) => ({
       name: `webkit-${v.name}`,
