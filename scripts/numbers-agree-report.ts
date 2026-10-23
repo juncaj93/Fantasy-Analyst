@@ -74,7 +74,6 @@ let lineupInputs: StartSitInput[] = [];
 let published = new Map<string, number>();
 let profile: ReturnType<typeof rehydrateLeagueRules>['profile'] | null = null;
 let shape: ReturnType<typeof rehydrateLeagueRules>['shape'] | null = null;
-let mode: any = 'balanced';
 let week = 0;
 
 await guarded('TEAM (lineup snapshot, rebuilt)', () => {
@@ -84,7 +83,6 @@ await guarded('TEAM (lineup snapshot, rebuilt)', () => {
   ({ shape, profile } = rehydrateLeagueRules(inputs.rules));
   lineupInputs = rehydrateStartSitInputs(inputs.startSit);
   published = new Map(Object.entries(inputs.published as Record<string, number>));
-  mode = inputs.mode;
   console.log(`captured ${lineupRaw.capturedAt}; mode ${inputs.mode}; posture recorded ${inputs.posture ?? 'none'}`);
   const lineup = assembleLineup({
     inputs: lineupInputs,
