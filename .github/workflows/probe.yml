@@ -47,6 +47,10 @@ jobs:
           # the deployment happens to have selected. Read-only: it changes which
           # league is asked about, never which one is selected.
           LEAGUE_ID: ${{ inputs.league_id }}
+          # The real league's Sleeper id, for the probes that read Sleeper's
+          # public feeds directly. A secret rather than a default in the
+          # scripts, because this repository is public.
+          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
           # Which parts of a multi-part probe to run (probe-cleanup-d1.mjs).
           STEPS: ${{ inputs.steps }}
           # Read by probes with a verbose mode. A probe's switches have to be

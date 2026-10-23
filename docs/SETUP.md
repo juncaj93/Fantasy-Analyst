@@ -190,6 +190,24 @@ All of this happens on your phone in the **Setup** tab. Each row shows a status:
 - ⚠️ needs you
 - ○ not started / optional
 
+## The league ID secret
+
+The probe scripts that read Sleeper's public feeds directly need the real
+league's Sleeper id. The repository is public, so the id is not written in any
+script; it is a GitHub secret named `SLEEPER_LEAGUE_ID`.
+
+1. Open the repository on github.com.
+2. Click **Settings** (the gear tab along the top).
+3. In the left column, click **Secrets and variables**, then **Actions**.
+4. Click the green **New repository secret** button.
+5. In **Name**, type `SLEEPER_LEAGUE_ID`.
+6. In **Secret**, paste the league id: the long number at the end of the
+   league's Sleeper web address (`sleeper.com/leagues/<this number>`).
+7. Click **Add secret**.
+
+A script run without it stops at once and says so; it never falls back to a
+league of its own.
+
 ## B1. Sleeper
 
 Tap **Sleeper**.

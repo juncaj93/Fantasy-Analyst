@@ -30,7 +30,11 @@ import { join } from 'node:path';
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
 /* Tony's Pizza Fantasy on Sleeper. Public, like every Sleeper league id. */
-const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID || '1385016656425668608';
+const SLEEPER_LEAGUE = process.env.SLEEPER_LEAGUE_ID ?? '';
+if (!SLEEPER_LEAGUE) {
+  console.error('SLEEPER_LEAGUE_ID is not set. It is a repository secret: see docs/SETUP.md, "The league ID secret".');
+  process.exit(1);
+}
 const SLEEPER = 'https://api.sleeper.app';
 /* Earlier builds to replay on the same inputs, oldest first: before round 2, round 2 as first shipped (#367), and the follow-up Alex saw on 14 October (#368). */
 const BEFORES = (process.env.BEFORE_SHAS || 'before round 2=35c4054f677071903379d2c21c133fbd95b2dde9,round 2 as first shipped=d8a6bc1a72b9f3515b8f2071440c1abc8eb17384,live on 14 October (#368)=cc425394962452ace3516ab034f6cee7010adc2f')

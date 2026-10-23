@@ -38,7 +38,11 @@ import { buildRivalSeasonAggregates, blendRivalTendency, type HistoryClaim, type
 import { positionNeed, type NeedRosterPlayer } from '../src/core/waivers/rivalNeed.ts';
 
 const dir = process.argv[2];
-const rootLeague = process.argv[3] ?? '1385016656425668608';
+const rootLeague = process.argv[3] ?? process.env.SLEEPER_LEAGUE_ID ?? '';
+if (!rootLeague) {
+  console.error('No league: pass it as the third argument or set SLEEPER_LEAGUE_ID. It is a repository secret: see docs/SETUP.md, "The league ID secret".');
+  process.exit(1);
+}
 if (!dir) {
   console.error('usage: waiver-rival-backtest.ts <dir> [leagueId]');
   process.exit(1);
