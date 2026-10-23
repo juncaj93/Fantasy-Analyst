@@ -131,7 +131,7 @@ const LOAD_MORE_MARGIN = '600px';
  * a player up the **draft board**. That was the right control for August. The
  * draft is months behind this league now, and a control whose only effect is
  * on a board nobody will open again is a thumb-sized target on the busiest
- * corner of the card, doing nothing, next to Done.
+ * corner of the card, doing nothing, next to the X.
  *
  * What a reader actually asks of a player's card in October is the question
  * this replaces it with: *can I have him?* The answer is one word and it is
@@ -154,7 +154,7 @@ const LOAD_MORE_MARGIN = '600px';
  * Ownership is not the reader's to change from here — this app never acts on
  * Alex's behalf, and a tappable owner would imply it could. It is a `span`
  * with no handler and no focus stop, which is also what keeps the header's
- * tab order down to Back and Done.
+ * tab order down to Back and the X.
  */
 function OwnerPill({ label }: { label: string | null }) {
   /*
@@ -473,7 +473,7 @@ export function PlayersScreen({
   const open = openId == null ? null : (players.find((p) => p.id === openId) ?? null);
 
   /**
-   * The card's top corner, beside Done: the heart while a draft is ahead, the
+   * The card's top corner, beside the X: the heart while a draft is ahead, the
    * owner once it is over.
    *
    * The heart only ever moved the draft board, so it belongs here exactly as

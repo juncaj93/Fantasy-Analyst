@@ -3,7 +3,8 @@
  *
  * Measured the way a finger lands: a tap 21px above and below the centre of a
  * drawn button must still reach it. The boxes are 32px and 36px on purpose (a
- * header stays one line); the reach is an invisible ::after.
+ * header stays one line); the reach is an invisible ::after. A sheet's X is
+ * drawn at 44px and needs none.
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -18,15 +19,15 @@ async function reaches(page: Page, target: Locator): Promise<boolean[]> {
   );
 }
 
-test('a sheet’s Done and its full-profile link each reach 44px', async ({ page }) => {
+test('a sheet’s X and its full-profile link each reach 44px', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('tab-players').click();
   await page.getByTestId('player-search-row').first().click();
   const sheet = page.getByTestId('player-sheet');
-  await expect(sheet.getByTestId('sheet-close')).toHaveText('Done');
+  await expect(sheet.getByTestId('sheet-close')).toHaveAttribute('aria-label', 'Close');
   await pastTheSettle(page);
 
-  expect(await reaches(page, sheet.getByTestId('sheet-close')), 'Done').toEqual([true, true]);
+  expect(await reaches(page, sheet.getByTestId('sheet-close')), 'the X').toEqual([true, true]);
   expect(await reaches(page, sheet.getByTestId('player-full-profile')), 'View full profile').toEqual([true, true]);
 });
 

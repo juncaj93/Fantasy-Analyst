@@ -153,7 +153,7 @@ test.describe('swiping a sheet down', () => {
     await expect(sheet(page)).toHaveCount(0, { timeout: 1_000 });
   });
 
-  test('keeps Done, a tap above it and Escape as ways out', async ({ page }) => {
+  test('keeps the X, a tap above it and Escape as ways out', async ({ page }) => {
     await openPlayerCard(page);
     await page.getByTestId('sheet-close').click();
     await expect(sheet(page)).toHaveCount(0);

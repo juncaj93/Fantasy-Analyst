@@ -1,5 +1,5 @@
 /**
- * The corner of a player's card, beside Done: the heart before the draft, the
+ * The corner of a player's card, beside the X: the heart before the draft, the
  * owner after it.
  *
  * The heart only ever moved the draft board, so once Sleeper calls the draft

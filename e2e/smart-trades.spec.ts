@@ -399,8 +399,12 @@ test.describe('the detail sheet', () => {
     expect(body.x + body.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
   });
 
-  test('closes on Done and leaves nothing behind', async ({ page }) => {
-    await page.getByTestId('sheet-close').click();
+  test('closes on the X and leaves nothing behind', async ({ page }) => {
+    const close = page.getByTestId('smart-trade-detail').getByTestId('sheet-close');
+    await expect(close).toHaveAttribute('aria-label', 'Close');
+    await expect(close).toHaveText('');
+    await expect(close).toHaveClass('sheet-close-x');
+    await close.click();
     await expect(page.getByTestId('smart-trade-detail')).toHaveCount(0);
     await expect(page.getByTestId('smart-trades')).toBeVisible();
   });

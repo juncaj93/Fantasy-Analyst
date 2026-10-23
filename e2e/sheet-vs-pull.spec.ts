@@ -399,10 +399,10 @@ test.describe('and gives it straight back', () => {
    * And by the other way out, which is a different unmount path.
    *
    * A suspension that is released by the gesture but not by the button would be
-   * a screen the reader can permanently disable by tapping Done — the
+   * a screen the reader can permanently disable by tapping the X — the
    * stuck-disabled state this arbitration must not be able to reach.
    */
-  test('and pulls again after the sheet is closed by its Done control', async ({ page }) => {
+  test('and pulls again after the sheet is closed by its X', async ({ page }) => {
     await openTrades(page);
     await page.getByTestId('trade-row').first().click();
     await expect(page.getByTestId('player-sheet')).toBeVisible();
@@ -415,7 +415,7 @@ test.describe('and gives it straight back', () => {
 
     expectPulled(await pullsSeen(page));
     await expect.poll(async () => requests.length, {
-      message: 'closing a sheet with Done left the screen unpullable',
+      message: 'closing a sheet with the X left the screen unpullable',
     }).toBeGreaterThan(0);
   });
 
