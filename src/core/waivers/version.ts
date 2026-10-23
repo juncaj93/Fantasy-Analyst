@@ -108,5 +108,10 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * protection, and the first drop offered, ahead of elite backs' handcuffs and
  * high picks. A move that costs somebody lists its best three drops. "In
  * your lineup" is the app's best week lineup, not Sleeper's leftover slots.
+ *
+ * `waiver@16`, 23 October 2026: availability is Team's rule
+ * (`core/injury/weekAvailability.ts`). This week a Questionable player is a
+ * whole game and a Doubtful one is his rate less six points, in the tiers and
+ * on the yardstick, which no longer charges half a point for Questionable.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@15', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@16', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

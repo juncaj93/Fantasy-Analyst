@@ -152,29 +152,26 @@ describe('a stack treated as fully independent', () => {
   });
 });
 
-describe('a questionable player flattened to one projection', () => {
+describe('a questionable player discounted again', () => {
   /**
-   * The failure: the mixture is dropped and a Questionable player is simply
-   * projected a bit lower. His mean barely moves, so nothing on the card looks
-   * wrong — and his *floor* silently stops being zero, which is the entire
-   * reason the branch exists.
+   * The failure: a play-chance mix, or any other discount, creeps back into the
+   * simulation. Team counts a Questionable player at full value with a chip
+   * (Alex's decision, 23 October 2026), so a lower number here is two screens
+   * disagreeing about one player. Before that date this file guarded the mix.
    */
-  it('is caught by the floor having to collapse toward his banked points', () => {
+  it('is caught by his distribution having to match a healthy player of the same projection', () => {
     const clock = resolveGameClock(KICKOFF, BEFORE);
-    const uncertain = buildDistribution(
-      player({ playerId: 'a', side: 'mine', projection: 14, availability: 'uncertain' }),
+    const questionable = buildDistribution(
+      player({ playerId: 'a', side: 'mine', projection: 14, availability: 'uncertain', designation: 'questionable' }),
       clock,
     );
-    // The mutation: the same expected value, expressed as a lower flat
-    // projection with no inactive branch at all.
-    const flattened = buildDistribution(
-      player({ playerId: 'a', side: 'mine', projection: 14 * 0.5, availability: 'high_confidence_active' }),
+    const healthy = buildDistribution(
+      player({ playerId: 'a', side: 'mine', projection: 14, availability: 'high_confidence_active' }),
       clock,
     );
-
-    expect(uncertain.mixture.inactive).toBeGreaterThan(0);
-    expect(flattened.mixture.inactive).toBe(0);
-    expect(uncertain.floor).toBeLessThan(flattened.floor);
+    expect(questionable.mixture.inactive).toBe(0);
+    expect(questionable.floor).toBe(healthy.floor);
+    expect(questionable.median).toBe(healthy.median);
   });
 });
 
@@ -233,7 +230,7 @@ describe('a hero engine that surfaces the trivial over the urgent', () => {
   it('is caught by the tiers having to be strictly ordered', () => {
     const players = lineups().map((p) =>
       p.playerId === 'mine-0'
-        ? { ...p, availability: 'uncertain' as const, kickoff: '2026-12-20T21:25:00Z' }
+        ? { ...p, ruledOut: true, kickoff: '2026-12-20T21:25:00Z' }
         : p.playerId === 'mine-4'
           ? { ...p, actual: p.projection! + 8 }
           : p,

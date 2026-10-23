@@ -243,6 +243,7 @@ export function buildPlayerRate(args: {
     onReserve: args.onReserve === true,
     weeks: args.weeks,
     byeWeek: args.byeWeek,
+    rate: resolved.rate,
   });
   return {
     playerId: evaluation.playerId,

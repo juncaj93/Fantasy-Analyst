@@ -171,14 +171,14 @@ describe('a defence on the generic scan', () => {
 /*
  * The number on the card is the projection gap, with no penalty in it.
  *
- * A bench player who is questionable grades well below his projection, and
+ * A bench player who is doubtful grades well below his projection, and
  * the grade gap is still what decides the call. The card prints the market's
  * two numbers subtracted, so `+6.7 pts` means what a reader thinks it means.
  */
 describe('the points a value add shows', () => {
   it('are his projection minus the other man\'s, even when the other man carries a penalty', () => {
     const advice = recommendWaiverUpgrades({
-      roster: [...roster().filter((c) => c.player.id !== 'rb3'), candidate('rb3', 'Weak Back', 'RB', 1, { status: 'Questionable' })],
+      roster: [...roster().filter((c) => c.player.id !== 'rb3'), candidate('rb3', 'Weak Back', 'RB', 1, { status: 'Doubtful' })],
       candidates: [candidate('fa-rb1', 'Wire Back', 'RB', 7)],
       shape: SHAPE,
       profile: HALF_PPR,
@@ -187,8 +187,8 @@ describe('the points a value add shows', () => {
     });
     const add = advice.valueAdds[0]!;
     expect(add.basis.projectionGap).toBeCloseTo(6, 5);
-    // The decision sees the availability charge: half a point off a Questionable drop.
-    expect(add.gain).toBeCloseTo(6.5, 5);
+    // The decision sees Team's availability charge: six points off a Doubtful drop.
+    expect(add.gain).toBeCloseTo(12, 5);
 
     const row = buildWaiverBoard({ upgrades: [], valueAdds: advice.valueAdds }).rows[0]!;
     // Both projections, as priced, on the one yardstick the row names.

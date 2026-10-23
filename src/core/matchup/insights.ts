@@ -232,40 +232,12 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
     });
   }
 
-  for (const player of input.players) {
-    if (!player.starting) continue;
-    const distribution = distributionById.get(player.playerId);
-    if (!distribution || distribution.locked) continue;
-    if (player.availability !== 'uncertain' && player.availability !== 'likely_inactive') {
-      continue;
-    }
-    /*
-     * What his availability is worth, in the only currency this screen uses.
-     *
-     * The difference between the matchup as it stands and the matchup with him
-     * certain to play — which is exactly what the reader wants to know and is
-     * not visible from the designation alone. An availability question about a
-     * player with no leverage is not an alert; it is a fact, and it stays off
-     * the card.
-     */
-    const grip = input.leverage.find((l) => l.playerId === player.playerId);
-    const impact = grip ? grip.swing * (distribution.mixture.inactive + distribution.mixture.limited * 0.5) : 0;
-    if (impact < MATERIAL_SWING / 2) continue;
-
-    const mine = player.side === 'mine';
-    candidates.push({
-      key: `injury:${player.playerId}:${player.availability}`,
-      kind: 'injury',
-      urgency: 'act_now',
-      headline: `${name(player.playerId)} is a genuine question`,
-      detail: mine
-        ? `About ${percent(impact)} of your win odds are riding on whether he plays.`
-        : `Their ${name(player.playerId)} is unresolved — worth about ${percent(impact)} either way.`,
-      playerId: player.playerId,
-      side: player.side,
-      winImpact: round4(impact),
-    });
-  }
+  /*
+   * No "genuine question" alert since 23 October 2026. It priced the win odds
+   * riding on the play-chance mix, and a Questionable player now counts at
+   * full value with Team's chip on his row (Alex's decision), so there is no
+   * mix left to price.
+   */
 
   /*
    * No lineup-leverage insight since October 2026. A sentence that says "start

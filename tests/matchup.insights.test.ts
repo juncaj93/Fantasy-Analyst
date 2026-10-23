@@ -91,7 +91,7 @@ describe('priority', () => {
     const players = mixedSlate(
       lineups().map((p) =>
         p.playerId === 'mine-0'
-          ? { ...p, availability: 'uncertain' as const }
+          ? { ...p, ruledOut: true }
           : p.playerId === 'mine-4'
             ? { ...p, actual: p.projection! + 8 }
             : p,
@@ -300,7 +300,7 @@ describe('state and supersession', () => {
 
   it('carries forward when a card first became relevant', () => {
     const players = mixedSlate(
-      lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, availability: 'uncertain' as const } : p)),
+      lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, ruledOut: true } : p)),
       ['mine-0'],
     );
     const first = forecast(players, HALFTIME);
@@ -327,14 +327,14 @@ describe('state and supersession', () => {
 
   it('does not let a superseded card survive its state', () => {
     const players = mixedSlate(
-      lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, availability: 'uncertain' as const } : p)),
+      lineups().map((p) => (p.playerId === 'mine-0' ? { ...p, ruledOut: true } : p)),
       ['mine-0'],
     );
     const first = forecast(players, HALFTIME);
     expect(first.insights.some((i) => i.kind === 'injury')).toBe(true);
 
     const resolved = forecast(
-      players.map((p) => (p.playerId === 'mine-0' ? { ...p, availability: 'high_confidence_active' as const } : p)),
+      players.map((p) => (p.playerId === 'mine-0' ? { ...p, ruledOut: false } : p)),
       HALFTIME,
       {
         previous: {

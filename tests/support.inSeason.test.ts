@@ -127,6 +127,7 @@ describe('every in-season decision captures and replays', () => {
        * that reads as redacted, which is the failure mode worth catching.
        */
       const text = JSON.stringify(captured);
+      const names = JSON.stringify(captured, (key, value) => (key === 'headline' || key === 'detail' ? undefined : value));
       const rosters = await db
         .prepare('SELECT owner_id, owner_name FROM rosters WHERE league_id = ?')
         .bind(LEAGUE)
@@ -142,10 +143,13 @@ describe('every in-season decision captures and replays', () => {
            * `not.toContain` would fail on the word `Your` in an ordinary
            * sentence — which is not a leak. The claim being made is that the
            * display name does not appear *as* the display name, which is the
-           * same boundary the alias scrub replaces on.
+           * same boundary the alias scrub replaces on. An apostrophe continues
+           * the word too, and the app's own headlines and details are left out
+           * of this one check: `You remain a strong favorite` is a sentence the
+           * app wrote, not a name. The id check above still reads everything.
            */
-          const asAName = new RegExp(`(?<![\\p{L}\\p{N}_])${row.owner_name}(?![\\p{L}\\p{N}_])`, 'u');
-          expect(asAName.test(text), `owner name ${row.owner_name} survived capture`).toBe(false);
+          const asAName = new RegExp(`(?<![\\p{L}\\p{N}_])${row.owner_name}(?![\\p{L}\\p{N}_'’])`, 'u');
+          expect(asAName.test(names), `owner name ${row.owner_name} survived capture`).toBe(false);
         }
       }
       expect(text, 'the Sleeper league id survived capture').not.toContain('sleeper-league-1');

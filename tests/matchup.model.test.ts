@@ -134,21 +134,20 @@ describe('game state decides what is still uncertain', () => {
 });
 
 describe('the injury mixture', () => {
-  it('does not reduce a questionable player to one flat projection', () => {
+  it('counts a questionable player at full value, as Team does (23 October 2026)', () => {
     const clock = resolveGameClock(KICKOFF, BEFORE);
     const certain = buildDistribution(
       player({ playerId: 'a', side: 'mine', projection: 14, availability: 'high_confidence_active' }),
       clock,
     );
-    const doubtfulNow = buildDistribution(
-      player({ playerId: 'b', side: 'mine', projection: 14, availability: 'uncertain' }),
+    const questionable = buildDistribution(
+      player({ playerId: 'b', side: 'mine', projection: 14, availability: 'uncertain', designation: 'questionable' }),
       clock,
     );
-    // The expectation falls and the floor collapses toward zero — two different
-    // consequences of the same uncertainty, and both have to be visible.
-    expect(effectiveRemaining(doubtfulNow)).toBeLessThan(effectiveRemaining(certain));
-    expect(doubtfulNow.floor).toBeLessThan(certain.floor);
-    expect(doubtfulNow.mixture.inactive).toBeGreaterThan(0);
+    // The old play-chance mix made this 0.616 of 14 (8.62). Team's rule is full value.
+    expect(effectiveRemaining(questionable)).toBe(effectiveRemaining(certain));
+    expect(questionable.floor).toBe(certain.floor);
+    expect(questionable.mixture).toEqual({ normal: 1, limited: 0, inactive: 0 });
   });
 
   it('collapses the branch once his game is running', () => {
