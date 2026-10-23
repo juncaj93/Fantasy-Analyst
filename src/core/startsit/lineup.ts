@@ -1575,7 +1575,12 @@ function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation):
   if (inNews && !inNews.unknown && inNews.value > 0) {
     return `${incoming.name} has a positive recent signal (${inNews.display})`;
   }
-  if (incoming.expectation.points != null && outgoing.expectation.points != null) {
+  /*
+   * Only between two full markets. Since the minus-2 rule (23 October 2026) a
+   * Sleeper-only player can win a slot, and his one posted line read here as
+   * "the higher market expectation (1.8 vs 12.5 pts)".
+   */
+  if (hasCompleteMarket(incoming) && hasCompleteMarket(outgoing) && incoming.expectation.points != null && outgoing.expectation.points != null) {
     return `${incoming.name} carries the higher market expectation (${incoming.expectation.points.toFixed(1)} vs ${outgoing.expectation.points.toFixed(1)} pts)`;
   }
   return `${incoming.name} scores higher on the evidence available`;

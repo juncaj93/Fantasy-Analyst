@@ -45,6 +45,8 @@ describe('Team (assembleLineup)', () => {
     const shown = r.starters.find((e) => e.playerId === 's')!.decision!.points;
     const out = r.bench.find((e) => e.playerId === 'p')!.decision!.points;
     expect(r.swaps[0]!.gain).toBeCloseTo(shown - out, 2);
+    // His one posted line is not "the higher market expectation".
+    expect(r.swaps[0]!.reason).not.toMatch(/market expectation/);
   });
 
   it('keeps the priced player when the Sleeper-only one is ahead by less than 2', () => {
