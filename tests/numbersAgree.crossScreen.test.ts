@@ -9,7 +9,7 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DOUBTFUL, HEALTHY, QUESTIONABLE, SLEEPER_ONLY, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
+import { DOUBTFUL, HEALTHY, NUDGED, QUESTIONABLE, SLEEPER_ONLY, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
 
 let screens: CrossScreen;
 beforeAll(async () => {
@@ -36,6 +36,13 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
 
   it('a Doubtful player is his number less six, never below zero, everywhere', () => {
     expectAgree(DOUBTFUL, 0);
+  });
+
+  it('a nudged player shows the adjusted number everywhere, Matchup card included', () => {
+    const n = screens.numbers(NUDGED);
+    // The market is 15; the recent-news nudge sits on top of it on every screen.
+    expect(n.team).toBeGreaterThan(15);
+    expectAgree(NUDGED, n.team!);
   });
 
   it('a Sleeper-only player shows his undocked number everywhere', () => {
