@@ -20,6 +20,8 @@
  * anything and "no designation" and "no information" are different sentences.
  */
 
+import { zonedParts } from '../time/zoned.ts';
+
 /**
  * What the league host says about availability.
  *
@@ -226,6 +228,13 @@ export interface InjuryObservation {
   /** What the source literally said, kept so a surprise can be traced. */
   raw: string | null;
   observedAt: string | null;
+  /**
+   * When this source's copy was taken, where that is known and `observedAt` is
+   * not. Sleeper does not stamp a status, so its copy is as old as the last
+   * player-list download. Used only to decide which of two disagreeing sources
+   * is newer; never a freshness claim, so it moves no confidence.
+   */
+  asOf?: string | null;
   practice?: PracticeStatus[];
   bodyPart?: string | null;
 }
@@ -272,12 +281,12 @@ export const NO_INJURY_INFORMATION: InjuryState = {
 };
 
 /**
- * Sources, in the order they are believed for a *designation*.
+ * Sources, in the order they are believed when they name the same severity.
  *
- * Sleeper is first and it is not a close call: it is the league host, it is what
- * the user's own app shows, and it is what actually governs whether a player is
- * in their lineup. A practice report published on Friday is better at describing
- * the week and worse at describing Sunday.
+ * Sleeper is first: it is the league host and what the user's own app shows.
+ * When the two name different severities, the worse one wins (`chooseDesignation`),
+ * and this order only breaks ties, so a player both sources call ruled out
+ * keeps Sleeper's word for it.
  *
  * Body part and practice participation invert this — see `resolveInjury`.
  */
@@ -289,11 +298,71 @@ function rank(source: string): number {
 }
 
 /**
+ * How much older a worse record must be before a newer, cleaner one beats it.
+ *
+ * A day. Sleeper's copy is as old as the last player-list download, which is
+ * up to a day by design, so two records closer than that are the same news
+ * read at different moments and the worse one stands. A Wednesday "Out" read
+ * against a Sunday "Active" is not: the newer word wins.
+ */
+export const CLEARLY_OLDER_HOURS = 24;
+
+function timeOf(o: InjuryObservation): number {
+  return Date.parse(o.asOf ?? o.observedAt ?? '');
+}
+
+/** The Tuesday, Detroit time, that starts the NFL week an instant falls in. */
+function nflWeekStart(ms: number): number {
+  const p = zonedParts(ms, 'America/Detroit');
+  const sinceTuesday = (p.weekday - 2 + 7) % 7;
+  return Date.UTC(p.year, p.month - 1, p.day - sinceTuesday);
+}
+
+/**
+ * Which designated observation decides. The more severe one, unless it is old.
+ *
+ * Sleeper's player list is downloaded once a day and the injury report is
+ * checked every five minutes, so a player ruled out after the morning download
+ * used to keep Sleeper's stale Questionable for up to a day. Now the worse of
+ * the two stands, with time as the check on it:
+ *
+ *  - when every record is dated, a worse record that is `CLEARLY_OLDER_HOURS`
+ *    older than a cleaner one loses to it;
+ *  - when one is not, the dated ones take part only if they are from the
+ *    current NFL week, so last month's report cannot bench a healthy player.
+ *
+ * Equal severities keep source order, so agreeing sources change nothing.
+ * `designated` arrives in source order.
+ */
+function chooseDesignation(designated: InjuryObservation[], now: Date): InjuryObservation | null {
+  if (designated.length <= 1) return designated[0] ?? null;
+  const times = designated.map(timeOf);
+  const clearly = CLEARLY_OLDER_HOURS * 3_600_000;
+  let contenders: InjuryObservation[];
+  if (times.every(Number.isFinite)) {
+    contenders = designated.filter(
+      (o, i) =>
+        !designated.some(
+          (p, j) => DESIGNATION_SEVERITY[p.designation] < DESIGNATION_SEVERITY[o.designation] && times[j]! - times[i]! > clearly,
+        ),
+    );
+  } else {
+    const thisWeek = nflWeekStart(now.getTime());
+    contenders = designated.filter((_, i) => !Number.isFinite(times[i]!) || nflWeekStart(times[i]!) === thisWeek);
+  }
+  if (contenders.length === 0) contenders = designated;
+  return contenders.reduce((best, o) =>
+    DESIGNATION_SEVERITY[o.designation] > DESIGNATION_SEVERITY[best.designation] ? o : best,
+  );
+}
+
+/**
  * Combine what the sources said into one state.
  *
  * The rules, in full:
  *
- *  - the designation comes from the highest-priority source that has a real one;
+ *  - the designation is the more severe of the sources', unless that one is
+ *    clearly older than a cleaner one (`chooseDesignation`);
  *  - the body part and the practice week come from whoever has them, because
  *    only the injury report publishes those and there is nothing to arbitrate;
  *  - freshness is measured against the observation the designation came from,
@@ -309,7 +378,10 @@ export function resolveInjury(observations: InjuryObservation[], now: Date): Inj
     (a, b) => rank(a.source) - rank(b.source) || (Date.parse(b.observedAt ?? '') || 0) - (Date.parse(a.observedAt ?? '') || 0),
   );
 
-  const primary = sorted.find((o) => o.designation !== 'unknown') ?? null;
+  const primary = chooseDesignation(
+    sorted.filter((o) => o.designation !== 'unknown'),
+    now,
+  );
   const designation = primary?.designation ?? 'unknown';
 
   // Whoever has it. Only the injury report publishes a body part, so this is a

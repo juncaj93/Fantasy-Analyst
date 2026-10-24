@@ -53,6 +53,7 @@ export class SleeperSyncService {
       /* Depth order and injury notes for Waivers, from the same answer: one settings row, no request. */
       await this.settings.set(PLAYER_NOTES_KEY, playerNotesOf(raw, new Date())).catch(() => undefined);
       const total = await this.players.count();
+      await this.settings.markPlayersSynced(nowIso());
       await this.settings.logSync('players', 'ok', `${written} players written`, startedAt);
       return { written, total };
     } catch (err) {

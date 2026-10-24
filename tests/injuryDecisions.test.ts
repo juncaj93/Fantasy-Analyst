@@ -95,10 +95,11 @@ describe('availability, for a lineup', () => {
     });
 
     it('says so when the sources disagree, rather than picking a side quietly', () => {
+      // A three-day-old Out against a current Questionable: the newer word stands, and the note says they disagree.
       const conflicted = resolveInjury(
         [
           { source: 'sleeper', designation: 'questionable', raw: 'Questionable', observedAt: recently },
-          { source: 'nflverse', designation: 'out', raw: 'Out', observedAt: recently },
+          { source: 'nflverse', designation: 'out', raw: 'Out', observedAt: new Date(NOW.getTime() - 72 * 3_600_000).toISOString() },
         ],
         NOW,
       );

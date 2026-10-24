@@ -78,10 +78,11 @@ describe('availability confidence', () => {
   });
 
   it('lowers confidence when the sources disagree', () => {
+    // The report's Out is a week older than Sleeper's Questionable, so the newer word stands and the disagreement shows.
     const conflicted = resolveInjury(
       [
         { source: 'sleeper', designation: 'questionable', raw: 'Questionable', observedAt: FRESH },
-        { source: 'nflverse', designation: 'out', raw: 'Out', observedAt: FRESH, practice: ['limited'] },
+        { source: 'nflverse', designation: 'out', raw: 'Out', observedAt: OLD, practice: ['limited'] },
       ],
       NOW,
     );

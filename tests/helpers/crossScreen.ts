@@ -18,6 +18,7 @@ import { SleeperProjectionsRepo } from '../../src/server/repos/sleeperProjection
 import { rowFigure } from '../../src/web/rowFigure.ts';
 import { weekPointsBeforeStatus, weekPointsOf } from '../../src/core/startsit/weekPoints.ts';
 import type { StartSitEvaluation } from '../../src/core/startsit/engine.ts';
+import { injurySeason } from '../../src/server/services/injuryService.ts';
 import { createTestDb } from './db.ts';
 import { player } from './players.ts';
 import { FETCHED_AT, LEAGUE, MINE, THEIRS, envFor, seed } from './tradeLeague.ts';
@@ -29,6 +30,8 @@ export const SLEEPER_ONLY = 'm_sl';
 export const HEALTHY = 'm_wr1';
 /** A priced receiver with good recent news, so his number carries a nudge on top of the market. */
 export const NUDGED = 'm_wr2';
+/** A bench back Sleeper still calls Questionable and this week's injury report calls Out. */
+export const SOURCES_SPLIT = 'm_bn2';
 
 export interface ScreenNumbers {
   team: number | null;
@@ -58,7 +61,17 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     player({ id: QUESTIONABLE, fullName: 'M_WR3', position: 'WR', team: 'DAL', status: 'Questionable' }),
     player({ id: DOUBTFUL, fullName: 'M_BN1', position: 'WR', team: 'DAL', status: 'Doubtful' }),
     player({ id: SLEEPER_ONLY, fullName: 'M_SL', position: 'WR', team: 'KC' }),
+    player({ id: SOURCES_SPLIT, fullName: 'M_BN2', position: 'RB', team: 'NE', status: 'Questionable' }),
   ]);
+  /* This week's report, published now: Out. The worse word stands on every screen. */
+  await db
+    .prepare(
+      `INSERT INTO player_injury_reports (player_id, season, week, team, report_status,
+         primary_injury, secondary_injury, practice_status, practice_raw, gsis_id, source, published_at, fetched_at)
+       VALUES (?, ?, 5, 'NE', 'Out', 'Knee', NULL, 'dnp', 'Did Not Participate In Practice', NULL, 'nflverse', ?, ?)`,
+    )
+    .bind(SOURCES_SPLIT, injurySeason(), new Date().toISOString(), new Date().toISOString())
+    .run();
   const ids = [...MINE.map((p) => p[0]), SLEEPER_ONLY];
   const mineStarters = MINE.slice(0, 9).map((p) => p[0]);
   const theirStarters = THEIRS.slice(0, 9).map((p) => p[0]);
@@ -120,7 +133,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   const waivers = await get(`/api/leagues/${LEAGUE}/waivers`);
   const asked = [QUESTIONABLE, DOUBTFUL, SLEEPER_ONLY, HEALTHY];
   const trade = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${asked.join(',')}&get=t_rb1`);
-  const tradeNudged = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${NUDGED}&get=t_rb1`);
+  const tradeNudged = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${NUDGED},${SOURCES_SPLIT}&get=t_rb1`);
   const compareOf = async (playerIds: string[]): Promise<Json> =>
     (await (
       await app(
@@ -133,7 +146,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
       )
     ).json()) as Json;
   const compare = await compareOf(asked);
-  const compareNudged = await compareOf([NUDGED, HEALTHY]);
+  const compareNudged = await compareOf([NUDGED, HEALTHY, SOURCES_SPLIT]);
 
   const teamEvaluations: StartSitEvaluation[] = [...lineup.starters, ...lineup.bench, ...lineup.undecidable];
   const matchupPlayers: Json[] = [
@@ -162,14 +175,14 @@ export async function readEveryScreen(): Promise<CrossScreen> {
       /* Trades: this week's rate times this week's share. */
       const rate = [...(trade.evaluation?.a?.outgoing ?? []), ...(tradeNudged.evaluation?.a?.outgoing ?? [])].find((p: Json) => p.playerId === playerId);
       const tradeNumber = rate?.rate == null ? null : Math.round(rate.rate * (rate.weekly?.[0] ?? 1) * 100) / 100;
-      /* Compare: the card's number (`weekPointsOf`). */
+      /* Compare: the card's number (`weekPointsOf`), `Out` as zero. */
       const c = [...(compare.evaluations ?? []), ...(compareNudged.evaluations ?? [])].find((x: Json) => x.playerId === playerId);
       return {
         team,
         matchup: card?.projectedFinal ?? null,
         waivers: waiverNumber,
         trades: tradeNumber,
-        compare: c ? weekPointsOf(c).points : null,
+        compare: c ? (weekPointsOf(c).out ? 0 : weekPointsOf(c).points) : null,
       };
     },
   };

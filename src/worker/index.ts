@@ -40,6 +40,7 @@ import { InjuryHistoryService } from '../server/services/injuryHistoryService.ts
 import { UsageService } from '../server/services/usageService.ts';
 import { NflverseService } from '../server/services/nflverseService.ts';
 import { nflverseFeedDue } from '../core/nflverse/cadence.ts';
+import { dailyPlayerListDue, isSundayPlayerListSlot, sundayPlayerListDue } from '../core/sleeper/playerListClock.ts';
 import { waiverReadDue } from '../core/league/waiverReadCadence.ts';
 import { WeekPointsService } from '../server/services/weekPointsService.ts';
 import { managerIntelWindow } from '../core/league/managerIntelCadence.ts';
@@ -272,6 +273,32 @@ export default {
         if ((run.changedPlayerIds ?? []).length === 0) await injuries.catchUpOneWeek();
       } catch (err) {
         console.error('injury check failed', err);
+      }
+
+      /*
+       * Sunday's one player-list download, at game time.
+       *
+       * 11:45 AM Eastern, after the 1 PM games' inactives, with retries at
+       * 12:15 PM and 12:30 PM that run only if nothing has succeeded that
+       * Eastern day. The 09:00 tick skips Sundays so this is the day's only
+       * download. See `core/sleeper/playerListClock.ts`.
+       *
+       * After the injury check, and the tick ends here when it runs: a 5 MB
+       * parse gets the invocation to itself, and everything below is just as
+       * due five minutes later.
+       */
+      if (isSundayPlayerListSlot(event.scheduledTime)) {
+        const lastSuccess = await new SettingsRepo(env.DB).playersLastSuccessAt().catch(() => null);
+        if (sundayPlayerListDue(event.scheduledTime, lastSuccess)) {
+          try {
+            const metered = toAppEnv(env, budgetedFetch(new RequestBudget(MAX_CRON_SUBREQUESTS)));
+            const { written } = await new SleeperSyncService(env.DB, metered.sleeper).syncPlayers();
+            console.log(`player list downloaded (Sunday game-time slot): ${written} players written`);
+          } catch (err) {
+            console.error('player list download failed (Sunday game-time slot)', err);
+          }
+          return;
+        }
       }
 
       /*
@@ -546,6 +573,9 @@ export default {
        * for one more day.
        */
       await run.step('players', 'Player list', async () => {
+        /* Once per Eastern date, and never on a Sunday: that day's download is at game time. */
+        const lastSuccess = await new SettingsRepo(env.DB).playersLastSuccessAt();
+        if (!dailyPlayerListDue(event.scheduledTime ?? Date.now(), lastSuccess)) return { outcome: 'skipped' as const };
         const { written } = await sleeperSync.syncPlayers();
         return { outcome: 'succeeded', items: written };
       });
