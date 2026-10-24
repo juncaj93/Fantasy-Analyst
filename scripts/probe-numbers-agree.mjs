@@ -107,12 +107,17 @@ if (!SLEEPER_LEAGUE || !process.env.CLOUDFLARE_API_TOKEN) {
   }
 }
 
-/* D1 rows read per statement, last 24 hours (Cloudflare analytics, free). */
+/* D1 rows read (Cloudflare analytics, free, no SQL). The workflow passes no account id, so ask the token. */
 const token = process.env.CLOUDFLARE_API_TOKEN;
-const account = process.env.ACCOUNT_ID;
-if (token && account) {
-  const to = new Date();
-  const from = new Date(to.getTime() - 24 * 3600 * 1000);
+const account =
+  process.env.ACCOUNT_ID ||
+  (token
+    ? await fetch('https://api.cloudflare.com/client/v4/accounts', { headers: { authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((b) => b?.result?.[0]?.id ?? null)
+        .catch(() => null)
+    : null);
+const d1Rows = async (from, to) => {
   const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -120,16 +125,39 @@ if (token && account) {
       query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $a }) {
         d1QueriesAdaptiveGroups(limit: 10000, filter: { datetime_geq: $from, datetime_lt: $to }, orderBy: [sum_rowsRead_DESC]) {
           count dimensions { query } sum { rowsRead } } } } }`,
-      variables: { a: account, from: from.toISOString(), to: to.toISOString() },
+      variables: { a: account, from, to },
     }),
   }).then((r) => r.json()).catch(() => null);
-  const rows = res?.data?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? [];
-  const total = rows.reduce((sum, r) => sum + Number(r.sum?.rowsRead ?? 0), 0);
+  return res?.data?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? [];
+};
+const sumRows = (rows) => rows.reduce((sum, r) => sum + Number(r.sum?.rowsRead ?? 0), 0);
+/* This round's deploy runs, start to finish (GitHub Actions run times, UTC). */
+const DEPLOYS = [
+  ['#411 (D1 rule)', '2026-10-23T15:06:27Z', '2026-10-23T15:10:47Z'],
+  ['#412 (minus 2)', '2026-10-23T18:01:10Z', '2026-10-23T18:04:34Z'],
+  ['#413 (Matchup card)', '2026-10-23T18:45:57Z', '2026-10-23T18:50:30Z'],
+  ['#414 (Compare slot)', '2026-10-23T19:28:30Z', '2026-10-23T19:32:49Z'],
+  ['#415 stood down', '2026-10-23T20:06:52Z', '2026-10-23T20:07:01Z'],
+  ['#415 (tie line)', '2026-10-24T00:23:05Z', '2026-10-24T00:27:21Z'],
+  ['#416 (kickoff order)', '2026-10-24T00:47:30Z', '2026-10-24T00:52:47Z'],
+  ['#416 smoke re-run', '2026-10-24T00:58:34Z', '2026-10-24T01:00:08Z'],
+];
+if (token && account) {
+  const to = new Date();
+  const rows = await d1Rows(new Date(to.getTime() - 24 * 3600 * 1000).toISOString(), to.toISOString());
+  const total = sumRows(rows);
   console.log(`\n## D1, last 24 hours to ${et(to)}: ${total} rows read across ${rows.length} statements (${Math.round((total / 5_000_000) * 100)}% of 5,000,000)`);
   for (const r of rows.slice(0, 25)) {
     const per = Number(r.count) ? Math.round(Number(r.sum.rowsRead) / Number(r.count)) : 0;
     console.log(`  ${r.count} calls, ${r.sum.rowsRead} rows (${per}/call): ${String(r.dimensions.query).replace(/\s+/g, ' ').slice(0, 140)}`);
   }
+  const today = await d1Rows('2026-10-24T00:00:00Z', to.toISOString());
+  console.log(`\n## D1 since the reset (8:00 PM ET): ${sumRows(today)} rows read (${((sumRows(today) / 5_000_000) * 100).toFixed(1)}% of 5,000,000)`);
+  console.log('\n## Rows read per deploy run (all D1 reads in the window, the gate and anyone else)');
+  for (const [label, from, until] of DEPLOYS) {
+    const w = await d1Rows(from, until);
+    console.log(`  ${label.padEnd(22)} ${et(new Date(from))} to ${et(new Date(until))}: ${sumRows(w)} rows, ${w.length} statements`);
+  }
 } else {
-  console.log('\n## D1: no Cloudflare token in this run');
+  console.log(`\n## D1: ${token ? 'no Cloudflare account id resolved' : 'no Cloudflare token'} in this run`);
 }

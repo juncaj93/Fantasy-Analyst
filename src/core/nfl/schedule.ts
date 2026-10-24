@@ -52,6 +52,7 @@
  * is the worst of both. This app has no weather source; see the brief's §14.
  */
 
+import { normalizeTeam } from '../identity/normalize.ts';
 import { extractFields, headerIndex, int, text } from '../source/csv.ts';
 
 /**
@@ -223,9 +224,10 @@ function seasonLines(csv: string, season: string | undefined): string[] {
 export function weeksByTeam(rows: readonly ScheduleTeamWeek[]): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>();
   for (const row of rows) {
-    const weeks = out.get(row.team) ?? new Set<number>();
+    const team = normalizeTeam(row.team);
+    const weeks = out.get(team) ?? new Set<number>();
     weeks.add(row.week);
-    out.set(row.team, weeks);
+    out.set(team, weeks);
   }
   return out;
 }
@@ -243,7 +245,7 @@ export function byeWeeks(
   team: string,
   range: { from: number; to: number },
 ): number[] {
-  const played = weeksByTeam(rows).get(team.toUpperCase()) ?? new Set<number>();
+  const played = weeksByTeam(rows).get(normalizeTeam(team)) ?? new Set<number>();
   const out: number[] = [];
   for (let week = range.from; week <= range.to; week++) if (!played.has(week)) out.push(week);
   return out;
@@ -284,7 +286,7 @@ export const MIN_TEAMS_FOR_BYE = 20;
 export function playingTeams(fixtures: readonly ScheduleTeamWeek[]): Set<string> | null {
   const teams = new Set<string>();
   for (const row of fixtures) {
-    if (row.opponent && row.team) teams.add(row.team.toUpperCase());
+    if (row.opponent && row.team) teams.add(normalizeTeam(row.team));
   }
   return teams.size >= MIN_TEAMS_FOR_BYE ? teams : null;
 }
@@ -296,7 +298,7 @@ export function playingTeams(fixtures: readonly ScheduleTeamWeek[]): Set<string>
  * bye) and false whenever {@link playingTeams} returned null.
  */
 export function isOnBye(team: string | null | undefined, playing: ReadonlySet<string> | null | undefined): boolean {
-  const club = (team ?? '').trim().toUpperCase();
+  const club = normalizeTeam(team);
   if (!club || !playing) return false;
   return !playing.has(club);
 }
@@ -305,7 +307,7 @@ export function homeByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, b
   const out = new Map<string, boolean>();
   for (const row of fixtures) {
     if (!row.opponent) continue;
-    out.set(row.team.toUpperCase(), row.home);
+    out.set(normalizeTeam(row.team), row.home);
   }
   return out;
 }
@@ -331,13 +333,19 @@ export function indoorByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string,
   for (const row of fixtures) {
     if (!row.opponent) continue;
     const roof = (row.roof ?? '').trim().toLowerCase();
-    if (roof === 'dome' || roof === 'closed') out.set(row.team.toUpperCase(), true);
+    if (roof === 'dome' || roof === 'closed') out.set(normalizeTeam(row.team), true);
   }
   return out;
 }
 
+/*
+ * In Sleeper's codes, which every other table and every player row uses. The
+ * file writes the Rams as `LA` (23 October 2026: every Rams player read as on a
+ * bye on Matchup, a 0 on the card, every week). The readers above fold the same
+ * way, so rows stored before this read correctly too.
+ */
 function normaliseTeam(raw: string | undefined): string | null {
-  const value = (raw ?? '').trim().toUpperCase();
+  const value = normalizeTeam(raw);
   return value.length === 0 ? null : value;
 }
 
