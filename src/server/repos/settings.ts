@@ -68,7 +68,46 @@ export class SettingsRepo {
       finishedAt: String(row['finished_at'] ?? ''),
     };
   }
+
+  /**
+   * When the full Sleeper player list last downloaded successfully, or null.
+   *
+   * One settings row, written by `syncPlayers` on success. Before the first
+   * success that writes it, the sync log's newest `ok` row answers instead.
+   */
+  async playersLastSuccessAt(): Promise<string | null> {
+    const cached = playersStampCache.get(this.db);
+    if (cached && Date.now() - cached.readAt < PLAYERS_STAMP_TTL_MS) return cached.at;
+    // One statement, one round trip: the stamp, or the log when there is no stamp yet.
+    const row = await this.db
+      .prepare(
+        `SELECT COALESCE(
+           (SELECT value_json FROM settings WHERE key = ?),
+           (SELECT json_quote(MAX(finished_at)) FROM sync_log WHERE kind = 'players' AND status = 'ok')
+         ) AS at`,
+      )
+      .bind(SETTING_KEYS.playersLastSuccess)
+      .first<Record<string, unknown>>();
+    const parsed = row?.['at'] == null ? null : parseJson<unknown>(String(row['at']), null);
+    const at = typeof parsed === 'string' && parsed ? parsed : null;
+    playersStampCache.set(this.db, { at, readAt: Date.now() });
+    return at;
+  }
+
+  /** Record a successful player-list download. */
+  async markPlayersSynced(at: string): Promise<void> {
+    await this.set(SETTING_KEYS.playersLastSuccess, at);
+    playersStampCache.delete(this.db);
+  }
 }
+
+/*
+ * The stamp changes once a day and every injury read wants it, so a minute's
+ * memory per database handle keeps it to one row read however many screens a
+ * request assembles. The download itself clears it.
+ */
+const PLAYERS_STAMP_TTL_MS = 60_000;
+const playersStampCache = new WeakMap<Database, { at: string | null; readAt: number }>();
 
 /** Setting keys used across the app. */
 export const SETTING_KEYS = {
@@ -130,4 +169,13 @@ export const SETTING_KEYS = {
    * the work is done. See `core/league/managerIntelCadence.ts`.
    */
   managerIntelWeekly: 'managerIntel.weekly',
+  /**
+   * When the full player list last downloaded successfully, as an ISO instant.
+   *
+   * Sleeper asks for that download at most once a day, and this is what holds
+   * the scheduled ones to one per Eastern date (`core/sleeper/playerListClock.ts`).
+   * It is also how old Sleeper's injury statuses are, which is what lets a
+   * newer injury report outrank them (`core/injury/model.ts`).
+   */
+  playersLastSuccess: 'sleeper.players.lastSuccessAt',
 } as const;

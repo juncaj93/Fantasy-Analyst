@@ -26,6 +26,7 @@ import type { Database } from '../db.ts';
 import { InjuryRepo, InjurySourceRepo, type InjurySourceRun, type StoredInjuryReport } from '../repos/injury.ts';
 import { InjuryHistoryRepo } from '../repos/injuryHistory.ts';
 import { PlayerRepo } from '../repos/players.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import {
   NO_INJURY_INFORMATION,
   normalizeDesignation,
@@ -659,7 +660,10 @@ export class InjuryService {
     const season = opts.season ?? injurySeason(this.now());
     const now = this.now();
     const ids = players.map((p) => p.playerId);
-    const reports = await this.repo.latestFor(ids, season).catch(() => new Map<string, StoredInjuryReport>());
+    const [reports, statusAsOf] = await Promise.all([
+      this.repo.latestFor(ids, season).catch(() => new Map<string, StoredInjuryReport>()),
+      this.playerListAsOf(),
+    ]);
 
     const out = new Map<string, InjuryState>();
     for (const player of players) {
@@ -675,6 +679,7 @@ export class InjuryService {
           // status, so this is the sync time or nothing — and nothing is
           // honest rather than optimistic.
           observedAt: opts.statusObservedAt ?? null,
+          asOf: statusAsOf,
         });
       }
 
@@ -708,7 +713,10 @@ export class InjuryService {
     opts: { season?: string; statusObservedAt?: string | null } = {},
   ): Promise<InjuryState> {
     const season = opts.season ?? injurySeason(this.now());
-    const weeks = await this.repo.weeksFor(playerId, season).catch(() => [] as StoredInjuryReport[]);
+    const [weeks, statusAsOf] = await Promise.all([
+      this.repo.weeksFor(playerId, season).catch(() => [] as StoredInjuryReport[]),
+      this.playerListAsOf(),
+    ]);
     const observations: InjuryObservation[] = [];
 
     const sleeper = normalizeDesignation(status);
@@ -718,6 +726,7 @@ export class InjuryService {
         designation: sleeper.designation,
         raw: sleeper.raw,
         observedAt: opts.statusObservedAt ?? null,
+        asOf: statusAsOf,
       });
     }
 
@@ -738,6 +747,17 @@ export class InjuryService {
 
     if (observations.length === 0) return NO_INJURY_INFORMATION;
     return resolveInjury(observations, this.now());
+  }
+
+  /**
+   * How old Sleeper's statuses are: the last successful player-list download.
+   *
+   * What lets a newer injury report outrank a status Sleeper has since changed
+   * and this app has not yet downloaded. Null when unknown, which the model
+   * reads as "only this week's report may outrank it".
+   */
+  private async playerListAsOf(): Promise<string | null> {
+    return new SettingsRepo(this.db).playersLastSuccessAt().catch(() => null);
   }
 
   async health(season = injurySeason(this.now())): Promise<InjuryHealth> {

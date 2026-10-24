@@ -9,7 +9,7 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DOUBTFUL, HEALTHY, NUDGED, QUESTIONABLE, SLEEPER_ONLY, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
+import { DOUBTFUL, HEALTHY, NUDGED, QUESTIONABLE, SLEEPER_ONLY, SOURCES_SPLIT, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
 
 let screens: CrossScreen;
 beforeAll(async () => {
@@ -47,6 +47,12 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
 
   it('a Sleeper-only player shows his undocked number everywhere', () => {
     expectAgree(SLEEPER_ONLY, 16);
+  });
+
+  it('Sleeper Questionable and this week\'s report Out reads Out on every screen, and Team benches him', () => {
+    expectAgree(SOURCES_SPLIT, 0);
+    const starters = screens.lineup.starters.map((e: { playerId: string }) => e.playerId);
+    expect(starters).not.toContain(SOURCES_SPLIT);
   });
 });
 
