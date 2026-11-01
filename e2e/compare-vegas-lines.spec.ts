@@ -98,20 +98,26 @@ test('the Vegas lines sit under Base, and Uncertainty is gone', async ({ page })
   await expect(page.getByTestId('compare-sheet')).not.toContainText('lower confidence');
 });
 
-/** The compare response's game lines, by player, as the server sent them. */
-async function gameLinesFrom(page: Page): Promise<Map<string, { total: number | null; teamPoints: number | null } | null>> {
-  const response = await page.waitForResponse((r) => r.url().includes('/api/startsit/compare') && r.request().method() === 'POST');
-  const body = (await response.json()) as { evaluations: { playerId: string; gameLine?: { total: number | null; teamPoints: number | null } | null; decision?: { basis: string } | null }[] };
-  return new Map(body.evaluations.map((e) => [e.playerId, e.decision?.basis === 'published' ? null : (e.gameLine ?? null)]));
-}
-
-const shown = (v: number | null | undefined) => (v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1));
-
-test('Game total and Team points sit last, above Score, with the server’s numbers; news and opponent have no row', async ({ page }) => {
+test('Game total and Team points sit last, above Score; news and opponent have no row', async ({ page }) => {
+  /*
+   * The demo players' games carry no line, so one known game is put on the
+   * first two: a 47.5 total with a 3-point favourite (25.25 and 22.25).
+   */
+  const sides: Record<string, string> = {};
+  await page.route('**/api/startsit/compare', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const [a, b] = body.evaluations ?? [];
+    if (a && b) {
+      a.gameLine = { total: 47.5, teamPoints: 25.25 };
+      b.gameLine = { total: 47.5, teamPoints: 22.25 };
+      sides.favourite = a.playerId;
+      sides.underdog = b.playerId;
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
   await openCompare(page);
-  const lines = gameLinesFrom(page);
   await compareFirst(page, 4);
-  const byPlayer = await lines;
   const grid = page.getByTestId('compare-grid');
   const labels = await grid.locator('.cmp2-factor-label').allInnerTexts();
   expect(labels.slice(0, 4)).toEqual(['Base', 'Yards', 'Catches', 'TD %']);
@@ -120,10 +126,12 @@ test('Game total and Team points sit last, above Score, with the server’s numb
   await expect(grid).not.toContainText('Opponent');
 
   const order = await page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')!));
-  const cells = (key: string) => grid.locator(`[data-factor="${key}"] [data-testid="compare-cell"]`).allInnerTexts();
-  expect(await cells('game_total')).toEqual(order.map((id) => shown(byPlayer.get(id)?.total)));
-  expect(await cells('team_points')).toEqual(order.map((id) => shown(byPlayer.get(id)?.teamPoints)));
-  expect((await cells('game_total')).some((t) => t !== '–'), 'the demo week prices its games').toBe(true);
+  const cell = (key: string, id: string) => grid.locator(`[data-factor="${key}"] [data-testid="compare-cell"]`).nth(order.indexOf(id));
+  // Two players in one game: one total, two team numbers.
+  await expect(cell('game_total', sides.favourite!)).toHaveText('47.5');
+  await expect(cell('game_total', sides.underdog!)).toHaveText('47.5');
+  await expect(cell('team_points', sides.favourite!)).toHaveText('25.3');
+  await expect(cell('team_points', sides.underdog!)).toHaveText('22.3');
   // Vegas numbers, not fallbacks: never grey, never marked.
   await expect(grid.locator('[data-kind="game"] [data-muted="true"]')).toHaveCount(0);
   await expect(grid.locator('[data-kind="game"] .num-sleeper')).toHaveCount(0);
