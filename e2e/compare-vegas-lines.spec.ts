@@ -4,6 +4,8 @@
  *
  *  - the Vegas lines sit under Base (Yards, Catches, TD %), and there is no
  *    Uncertainty row and no paragraph;
+ *  - since 1 November 2026, Game total and Team points sit last above Score,
+ *    and Recent news and Opponent have no row;
  *  - two players and four players each fit one screen, nothing scrolls
  *    sideways, and no text is cut off;
  *  - a number on Sleeper's week is grey with a `Sleeper` label under it, on
@@ -94,6 +96,73 @@ test('the Vegas lines sit under Base, and Uncertainty is gone', async ({ page })
   await expect(grid).not.toContainText('Uncertainty');
   await expect(page.getByTestId('compare-factor-detail')).toHaveCount(0);
   await expect(page.getByTestId('compare-sheet')).not.toContainText('lower confidence');
+});
+
+test('Game total and Team points sit last, above Score; news and opponent have no row', async ({ page }) => {
+  /*
+   * The demo players' games carry no line, so one known game is put on the
+   * first two: a 47.5 total with a 3-point favourite (25.25 and 22.25).
+   */
+  const sides: Record<string, string> = {};
+  await page.route('**/api/startsit/compare', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const [a, b] = body.evaluations ?? [];
+    if (a && b) {
+      a.gameLine = { total: 47.5, teamPoints: 25.25 };
+      b.gameLine = { total: 47.5, teamPoints: 22.25 };
+      sides.favourite = a.playerId;
+      sides.underdog = b.playerId;
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await openCompare(page);
+  await compareFirst(page, 4);
+  const grid = page.getByTestId('compare-grid');
+  const labels = await grid.locator('.cmp2-factor-label').allInnerTexts();
+  expect(labels.slice(0, 4)).toEqual(['Base', 'Yards', 'Catches', 'TD %']);
+  expect(labels.slice(-2)).toEqual(['Game total', 'Team points']);
+  await expect(grid).not.toContainText('Recent news');
+  await expect(grid).not.toContainText('Opponent');
+
+  const order = await page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')!));
+  const cell = (key: string, id: string) => grid.locator(`[data-factor="${key}"] [data-testid="compare-cell"]`).nth(order.indexOf(id));
+  // Two players in one game: one total, two team numbers.
+  await expect(cell('game_total', sides.favourite!)).toHaveText('47.5');
+  await expect(cell('game_total', sides.underdog!)).toHaveText('47.5');
+  await expect(cell('team_points', sides.favourite!)).toHaveText('25.3');
+  await expect(cell('team_points', sides.underdog!)).toHaveText('22.3');
+  // Vegas numbers, not fallbacks: never grey, never marked.
+  await expect(grid.locator('[data-kind="game"] [data-muted="true"]')).toHaveCount(0);
+  await expect(grid.locator('[data-kind="game"] .num-sleeper')).toHaveCount(0);
+  // Same row style as the others, and one line each.
+  const heights = await grid.locator('[data-testid="compare-factor"]:not([data-kind="line"])').evaluateAll((rows) => rows.map((r) => Math.round(r.getBoundingClientRect().height)));
+  expect(new Set(heights).size, 'every factor row the same height').toBe(1);
+});
+
+test('a player with no Vegas game numbers gets a dash in both game rows', async ({ page }) => {
+  let stripped = '';
+  await page.route('**/api/startsit/compare', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const first = body.evaluations?.[0];
+    if (first) {
+      first.gameLine = null;
+      stripped = first.playerId;
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await openCompare(page);
+  await compareFirst(page, 2);
+  const order = await page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')!));
+  const at = order.indexOf(stripped);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const grid = page.getByTestId('compare-grid');
+  for (const key of ['game_total', 'team_points']) {
+    await expect(grid.locator(`[data-factor="${key}"] [data-testid="compare-cell"]`).nth(at)).toHaveText('–');
+  }
+  // His Score is untouched: the game lines are read, never added.
+  await expect(page.locator('[data-testid="compare-total"] [role="cell"]').nth(at)).not.toHaveText('–');
 });
 
 test('two quarterbacks get Pass yds, Pass TD and Rush yds', async ({ page }) => {

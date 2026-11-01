@@ -121,7 +121,6 @@ export function CompareSheet({
   const [comparison, setComparison] = useState<StartSitComparison | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   /* Position chips: every position this league starts, then FLX, then DEF. */
   const segments = useMemo(() => {
@@ -182,21 +181,17 @@ export function CompareSheet({
   }, [ids, leagueId, slot, mode]);
 
   const toggle = (row: PoolRow) => {
-    setNotice(null);
     if (ids.includes(row.id)) {
       setIds((current) => current.filter((id) => id !== row.id));
       return;
     }
-    if (ids.length >= MAX_COMPARE) {
-      setNotice(`Up to ${MAX_COMPARE} players.`);
-      return;
-    }
+    /* Full: the tap does nothing. No "Up to 4 players." hint (1 November 2026): Alex wants no help text. */
+    if (ids.length >= MAX_COMPARE) return;
     setNames((n) => ({ ...n, [row.id]: row.name }));
     setIds((current) => [...current, row.id]);
   };
 
   const remove = (id: string) => {
-    setNotice(null);
     setIds((current) => current.filter((x) => x !== id));
   };
 
@@ -308,11 +303,6 @@ export function CompareSheet({
             </p>
           ))
         : null}
-      {notice ? (
-        <p className="cmp2-notice" role="status" data-testid="compare-notice">
-          {notice}
-        </p>
-      ) : null}
       {error ? (
         <p className="cmp2-notice" role="alert">
           {error}
@@ -554,7 +544,8 @@ export function Verdict({
 /* --------------------------------------------------------- the score table */
 
 /**
- * The table: Base, the Vegas lines under it, Recent news, Opponent, Score.
+ * The table: Base, the Vegas lines under it, Game total, Team points, Score.
+ * Recent news and Opponent count in the score without a row (1 November 2026).
  * The arithmetic lives in `compareTable.ts`. One line per row, no taps and no
  * paragraphs (15 October 2026): the lines say what Vegas thinks, and a grey
  * cell is a number on Sleeper's week or a line nobody has posted.

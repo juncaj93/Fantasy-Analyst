@@ -11,9 +11,14 @@
  *   Yards …       the posted lines themselves, not points (15 October 2026):
  *                 Yards, Catches, TD %, or Pass yds, Pass TD, Rush yds when
  *                 every column is a QB. They explain Base and are not summed.
- *   Recent news   the capped nudge, as it counts in his number
- *   Opponent      the same
+ *   Game total    the Vegas over/under for his game (1 November 2026)
+ *   Team points   his team's implied points in that game
  *   Score         `weekPointsOf`, the number every other screen prints
+ *
+ * Recent news and Opponent left the table on 1 November 2026 and stayed in
+ * the score: Alex wanted the game lines there instead. Base absorbs them, so
+ * the shown number rows still add up to Score. Game total and Team points are
+ * read, never added, like the lines under Base.
  *
  * Uncertainty had a row until `startsit@6` took it out of the score.
  *
@@ -45,16 +50,22 @@ export interface TableCell {
 export interface TableRow {
   key: string;
   label: string;
-  /** `line` rows are market lines, shown for reading and never added up. */
-  kind: 'base' | 'line' | 'nudge';
+  /**
+   * `line` rows are market lines under Base and `game` rows are the game's
+   * Vegas numbers: both are shown for reading and never added up.
+   */
+  kind: 'base' | 'line' | 'nudge' | 'game';
   cells: TableCell[];
 }
 
-const NUDGES: { key: string; label: string; always: boolean }[] = [
-  { key: 'news_recent', label: 'Recent news', always: true },
-  { key: 'matchup_role', label: 'Opponent', always: true },
-  { key: 'weather', label: 'Weather', always: false },
-  { key: 'status', label: 'Availability', always: false },
+/*
+ * The nudges with a row of their own, each only when it moved somebody.
+ * Recent news and Opponent count in the score but have no row (1 November
+ * 2026); Base carries them.
+ */
+const NUDGES: { key: string; label: string }[] = [
+  { key: 'weather', label: 'Weather' },
+  { key: 'status', label: 'Availability' },
 ];
 
 const tenth = (v: number): number => Math.round(v * 10) / 10;
@@ -79,7 +90,7 @@ function nudge(e: StartSitEvaluation, key: string): number | null {
 
 export function compareTable(columns: StartSitEvaluation[]): { rows: TableRow[]; score: TableCell[] } {
   const weeks = columns.map((e) => weekPointsOf(e));
-  const nudgeRows = NUDGES.filter(({ key, always }) => always || columns.some((e) => nudge(e, key) != null)).map(
+  const nudgeRows = NUDGES.filter(({ key }) => columns.some((e) => nudge(e, key) != null)).map(
     ({ key, label }) => ({
       key,
       label,
@@ -109,7 +120,37 @@ export function compareTable(columns: StartSitEvaluation[]): { rows: TableRow[];
         : { value: w.points, text: w.points.toFixed(1), muted: weekIsSleeper(w), sleeper: weekIsSleeper(w) },
   );
 
-  return { rows: [{ key: 'base', label: 'Base', kind: 'base', cells: base }, ...lineRows(columns), ...nudgeRows], score };
+  return {
+    rows: [{ key: 'base', label: 'Base', kind: 'base', cells: base }, ...lineRows(columns), ...nudgeRows, ...gameRows(columns)],
+    score,
+  };
+}
+
+/* ------------------------------------------------------- the game lines */
+
+/**
+ * His game's numbers, or null for a dash: no game this week, a game nobody
+ * has priced, or a player whose own number is Sleeper's fallback (the brief
+ * of 1 November 2026: show a dash, do not guess).
+ */
+function gameLine(e: StartSitEvaluation): { total: number | null; teamPoints: number | null } | null {
+  if (weekIsSleeper(weekPointsOf(e))) return null;
+  return e.gameLine ?? null;
+}
+
+const gameCell = (v: number | null | undefined): TableCell => (v == null ? DASH : { value: v, text: tenth(v).toFixed(1) });
+
+/**
+ * Game total and Team points, from the game line the engine already holds for
+ * him (`core/startsit/gameLine.ts`). Two players in one game share a total.
+ * A Vegas number, never a fallback, so never grey or marked.
+ */
+export function gameRows(columns: StartSitEvaluation[]): TableRow[] {
+  const lines = columns.map(gameLine);
+  return [
+    { key: 'game_total', label: 'Game total', kind: 'game', cells: lines.map((g) => gameCell(g?.total)) },
+    { key: 'team_points', label: 'Team points', kind: 'game', cells: lines.map((g) => gameCell(g?.teamPoints)) },
+  ];
 }
 
 /* ------------------------------------------------------------ the lines */
