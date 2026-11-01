@@ -777,7 +777,7 @@ test.describe('the comparison tool', () => {
     });
   }
 
-  test('refuses a fifth player in three words, and keeps the four already chosen', async ({ page }) => {
+  test('refuses a fifth player without a hint line, and keeps the four already chosen', async ({ page }) => {
     await page.getByTestId('compare-open').click();
     await allPlayers(page);
     const ids = await page.getByTestId('compare-candidate').evaluateAll((els) => els.slice(0, 5).map((e) => e.getAttribute('data-player-id')!));
@@ -785,7 +785,8 @@ test.describe('the comparison tool', () => {
     const fifth = page.locator(`[data-testid="compare-candidate"][data-player-id="${ids[4]}"]`);
     await fifth.click();
     await expect(fifth).toHaveAttribute('data-chosen', 'false');
-    await expect(page.getByTestId('compare-notice')).toHaveText('Up to 4 players.');
+    // No help text since 1 November 2026: the tap simply does nothing.
+    await expect(page.getByTestId('compare-sheet')).not.toContainText('Up to 4 players');
     await expect(page.getByTestId('compare-chosen')).toHaveCount(4);
   });
 
@@ -894,12 +895,15 @@ test.describe('the comparison tool', () => {
     await expect(vegas.locator('.cmp2-factor-label')).toHaveText('Base');
     await expect(grid.locator('.cmp2-total .cmp2-pin')).toHaveText('Score');
     const labels = await grid.locator('.cmp2-factor-label').allInnerTexts();
-    expect(labels.slice(0, 6)).toEqual(['Base', 'Yards', 'Catches', 'TD %', 'Recent news', 'Opponent']);
-    for (const label of labels.slice(6)) expect(label, 'only a row that moved somebody').toMatch(/^(Weather|Availability)$/);
+    expect(labels.slice(0, 4)).toEqual(['Base', 'Yards', 'Catches', 'TD %']);
+    expect(labels.slice(-2)).toEqual(['Game total', 'Team points']);
+    for (const label of labels.slice(4, -2)) expect(label, 'only a row that moved somebody').toMatch(/^(Weather|Availability)$/);
+    await expect(grid).not.toContainText('Recent news');
+    await expect(grid).not.toContainText('Opponent');
     await expect(grid).not.toContainText('Uncertainty');
-    // Every column adds up to its Score; the Vegas lines are lines, not points, and sit outside the sum.
+    // Every column adds up to its Score; the Vegas lines and game lines are read, not points, and sit outside the sum.
     const columns = await page.getByTestId('compare-column').count();
-    const cells = await grid.locator('[data-testid="compare-factor"]:not([data-kind="line"])').evaluateAll((rows) =>
+    const cells = await grid.locator('[data-testid="compare-factor"]:not([data-kind="line"]):not([data-kind="game"])').evaluateAll((rows) =>
       rows.map((r) => [...r.querySelectorAll('[data-testid="compare-cell"]')].map((c) => c.textContent ?? '')),
     );
     const totals = await grid.locator('[data-testid="compare-total"] [role="cell"]').allInnerTexts();

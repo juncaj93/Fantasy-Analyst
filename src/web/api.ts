@@ -1278,6 +1278,8 @@ export interface StartSitEvaluation {
   roleProfile?: { bucket: string; label: string; adot: number | null; games: number; confidence: string; detail: string | null };
   tdDependency?: { profile: string; share: number | null; touchdowns: number; scoringGames: number; games: number; display: string };
   gameScript?: { points: number; impliedTeamTotal: number | null; favoured: boolean | null; display: string; unknown: boolean };
+  /** His game's total and his team's implied points, for reading. Absent from older workers. See `core/startsit/gameLine.ts`. */
+  gameLine?: { total: number | null; teamPoints: number | null } | null;
   weather?: { points: number; unknown: boolean; indoor: boolean; display: string };
   /**
    * The number a decision between players is made on, and what it was built

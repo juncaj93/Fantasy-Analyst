@@ -1,9 +1,12 @@
 /**
  * The Compare table adds up (13 October 2026), and since 15 October 2026 the
  * Vegas lines sit under Base in place of the paragraph that explained it.
+ * Since 1 November 2026 Recent news and Opponent have no row (they still
+ * count), and Game total and Team points sit last, above Score.
  */
 import { describe, expect, it } from 'vitest';
 import { compareTable, lineRows, yardsCell } from '../src/web/compareTable.ts';
+import { weekPointsOf } from '../src/core/startsit/weekPoints.ts';
 import type { StartSitEvaluation } from '../src/web/api.ts';
 
 type Component = StartSitEvaluation['components'][number];
@@ -47,6 +50,7 @@ const priced = evaluation({
   ],
   score: 12.19,
   decision: { points: 12.19, basis: 'market', base: 12.34, adjustments: -0.15 },
+  gameLine: { total: 47.5, teamPoints: 25.25 },
 } as Partial<StartSitEvaluation> & Pick<StartSitEvaluation, 'playerId' | 'name'>);
 
 /* Part of a market, and Sleeper's 9.2 used as the base: Egbuka's shape. */
@@ -63,6 +67,8 @@ const published = evaluation({
   components: [c('vegas', 2.0), c('news_recent', -0.05, { shownValue: -0.3 }), c('uncertainty', 0, { textOnly: true })],
   score: 1.95,
   decision: { points: 8.9, basis: 'published', base: 9.2, adjustments: -0.3 },
+  /* Priced, but his own number is Sleeper's: a dash all the same. */
+  gameLine: { total: 47.5, teamPoints: 22.25 },
 } as Partial<StartSitEvaluation> & Pick<StartSitEvaluation, 'playerId' | 'name'>);
 
 /* A fragment and nothing published: Tre' Harris. */
@@ -89,16 +95,37 @@ const out = evaluation({
   components: [c('status', -99)],
   score: -97,
   decision: { points: -97, basis: 'published', base: 2, adjustments: -99 },
+  gameLine: { total: 44, teamPoints: null },
 } as Partial<StartSitEvaluation> & Pick<StartSitEvaluation, 'playerId' | 'name'>);
 
-const numberRows = (rows: ReturnType<typeof compareTable>['rows']) => rows.filter((r) => r.kind !== 'line');
+const numberRows = (rows: ReturnType<typeof compareTable>['rows']) => rows.filter((r) => r.kind === 'base' || r.kind === 'nudge');
 
 describe('the Compare table', () => {
   const { rows, score } = compareTable([priced, published, fragment, out]);
 
-  it('has Base, the Vegas lines, Recent news, Opponent, then Score, and no Uncertainty', () => {
-    expect(rows.map((r) => r.label)).toEqual(['Base', 'Yards', 'Catches', 'TD %', 'Recent news', 'Opponent']);
-    expect(rows.map((r) => r.kind)).toEqual(['base', 'line', 'line', 'line', 'nudge', 'nudge']);
+  it('runs Base, the Vegas lines, Game total, Team points, then Score, with no Recent news, Opponent or Uncertainty', () => {
+    expect(rows.map((r) => r.label)).toEqual(['Base', 'Yards', 'Catches', 'TD %', 'Game total', 'Team points']);
+    expect(rows.map((r) => r.kind)).toEqual(['base', 'line', 'line', 'line', 'game', 'game']);
+  });
+
+  it('shows the game lines to one decimal, plain, and a dash with no Vegas game numbers', () => {
+    const [total, team] = rows.slice(4);
+    // Walker priced; Egbuka on Sleeper's week; Harris no game line; Shipley no spread.
+    expect(total!.cells.map((c) => c.text)).toEqual(['47.5', '–', '–', '44.0']);
+    expect(team!.cells.map((c) => c.text)).toEqual(['25.3', '–', '–', '–']);
+    for (const c of [...total!.cells, ...team!.cells]) {
+      expect(c.muted).toBeFalsy();
+      expect(c.sleeper).toBeFalsy();
+    }
+  });
+
+  it('hides Recent news and Opponent but keeps them in the Score', () => {
+    expect(rows.some((r) => r.key === 'news_recent' || r.key === 'matchup_role')).toBe(false);
+    // The same numbers every other screen prints, nudges and all.
+    expect(score.map((s) => s.value)).toEqual([priced, published, fragment, out].map((e) => (weekPointsOf(e).out ? null : weekPointsOf(e).points)));
+    expect(score[0]!.value).toBe(12.19);
+    // Base carries the hidden nudges so the column still adds up: 12.34 + 0.26 − 0.41.
+    expect(rows[0]!.cells[0]!.text).toBe('12.2');
   });
 
   it('adds up to Score on screen, column by column, without the lines', () => {
@@ -110,7 +137,8 @@ describe('the Compare table', () => {
   });
 
   it('starts a published week from Sleeper, never from the Vegas fragment', () => {
-    expect(rows[0]!.cells[1]!.text).toBe('9.2');
+    // Sleeper's 9.2 with his hidden news (−0.3) folded in; never the 2.0 fragment.
+    expect(rows[0]!.cells[1]!.text).toBe('8.9');
   });
 
   it('gives a fragment and an Out player no number at all', () => {

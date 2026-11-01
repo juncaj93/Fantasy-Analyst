@@ -31,6 +31,7 @@ import type { UsageWeek } from '../usage/role.ts';
 import { availabilityConfidence, type AvailabilityView } from './availabilityConfidence.ts';
 import { assessMatchup, NO_MATCHUP, type DefenseTendencyIndex, type MatchupAssessment } from './defense.ts';
 import { assessGameScript, NO_GAME_SCRIPT, type GameContext, type GameScriptAssessment } from './gameScript.ts';
+import { gameLineOf, type GameLine } from './gameLine.ts';
 import { assessMarketComparability, COMPARABLE, type MarketComparability } from './comparability.ts';
 import { compareWithMarket, type MarketAgreement } from './market.ts';
 import { modeWeightFor, type StartSitMode } from './mode.ts';
@@ -263,6 +264,11 @@ export interface StartSitEvaluation {
   tdDependency: TdDependencyAssessment;
   /** The game he is walking into. */
   gameScript: GameScriptAssessment;
+  /**
+   * His game's total and his team's implied points, for reading only (1
+   * November 2026). Null when the game is not priced. See `gameLine.ts`.
+   */
+  gameLine?: GameLine | null;
   /** The forecast, and what it does to his role. */
   weather: WeatherAssessment;
   /** What this defence gives up to his role. */
@@ -708,6 +714,7 @@ export function evaluatePlayer(
     roleProfile,
     tdDependency: td,
     gameScript,
+    gameLine: gameLineOf(input.game),
     weather,
     matchup,
     availability: availabilityView,
@@ -883,6 +890,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     // Absent on purpose: the spread is inside the anchor, and the only part of
     // it a defence may be paid for again is capped inside the projection.
     gameScript: NO_GAME_SCRIPT,
+    gameLine: gameLineOf(input.game),
     weather: assessWeather(input.player.position, UNCLASSIFIED.bucket, null),
     matchup: NO_MATCHUP,
     availability: availabilityView,
