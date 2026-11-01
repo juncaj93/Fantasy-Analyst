@@ -67,7 +67,7 @@ const published = evaluation({
   components: [c('vegas', 2.0), c('news_recent', -0.05, { shownValue: -0.3 }), c('uncertainty', 0, { textOnly: true })],
   score: 1.95,
   decision: { points: 8.9, basis: 'published', base: 9.2, adjustments: -0.3 },
-  /* Priced, but his own number is Sleeper's: a dash all the same. */
+  /* His own number is Sleeper's, but his game is priced: the game lines still show. */
   gameLine: { total: 47.5, teamPoints: 22.25 },
 } as Partial<StartSitEvaluation> & Pick<StartSitEvaluation, 'playerId' | 'name'>);
 
@@ -108,11 +108,11 @@ describe('the Compare table', () => {
     expect(rows.map((r) => r.kind)).toEqual(['base', 'line', 'line', 'line', 'game', 'game']);
   });
 
-  it('shows the game lines to one decimal, plain, and a dash with no Vegas game numbers', () => {
+  it('shows the game lines to one decimal, plain, and a dash only without a priced game or spread', () => {
     const [total, team] = rows.slice(4);
-    // Walker priced; Egbuka on Sleeper's week; Harris no game line; Shipley no spread.
-    expect(total!.cells.map((c) => c.text)).toEqual(['47.5', '–', '–', '44.0']);
-    expect(team!.cells.map((c) => c.text)).toEqual(['25.3', '–', '–', '–']);
+    // Walker priced; Egbuka on Sleeper's week in a priced game; Harris no game line; Shipley no spread.
+    expect(total!.cells.map((c) => c.text)).toEqual(['47.5', '47.5', '–', '44.0']);
+    expect(team!.cells.map((c) => c.text)).toEqual(['25.3', '22.3', '–', '–']);
     for (const c of [...total!.cells, ...team!.cells]) {
       expect(c.muted).toBeFalsy();
       expect(c.sleeper).toBeFalsy();

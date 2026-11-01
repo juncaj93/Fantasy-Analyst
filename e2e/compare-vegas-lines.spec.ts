@@ -5,6 +5,7 @@
  *  - the Vegas lines sit under Base (Yards, Catches, TD %), and there is no
  *    Uncertainty row and no paragraph;
  *  - since 1 November 2026, Game total and Team points sit last above Score,
+ *    for every player whose game is priced (a Sleeper-fallback player too),
  *    and Recent news and Opponent have no row;
  *  - two players and four players each fit one screen, nothing scrolls
  *    sideways, and no text is cut off;
@@ -163,6 +164,38 @@ test('a player with no Vegas game numbers gets a dash in both game rows', async 
   }
   // His Score is untouched: the game lines are read, never added.
   await expect(page.locator('[data-testid="compare-total"] [role="cell"]').nth(at)).not.toHaveText('–');
+});
+
+test('a Sleeper-fallback player in a priced game shows both game numbers, plain', async ({ page }) => {
+  let fallback = '';
+  await page.route('**/api/startsit/compare', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    const first = body.evaluations?.[0];
+    if (first?.decision) {
+      // His own number is Sleeper's; his game is priced: 47.5, underdog by 3.
+      first.decision = { ...first.decision, basis: 'published' };
+      first.gameLine = { total: 47.5, teamPoints: 22.25 };
+      fallback = first.playerId;
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
+  await openCompare(page);
+  await compareFirst(page, 2);
+  const order = await page.getByTestId('compare-column').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-id')!));
+  const at = order.indexOf(fallback);
+  expect(at).toBeGreaterThanOrEqual(0);
+  const grid = page.getByTestId('compare-grid');
+  const cell = (key: string) => grid.locator(`[data-factor="${key}"] [data-testid="compare-cell"]`).nth(at);
+  await expect(cell('game_total')).toHaveText('47.5');
+  await expect(cell('team_points')).toHaveText('22.3');
+  // Vegas numbers: no grey, no dotted marker, even in a fallback column.
+  for (const key of ['game_total', 'team_points']) {
+    await expect(cell(key)).not.toHaveAttribute('data-muted', 'true');
+    await expect(cell(key)).not.toHaveClass(/num-sleeper/);
+  }
+  // His own Score keeps its fallback marker.
+  await expect(page.locator('[data-testid="compare-total"] [role="cell"]').nth(at)).toHaveAttribute('data-muted', 'true');
 });
 
 test('two quarterbacks get Pass yds, Pass TD and Rush yds', async ({ page }) => {

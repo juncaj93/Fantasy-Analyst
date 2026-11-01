@@ -129,12 +129,11 @@ export function compareTable(columns: StartSitEvaluation[]): { rows: TableRow[];
 /* ------------------------------------------------------- the game lines */
 
 /**
- * His game's numbers, or null for a dash: no game this week, a game nobody
- * has priced, or a player whose own number is Sleeper's fallback (the brief
- * of 1 November 2026: show a dash, do not guess).
+ * His game's numbers, or null for a dash: no game this week, or a game nobody
+ * has priced. They describe the game, not his own number, so a player on
+ * Sleeper's fallback still shows them, plain (Alex, 1 November 2026).
  */
 function gameLine(e: StartSitEvaluation): { total: number | null; teamPoints: number | null } | null {
-  if (weekIsSleeper(weekPointsOf(e))) return null;
   return e.gameLine ?? null;
 }
 
