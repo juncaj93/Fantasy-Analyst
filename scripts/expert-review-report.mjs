@@ -22,8 +22,8 @@ const load = (name) => {
     return null;
   }
 };
-const f2 = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(2));
-const f1 = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(1));
+const f2 = (v) => (v == null || !Number.isFinite(Number(v)) ? 'n/a' : Number(v).toFixed(2));
+const f1 = (v) => (v == null || !Number.isFinite(Number(v)) ? 'n/a' : Number(v).toFixed(1));
 const section = (title) => console.log(`\n=== ${title} ===`);
 const guard = (title, fn) => {
   try {
@@ -49,7 +49,7 @@ guard('Team', () => {
   console.log(`  mine: ${cov(l.modeSuggestion?.mine)} | opponent: ${cov(l.modeSuggestion?.opponent)}`);
   console.log(`recommended ${f2(l.recommendedPoints)} · current ${f2(l.currentPoints)} · confidence ${l.confidence ?? '?'}`);
   const evalById = new Map([...(l.starters ?? []), ...(l.bench ?? []), ...(l.undecidable ?? [])].map((e) => [e.playerId, e]));
-  const num = (e) => (e ? `${f2(e.decision?.points ?? e.score)} ${e.decision?.basis ?? (e.score == null ? 'none' : 'score')}${e.injury?.designation && e.injury.designation !== 'healthy' ? ` ${e.injury.designation}` : ''}${e.ruledOut ? ' OUT' : ''}` : '—');
+  const num = (e) => (e ? `${f2(e.decision?.points ?? e.score)} ${e.decision?.basis ?? (e.score == null ? 'none' : 'score')}${e.injury?.designation && e.injury.designation !== 'healthy' ? ` ${e.injury.designation}` : ''}${e.ruledOut ? ' OUT' : ''}` : 'n/a');
   console.log('slots (app lineup):');
   for (const s of l.slots ?? []) {
     const e = evalById.get(s.playerId);
@@ -85,7 +85,7 @@ guard('Matchup', () => {
   if (!m) return console.log('no matchup read');
   const f = m.forecast ?? {};
   console.log(`week ${m.week} · found ${m.found} ${m.reason ?? ''}`);
-  const side = (t) => (t ? `${t.name} actual ${f2(t.actual)} projected ${f2(t.projectedFinal)} win ${t.winProbability}` : '—');
+  const side = (t) => (t ? `${t.name} actual ${f2(t.actual)} projected ${f2(t.projectedFinal)} win ${t.winProbability}` : 'n/a');
   console.log(`mine: ${side(f.teams?.mine)} | theirs: ${side(f.teams?.theirs)} · phase ${f.phase} · degraded ${f.degraded ? f.degradedReason : 'no'}`);
   const sm = f.suggestedMode;
   console.log(`matchup's own mode read: ${sm?.mode} auto=${sm?.auto} state=${sm?.state} margin=${sm?.margin} · mine coverage ${sm?.mine?.coverage} total ${f2(sm?.mine?.total)} · theirs coverage ${sm?.opponent?.coverage} total ${f2(sm?.opponent?.total)}`);
@@ -162,7 +162,7 @@ guard('Builder', () => {
     console.log(`team ${rid} ${team?.label ?? ''} (${team?.activity?.label ?? team?.activity ?? ''}) needs [${(team?.needs ?? []).join('; ')}] suggested ${(team?.suggested ?? []).length} · audit ${JSON.stringify(r.audit)}`);
     for (const p of r.packages ?? []) {
       console.log(`  ${p.status}: give ${(p.give ?? []).map((x) => `${x.position} ${x.name}`).join(' + ')} · get ${(p.get ?? []).map((x) => `${x.position} ${x.name}`).join(' + ')}${(p.drops ?? []).length ? ` · drop ${(p.drops ?? []).map((x) => x.name).join(', ')}` : ''}`);
-      console.log(`    you: this week ${f1(p.alex?.thisWeek)} next3 ${f1(p.alex?.next3)} playoffs ${f1(p.alex?.playoffs)} ROS ${f1(p.alex?.restOfSeason)} weighted ${f1(p.alex?.weighted)} · them: next3 ${f1(p.them?.next3)} ROS ${f1(p.them?.restOfSeason)} weighted ${f1(p.them?.weighted)} · balance ${p.balance?.label} (${f1(p.balance?.give)} vs ${f1(p.balance?.get)}) · ${p.statusReason ?? ''} · need ${p.need ?? '—'}`);
+      console.log(`    you: this week ${f1(p.alex?.thisWeek)} next3 ${f1(p.alex?.next3)} playoffs ${f1(p.alex?.playoffs)} ROS ${f1(p.alex?.restOfSeason)} weighted ${f1(p.alex?.weighted)} · them: next3 ${f1(p.them?.next3)} ROS ${f1(p.them?.restOfSeason)} weighted ${f1(p.them?.weighted)} · balance ${p.balance?.label} (${f1(p.balance?.give)} vs ${f1(p.balance?.get)}) · ${p.statusReason ?? ''} · need ${p.need ?? 'n/a'}`);
     }
     for (const n of r.notes ?? []) console.log(`  note: ${n}`);
   }
