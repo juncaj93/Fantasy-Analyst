@@ -28,6 +28,7 @@ import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { MatchupService } from './matchupService.ts';
 import { SmartTradeService } from './smartTradeService.ts';
 import { seasonChecksFor } from './tradeIdeaCheck.ts';
+import { ideasToCheck } from '../../core/trades/seasonCheck.ts';
 import { assembleSmartTrades } from '../../core/trades/assemble.ts';
 import { gatherLineupInputs, gatherWaiverInputs, NoDecision } from './decisionInputs.ts';
 import { captureLineupSnapshot } from '../../core/support/lineupSnapshot.ts';
@@ -206,7 +207,7 @@ export async function captureSupportSnapshot(
         db,
         sleeper,
         gathered.league.id,
-        assembleSmartTrades(gathered.request).offers,
+        ideasToCheck(assembleSmartTrades(gathered.request)),
       );
       return captureTradeSnapshot({
         gitSha,
@@ -219,6 +220,7 @@ export async function captureSupportSnapshot(
           inputs: gathered.request.inputs,
           history: gathered.request.history,
           limit: gathered.request.limit,
+          currentWeek: gathered.request.currentWeek,
           warnings: gathered.request.warnings ?? [],
           seasonChecks,
         },

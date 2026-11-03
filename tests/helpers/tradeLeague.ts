@@ -113,8 +113,22 @@ function boardFor(id: string, position: string, points: number): PlayerProp[] {
   return props;
 }
 
-export async function seed(db: AppEnv['db'], opts: { deadline?: number } = {}): Promise<void> {
-  const all: Spec[] = [...MINE, ...THEIRS, ...FREE];
+/**
+ * The two rosters with one fair deal in them (November 2026, review T3/T10):
+ * Alex has a sixth receiver on the bench, so moving one costs his flex little,
+ * and Dermot's bench back is a real one, so moving a back costs him little.
+ * Since the trade tools show only deals both sides gain from over the season,
+ * the plain fixture has nothing to show.
+ */
+export const FAIR_DEAL = {
+  mine: [['m_wr6', 'WR', 12, 'KC']] as Spec[],
+  theirs: { t_bn1: 12 } as Record<string, number>,
+};
+
+export async function seed(db: AppEnv['db'], opts: { deadline?: number; fairDeal?: boolean } = {}): Promise<void> {
+  const mine: Spec[] = opts.fairDeal ? [...MINE, ...FAIR_DEAL.mine] : MINE;
+  const theirs: Spec[] = opts.fairDeal ? THEIRS.map(([id, pos, pts, team]) => [id, pos, FAIR_DEAL.theirs[id] ?? pts, team] as Spec) : THEIRS;
+  const all: Spec[] = [...mine, ...theirs, ...FREE];
   await new PlayerRepo(db).upsertMany(
     all.map(([id, position, , team]) => player({ id, fullName: id.toUpperCase(), position, team: team ?? 'NE' })),
   );
@@ -153,8 +167,8 @@ export async function seed(db: AppEnv['db'], opts: { deadline?: number } = {}): 
   });
   await leagues.selectLeague(LEAGUE);
   await leagues.replaceRosters(LEAGUE, [
-    { leagueId: LEAGUE, rosterId: 1, ownerId: 'me', ownerName: 'Alex', playerIds: MINE.map((p) => p[0]), starterIds: MINE.slice(0, 9).map((p) => p[0]), reserveIds: [], isMine: true, settings: null },
-    { leagueId: LEAGUE, rosterId: 2, ownerId: 'dermot', ownerName: 'Dermot', playerIds: THEIRS.map((p) => p[0]), starterIds: THEIRS.slice(0, 9).map((p) => p[0]), reserveIds: [], isMine: false, settings: null },
+    { leagueId: LEAGUE, rosterId: 1, ownerId: 'me', ownerName: 'Alex', playerIds: mine.map((p) => p[0]), starterIds: mine.slice(0, 9).map((p) => p[0]), reserveIds: [], isMine: true, settings: null },
+    { leagueId: LEAGUE, rosterId: 2, ownerId: 'dermot', ownerName: 'Dermot', playerIds: theirs.map((p) => p[0]), starterIds: theirs.slice(0, 9).map((p) => p[0]), reserveIds: [], isMine: false, settings: null },
     { leagueId: LEAGUE, rosterId: 3, ownerId: 'kim', ownerName: null, playerIds: [], starterIds: [], reserveIds: [], isMine: false, settings: null },
   ]);
 

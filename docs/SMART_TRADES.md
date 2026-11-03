@@ -87,10 +87,33 @@ for a swap of benches and a swap of stars:
 
 | band | gap | meaning |
 | --- | --- | --- |
-| `even` | ≤ 10% | roughly even |
-| `edge_user` | ≤ 25% | slight edge to you |
-| `edge_opponent` | ≤ 25% | slight edge to them |
-| `outside_range` | > 25% | **hard stop** |
+| `even` | ≤ 10% either way | roughly even |
+| `edge_opponent` | 10% to 25% their way | slight edge to them |
+| `outside_range` | > 10% your way, or > 25% theirs | **hard stop** |
+
+**Fair to both sides (November 2026, review T3).** Alex's rule replaced his
+15 September "lean my way" instruction: his edge is at most 10%, read in whole
+percents, so there is no "slight edge to you" band any more, and an even deal
+ranks above one leaning their way. Every idea is then put through Check a
+trade (`core/trades/seasonCheck.ts`) and shown only when, over the rest of the
+season, his value edge is at most 10% (a player the partner would cut counts
+zero for him), Alex's lineup gains 8+ points and the partner's 3+
+(`core/trades/fairToBoth.ts`, the one rule Build a trade reads too), and Check
+a trade does not say it leans to the other team. An idea Check a trade cannot
+value is left off. The board holds ten more ideas behind the five
+(`reserve`) so one left off is replaced, not a gap.
+
+**Partners (review T7, T11).** A measured manager who almost never trades
+(`low_activity`, `effectively_inactive`) gets no idea at all. An unmeasured one
+reads as an occasional trader, never above a proven one. A manager who has
+traded with Alex before is weighted up.
+
+**A weak spot.** When Alex's lineup has a hole or a weak position, somebody
+arriving must start there. A roster with none can take a clean upgrade.
+
+**No kickoff locks.** The ideas' lineups ignore game locks, so the board is
+not blind from Sunday's first kickoff to the week rolling over (part of T1).
+The week's numbers are still the yardstick; rest-of-season value is round 2.
 
 `outside_range` is the objective sanity boundary. It is evaluated **before any
 manager profile is read**, so no history can carry an offer across it — the
@@ -625,10 +648,10 @@ has seen fail is a gate nobody knows the shape of.
 - **Build a trade** (`docs/TRADE_BUILDER.md`) is the marks-driven tool beside
   these ideas: Alex chooses who he would sell and want, and packages are scored
   on both rosters over the rest of the season. It reads the deadline.
-- **The trade deadline is not read** by the ideas board. A league past its deadline can still be
-  offered trades. `settings.trade_deadline` is a week number and the check needs
-  a clock `tradeCapabilityOf` deliberately does not take; it belongs with the
-  capability gate when it is added.
+- **The trade deadline** is read by the ideas board since November 2026
+  (review T5): past `settings.trade_deadline` the board says trades are closed
+  and suggests nothing. Read in `assembleSmartTrades` from Sleeper's week, the
+  same `currentWeekOf` Check a trade and Build a trade use.
 - **Activation depends on some sync running.** A reader who opens Trades as
   their very first action after a draft, having opened nothing else, sees the
   pre-draft state until any sync runs. The draft poll normally beats them to it;

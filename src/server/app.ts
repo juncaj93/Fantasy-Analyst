@@ -126,7 +126,7 @@ import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
 import { seasonChecksFor } from './services/tradeIdeaCheck.ts';
-import { applySeasonChecks } from '../core/trades/seasonCheck.ts';
+import { applySeasonChecks, ideasToCheck } from '../core/trades/seasonCheck.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
 import { MAX_MARKS, TradeBuilderService } from './services/tradeBuilderService.ts';
 import { meterDatabase } from './meter.ts';
@@ -2859,7 +2859,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * rest-of-season check says favours the other team is left off, and every
      * idea shown carries that verdict. See `core/trades/seasonCheck.ts`.
      */
-    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, board.offers, inputs);
+    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, ideasToCheck(board), inputs);
     return jsonResponse(applySeasonChecks(board, checks).board);
   });
 

@@ -30,6 +30,14 @@
  */
 
 import type { ManagerTradeTendencies, OfferShape } from '../managers/tradeTendencies.ts';
+import { INACTIVITY_SEASONS, activityClassFor, type ActivityClass } from './activity.ts';
+
+/*
+ * The activity classes live in `activity.ts`, which imports nothing, so Build
+ * a trade's screen can rank partners with the same function without pulling
+ * this module into the page. Re-exported so callers keep one place to import.
+ */
+export { INACTIVITY_SEASONS, activityClassFor, type ActivityClass };
 
 /**
  * The most a manager's history may move a composite score, in either direction.
@@ -74,54 +82,11 @@ export const MANAGER_FIT_CAP = 0.18;
  */
 export const TRADE_SHRINKAGE_K = 4;
 
-/**
- * What an edge in the user's favour is worth against a manager who trades.
- *
- * Alex, 15 September 2026: *managers who trade often should receive a higher
- * volume of suggested trades, and those trades should lean toward what benefits
- * me even if only mildly fair to the other side — a frequent trader is more
- * likely to engage with an imperfect-but-plausible offer than a rare trader is
- * with a perfect one.*
- *
- * The volume half of that is `OFFERS_BY_ACTIVITY` in `bilateral.ts`. This is
- * the lean, and **where it lives is the whole of its safety.** It is a term in
- * this module rather than an adjustment to the fairness score, because the
- * fairness score is objective and this file's one invariant is that behaviour
- * reaches the composite through exactly one capped channel — `total minus
- * managerFit` is identical whoever the partner is, and two tests hold it. An
- * activity-aware fairness term would have been a second channel wearing the
- * first one's name, which is the double-count the header of `RANK_WEIGHTS`
- * records as a real defect rather than a design choice.
- *
- * So it is a term like any other: scaled by the evidence behind it, summed with
- * the rest, and clamped at {@link MANAGER_FIT_CAP}. An offer already at the cap
- * on activity alone gains nothing from it, which is the correct ceiling —
- * "trades often" and "trades often and this one is edged your way" are not
- * worth more than the most history may ever be worth.
- *
- * And it cannot widen what counts as fair. `edgeToUser` is set only for the
- * `edge_user` band; anything past `FAIRNESS_BANDS.edge` was rejected at gate 1
- * before a profile was read at all.
- */
-export const EDGE_TO_ACTIVE_TRADER = 0.25;
+/** An unmeasured manager's activity term, as a share of the cap: what a selective trader gets at most. */
+export const UNKNOWN_ACTIVITY_SHARE = 0.2;
 
-/** Fully observed seasons with no trade at all before inactivity is a finding. */
-export const INACTIVITY_SEASONS = 2;
-
-/**
- * How active a manager is, as five distinct claims.
- *
- * `unknown` is a statement about the evidence and every other value is a
- * statement about the manager. Keeping them in one enum is what makes it
- * impossible to write a consumer that accidentally treats an unmeasured manager
- * as a measured non-trader — the case §10 names as the standing principle.
- */
-export type ActivityClass =
-  | 'active'
-  | 'selective'
-  | 'low_activity'
-  | 'effectively_inactive'
-  | 'unknown';
+/** A manager who has traded with you before, as a share of the cap. */
+export const REPEAT_PARTNER_SHARE = 0.35;
 
 /** Neutral product language. No manager is ever described as bad at this. */
 export const ACTIVITY_LABELS: Record<ActivityClass, string> = {
@@ -142,15 +107,6 @@ export interface OfferShapeSummary {
   partnerReceives: string[];
   /** Positions the partner would send. */
   partnerSends: string[];
-  /**
-   * True when the objective value of this offer already tilts toward the user.
-   *
-   * The `edge_user` band and nothing wider — an offer past
-   * `FAIRNESS_BANDS.edge` was rejected at gate 1 and never reaches this module.
-   * Optional, and absent reads as false, so a caller that does not supply it
-   * gets the behaviour this file had before {@link EDGE_TO_ACTIVE_TRADER}.
-   */
-  edgeToUser?: boolean;
 }
 
 export interface ManagerFitEvidence {
@@ -295,18 +251,23 @@ export function managerFitFor(input: ManagerFitInput): ManagerFit {
    * The whole point is that there is no evidence and a choice is being made
    * anyway.
    */
+  /*
+   * Capped at what a measured selective trader gets (review T7, November
+   * 2026). Until then an unknown read as active, 0.126 flat, which put a data
+   * gap above a proven record (an active trader at 6 trades reads about 0.10).
+   * Alex's rule is partners who trade often: no history is not a reason to
+   * rank first. Still not a penalty, so a new manager is not read as inactive.
+   */
   if (activity === 'unknown') {
     base.terms = [
       {
         key: 'activity_assumed',
-        detail: 'too little history to tell; read as an active trader rather than an inactive one',
-        value: round3(cap * 0.7),
+        detail: 'too little history to tell; read as an occasional trader',
+        value: round3(cap * UNKNOWN_ACTIVITY_SHARE),
       },
     ];
-    base.contribution = round3(cap * 0.7);
-    base.notes.push(
-      'Limited trade history, so this is read as an active manager rather than an inactive one — the app cannot yet tell a new manager from a quiet one.',
-    );
+    base.contribution = round3(cap * UNKNOWN_ACTIVITY_SHARE);
+    base.notes.push('Limited trade history.');
     return base;
   }
 
@@ -383,34 +344,9 @@ export function managerFitFor(input: ManagerFitInput): ManagerFit {
     }
   }
 
+  /* Weighted up in November 2026 (review T7): a manager who has traded with you is the likeliest to again. */
   if (t && input.askingUserId && t.repeatPartners.some((p) => p.userId === input.askingUserId)) {
-    terms.push({ key: 'repeat_partner', detail: 'has dealt with you before', value: cap * 0.2 });
-  }
-
-  /*
-   * An edge in your favour, offered to somebody who actually trades.
-   *
-   * The reasoning is about who replies rather than about what is fair: a
-   * manager who makes deals every month will look at a plausible offer that is
-   * slightly your way, and a manager who has made two trades in three seasons
-   * will not look at anything. Ranking the first ahead is spending the board on
-   * the conversations that can happen.
-   *
-   * Only for the two classes that have actually been measured as trading.
-   * `unknown` returns above this line and is unaffected, `low_activity` and
-   * `effectively_inactive` are excluded — nudging an edged offer toward a
-   * manager who does not trade would be the feature promoting exactly the
-   * suggestion least likely to land.
-   */
-  if (offer?.edgeToUser && (activity === 'active' || activity === 'selective')) {
-    terms.push({
-      key: 'edge_to_active_trader',
-      detail:
-        activity === 'active'
-          ? 'trades often enough to look at an offer that is slightly your way'
-          : 'trades from time to time, and this one is slightly your way',
-      value: cap * EDGE_TO_ACTIVE_TRADER * (activity === 'active' ? 1 : 0.5),
-    });
+    terms.push({ key: 'repeat_partner', detail: 'has dealt with you before', value: cap * REPEAT_PARTNER_SHARE });
   }
 
   /*
@@ -429,40 +365,6 @@ export function managerFitFor(input: ManagerFitInput): ManagerFit {
   base.notes = notesFor({ activity, tendencies: t, evidence, terms: scaled });
   base.uncertain = evidence.confidence < 0.34 || !historyComplete;
   return base;
-}
-
-/**
- * Which of the five classes describes this manager.
- *
- * The order of the tests is the argument. Completeness is checked before
- * anything else, so a manager whose history is still being read can never fall
- * through into a claim about his behaviour — which is the failure §10 exists to
- * prevent and the one that would be invisible in production, because an
- * incomplete backfill and a quiet manager produce the same empty profile.
- */
-export function activityClassFor(args: {
-  sample: number;
-  seasonsObserved: number;
-  historyComplete: boolean;
-  ratePerSeason: number | null;
-}): ActivityClass {
-  const { sample, seasonsObserved, historyComplete } = args;
-
-  // Anything at all on the record is a measurement, however thin.
-  if (sample > 0) {
-    const rate = args.ratePerSeason ?? sample / Math.max(1, seasonsObserved);
-    if (sample >= 6 && rate >= 1.5) return 'active';
-    if (sample >= 3) return 'selective';
-    /*
-     * One or two trades. Whether that is "rarely" or "we have barely looked"
-     * depends entirely on how long he has been observed for.
-     */
-    return seasonsObserved >= INACTIVITY_SEASONS && historyComplete ? 'low_activity' : 'unknown';
-  }
-
-  // No trades. The only question left is whether anybody has actually looked.
-  if (historyComplete && seasonsObserved >= INACTIVITY_SEASONS) return 'effectively_inactive';
-  return 'unknown';
 }
 
 /**
