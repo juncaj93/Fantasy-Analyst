@@ -99,6 +99,22 @@ const THEIRS: [id: string, position: string, points: number][] = [
   ['t_te', 'TE', 8],
 ];
 
+/**
+ * Free agents, priced like everyone else.
+ *
+ * Check a trade values a player over the best free agents at his position, and
+ * with none it cannot value anybody, so every idea came back "not checked".
+ * Since November 2026 an idea the check cannot confirm is fair to both sides
+ * is left off (review T3), so the league needs a waiver wire, as a real one
+ * has.
+ */
+const FREE: [id: string, position: string, points: number][] = [
+  ['f_qb1', 'QB', 12], ['f_qb2', 'QB', 12], ['f_qb3', 'QB', 12],
+  ['f_rb1', 'RB', 9], ['f_rb2', 'RB', 9], ['f_rb3', 'RB', 9],
+  ['f_wr1', 'WR', 8], ['f_wr2', 'WR', 8], ['f_wr3', 'WR', 8],
+  ['f_te1', 'TE', 5], ['f_te2', 'TE', 5], ['f_te3', 'TE', 5],
+];
+
 /** The partner's Sleeper user id, used by every history assertion below. */
 const PARTNER_USER = 'partner-user';
 
@@ -122,7 +138,7 @@ const FETCHED_AT = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
 const GAME_START = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
 
 async function seedTradingLeague(db: NodeSqliteDatabase): Promise<string> {
-  const all = [...MINE, ...THEIRS];
+  const all = [...MINE, ...THEIRS, ...FREE];
   await new PlayerRepo(db).upsertMany(
     all.map(([id, position]) => player({ id, fullName: id.toUpperCase(), position, team: 'NE' })),
   );
@@ -416,24 +432,22 @@ describe('reading the stored history', () => {
     }
   });
 
-  it('reads a manager with settled seasons and no profile as a measured non-trader', async () => {
+  it('reads a manager with settled seasons and no profile as a measured non-trader, and sends him nothing', async () => {
     /*
      * The other half of §10, and the one no single table can answer: no trade
      * profile exists for him, and two seasons of his have been read to the end.
-     * That is a measurement of a quiet manager, not an absence of evidence — and
-     * it must lower his rank rather than leave him neutral.
+     * That is a measurement of a quiet manager, not an absence of evidence.
+     * Since November 2026 (Alex; review T11) such a manager gets no idea at
+     * all, however well the numbers work.
      */
     await settleSeason('trade-league', '2024', 2, PARTNER_USER);
     await settleSeason('trade-league', '2025', 2, PARTNER_USER);
 
     const board = await new SmartTradeService(db).build();
     expect(board.history.profiles).toBe(0);
-    expect(board.offers.length).toBeGreaterThan(0);
-    for (const offer of board.offers) {
-      expect(offer.managerFit.activity).toBe('effectively_inactive');
-      expect(offer.managerFit.contribution).toBeLessThan(0);
-      expect(offer.caveats.join(' ')).toMatch(/rarely trades/i);
-    }
+    expect(board.offers).toEqual([]);
+    const explained = await new SmartTradeService(db).explain();
+    expect(explained.rejections.find((r) => r.reason === 'rare_trader')?.detail).toMatch(/effectively inactive/);
   });
 
   it('leaves a manager with one settled season unknown rather than inactive', async () => {

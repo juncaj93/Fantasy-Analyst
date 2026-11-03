@@ -166,6 +166,8 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
       seasonsByUser: new Map(history.seasonsByUser),
     },
     limit: input.request.limit,
+    ...(input.request.currentWeek ? { currentWeek: input.request.currentWeek } : {}),
+    withReserve: true,
     ...(input.request.published ? { published: input.request.published } : {}),
   }), seasonChecks).board;
 
@@ -227,6 +229,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
         limit: input.request.limit ?? null,
         history,
         ...(seasonChecks.size > 0 ? { seasonChecks: [...seasonChecks] } : {}),
+        ...(input.request.currentWeek ? { currentWeek: input.request.currentWeek } : {}),
         ...(input.request.published && input.request.published.size > 0 ? { published: [...input.request.published] } : {}),
       },
       output,
@@ -263,6 +266,8 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
     inputs: rehydrateStartSitInputs(inputs.pool),
     history,
     limit: inputs.limit ?? undefined,
+    ...(inputs.currentWeek ? { currentWeek: inputs.currentWeek } : {}),
+    withReserve: true,
     ...(inputs.published ? { published: new Map(inputs.published) } : {}),
   }), new Map(inputs.seasonChecks ?? [])).board;
 

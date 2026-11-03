@@ -461,7 +461,17 @@ function buildView(args: {
     const hit = cache.get(key);
     if (hit) return hit;
 
-    const inputs = ids.map((id) => pool.get(id)).filter((i): i is StartSitInput => i != null);
+    /*
+     * No kickoff locks. A trade is about the lineups to come, not about who
+     * is locked into this one: from the first Sunday kickoff to the week
+     * rolling over, locks froze every lineup and every idea read "would gain
+     * 0.0 pts" (review T1, the blind window). Without a kickoff nobody is
+     * locked, and the points are the same.
+     */
+    const inputs = ids
+      .map((id) => pool.get(id))
+      .filter((i): i is StartSitInput => i != null)
+      .map((i) => (i.kickoff ? { ...i, kickoff: null } : i));
     const lineup = recommendLineup(inputs, shape, profile, args.published ? { published: args.published } : {});
     const starters = new Set(lineup.slots.map((s) => s.playerId).filter((id): id is string => id != null));
     const depth = new Map<string, number>();

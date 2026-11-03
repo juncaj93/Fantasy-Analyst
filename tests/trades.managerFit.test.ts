@@ -176,17 +176,27 @@ describe('the contribution', () => {
    * hedge all still say the evidence is thin, so no screen can print a claim
    * about how this manager behaves.
    */
-  it('reads an unknown manager as an active trader, and says it is assuming', () => {
+  it('reads an unknown manager as an occasional trader, never above a proven one (review T7)', () => {
     const fit = managerFitFor({ tendencies: null, seasonsObserved: 0, historyComplete: false, offer: ONE_FOR_ONE });
 
     expect(fit.activity).toBe('unknown');
     expect(fit.contribution).toBeGreaterThan(0);
-    expect(fit.contribution).toBeLessThanOrEqual(MANAGER_FIT_CAP);
+    expect(fit.contribution).toBeLessThanOrEqual(MANAGER_FIT_CAP * 0.2);
     expect(fit.uncertain).toBe(true);
     expect(fit.label).toBe('Limited history');
     expect(fit.notes.join(' ')).toMatch(/limited trade history/i);
-    expect(fit.notes.join(' ')).toMatch(/cannot yet tell/i);
     expect(fit.terms.map((t) => t.key)).toEqual(['activity_assumed']);
+
+    // An active trader outranks the data gap.
+    const proven = managerFitFor({
+      tendencies: tendenciesFor({ user: 'a', trades: 9, seasons: ['2024', '2025', '2026'] }),
+      seasonsObserved: 3,
+      historyComplete: true,
+      leagueRate: 1,
+      offer: ONE_FOR_ONE,
+    });
+    expect(proven.activity).toBe('active');
+    expect(proven.contribution).toBeGreaterThan(fit.contribution);
   });
 
   it('still ranks an unmeasured manager above a measured non-trader', () => {

@@ -98,7 +98,7 @@ const BOARD = {
  * the extra line on the row, so the line is measured, not assumed.
  */
 const SEASON = [
-  { status: 'ok', kind: 'favors_a', headline: 'Favors You by about 31 pts over the rest of the season (30 for you, -1 for Dermot).', confidence: 'medium', reason: null },
+  { status: 'ok', kind: 'favors_a', headline: 'Favors You by about 31 pts over the rest of the season (30 for you, -1 for Dermot).', confidence: 'medium', reason: null, drop: 'Antonio Williams' },
   { status: 'ok', kind: 'close', headline: 'Close call. Within about 12 pts, which is more than this model can separate.', confidence: 'medium', reason: null },
   { status: 'insufficient', kind: null, headline: null, confidence: null, reason: 'No number can be put on Tony Pollard: on a bye and no season line is stored for him' },
 ];
@@ -367,6 +367,11 @@ test.describe('the detail sheet', () => {
   test('gives Check a trade’s full verdict in the sheet', async ({ page }) => {
     await expect(page.getByTestId('smart-trade-season-detail')).toContainText('Favors You by about 31 pts over the rest of the season');
     await expect(page.getByTestId('smart-trade-season-detail')).toContainText('medium confidence, from Check a trade');
+  });
+
+  test('names the player you would drop to make room (review T6)', async ({ page }) => {
+    await expect(page.getByTestId('smart-trade-drop')).toHaveText('Antonio Williams');
+    expect(await horizontalOverflow(page)).toBe(0);
   });
 
   test('says what each side gets, how fair it is, and who the manager is', async ({ page }) => {

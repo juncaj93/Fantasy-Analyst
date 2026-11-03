@@ -36,7 +36,8 @@ describe('the trade builder route', () => {
   beforeEach(async () => {
     db = await createTestDb();
     forgetPlayerReads(db);
-    await seed(db);
+    /* The variant with a deal fair to both sides in it; see `FAIR_DEAL`. */
+    await seed(db, { fairDeal: true });
   });
 
   it('builds packages that help both teams from a Sell mark, with no Sleeper request', async () => {
@@ -59,7 +60,8 @@ describe('the trade builder route', () => {
     expect(body.teams[0]!.suggested.join(' ')).not.toMatch(/T_WR/);
     expect(body.teams[0]!.needs).toContain('thin at WR');
     /* A 12.5 receiver for any of his backs makes his lineup worse (all four start), so it is hidden and counted. */
-    expect(body.audit.hidden['no_gain_for_them']).toBeGreaterThan(0);
+    /* Packages tilted past the fair-to-both band are hidden, and counted (review T10). */
+    expect((body.audit.hidden['outside_band'] ?? 0) + (body.audit.hidden['you_overpay'] ?? 0)).toBeGreaterThan(0);
     expect(body.willingness).toMatch(/unknown/);
     expect(body.advisory).toMatch(/never sends/);
     expect(body.weeks).toMatchObject({ thisWeek: 5, next3: [5, 6, 7], playoffs: [15, 16, 17] });
@@ -144,6 +146,7 @@ describe('manager activity, as a note', () => {
     expect(activityOf({ rosterId: 2, ownerId: 'ron' }, '2026', trades, identities)).toEqual({
       thisSeason: 2,
       earlier: 1,
+      seasons: 2,
       line: 'Has made 2 trades this season, 1 before',
     });
   });

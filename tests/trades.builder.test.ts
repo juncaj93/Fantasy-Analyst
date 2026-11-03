@@ -288,21 +288,21 @@ describe('elite backs', () => {
 describe('their needs, in plain words', () => {
   const slots = slotsOf(SHAPE);
 
-  it('a team with a bye hole', () => {
-    expect(needsOf(team(3, 'Kim', KIM), slots, REPLACEMENT, HORIZON).map((n) => n.label)).toContain('their TE is on bye in week 8');
+  it('a one-week bye is not a need (review T11)', () => {
+    expect(needsOf(team(3, 'Kim', KIM), slots, REPLACEMENT, HORIZON).map((n) => n.label)).not.toContain('their TE is on bye in week 8');
   });
 
   it('a team with an injured starter', () => {
     expect(needsOf(team(2, 'Ron', RON), slots, REPLACEMENT, HORIZON)[0]!.label).toBe('their RB2 is Out');
   });
 
-  it('a package that fills the bye hole says so', () => {
+  it('a package that only covers a bye week is not sold as filling a need', () => {
     const result = buildTradePackages(input({ team: 3, sell: ['te2'], want: new Map([[3, ['kim-wrF']]]) }));
     const pkg = result.teams[0]!.packages.find((p) => p.give.some((g) => g.playerId === 'te2'));
-    expect(pkg).toBeDefined();
-    expect(pkg!.need).toBe('their TE is on bye in week 8');
-    expect(pkg!.why).toBe('Their TE is on bye in week 8');
-    expect(pkg!.pitch).toMatch(/saw your TE is on bye in week 8/);
+    if (pkg) {
+      expect(pkg.need).not.toBe('their TE is on bye in week 8');
+      expect(pkg.pitch).not.toMatch(/on bye/);
+    }
   });
 });
 
@@ -457,7 +457,8 @@ describe('short forms for the compact card and sheet', () => {
 
 describe('a package that needs a follow-up add', () => {
   const SLOTS = slotsOf(SHAPE);
-  const twoQbs = [withBye(rate('burrow', 'QB', 21), 8), rate('love', 'QB', 18), ...ALEX.filter((p) => p.position !== 'QB')];
+  /* Love at 14, so love + rb4 for Waddle is inside the fair-to-both band (review T10). */
+  const twoQbs = [withBye(rate('burrow', 'QB', 21), 8), rate('love', 'QB', 14), ...ALEX.filter((p) => p.position !== 'QB')];
 
   it('trading the backup QB with the starter on a bye says add a QB that week, and names the free agents assumed', () => {
     const after = [...twoQbs.filter((p) => p.playerId !== 'love'), rate('doubs', 'WR', 9)];

@@ -62,9 +62,11 @@ The same weighted change on their roster, with no preferences. **A package that
 does not help them by at least one weighted point is never shown.** Their need
 is read off their own lineup for the next three weeks against their healthy one:
 
-- `their RB2 is Out` (a starter injured);
-- `their TE is on bye in week 8` (a starter on a bye);
+- `their RB2 is Out` (a starter injured for more than one game of the next three);
 - `thin at WR` / `thin at flex` (a free agent would start there, or nearly).
+
+A one-week bye is not a need (November 2026, review T11): nobody trades a
+starter for one week's cover.
 
 The card's why-line is the need the package fills, else who would start for
 them.
@@ -76,10 +78,14 @@ players, from the same evaluation), as a share of the larger side:
 
 | edge to Alex | status |
 | --- | --- |
-| 10% or less, or tilted their way | Likely, when it fills a named need; else Maybe |
-| up to 25% | Maybe |
-| up to 45% | Long shot |
-| past 45% | not shown |
+| 10% or less, or tilted their way up to 25% | Likely, when it fills a named need; else Maybe |
+| past 10% his way, or past 25% theirs | not shown |
+
+**Fair to both sides (November 2026, review T10).** The same rule as the trade
+ideas (`core/trades/fairToBoth.ts`): Alex's value edge at most 10%, a player
+the partner would cut counted at zero for him, Alex's lineup gaining 8+ points
+over the rest of the season and theirs 3+. Until then a deal 25% his way was
+Maybe and nothing stopped "give 43 for 3".
 
 A package that helps them less than a quarter as much as it helps Alex drops
 one level. **No percentage is ever shown**: Sleeper does not publish offers that
@@ -111,9 +117,12 @@ are left.
 
 ### Manager behaviour
 
-A note only: completed trades this season (by roster) and in earlier seasons
-this app has read (mapped through the ledger's roster identities for that
-season). It moves no number.
+Completed trades this season (by roster) and in earlier seasons this app has
+read (mapped through the ledger's roster identities for that season), read in
+the same activity classes as the trade ideas (`core/trades/activity.ts`).
+Since November 2026 (review T11) it orders the packages: managers who trade
+often first. Asking every team, a manager who almost never trades gets no
+package; a team Alex names himself is still asked.
 
 ## Compact layout (15 October 2026)
 

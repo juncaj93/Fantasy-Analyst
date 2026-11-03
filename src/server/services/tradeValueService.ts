@@ -26,6 +26,7 @@
  * and the model then ranks them by its own number.
  */
 
+import { currentWeekOf } from '../../core/tradeValue/weeks.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../../core/startsit/engine.ts';
 import { boundedFreeAgentIds } from '../../core/roster/freeAgents.ts';
 import { buildRosterShape, buildScoringProfile, startablePositions } from '../../core/sleeper/scoring.ts';
@@ -119,12 +120,7 @@ function viewOf(horizon: TradeHorizon): TradeHorizonView {
  * out of season, there is nothing left to affect, and 19 makes the horizon empty
  * so the model says so instead of valuing weeks that cannot be played.
  */
-export function currentWeekOf(state: NflState | null): number {
-  if (!state) return 1;
-  if (state.seasonType === 'post' || state.seasonType === 'off') return 19;
-  if (state.seasonType === 'pre') return 1;
-  return state.week != null && state.week > 0 ? state.week : 1;
-}
+export { currentWeekOf };
 
 /**
  * How many players a roster may hold in this league, from its own settings.

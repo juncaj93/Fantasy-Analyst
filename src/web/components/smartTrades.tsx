@@ -222,6 +222,13 @@ export function SmartTradeSheet({
               </dd>
             </div>
           ) : null}
+          {/* The player Alex would cut to make room, when the deal brings him an extra one (review T6). */}
+          {offer.seasonCheck?.drop ? (
+            <div className="weekly-line">
+              <dt>You drop</dt>
+              <dd data-testid="smart-trade-drop">{offer.seasonCheck.drop}</dd>
+            </div>
+          ) : null}
           <div className="weekly-line">
             <dt>This manager</dt>
             <dd data-testid="smart-trade-manager">

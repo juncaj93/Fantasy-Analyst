@@ -276,10 +276,11 @@ const MIXED: Record<string, Spec[]> = {
     ['wr3', 'WR', 11],
     ['wr6', 'WR', 10],
   ],
+  /* Backs priced so a fair upgrade exists: no more than 10% the user's way (review T3). */
   '2': [
     ['qb2', 'QB', 20],
-    ['rb3', 'RB', 16],
-    ['rb4', 'RB', 14],
+    ['rb3', 'RB', 15],
+    ['rb4', 'RB', 13],
     ['rb5', 'RB', 12],
     ['rb6', 'RB', 11],
     ['wr4', 'WR', 13],

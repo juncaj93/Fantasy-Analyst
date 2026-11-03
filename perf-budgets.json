@@ -134,6 +134,7 @@
       "src/core/startsit/tiebreak.ts",
       "src/core/startsit/weekCard.ts",
       "src/core/startsit/weekPoints.ts",
+      "src/core/trades/activity.ts",
       "src/core/trades/builderResponse.ts",
       "src/core/trades/category.ts",
       "src/core/trades/seasonCheck.ts",

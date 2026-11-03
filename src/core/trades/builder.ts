@@ -55,6 +55,8 @@ import type { TradeHorizon } from '../tradeValue/weeks.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import { isDeadSpot, readDrops, type DropSignals } from '../waivers/dropScore.ts';
 import { tradeExcluded } from './rosterUtility.ts';
+import { FAIR_TO_BOTH, fairToBoth, sentValue, valueEdge, wholePercent } from './fairToBoth.ts';
+import { isRareTrader } from './activity.ts';
 import {
   BUILDER_ADVISORY,
   BUILDER_WILLINGNESS,
@@ -66,6 +68,7 @@ import {
   type PackagePlayer,
   type PackageStatus,
   type TradeActivity,
+  partnerActivity,
   rankPackages,
   topAcrossTeams,
 } from './builderResponse.ts';
@@ -76,9 +79,13 @@ export const BUILDER = {
   /** Weighted points either side must gain to count as helped. */
   minGain: 1,
   /**
-   * Balance bands, as Alex's edge in rest-of-season value over the larger side:
-   * up to `even` is Likely territory, up to `maybe` is Maybe, up to `longShot`
-   * is a Long shot, and past it the package is not shown.
+   * Balance bands, as Alex's edge in rest-of-season value over the larger side.
+   * Up to `even` either way is about even. Past Alex's edge of
+   * {@link FAIR_TO_BOTH.userEdgeMax}, or the partner's of
+   * {@link FAIR_TO_BOTH.partnerEdgeMax}, the package is not shown: it is not
+   * fair to both sides (Alex, November 2026, review T10). Until then a deal 25%
+   * his way was Maybe and 45% a Long shot, and nothing stopped him paying 43
+   * for 3.
    */
   band: { even: 0.1, maybe: 0.25, longShot: 0.45 },
   /** Their players suggested per team when Alex marked none there. */
@@ -241,6 +248,16 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
   const dropCache = new Map<string, SideResult | null>();
 
   for (const team of teams) {
+    /*
+     * Asking every team, a manager who almost never trades gets nothing (Alex,
+     * November 2026, review T11): the November probe's three packages all went
+     * to managers with 1, 2 and 0 trades. A team Alex names himself is asked.
+     */
+    if (allLike && isRareTrader(partnerActivity(team.activity))) {
+      hide('rare_trader');
+      teamResults.push({ rosterId: team.rosterId, label: team.label, activity: team.activity, needs: [], suggested: [], packages: [] });
+      continue;
+    }
     const needs = needsOf(team, slots, input.replacement, horizon);
     const theirs = new Map(team.roster.map((p) => [p.playerId, p] as const));
     const wanted = (input.want.get(team.rosterId) ?? []).filter((id) => theirs.has(id));
@@ -298,7 +315,19 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
       const mineGain =
         quickValue(slots, input.replacement, [...input.me.roster.filter((p) => !s.give.includes(p.playerId)), ...s.get.map((id) => theirs.get(id)!)], horizon) - myBase;
       const theirGain = -theirLoss(s.get, outgoing);
-      return { team, give: s.give, get: s.get, priority: mineGain > 0 && theirGain > 0 ? mineGain + theirGain : Math.min(mineGain, theirGain) - 100 };
+      /*
+       * And a package clearly outside the fair-to-both band goes behind every
+       * one inside it, so the few full checks are spent on deals that can be
+       * shown (review T10). The same value over a free agent the full check
+       * reads, without the partner's cut.
+       */
+      const edge = valueEdge(
+        outgoing.reduce((sum, p) => sum + overReplacement(p, input.replacement), 0),
+        s.get.reduce((sum, id) => sum + overReplacement(theirs.get(id)!, input.replacement), 0),
+      );
+      const fair = wholePercent(edge) <= wholePercent(FAIR_TO_BOTH.userEdgeMax) && wholePercent(-edge) <= wholePercent(FAIR_TO_BOTH.partnerEdgeMax);
+      const priority = mineGain > 0 && theirGain > 0 ? mineGain + theirGain : Math.min(mineGain, theirGain) - 100;
+      return { team, give: s.give, get: s.get, priority: fair ? priority : priority - 1000 };
     });
     generated += candidates.length;
     const cap = all ? BUILDER.evaluatedAllTeams : BUILDER.evaluatedPerTeam;
@@ -417,11 +446,21 @@ function evaluatePackage(
   if (aWeighted < BUILDER.minGain || a.net + (moveCost?.net ?? 0) <= 0) return { hidden: 'no_gain_for_you' };
   if (bWeighted < BUILDER.minGain || b.net <= 0) return { hidden: 'no_gain_for_them' };
 
-  const giveValue = round1(a.outgoing.reduce((s, p) => s + (p.rosValue ?? 0), 0));
+  /*
+   * Fair to both sides, the same rule the trade ideas keep (`fairToBoth.ts`).
+   * A player they would cut on arrival is worth nothing to them, so he counts
+   * zero in what Alex gives (the November probe called Concepcion and Love for
+   * Lawrence "about even" with Love cut).
+   */
+  const cuts = new Set(b.mustDrop ? [b.mustDrop.playerId] : []);
+  const giveValue = round1(sentValue(a.outgoing, cuts));
   const getValue = round1(a.incoming.reduce((s, p) => s + (p.rosValue ?? 0), 0));
-  const larger = Math.max(giveValue, getValue);
-  const edge = larger > 0 ? (getValue - giveValue) / larger : 0;
-  if (edge > BUILDER.band.longShot) return { hidden: 'outside_band' };
+  const fair = fairToBoth({ giveValue, getValue, userGain: a.net + (moveCost?.net ?? 0), partnerGain: b.net });
+  const edge = fair.edge;
+  if (fair.reason === 'user_edge') return { hidden: 'outside_band' };
+  if (fair.reason === 'partner_edge') return { hidden: 'you_overpay' };
+  if (fair.reason === 'user_gain') return { hidden: 'no_gain_for_you' };
+  if (fair.reason === 'partner_gain') return { hidden: 'no_gain_for_them' };
 
   const sends = new Set(candidate.give.map((id) => input.me.roster.find((p) => p.playerId === id)?.position ?? ''));
   const need = needs.find((n) => sends.has(n.position) || (n.position === 'FLEX' && [...sends].some((s) => ['RB', 'WR', 'TE'].includes(s)))) ?? null;
@@ -750,9 +789,12 @@ function overReplacement(p: PlayerRate, replacement: ReplacementLevels): number 
  * What this team is short of, strongest first, in plain words.
  *
  * Read off their own best lineup for the next three weeks against their healthy
- * one: a starter out (`their RB2 is Out`), a starter on a bye (`their TE is on
- * bye in week 8`), or a position a free agent would start at, or nearly
- * (`thin at WR`).
+ * one: a starter out for more than one of those weeks (`their RB2 is Out`), or a
+ * position a free agent would start at, or nearly (`thin at WR`).
+ *
+ * A one-week bye is not a need (review T11, November 2026): nobody trades a
+ * starter for a week's cover, and the November probe's packages rested on
+ * "their RB1 is on bye in week 9". Nor is a starter out for one week only.
  */
 export function needsOf(team: BuilderTeam, slots: readonly LineupSlotSpec[], replacement: ReplacementLevels, horizon: TradeHorizon): Need[] {
   const priced = team.roster.filter((p) => p.rate != null && !tradeExcluded(p.position));
@@ -770,19 +812,23 @@ export function needsOf(team: BuilderTeam, slots: readonly LineupSlotSpec[], rep
   const seen = new Set<string>();
   for (const s of starters) {
     const p = byId.get(s.id)!;
-    for (let k = 0; k < Math.min(3, horizon.weeks.length); k++) {
-      const playing = p.weekly[k] ?? 1;
-      if (playing >= 0.5) continue;
-      const week = horizon.weeks[k]!;
-      const lost = (p.rate ?? 0) * (1 - playing) - (replacement.get(p.position)?.rate ?? 0) * (1 - playing);
-      const label =
-        p.byeWeek === week
-          ? `their ${rankOf(p)} is on bye in week ${week}`
-          : `their ${rankOf(p)} is ${WORD[p.designation] ?? 'out'}${k === 0 ? '' : ` in week ${week}`}`;
-      if (!seen.has(p.playerId)) out.push({ position: p.position, label, severity: Math.max(0.1, lost) + (3 - k) * 0.01 });
-      seen.add(p.playerId);
-      break;
+    /* Games lost to injury over the next three weeks, byes left out. More than one is a need. */
+    const window = Math.min(3, horizon.weeks.length);
+    let gamesLost = 0;
+    let first: number | null = null;
+    for (let k = 0; k < window; k++) {
+      if (p.byeWeek === horizon.weeks[k]) continue;
+      const out = 1 - Math.min(1, Math.max(0, p.weekly[k] ?? 1));
+      gamesLost += out;
+      if (out >= 0.5 && first == null) first = k;
     }
+    if (first == null || !(gamesLost > 1)) continue;
+    const k = first;
+    const week = horizon.weeks[k]!;
+    const lost = ((p.rate ?? 0) - (replacement.get(p.position)?.rate ?? 0)) * gamesLost;
+    const label = `their ${rankOf(p)} is ${WORD[p.designation] ?? 'out'}${k === 0 ? '' : ` in week ${week}`}`;
+    if (!seen.has(p.playerId)) out.push({ position: p.position, label, severity: Math.max(0.1, lost) + (3 - k) * 0.01 });
+    seen.add(p.playerId);
   }
   /* Thin: a slot a free agent fills, or a starter barely above one. */
   for (const [i, pick] of healthy.picks.entries()) {

@@ -50,6 +50,8 @@ import type { ArbitrageRead } from './arbitrage.ts';
 import type { OfferCategory } from './category.ts';
 import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
 import { counterpartNeed, scarcityLine, scarcityOf, type ScarcityCost } from './rosterFit.ts';
+import { FAIR_TO_BOTH, wholePercent } from './fairToBoth.ts';
+import { isRareTrader } from './activity.ts';
 
 // ------------------------------------------------------------- the bounds --
 
@@ -94,7 +96,7 @@ export type TradeBounds = Record<keyof typeof TRADE_BOUNDS, number>;
  * `outside` is the hard objective sanity boundary of §8 and §12. Nothing —
  * manager history least of all — may carry an offer across it.
  */
-export const FAIRNESS_BANDS = { even: 0.1, edge: 0.25 } as const;
+export const FAIRNESS_BANDS = { even: 0.1, edge: 0.25, userEdge: FAIR_TO_BOTH.userEdgeMax } as const;
 
 /**
  * Starting-lineup points the user must gain before an offer is worth showing.
@@ -208,9 +210,15 @@ export const OFFERS_BY_ACTIVITY: Record<ActivityClass, number> = {
   active: 4,
   selective: 3,
   unknown: 2,
-  low_activity: 1,
-  effectively_inactive: 1,
+  /*
+   * None. Alex, November 2026: partners who trade often; never a manager with
+   * almost no trade history just because the numbers work (review T11). A
+   * measured rare trader gets no idea at all; see `findBilateralTrades`.
+   */
+  low_activity: 0,
+  effectively_inactive: 0,
 };
+
 
 
 /**
@@ -291,6 +299,16 @@ export const ARBITRAGE_SCORED_SLOTS = 3;
  * lineup-neutral for them and has to earn its place on roster logic instead.
  */
 export const MATERIAL_HARM = 0.75;
+
+/**
+ * Ideas held behind the board for the season check (review T3).
+ *
+ * The fair-to-both rule is read on the season, after the search, so some
+ * surfaced ideas are left off. Ten more in ranked order is enough to refill a
+ * board of five on an ordinary week, and each is one more Check a trade run on
+ * data the check has already read: no extra database rows.
+ */
+export const RESERVE_IDEAS = 10;
 
 /** User gain at which the benefit term is considered maxed out, for scoring. */
 export const REFERENCE_GAIN = 5;
@@ -489,6 +507,10 @@ export type RejectionReason =
   | 'unpriced_players'
   | 'unpriced_lineup'
   | 'no_plausible_use'
+  /** Nothing arriving starts at a position where your lineup is weak. Alex, November 2026. */
+  | 'no_weak_spot'
+  /** This manager almost never trades, so no idea goes to him. Alex, November 2026 (review T11). */
+  | 'rare_trader'
   | 'pruned_by_bound';
 
 export interface Rejection {
@@ -501,6 +523,11 @@ export interface Rejection {
 
 export interface BilateralReport {
   offers: OfferEvaluation[];
+  /**
+   * The next ideas in ranked order, behind the surfaced ones, for the season
+   * check to fill from when it leaves one off. Never shown as they are.
+   */
+  reserve: OfferEvaluation[];
   /** Candidates enumerated before the optimiser ran. */
   generated: number;
   /** Candidates that survived cheap pruning and were fully scored. */
@@ -574,6 +601,23 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
           `${waiting.length} of their players ${waiting.length === 1 ? 'has' : 'have'} no market price this week ` +
           `and ${waiting.length === 1 ? 'was' : 'were'} left out: ${waiting.map((id) => view.nameOf.get(id) ?? id).join(', ')}`,
       });
+    }
+
+    /*
+     * A manager the record shows almost never trades gets no idea at all
+     * (Alex, November 2026; review T11). An unmeasured one is not skipped:
+     * that is a data gap, not a finding about him.
+     */
+    const activity = managerFitFor(fit).activity;
+    if (isRareTrader(activity)) {
+      rejections.push({
+        partnerKey: partner.key,
+        give: [],
+        get: [],
+        reason: 'rare_trader',
+        detail: `${partner.displayName} almost never trades (${activity.replace('_', ' ')}), so no idea goes to him`,
+      });
+      continue;
     }
 
     const candidates = generateCandidates({
@@ -833,8 +877,16 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
     );
   }
 
+  /* The next player-disjoint ideas behind the board, for the season check to fill from. */
+  const reserve: OfferEvaluation[] = [];
+  for (const offer of ranked) {
+    if (reserve.length >= RESERVE_IDEAS) break;
+    if (!surfaced.includes(offer)) reserve.push(offer);
+  }
+
   return {
     offers: surfaced,
+    reserve,
     generated,
     scored,
     viable: ranked.length,
@@ -1413,6 +1465,21 @@ function evaluate(args: {
     );
   }
 
+  /*
+   * And it fills a weak spot (Alex, November 2026): when your lineup has a
+   * hole or a weak position, somebody arriving must start there. A roster
+   * with no weak position at all can still take a clean upgrade anywhere. A
+   * buy-low or sell-high is a different question and is not held to it.
+   */
+  if (strongest.length === 0 && hasNeed(me)) {
+    const entering = new Set(userDelta.entersLineup);
+    const fillsWeak = getting.some((p) => {
+      const level = me.needs.get(p.position)?.level;
+      return entering.has(p.playerId) && (level === 'hole' || level === 'weak');
+    });
+    if (!fillsWeak) return reject('no_weak_spot', 'nobody arriving starts at a position where your lineup is weak');
+  }
+
   // ------------------------------------ gate 3: could they defend accepting --
   const partnerDelta = them.delta(candidate.get, candidate.give);
   if (!partnerDelta.legal) {
@@ -1450,14 +1517,6 @@ function evaluate(args: {
       getting: getting.length,
       partnerReceives: giving.map((p) => p.position),
       partnerSends: getting.map((p) => p.position),
-      /*
-       * Whether this one is edged your way, for the frequency lean.
-       *
-       * The band and not the gap, so the term cannot vary with a decimal
-       * nothing under it supports — and `edge_user` only, because the wider
-       * band was rejected at gate 1 above. See `EDGE_TO_ACTIVE_TRADER`.
-       */
-      edgeToUser: fairness.band === 'edge_user',
     },
   });
 
@@ -1480,6 +1539,7 @@ function evaluate(args: {
     counterparty: partnerSide,
     managerFit,
     size: giving.length + getting.length,
+    giving: giving.length,
     netGain,
     /*
      * What an arbitrage offer is scored on instead of this week's points.
@@ -1548,9 +1608,17 @@ export function fairnessOf(give: readonly OfferPlayer[], get: readonly OfferPlay
   const larger = Math.max(outgoing, incoming);
   const gap = larger <= 0 ? 0 : round3((incoming - outgoing) / larger);
 
+  /*
+   * Fair to both sides (Alex, November 2026, review T3): his edge stops at
+   * {@link FAIRNESS_BANDS.userEdge}. Past it the other manager says no, so
+   * the idea is outside the range; there is no "slight edge to you" band any
+   * more. The other way, a deal may lean to them up to the wider band, which
+   * is where a fair 2-for-1 consolidation usually sits.
+   */
   let band: FairnessBand;
-  if (Math.abs(gap) <= FAIRNESS_BANDS.even) band = 'even';
-  else if (Math.abs(gap) <= FAIRNESS_BANDS.edge) band = gap > 0 ? 'edge_user' : 'edge_opponent';
+  if (wholePercent(gap) > wholePercent(FAIRNESS_BANDS.userEdge)) band = 'outside_range';
+  else if (Math.abs(gap) <= FAIRNESS_BANDS.even) band = 'even';
+  else if (Math.abs(gap) <= FAIRNESS_BANDS.edge) band = 'edge_opponent';
   else band = 'outside_range';
 
   return { band, label: FAIRNESS_LABELS[band], incoming, outgoing, gap };
@@ -1636,6 +1704,8 @@ export function scoreOf(args: {
   counterparty: SideOutcome;
   managerFit: ManagerFit;
   size: number;
+  /** Players the user sends, for the shape preference. */
+  giving?: number;
   /**
    * This week's gain net of the scarcity charge, when one was computed. The
    * user term ranks on it, so a scarce give ranks below an equal gain from
@@ -1657,30 +1727,12 @@ export function scoreOf(args: {
       : clamp01((args.netGain ?? args.user.starterGain) / REFERENCE_GAIN);
 
   /*
-   * An edge to the user is *better* than an even deal, and paying over the odds
-   * is worse than either.
-   *
-   * The previous reading scored `even` and `edge_user` identically at 1 — an
-   * edge was permitted but never preferred, so between a dead-even package and
-   * one that captured real surplus the composite was indifferent and the
-   * ordering fell through to the alphabetical tiebreak. §8 permits seeking an
-   * edge; this is the smallest change that actually seeks one.
-   *
-   * The gap between the two bands is deliberately narrow. At a weight of
-   * {@link RANK_WEIGHTS.fairness} it is worth 0.024 of the composite — less
-   * than {@link MANAGER_FIT_CAP}, and far less than a point of lineup gain — so
-   * it settles offers that are otherwise level and cannot promote a worse deal
-   * past a better one. Seeking an edge is a tiebreak, not an objective.
-   *
-   * Nothing here can surface a lopsided trade: `outside_range` is rejected at
-   * gate 1 before any of this runs, and gate 3 still requires the partner keep
-   * a legal lineup, lose no material points, and have roster logic of their
-   * own. The band this now prefers is bounded by {@link FAIRNESS_BANDS.edge} on
-   * one side and by those gates on the other, which is what makes "favour the
-   * user where it is still fair" a safe thing to ask for.
+   * Even first (Alex, November 2026, review T3). This used to rank a deal
+   * 10-25% his way above an even one, on his 15 September instruction to lean
+   * his way; fair to both sides replaced it. An idea his way past the even
+   * band is rejected at gate 1, so what is left is even, or leaning theirs.
    */
-  const fairness =
-    args.fairness.band === 'edge_user' ? 1 : args.fairness.band === 'even' ? 0.88 : 0.55;
+  const fairness = args.fairness.band === 'even' ? 1 : 0.6;
 
   /*
    * Their side: lineup points, then roster logic, each worth half.
@@ -1694,7 +1746,12 @@ export function scoreOf(args: {
       Math.min(1, args.counterparty.rationales.length / 2) * 0.5,
   );
 
-  const simplicity = args.size <= 2 ? 1 : args.size === 3 ? 0.7 : 0.5;
+  /*
+   * The shapes Alex asked for: one for one, or two of his for one better
+   * player (2-for-1 consolidation, bench depth for a starter). Taking two of
+   * theirs for one ranks a little lower, since it costs him a roster spot.
+   */
+  const simplicity = args.size <= 2 ? 1 : args.size === 3 ? (args.giving === 2 ? 1 : 0.7) : 0.5;
 
   const weighted =
     RANK_WEIGHTS.user * user +
@@ -1732,20 +1789,11 @@ export function compareOffers(a: OfferEvaluation, b: OfferEvaluation): number {
     b.score - a.score ||
     b.user.starterGain - a.user.starterGain ||
     /*
-     * Then the surplus, before their gain rather than after it.
-     *
-     * Two offers that move the user's lineup by the same amount are the case
-     * where "fair but favours you where it can" is decided, and the value gap
-     * is the only thing separating them. Ordering their gain first would spend
-     * that tie making the *partner* better off, which is generous rather than
-     * fair — their side is already protected by gate 3, and the band this can
-     * reach is already bounded by `FAIRNESS_BANDS.edge`.
-     *
-     * Their gain still breaks the tie after it, so between two packages that
-     * are equally good for the user and equally priced, the one they are more
-     * likely to take is the one that surfaces.
+     * Then the closer to even, before their gain (review T3). Between two
+     * packages that move the user's lineup by the same amount, the fairer one
+     * is the one the other manager is likelier to take.
      */
-    b.fairness.gap - a.fairness.gap ||
+    Math.abs(a.fairness.gap) - Math.abs(b.fairness.gap) ||
     b.counterparty.starterGain - a.counterparty.starterGain ||
     a.give.length + a.get.length - (b.give.length + b.get.length) ||
     a.id.localeCompare(b.id)

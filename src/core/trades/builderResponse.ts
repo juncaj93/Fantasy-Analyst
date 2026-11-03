@@ -32,11 +32,15 @@ export interface PackageMove extends PackagePlayer {
   reason: string;
 }
 
+import { ACTIVITY_RANK, activityClassFor, type ActivityClass } from './activity.ts';
+
 /** Completed trades on record for one manager, from Sleeper's transactions. */
 export interface TradeActivity {
   thisSeason: number;
   /** Earlier seasons this app has read. Null when none have been read. */
   earlier: number | null;
+  /** Seasons on record, this one included. Optional: older bodies lack it. */
+  seasons?: number;
   /** `Has made 4 trades this season`. */
   line: string;
 }
@@ -180,13 +184,33 @@ export function rankKey(p: Pick<BuiltPackage, 'costsNow' | 'alex'>): number {
 }
 
 /**
- * The packages in ranked order: helps-now first by gain, then the rest, and
+ * How active a trader this partner is, in the classes the trade ideas use
+ * (`activity.ts`), so "trades often" means one thing on both tools.
+ */
+export function partnerActivity(activity: TradeActivity | null | undefined): ActivityClass {
+  if (!activity) return 'unknown';
+  const sample = activity.thisSeason + (activity.earlier ?? 0);
+  const seasons = activity.seasons ?? (activity.earlier != null ? 2 : 1);
+  return activityClassFor({
+    sample,
+    seasonsObserved: seasons,
+    historyComplete: activity.earlier != null,
+    ratePerSeason: sample / Math.max(1, seasons),
+  });
+}
+
+/**
+ * The packages in ranked order: managers who trade often first (Alex,
+ * November 2026, review T11), then helps-now first by gain, then the rest, and
  * ties to the likelier status, then the id, so one request gives one answer.
  * Shared by the engine and by the screen, which merges a sweep of teams.
  */
-export function rankPackages<T extends Pick<BuiltPackage, 'costsNow' | 'alex' | 'status' | 'id'>>(list: readonly T[]): T[] {
+export function rankPackages<T extends Pick<BuiltPackage, 'costsNow' | 'alex' | 'status' | 'id'> & { partner?: { activity?: TradeActivity } }>(
+  list: readonly T[],
+): T[] {
   const order: Record<PackageStatus, number> = { likely: 0, maybe: 1, long_shot: 2 };
-  return [...list].sort((a, b) => rankKey(b) - rankKey(a) || order[a.status] - order[b.status] || a.id.localeCompare(b.id));
+  const tier = (p: T) => ACTIVITY_RANK[partnerActivity(p.partner?.activity)];
+  return [...list].sort((a, b) => tier(a) - tier(b) || rankKey(b) - rankKey(a) || order[a.status] - order[b.status] || a.id.localeCompare(b.id));
 }
 
 /** All teams: the top five, at most two per team. */

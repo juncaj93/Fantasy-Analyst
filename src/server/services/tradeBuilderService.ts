@@ -249,5 +249,5 @@ export function activityOf(
         : earlier === 0
           ? 'No trades on record'
           : 'No trades this season';
-  return { thisSeason, earlier, line };
+  return { thisSeason, earlier, seasons: earlierSeasons.size + 1, line };
 }

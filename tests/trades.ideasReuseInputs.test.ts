@@ -35,7 +35,9 @@ describe('Check a trade for the board’s ideas', () => {
     expect(ideas.length).toBeGreaterThan(3);
 
     const { board, inputs } = await new SmartTradeService(db).buildWithInputs({ limit: 5 });
-    expect(await new SmartTradeService(db).build({ limit: 5 })).toEqual(board);
+    /* The same board, apart from the reserve held behind it for the season check. */
+    const { reserve: _held, ...shown } = board;
+    expect(await new SmartTradeService(db).build({ limit: 5 })).toEqual(shown);
     expect(inputs.length).toBeGreaterThan(0);
 
     const own = countingDb(db);

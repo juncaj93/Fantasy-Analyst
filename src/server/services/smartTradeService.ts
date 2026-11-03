@@ -44,6 +44,7 @@ import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import { ARBITRAGE, playedGames, readArbitrage, type ArbitrageRead } from '../../core/trades/arbitrage.ts';
 import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
+import { currentWeekOf } from '../../core/tradeValue/weeks.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
@@ -133,7 +134,7 @@ export class SmartTradeService {
    * and a 500 from this endpoint should never be able to blank the page.
    */
   async build(opts: { leagueId?: string; limit?: number } = {}): Promise<SmartTradeBoard> {
-    const { rejections: _dropped, ...board } = await this.assemble(opts);
+    const { rejections: _dropped, reserve: _held, ...board } = await this.assemble(opts);
     return board;
   }
 
@@ -334,6 +335,9 @@ export class SmartTradeService {
         published,
         history,
         limit: opts.limit,
+        /* For the trade deadline (review T5). No stored state: no check. */
+        currentWeek: nflState ? currentWeekOf(nflState) : undefined,
+        withReserve: true,
         warnings,
       },
       rosterRecords: rosters,

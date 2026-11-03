@@ -1,5 +1,11 @@
 /**
- * Weighting trade frequency, in the two places it was not being weighted.
+ * Weighting trade frequency.
+ *
+ * November 2026 (review T3, T7, T11): Alex's rule is now partners who trade
+ * often, fair to both sides. A measured manager who almost never trades gets
+ * no idea at all, and the "lean my way for an active trader" term below is
+ * gone: an idea more than 10% his way is outside the range for everybody.
+ * The history of the September rule is kept for context.
  *
  * Alex, 15 September 2026: *managers who trade often should receive a higher
  * volume of suggested trades, and those trades should lean toward what benefits
@@ -25,7 +31,7 @@ import { pricedCandidate as candidate } from './helpers/startsit.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildRosterViews, type RosterView } from '../src/core/trades/rosterUtility.ts';
 import { OFFERS_BY_ACTIVITY, TRADE_BOUNDS, findBilateralTrades } from '../src/core/trades/bilateral.ts';
-import { EDGE_TO_ACTIVE_TRADER, MANAGER_FIT_CAP, managerFitFor } from '../src/core/trades/managerFit.ts';
+import { MANAGER_FIT_CAP, managerFitFor } from '../src/core/trades/managerFit.ts';
 import type { ManagerTradeTendencies } from '../src/core/managers/tradeTendencies.ts';
 import type { StartSitInput } from '../src/core/startsit/engine.ts';
 
@@ -65,7 +71,7 @@ const UNMEASURED = { tendencies: null, seasonsObserved: 0, historyComplete: fals
  * One league where several offers are genuinely viable against one partner.
  *
  * The per-partner cap is what this file is about, so the fixture has to have
- * more good ideas than the cap allows — otherwise every activity class returns
+ * more good, fair ideas (within 10% the user's way) than the cap allows — otherwise every activity class returns
  * the same board and the test passes by having nothing to measure.
  */
 const DEEP: Record<string, Spec[]> = {
@@ -81,8 +87,8 @@ const DEEP: Record<string, Spec[]> = {
   ],
   '2': [
     ['qb2', 'QB', 20],
-    ['rb3', 'RB', 16],
-    ['rb4', 'RB', 14],
+    ['rb3', 'RB', 15],
+    ['rb4', 'RB', 13],
     ['rb5', 'RB', 12],
     ['rb6', 'RB', 11],
     ['wr4', 'WR', 13],
@@ -115,86 +121,57 @@ function boardFor(fit: typeof ACTIVE | typeof QUIET | typeof UNMEASURED) {
 }
 
 describe('volume: a manager who trades gets more ideas', () => {
-  it('raises the per-partner cap for an active trader, and lowers it for a measured non-trader', () => {
+  it('raises the per-partner cap for an active trader, and sends a measured rare trader nothing', () => {
     expect(OFFERS_BY_ACTIVITY.active).toBeGreaterThan(TRADE_BOUNDS.offersPerPartner);
     expect(OFFERS_BY_ACTIVITY.selective).toBeGreaterThan(OFFERS_BY_ACTIVITY.low_activity);
-    expect(OFFERS_BY_ACTIVITY.effectively_inactive).toBeLessThan(TRADE_BOUNDS.offersPerPartner);
+    expect(OFFERS_BY_ACTIVITY.low_activity).toBe(0);
+    expect(OFFERS_BY_ACTIVITY.effectively_inactive).toBe(0);
   });
 
   it('leaves a manager nobody has measured exactly where he was', () => {
-    // §10, and the rule the previous round was written to restore: an
-    // unmeasured manager must never be treated as a measured non-trader, and
-    // must not be penalised for a backfill nobody has run.
+    // A data gap is not a finding: an unmeasured manager is not skipped.
     expect(OFFERS_BY_ACTIVITY.unknown).toBe(TRADE_BOUNDS.offersPerPartner);
     expect(boardFor(UNMEASURED).offers.length).toBeLessThanOrEqual(TRADE_BOUNDS.offersPerPartner);
   });
 
-  it('actually sends more ideas to the manager who trades, on one league', () => {
-    const active = boardFor(ACTIVE).offers;
-    const quiet = boardFor(QUIET).offers;
+  it('sends ideas to the manager who trades, and none to one who never does (review T11)', () => {
+    const active = boardFor(ACTIVE);
+    const quiet = boardFor(QUIET);
 
-    expect(active.length).toBeGreaterThan(quiet.length);
-    expect(active.every((o) => o.partner.userId === 'u2')).toBe(true);
+    expect(active.offers.length).toBeGreaterThan(0);
+    expect(active.offers.every((o) => o.partner.userId === 'u2')).toBe(true);
+    expect(quiet.offers).toEqual([]);
+    expect(quiet.rejections.some((r) => r.reason === 'rare_trader')).toBe(true);
   });
 });
 
-describe('lean: an edge in your favour is worth more against somebody who replies', () => {
-  const shaped = (activityFit: typeof ACTIVE | typeof QUIET, edgeToUser: boolean) =>
+describe('no lean: fair to both sides for every partner (review T3)', () => {
+  const shaped = (activityFit: typeof ACTIVE | typeof QUIET) =>
     managerFitFor({
       ...activityFit,
       askingUserId: 'u1',
-      offer: { giving: 1, getting: 1, partnerReceives: ['WR'], partnerSends: ['RB'], edgeToUser },
+      offer: { giving: 1, getting: 1, partnerReceives: ['WR'], partnerSends: ['RB'] },
     });
 
-  it('pays an active trader for an edged offer, and pays nothing for an even one', () => {
-    const edged = shaped(ACTIVE, true);
-    const even = shaped(ACTIVE, false);
-
-    expect(edged.contribution).toBeGreaterThan(even.contribution);
-    expect(edged.terms.some((t) => t.key === 'edge_to_active_trader')).toBe(true);
-    expect(even.terms.some((t) => t.key === 'edge_to_active_trader')).toBe(false);
-  });
-
-  it('does not nudge an edged offer toward a manager who does not trade', () => {
-    // The suggestion least likely to land is the last one worth promoting.
-    expect(shaped(QUIET, true).terms.some((t) => t.key === 'edge_to_active_trader')).toBe(false);
-    expect(shaped(QUIET, true).contribution).toBe(shaped(QUIET, false).contribution);
+  it('has no term that pays an active trader for an offer edged the user’s way', () => {
+    expect(shaped(ACTIVE).terms.some((t) => t.key === 'edge_to_active_trader')).toBe(false);
   });
 
   it('stays inside the one cap the whole channel is bounded by', () => {
-    for (const fit of [ACTIVE, QUIET]) {
-      for (const edge of [true, false]) {
-        expect(Math.abs(shaped(fit, edge).contribution)).toBeLessThanOrEqual(MANAGER_FIT_CAP);
-      }
-    }
-    // A fraction of the cap, not a second cap beside it.
-    expect(EDGE_TO_ACTIVE_TRADER).toBeLessThan(1);
-    expect(EDGE_TO_ACTIVE_TRADER).toBeGreaterThan(0);
+    for (const fit of [ACTIVE, QUIET]) expect(Math.abs(shaped(fit).contribution)).toBeLessThanOrEqual(MANAGER_FIT_CAP);
   });
 
-  it('cannot widen what counts as fair, because it is never asked about that', () => {
-    /*
-     * `edgeToUser` is set only for the `edge_user` band, and anything past
-     * `FAIRNESS_BANDS.edge` is rejected at gate 1 before a profile is read. So
-     * the lean applies to offers the objective gates already permitted, and
-     * there is no value of this term that reaches one they did not.
-     */
+  it('shows an active trader nothing more than 10% the user’s way', () => {
     for (const offer of boardFor(ACTIVE).offers) {
       expect(offer.fairness.band).not.toBe('outside_range');
+      expect(offer.fairness.gap).toBeLessThanOrEqual(0.105);
     }
   });
 });
 
 describe('and behaviour still reaches the score through one channel only', () => {
   it('leaves the objective part of every offer untouched, whoever the partner is', () => {
-    /*
-     * The invariant the whole reweighting rests on, and the reason the lean is
-     * a term in `managerFit` rather than an adjustment to the fairness score.
-     * An activity-aware fairness term would have been a second behavioural
-     * channel wearing the first one's name — the double-count `RANK_WEIGHTS`
-     * records as a real defect rather than a design choice.
-     */
-    const objective = [ACTIVE, QUIET, UNMEASURED].map((fit) => {
+    const objective = [ACTIVE, UNMEASURED].map((fit) => {
       const offer = boardFor(fit).offers[0]!;
       return Math.round((offer.breakdown.total - offer.breakdown.managerFit) * 1e6) / 1e6;
     });

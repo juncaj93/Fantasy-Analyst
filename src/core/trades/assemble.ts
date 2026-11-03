@@ -40,6 +40,7 @@ import {
   type TradePartnerView,
 } from './bilateral.ts';
 import { TRADEABLE, tradeCapabilityOf, type TradeCapability } from './capability.ts';
+import { tradeHorizon } from '../tradeValue/weeks.ts';
 import type { ManagerFitInput } from './managerFit.ts';
 import type { ArbitrageRead } from './arbitrage.ts';
 import type { ManagerTradeTendencies } from '../managers/tradeTendencies.ts';
@@ -116,6 +117,17 @@ export interface TradeAssemblyRequest {
   published?: ReadonlyMap<string, number> | undefined;
   /** Surfaced offers, bounded by the engine at twenty whatever is asked for. */
   limit?: number | undefined;
+  /**
+   * The league's current week, for the trade deadline (review T5). Absent or
+   * zero: no deadline check, which is the preseason and an older snapshot.
+   */
+  currentWeek?: number | undefined;
+  /**
+   * Hold the next ideas behind the board for the season check (`reserve`).
+   * Only the callers that run the check ask for it; everyone else gets the
+   * board exactly as before.
+   */
+  withReserve?: boolean | undefined;
   /** Carried through rather than discarded; see `warnings` on the result. */
   warnings?: string[];
 }
@@ -124,6 +136,8 @@ export interface TradeAssemblyRequest {
 export interface TradeAssembly {
   found: boolean;
   offers: BilateralReport['offers'];
+  /** Ideas held behind the board for the season check to fill from. Stripped before a screen sees the board. */
+  reserve?: BilateralReport['reserve'];
   /** What the search did, for the probe and for the perf report. */
   search: {
     partners: number;
@@ -172,6 +186,14 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
    */
   const capability = tradeCapabilityOf({ leagueSettings: request.leagueSettings });
   if (!capability.tradeable) return empty([capability.reason!], capability, history, warnings);
+
+  /*
+   * Past the trade deadline nothing can be completed, so nothing is suggested
+   * (review T5). The same horizon Check a trade and Build a trade read.
+   */
+  if ((request.currentWeek ?? 0) > 0 && tradeHorizon({ leagueSettings: request.leagueSettings, currentWeek: request.currentWeek! }).deadlinePassed) {
+    return empty(['Trades are closed for the season.'], capability, history, warnings);
+  }
 
   const mine = request.rosters.find((roster) => roster.isMine) ?? null;
   if (!mine) {
@@ -274,6 +296,7 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
   return {
     found: report.offers.length > 0,
     offers: report.offers,
+    ...(request.withReserve ? { reserve: report.reserve } : {}),
     search: {
       partners: report.partners,
       generated: report.generated,

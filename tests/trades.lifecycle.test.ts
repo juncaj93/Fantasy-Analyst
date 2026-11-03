@@ -68,7 +68,19 @@ const THEIRS: [id: string, position: string, points: number][] = [
   ['t_te', 'TE', 8],
 ];
 
-const ALL = [...MINE, ...THEIRS];
+/**
+ * A waiver wire, priced like everyone else. Check a trade values a player over
+ * the best free agents at his position, and since November 2026 an idea it
+ * cannot check is not shown (review T3), so the league needs one.
+ */
+const FREE: [id: string, position: string, points: number][] = [
+  ['f_qb1', 'QB', 12], ['f_qb2', 'QB', 12], ['f_qb3', 'QB', 12],
+  ['f_rb1', 'RB', 9], ['f_rb2', 'RB', 9], ['f_rb3', 'RB', 9],
+  ['f_wr1', 'WR', 8], ['f_wr2', 'WR', 8], ['f_wr3', 'WR', 8],
+  ['f_te1', 'TE', 5], ['f_te2', 'TE', 5], ['f_te3', 'TE', 5],
+];
+
+const ALL = [...MINE, ...THEIRS, ...FREE];
 
 /**
  * A Sleeper that answers from a script and counts what it was asked.

@@ -1,14 +1,12 @@
 /**
- * Fair, but favouring the user where it still is.
+ * Fair to both sides, in the ranking (review T3, November 2026).
  *
- * The engine already refused lopsided trades and already refused trades the
- * partner would decline. What it did not do was *prefer* the deal that captured
- * surplus: `even` and `edge_user` scored identically, so between a dead-even
- * package and one worth a little more to the user the composite was indifferent
- * and the ordering fell through to an alphabetical tiebreak on the offer id.
- *
- * These tests pin the preference and, more importantly, pin its limits — the
- * bands it may not cross and the amount it may not outweigh.
+ * Until November the composite ranked a deal 10-25% the user's way above an
+ * even one, on Alex's 15 September "lean my way" instruction, and broke ties
+ * toward the bigger surplus. Alex replaced that rule: a good trade is fair to
+ * both sides, his edge at most 10%. These tests pin the new order: past 10%
+ * his way is outside the range, even ranks first, and ties go to the deal
+ * closer to even.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -69,48 +67,33 @@ function scoreWith(fairness: Fairness, userGain = 2): number {
   }).total;
 }
 
-describe('the composite prefers an edge to the user over a dead-even deal', () => {
-  it('ranks a slight edge above even, and even above paying over the odds', () => {
-    const edgeUser = fairnessAt(0.18);
+describe('even ranks first, and the user’s edge stops at 10%', () => {
+  it('puts a deal more than 10% the user’s way outside the range', () => {
+    expect(fairnessAt(0.18).band).toBe('outside_range');
+    expect(fairnessAt(0.12).band).toBe('outside_range');
+    expect(fairnessAt(0.09).band).toBe('even');
+  });
+
+  it('ranks even above leaning their way', () => {
     const even = fairnessAt(0);
     const edgeOpponent = fairnessAt(-0.18);
-
-    expect(edgeUser.band).toBe('edge_user');
     expect(even.band).toBe('even');
     expect(edgeOpponent.band).toBe('edge_opponent');
-
-    expect(scoreWith(edgeUser)).toBeGreaterThan(scoreWith(even));
     expect(scoreWith(even)).toBeGreaterThan(scoreWith(edgeOpponent));
   });
 
-  /*
-   * The bound that keeps this a tiebreak. If seeking an edge could outweigh a
-   * manager's whole measured history, it would be an objective rather than a
-   * preference — and §12's cap would stop meaning anything.
-   */
-  it('is worth less than the manager-history cap', () => {
-    const advantage = scoreWith(fairnessAt(0.18)) - scoreWith(fairnessAt(0));
-    expect(advantage).toBeGreaterThan(0);
-    expect(advantage).toBeLessThan(MANAGER_FIT_CAP);
-  });
-
-  /*
-   * And less than a point of lineup gain, which is the thing the board is
-   * actually for. An even deal that helps the user more must still win.
-   */
   it('never outranks a materially better deal for the user', () => {
     const evenButBetter = scoreWith(fairnessAt(0), 4);
-    const edgeButWorse = scoreWith(fairnessAt(0.18), 2);
-    expect(evenButBetter).toBeGreaterThan(edgeButWorse);
+    const leaningButWorse = scoreWith(fairnessAt(-0.18), 2);
+    expect(evenButBetter).toBeGreaterThan(leaningButWorse);
   });
 
-  it('cannot reach past the fairness band that is still fair', () => {
-    // Anything past `edge` is rejected at gate 1 and never scored at all.
-    expect(fairnessAt(FAIRNESS_BANDS.edge + 0.05).band).toBe('outside_range');
+  it('cannot reach past the band on their side either', () => {
+    expect(fairnessAt(-(FAIRNESS_BANDS.edge + 0.15)).band).toBe('outside_range');
   });
 });
 
-describe('the tiebreak spends a level match on the user', () => {
+describe('a level match goes to the deal closer to even', () => {
   function offer(over: { id: string; gap: number; userGain: number; partnerGain: number }): OfferEvaluation {
     const fairness = fairnessAt(over.gap);
     return {
@@ -130,19 +113,13 @@ describe('the tiebreak spends a level match on the user', () => {
     } as unknown as OfferEvaluation;
   }
 
-  /*
-   * Two offers identical on score and on the user's lineup gain. Before the
-   * value gap was a tiebreak these ordered by `id.localeCompare`, so which of
-   * them a reader saw first was decided by a player id.
-   */
-  it('breaks a level match toward the offer worth more to the user', () => {
-    const generous = offer({ id: 'zzz', gap: 0.02, userGain: 3, partnerGain: 1 });
+  it('breaks a level match toward the fairer offer, not the bigger surplus', () => {
+    const fairer = offer({ id: 'zzz', gap: 0.02, userGain: 3, partnerGain: 1 });
     const surplus = offer({ id: 'aaa', gap: 0.09, userGain: 3, partnerGain: 1 });
 
-    // Same band, so the composite cannot separate them; the tiebreak must.
-    expect(generous.fairness.band).toBe(surplus.fairness.band);
-    expect(generous.score).toBe(surplus.score);
-    expect([generous, surplus].sort(compareOffers)[0]!.id).toBe('aaa');
+    expect(fairer.fairness.band).toBe(surplus.fairness.band);
+    expect(fairer.score).toBe(surplus.score);
+    expect([surplus, fairer].sort(compareOffers)[0]!.id).toBe('zzz');
   });
 
   it('still prefers the deal they are likelier to take when the price is level', () => {
@@ -152,18 +129,19 @@ describe('the tiebreak spends a level match on the user', () => {
     expect([theirsWorse, theirsBetter].sort(compareOffers)[0]!.id).toBe('zzz');
   });
 
-  it('leaves the user’s own lineup gain ahead of the surplus', () => {
-    const bigGain = offer({ id: 'zzz', gap: 0, userGain: 5, partnerGain: 1 });
-    const bigEdge = offer({ id: 'aaa', gap: 0.09, userGain: 3, partnerGain: 1 });
+  it('leaves the user’s own lineup gain ahead of the balance', () => {
+    const bigGain = offer({ id: 'zzz', gap: 0.09, userGain: 5, partnerGain: 1 });
+    const even = offer({ id: 'aaa', gap: 0, userGain: 3, partnerGain: 1 });
 
-    expect([bigEdge, bigGain].sort(compareOffers)[0]!.id).toBe('zzz');
+    expect([even, bigGain].sort(compareOffers)[0]!.id).toBe('zzz');
   });
 });
 
 describe('the weights are still the weights', () => {
   it('leaves the fairness term inside its own share of the composite', () => {
-    const best = scoreWith(fairnessAt(0.18));
+    const best = scoreWith(fairnessAt(0));
     const worst = scoreWith(fairnessAt(-0.18));
     expect(best - worst).toBeLessThanOrEqual(RANK_WEIGHTS.fairness + 1e-9);
+    expect(best - worst).toBeLessThan(MANAGER_FIT_CAP);
   });
 });

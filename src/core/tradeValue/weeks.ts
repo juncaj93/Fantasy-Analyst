@@ -70,6 +70,20 @@ export function playoffLength(settings: Record<string, unknown> | null | undefin
   return rounds;
 }
 
+/**
+ * The week a trade made now first affects, from Sleeper's state.
+ *
+ * Shared by Check a trade, Build a trade and the trade ideas, so the deadline
+ * reads the same week on all three. Off-season and postseason read as week
+ * 19, past every deadline.
+ */
+export function currentWeekOf(state: { seasonType?: string | null; week?: number | null } | null): number {
+  if (!state) return 1;
+  if (state.seasonType === 'post' || state.seasonType === 'off') return 19;
+  if (state.seasonType === 'pre') return 1;
+  return state.week != null && state.week > 0 ? state.week : 1;
+}
+
 export function tradeHorizon(opts: {
   leagueSettings: Record<string, unknown> | null | undefined;
   currentWeek: number;

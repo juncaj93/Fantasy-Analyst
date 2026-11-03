@@ -175,7 +175,7 @@ describe('the three gates', () => {
      */
     const fixture = leagueOf({
       '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 13], ['rb0', 'RB', 12], ['wr1', 'WR', 4], ['wr2', 'WR', 4], ['te1', 'TE', 9]],
-      '2': [['qb2', 'QB', 17], ['rb3', 'RB', 14], ['rb4', 'RB', 13], ['wr5', 'WR', 16], ['wr6', 'WR', 4], ['te2', 'TE', 9]],
+      '2': [['qb2', 'QB', 17], ['rb3', 'RB', 14], ['rb4', 'RB', 13], ['wr5', 'WR', 14.5], ['wr6', 'WR', 4], ['te2', 'TE', 9]],
     });
 
     const report = run(fixture, '1', ['2']);
@@ -613,7 +613,8 @@ describe('behaviour cannot overrule the objective gates', () => {
     const readings = [
       { tendencies: null, seasonsObserved: 0, historyComplete: false },
       enthusiast,
-      { tendencies: null, seasonsObserved: 4, historyComplete: true, leagueRate: 1 },
+      // A measured occasional trader. A measured non-trader gets no idea at all now (review T11).
+      { ...enthusiast, tendencies: { ...enthusiast.tendencies, sample: 3, tradesPerSeason: 0.75, repeatPartners: [] } },
     ].map((fit) => findBilateralTrades({ me, partners: [{ view, partner, fit }] }).offers[0]);
 
     for (const offer of readings) expect(offer).toBeDefined();
@@ -627,11 +628,11 @@ describe('behaviour cannot overrule the objective gates', () => {
     }
   });
 
-  it('lowers rank for a measured non-trader without hiding the best roster fit', () => {
+  it('sends a measured non-trader nothing, even with the best roster fit (Alex, November 2026)', () => {
     /*
-     * §10, stated as an outcome rather than as a constant: the same offer, the
-     * same rosters, one manager measured and quiet and the other measured and
-     * active. Both survive; only the order changes.
+     * The September rule ranked a measured non-trader lower and still showed
+     * him. Alex's November rule: partners who trade often, never one with
+     * almost no history just because the numbers work (review T11).
      */
     const fixture = leagueOf({
       '1': [['qb1', 'QB', 18], ['rb1', 'RB', 14], ['rb2', 'RB', 3], ['wr1', 'WR', 16], ['wr2', 'WR', 15], ['wr3', 'WR', 14], ['wr4', 'WR', 13], ['wr5', 'WR', 12], ['te1', 'TE', 9]],
@@ -649,12 +650,9 @@ describe('behaviour cannot overrule the objective gates', () => {
       partners: [{ view, partner, fit: enthusiast }],
     });
 
-    expect(quiet.offers.length).toBeGreaterThan(0);
-    expect(quiet.offers[0]!.managerFit.activity).toBe('effectively_inactive');
-    expect(quiet.offers[0]!.caveats.join(' ')).toMatch(/rarely trades/i);
-    // Same idea, ranked lower — not removed.
-    expect(quiet.offers[0]!.score).toBeLessThan(active.offers[0]!.score);
-    expect(shapes(quiet.offers)[0]).toEqual(shapes(active.offers)[0]);
+    expect(active.offers.length).toBeGreaterThan(0);
+    expect(quiet.offers).toEqual([]);
+    expect(quiet.rejections.map((r) => r.reason)).toContain('rare_trader');
   });
 });
 
@@ -695,10 +693,12 @@ describe('how heavily trading often counts', () => {
   };
   /** Four complete seasons, not one trade. A finding, not a gap. */
   const quiet = { tendencies: null, seasonsObserved: 4, historyComplete: true, leagueRate: 1 };
+  /** Measured, and trades now and then. */
+  const occasional = { ...active, tendencies: { ...active.tendencies, sample: 3, tradesPerSeason: 0.75 } };
   /** Nobody has looked. Indistinguishable from a new manager. */
   const unmeasured = { tendencies: null, seasonsObserved: 0, historyComplete: false };
 
-  const offerFor = (fit: Parameters<typeof findBilateralTrades>[0]['partners'][number]['fit']) => {
+  const reportFor = (fit: Parameters<typeof findBilateralTrades>[0]['partners'][number]['fit']) => {
     const fixture = leagueOf(roster);
     return findBilateralTrades({
       me: fixture.views.get('1')!,
@@ -709,48 +709,42 @@ describe('how heavily trading often counts', () => {
           fit,
         },
       ],
-    }).offers[0]!;
+    });
   };
+  const offerFor = (fit: Parameters<typeof reportFor>[0]) => reportFor(fit).offers[0]!;
 
-  it('separates a frequent trader from a measured non-trader by more than it used to', () => {
-    /*
-     * The cap was 0.08 and activity was worth half of it, so the whole gap
-     * between "trades often" and "has never traded" was 0.08 of a composite
-     * running 0–1 — less than the gap between two adjacent objective bands, and
-     * therefore almost never the thing that decided an ordering. That was the
-     * complaint.
-     */
-    const gap = offerFor(active).breakdown.managerFit - offerFor(quiet).breakdown.managerFit;
-    expect(gap).toBeGreaterThan(0.08);
+  it('ranks a frequent trader above an occasional one', () => {
+    expect(offerFor(active).breakdown.managerFit).toBeGreaterThan(offerFor(occasional).breakdown.managerFit);
   });
 
-  it('reads a manager nobody has measured as an active one, not a quiet one', () => {
+  it('sends a measured non-trader nothing (review T11)', () => {
+    expect(reportFor(quiet).offers).toEqual([]);
+  });
+
+  it('reads a manager nobody has measured as no more than an occasional trader (review T7)', () => {
     const unknownFit = offerFor(unmeasured).breakdown.managerFit;
-    expect(unknownFit).toBeGreaterThan(offerFor(quiet).breakdown.managerFit);
     expect(unknownFit).toBeGreaterThan(0);
+    expect(unknownFit).toBeLessThan(offerFor(active).breakdown.managerFit);
+    expect(unknownFit).toBeLessThanOrEqual(MANAGER_FIT_CAP * 0.2 + 1e-9);
   });
 
   it('still tells the unmeasured apart from the measured, which is the older rule', () => {
-    /*
-     * §10. Treating a gap optimistically is not the same as claiming to have
-     * measured it, and the class is what every screen reads.
-     */
     expect(offerFor(unmeasured).managerFit.activity).toBe('unknown');
     expect(offerFor(unmeasured).managerFit.uncertain).toBe(true);
     expect(offerFor(active).managerFit.activity).toBe('active');
-    expect(offerFor(quiet).managerFit.activity).toBe('effectively_inactive');
+    expect(offerFor(occasional).managerFit.activity).toBe('selective');
   });
 
-  it('says out loud that the optimistic reading is an assumption', () => {
+  it('says the reading of an unmeasured manager is an assumption', () => {
     const fit = offerFor(unmeasured).managerFit;
-    expect(fit.notes.join(' ')).toMatch(/cannot yet tell/i);
-    expect(fit.terms[0]!.detail).toMatch(/read as an active trader/i);
+    expect(fit.notes.join(' ')).toMatch(/limited trade history/i);
+    expect(fit.terms[0]!.detail).toMatch(/read as an occasional trader/i);
   });
 
   it('leaves the objective part of the score untouched, whoever the partner is', () => {
     // The invariant the whole reweighting rests on: behaviour is one bounded
     // channel added to a score it cannot otherwise reach.
-    const objective = [active, quiet, unmeasured].map((fit) => {
+    const objective = [active, occasional, unmeasured].map((fit) => {
       const offer = offerFor(fit);
       return Math.round((offer.breakdown.total - offer.breakdown.managerFit) * 1e6) / 1e6;
     });

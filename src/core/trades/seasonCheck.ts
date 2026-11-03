@@ -7,23 +7,28 @@
  * a buy-low card saying "get him" above a check that said the trade favours the
  * other team. Alex asked for the two to agree.
  *
- * So every surfaced idea is put through Check a trade's own evaluation (the
- * caller does that; this module reaches no database), and:
+ * So every idea the board could show is put through Check a trade's own
+ * evaluation (the caller does that; this module reaches no database), and:
  *
- *  - an idea the season check says favours or leans to the other team is left
- *    off the board, and the board says how many were;
- *  - every idea that stays carries the season verdict, so the card and the
- *    check cannot say different things about it;
- *  - an idea the check could not value (a player with no number this week) is
- *    kept, and says it was not checked. Dropping it would hide a real idea on
- *    the strength of a missing number, which is the "no number" rule's mistake
- *    in reverse.
+ *  - an idea is shown only when it is **fair to both sides** over the rest of
+ *    the season (`fairToBoth.ts`, Alex's November 2026 rule, review T3): his
+ *    value edge at most 10% and both lineups gaining by more than noise. A
+ *    deal even on value that helps Alex's lineup more than theirs (his hole
+ *    is bigger) stays: the other manager judges what he gets and what it
+ *    costs, and both are fair. One that Check a trade says leans to the
+ *    other team is still left off, as since October;
+ *  - an idea the check could not value is left off: fair cannot be confirmed;
+ *  - every idea that stays carries the season verdict, and the player Alex
+ *    would have to drop to make room (review T6), so the card and the check
+ *    cannot say different things about it;
+ *  - the board asks for more ideas than it shows (`reserve`), so an idea left
+ *    off is replaced by the next fair one rather than leaving a gap.
  *
- * The idea search itself is untouched: it still decides what to propose and in
- * what order. This only refuses to show what the season check contradicts.
+ * The idea search itself still decides what to propose and in what order.
  */
 
 import type { OfferEvaluation } from './bilateral.ts';
+import { fairToBoth, sentValue, type UnfairReason } from './fairToBoth.ts';
 
 /** The Check a trade verdict on one idea, from the user's side. */
 export interface SeasonCheck {
@@ -35,6 +40,22 @@ export interface SeasonCheck {
   confidence: 'high' | 'medium' | 'low' | null;
   /** Why it could not be checked, when it could not. */
   reason: string | null;
+  /** Rest-of-season lineup points for the user and the partner. Optional: older bodies lack them. */
+  you?: number | null;
+  them?: number | null;
+  /** The user's value edge over the rest of the season, signed, share of the larger side. */
+  edge?: number | null;
+  /** Why it is not fair to both sides, or null when it is. */
+  unfair?: UnfairReason | null;
+  /** The player the user would drop to make room, when the deal brings an extra one. */
+  drop?: string | null;
+}
+
+interface SideLike {
+  net: number;
+  incoming: readonly { playerId: string; name?: string; rosValue: number | null }[];
+  outgoing: readonly { playerId: string; name?: string; rosValue: number | null }[];
+  mustDrop?: { playerId: string; name: string } | null;
 }
 
 /** The shape of a Check a trade evaluation this needs, so the module imports no service. */
@@ -43,24 +64,54 @@ export interface SeasonEvaluationLike {
   insufficientReason: string | null;
   verdict: { kind: SeasonCheck['kind']; headline: string } | null;
   confidence: 'high' | 'medium' | 'low';
+  /** The user's side (`a`) and the partner's (`b`). Absent on an older shape: then fairness is not read. */
+  a?: SideLike | null;
+  b?: SideLike | null;
 }
 
 export function seasonCheckOf(evaluation: SeasonEvaluationLike): SeasonCheck {
   if (evaluation.status !== 'ok' || evaluation.verdict == null) {
     return { status: 'insufficient', kind: null, headline: null, confidence: null, reason: evaluation.insufficientReason };
   }
-  return {
+  const base: SeasonCheck = {
     status: 'ok',
     kind: evaluation.verdict.kind,
     headline: evaluation.verdict.headline,
     confidence: evaluation.confidence,
     reason: null,
   };
+  const { a, b } = evaluation;
+  if (!a || !b) return base;
+  /* A player the partner would cut on arrival is worth nothing to him (review T10). */
+  const cuts = new Set(b.mustDrop ? [b.mustDrop.playerId] : []);
+  const reading = fairToBoth({
+    giveValue: sentValue(a.outgoing, cuts),
+    getValue: a.incoming.reduce((sum, p) => sum + (p.rosValue ?? 0), 0),
+    userGain: a.net,
+    partnerGain: b.net,
+  });
+  return {
+    ...base,
+    you: a.net,
+    them: b.net,
+    edge: reading.edge,
+    unfair: reading.reason,
+    drop: a.mustDrop?.name ?? null,
+  };
 }
 
-/** Whether the season check contradicts an idea that is meant to help the user. */
+/**
+ * Whether the season check keeps an idea off the board.
+ *
+ * Off when Check a trade could not value it (fair cannot be confirmed), when
+ * it says the deal favors or leans to the other team, or when it is not fair
+ * to both sides.
+ */
 export function contradicts(check: SeasonCheck | undefined): boolean {
-  return check?.status === 'ok' && (check.kind === 'leans_b' || check.kind === 'favors_b');
+  if (!check) return false;
+  if (check.status !== 'ok') return true;
+  if (check.kind === 'leans_b' || check.kind === 'favors_b') return true;
+  return check.unfair != null;
 }
 
 /** The short form for a card: four words at most. */
@@ -79,39 +130,54 @@ export function seasonCheckLabel(check: SeasonCheck | undefined): string | null 
   }
 }
 
-export interface SeasonAgreement<T extends { offers: OfferEvaluation[]; notes: string[] }> {
+export interface SeasonAgreement<T extends { offers: OfferEvaluation[]; notes: string[]; reserve?: OfferEvaluation[] }> {
   board: T;
   /** The ideas left off, for the probe. */
   dropped: OfferEvaluation[];
 }
 
+/** Every idea the season check should look at: the ones shown, then the reserve behind them. */
+export function ideasToCheck(board: { offers: readonly OfferEvaluation[]; reserve?: readonly OfferEvaluation[] }): OfferEvaluation[] {
+  return [...board.offers, ...(board.reserve ?? [])];
+}
+
 /**
- * The board with every idea checked, and the contradicted ones left off.
+ * The board with every idea checked, the unfair ones left off, and the gaps
+ * filled from the reserve.
  *
- * `checks` is keyed by offer id. An idea with no entry is shown as it was: the
- * check is an addition to a screen that worked without it, and a check that
- * failed to run must not be able to empty the board.
+ * `checks` is keyed by offer id. With no checks at all (the check failed to
+ * run) the board is shown as the idea search produced it: the weekly gates
+ * still hold, and a check that cannot run must not be able to empty the board.
+ * The reserve never reaches the screen.
  */
-export function applySeasonChecks<T extends { offers: OfferEvaluation[]; notes: string[] }>(
+export function applySeasonChecks<T extends { offers: OfferEvaluation[]; notes: string[]; reserve?: OfferEvaluation[] }>(
   board: T,
   checks: ReadonlyMap<string, SeasonCheck>,
 ): SeasonAgreement<T> {
-  if (checks.size === 0) return { board, dropped: [] };
+  const { reserve, ...rest } = board;
+  const shown = rest as unknown as T;
+  if (checks.size === 0) return { board: reserve === undefined ? board : shown, dropped: [] };
+
+  const room = board.offers.length;
   const kept: OfferEvaluation[] = [];
   const dropped: OfferEvaluation[] = [];
-  for (const offer of board.offers) {
+  const spoken = new Set<string>();
+  for (const offer of ideasToCheck(board)) {
+    if (kept.length >= room) break;
     const check = checks.get(offer.id);
     if (contradicts(check)) {
       dropped.push(offer);
       continue;
     }
+    /* One idea per player, as the board itself keeps it: a reserve idea may share a player with one left off, never with one shown. */
+    const involved = [...offer.give, ...offer.get].map((p) => p.playerId);
+    if (involved.some((id) => spoken.has(id))) continue;
+    for (const id of involved) spoken.add(id);
     kept.push(check ? { ...offer, seasonCheck: check } : offer);
   }
   const notes = [...board.notes];
-  if (dropped.length > 0) {
-    notes.push(
-      `${dropped.length} idea${dropped.length === 1 ? ' was' : 's were'} left off: over the rest of the season, Check a trade says ${dropped.length === 1 ? 'it favors' : 'they favor'} the other team.`,
-    );
+  if (kept.length === 0 && dropped.length > 0) {
+    notes.push('No trade in this league is fair to both sides right now.');
   }
-  return { board: { ...board, offers: kept, notes }, dropped };
+  return { board: { ...shown, offers: kept, notes }, dropped };
 }
