@@ -28,6 +28,13 @@ import { assessTdDependency } from '../src/core/startsit/tdDependency.ts';
 import { emptySignal } from '../src/core/evidence/aggregate.ts';
 import type { PlayerSignal } from '../src/core/evidence/types.ts';
 import type { UsageWeek } from '../src/core/usage/role.ts';
+import { buildScoringProfile } from '../src/core/sleeper/scoring.ts';
+
+/** Tony's Pizza Fantasy: half PPR, 6-point passing touchdowns, -2 an interception. */
+const LEAGUE = buildScoringProfile(
+  { rec: 0.5, rec_yd: 0.1, rush_yd: 0.1, pass_yd: 0.04, rush_td: 6, rec_td: 6, pass_td: 6, pass_int: -2, fum_lost: -2 },
+  [],
+);
 
 /** A receiver's week: targets, yards and scores, with nothing else claimed. */
 function week(n: number, over: Partial<UsageWeek> = {}): UsageWeek {
@@ -61,17 +68,24 @@ function read(over: Partial<ArbitrageInput> = {}): ArbitrageRead | null {
     preseasonPoints: 16 * 12, // twelve a game
     weeks: [1, 2, 3, 4, 5].map((n) => week(n)),
     signal: null,
+    scoring: LEAGUE,
     ...over,
   });
 }
 
 describe('what the reading is measured against', () => {
-  it('reconstructs a week the way the touchdown model does', () => {
-    // 100 receiving yards and a score, at the conventional rates. Receptions
-    // are deliberately absent — PPR is a league setting, and a residual that
-    // moved with it would be measuring the rulebook.
-    expect(productionOf(week(1, { recYards: 100, recTds: 1, receptions: 9 }))).toBe(16);
-    expect(productionOf(week(1, { recYards: 100, recTds: 1, receptions: 2 }))).toBe(16);
+  it('scores a week in the league\'s own rules, catches included', () => {
+    // 100 receiving yards and a score is 16; each catch is half a point here,
+    // because the preseason number on the other side is in half PPR too.
+    expect(productionOf(week(1, { recYards: 100, recTds: 1, receptions: 9 }), LEAGUE, 'WR')).toBe(20.5);
+    expect(productionOf(week(1, { recYards: 100, recTds: 1, receptions: 2 }), LEAGUE, 'WR')).toBe(17);
+  });
+
+  it('a passer gets 6 a touchdown and pays for interceptions (T2)', () => {
+    // 250 yards, 2 scores, 20 rushing yards, 35 attempts: 10 + 12 + 2, less
+    // the league-average 0.8 interceptions at -2.
+    const qb = week(1, { passAttempts: 35, passYards: 250, passTds: 2, rushYards: 20, targets: null, receptions: null, recYards: null, recTds: null });
+    expect(productionOf(qb, LEAGUE, 'QB')).toBeCloseTo(24 - 35 * 0.023 * 2, 5);
   });
 
   it('says nothing at all without a preseason expectation', () => {
@@ -302,8 +316,8 @@ describe('the newsletter tally reinforces and never originates', () => {
     // Deliberately mild on both sides: a shortfall or a surplus large enough to
     // saturate the 0–1 scale would clamp both readings to 1 and the test would
     // pass without the tally having done anything.
-    const quiet = [1, 2, 3, 4, 5].map((n) => week(n, { recYards: 85, targets: 6 }));
-    const hot = [1, 2, 3, 4, 5].map((n) => week(n, { targets: 4, recYards: 30, recTds: 2 }));
+    const quiet = [1, 2, 3, 4, 5].map((n) => week(n, { recYards: 70, targets: 6 }));
+    const hot = [1, 2, 3, 4, 5].map((n) => week(n, { targets: 4, recYards: 10, recTds: 2 }));
     const bad = signalWithNet(-3);
 
     const buy = read({ weeks: quiet })!;
@@ -324,7 +338,53 @@ describe('the newsletter tally reinforces and never originates', () => {
      * his expectation has a residual of nothing to multiply.
      */
     const onExpectation = [1, 2, 3, 4, 5].map((n) => week(n, { recYards: 100, recTds: 0, targets: 8 }));
-    expect(productionOf(onExpectation[0]!)).toBe(10);
-    expect(read({ weeks: onExpectation, preseasonPoints: 16 * 10, signal: signalWithNet(-8) })).toBeNull();
+    expect(productionOf(onExpectation[0]!, LEAGUE, 'WR')).toBe(12);
+    expect(read({ weeks: onExpectation, preseasonPoints: 16 * 12, signal: signalWithNet(-8) })).toBeNull();
+  });
+});
+
+describe('both sides of the subtraction are in the league\'s scoring (review T2)', () => {
+  it('a WR producing exactly his preseason 13.5 a game in half PPR gets no read', () => {
+    // 6 catches, 75 yards, a score every other week: 3 + 7.5 + 3 = 13.5.
+    // The old scoring read him at 10.5, "3.0 under", buy low.
+    const weeks = [1, 2, 3, 4, 5, 6].map((n) => week(n, { targets: 8, receptions: 6, recYards: 75, recTds: n % 2 === 0 ? 1 : 0 }));
+    const r = read({ weeks, preseasonPoints: 13.5 * ARBITRAGE.expectedGames });
+    expect(r).toBeNull();
+  });
+
+  it('a QB producing exactly his preseason 22 a game in this league gets no read', () => {
+    // 250 yards, 2 scores, 1 interception, 20 rushing yards: 10 + 12 - 2 + 2.
+    const weeks = [1, 2, 3, 4, 5, 6].map((n) =>
+      week(n, { passAttempts: 35, passYards: 250, passTds: 2, rushYards: 20, carries: 3, targets: null, receptions: null, recYards: null, recTds: null }),
+    );
+    const leaguePoints = [22, 22, 22, 22, 22, 22];
+    const r = read({ position: 'QB', weeks, preseasonPoints: 22 * ARBITRAGE.expectedGames, leaguePoints, leaguePointsThrough: 6 });
+    expect(r).toBeNull();
+  });
+
+  it('reads the league\'s own weekly points first: Brock Purdy at 25.15 against 20.99 is not a buy low', () => {
+    // Usage alone would score him lower (no record of his bonus plays); the
+    // league's points are what he really scored.
+    const weeks = [1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+      week(n, { passAttempts: 33, passYards: 230, passTds: 1, rushYards: 10, carries: 3, targets: null, receptions: null, recYards: null, recTds: null }),
+    );
+    const leaguePoints = [25.15, 25.15, 25.15, 25.15, 25.15, 25.15, 25.15, 25.15];
+    const r = read({ name: 'Brock Purdy', position: 'QB', weeks, preseasonPoints: 20.99 * ARBITRAGE.expectedGames, leaguePoints, leaguePointsThrough: 8 });
+    expect(r?.kind).not.toBe('buy_low');
+  });
+
+  it('a week past the stored season row is scored from usage, in the league\'s rules', () => {
+    const weeks = [1, 2, 3, 4].map((n) => week(n, { targets: 8, receptions: 6, recYards: 75, recTds: 0 }));
+    // Weeks 1 to 3 stored at 10.5; week 4 not stored yet, scored 3 + 7.5.
+    const r = read({ weeks, preseasonPoints: 10.5 * ARBITRAGE.expectedGames, leaguePoints: [10.5, 10.5, 10.5], leaguePointsThrough: 3 });
+    expect(r).toBeNull();
+  });
+
+  it('a WR truly 4 points a game under his number still reads buy low', () => {
+    const weeks = [1, 2, 3, 4, 5].map((n) => week(n));
+    const leaguePoints = [9, 9, 9, 9, 9];
+    const r = read({ weeks, preseasonPoints: 13 * ARBITRAGE.expectedGames, leaguePoints, leaguePointsThrough: 5 });
+    expect(r?.kind).toBe('buy_low');
+    expect(r!.residualPerGame).toBeCloseTo(-4, 1);
   });
 });
