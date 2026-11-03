@@ -22,7 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { captureDemoWaivers, decisionDigest, tierRows, type CapturedWaivers } from './helpers/waiverDecision.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
 import { byGain, CARD_CHIPS_MAX, CARD_REASON_MAX, currentWeekOf, sheetDrops, sheetPartner, sheetPeriod, shortReason, tierCard, tierSheet, waiverChip } from '../src/web/waiverCard.ts';
@@ -64,6 +64,18 @@ describe('the waiver card round changes nothing that is recommended', () => {
   it('matches the engine output recorded before the round, field for field', () => {
     expect(tierRows(captured.tiers).length).toBeGreaterThan(0);
     expect(decisionDigest(captured.tiers, captured.claimPlan)).toEqual(before);
+  });
+
+  it('gives the same answer on a Tuesday morning, inside the waiver window (X4)', async () => {
+    // Tuesday 3 November 2026, 10:00 AM ET: the hour CI used to go red.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-03T15:00:00.000Z'));
+    try {
+      const tuesday = await captureDemoWaivers();
+      expect(decisionDigest(tuesday.tiers, tuesday.claimPlan)).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('replays from the snapshot file alone to the same answer', async () => {

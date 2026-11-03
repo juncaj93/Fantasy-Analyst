@@ -189,6 +189,7 @@ describe('a silent arbitrage lane says which kind of silence it is', () => {
         preseasonPoints: 16 * 12,
         weeks: oneGame,
         signal: null,
+        scoring: (await import('../src/core/sleeper/scoring.ts')).buildScoringProfile({ rec: 0.5, pass_td: 6 }, []),
       }),
     ).toBeNull();
   });

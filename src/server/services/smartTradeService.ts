@@ -43,6 +43,7 @@ import { LeagueRepo } from '../repos/league.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import { ARBITRAGE, playedGames, readArbitrage, type ArbitrageRead } from '../../core/trades/arbitrage.ts';
+import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
 import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
@@ -388,7 +389,16 @@ export class SmartTradeService {
     if (inputs.length === 0) return out;
 
     const repo = new PreseasonProjectionsRepo(this.db);
-    const snapshot = await repo.latest(season, scoringKey(projectionScoringFrom(profile)));
+    /*
+     * The league's own points, week by week: one settings row, the same one
+     * Build a trade and Waivers read. Production is read from it so both sides
+     * of the buy-low subtraction are in this league's scoring (review T2). A
+     * missing row leaves the usage, scored with the league's rules.
+     */
+    const [snapshot, seasonPoints] = await Promise.all([
+      repo.latest(season, scoringKey(projectionScoringFrom(profile))),
+      new SettingsRepo(this.db).get<StoredSeasonPoints | null>(seasonPointsKey(season), null).catch(() => null),
+    ]);
     /*
      * No snapshot, and the reader is told so.
      *
@@ -443,6 +453,9 @@ export class SmartTradeService {
         preseasonPoints: points.get(input.player.id) ?? null,
         weeks: input.usageWeeks ?? [],
         signal: input.signal,
+        scoring: profile,
+        leaguePoints: seasonPoints?.points?.[input.player.id] ?? null,
+        leaguePointsThrough: seasonPoints?.through ?? 0,
       });
       if (read) out.set(input.player.id, read);
     }

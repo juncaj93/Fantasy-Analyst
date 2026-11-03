@@ -7,6 +7,7 @@
  * engine's answer and nothing hand-built.
  */
 
+import { vi } from 'vitest';
 import { SleeperClient } from '../../src/core/sleeper/client.ts';
 import { MockVegasProvider } from '../../src/core/vegas/mockProvider.ts';
 import { createApp, type AppEnv } from '../../src/server/app.ts';
@@ -21,7 +22,29 @@ export interface CapturedWaivers {
   snapshot: Record<string, unknown>;
 }
 
-export async function captureDemoWaivers(): Promise<CapturedWaivers> {
+/**
+ * The clock the capture runs on: Thursday 5 November 2026, 10:00 AM ET.
+ *
+ * The demo seed puts every kickoff three days after "now", and the waiver rule
+ * treats a free agent as on waivers in the 48 hours before the Wednesday run.
+ * On the real clock that made this capture differ every Monday 3 AM to
+ * Wednesday 3 AM ET (a demo free agent became a $1 claim), so CI went red two
+ * days a week. A fixed Thursday keeps the seeded league in the same place in
+ * the waiver week on every run.
+ */
+export const DEMO_WAIVER_CLOCK = '2026-11-05T15:00:00.000Z';
+
+export async function captureDemoWaivers(at: string = DEMO_WAIVER_CLOCK): Promise<CapturedWaivers> {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(at));
+  try {
+    return await captureAtFrozenClock();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+async function captureAtFrozenClock(): Promise<CapturedWaivers> {
   const db = await createTestDb();
   await seedDemoData(db);
   const env: AppEnv = {

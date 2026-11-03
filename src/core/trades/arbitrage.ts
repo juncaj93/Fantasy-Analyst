@@ -77,6 +77,7 @@ import { EXPECTED_GAMES } from '../nfl/expectedGames.ts';
 import { RECENCY_WEIGHTS, assessUsage } from '../startsit/usageTrend.ts';
 import { TD_DEPENDENCY, assessTdDependency, type TdDependencyAssessment } from '../startsit/tdDependency.ts';
 import type { PlayerSignal } from '../evidence/types.ts';
+import type { ScoringProfile } from '../sleeper/scoring.ts';
 import type { UsageWeek } from '../usage/role.ts';
 
 export const ARBITRAGE = {
@@ -156,6 +157,18 @@ export const ARBITRAGE = {
    * disappears" when the usage supports it.
    */
   roleDiscount: 0.5,
+  /**
+   * Interceptions per pass attempt, for a week the league's own points do not
+   * cover yet.
+   *
+   * The stored usage has no interception column, so a quarterback scored from
+   * it alone would never lose the league's two points for one, and every
+   * passer would read about 1.6 points a game better than he played. 2.3% is
+   * the NFL's rate over recent seasons. Only a fallback: a week the stored
+   * season points cover is read as the league scored it, interceptions and
+   * fumbles included.
+   */
+  interceptionRate: 0.023,
 } as const;
 
 export type ArbitrageKind = 'buy_low' | 'sell_high';
@@ -189,8 +202,26 @@ export interface ArbitrageInput {
   position: string;
   /** Preseason season-points projection, in this league's scoring. */
   preseasonPoints: number | null;
-  /** Stored weekly usage, which is where actual production is reconstructed from. */
+  /** Stored weekly usage: which weeks he played, and a week's production when the league's points do not cover it. */
   weeks: UsageWeek[];
+  /**
+   * The league's scoring, the same rules the preseason number is written in.
+   *
+   * Both sides of the subtraction have to be scored the same way. Until
+   * 3 November 2026 production was scored with no catch points and 4-point
+   * passing touchdowns against a preseason number in half PPR with 6-point
+   * passing touchdowns, so every pass catcher and every quarterback read as
+   * "buy low" (45 of 46 reads; review T2).
+   */
+  scoring: ScoringProfile;
+  /**
+   * What he actually scored in this league, week by week (index 0 is week 1),
+   * from the stored season row (`sleeper.seasonPoints.<season>`). Null when the
+   * row is not stored. A week inside `leaguePointsThrough` is read from here.
+   */
+  leaguePoints?: readonly number[] | null;
+  /** The last week the stored season row covers. */
+  leaguePointsThrough?: number;
   /** The newsletter tally, for the reinforcement term. Null is neutral. */
   signal: PlayerSignal | null;
 }
@@ -210,7 +241,9 @@ export function readArbitrage(input: ArbitrageInput): ArbitrageRead | null {
   if (input.preseasonPoints == null || !(input.preseasonPoints > 0)) return null;
 
   const expectedPerGame = round2(input.preseasonPoints / ARBITRAGE.expectedGames);
-  const observedPerGame = weightedRecent(games.map(productionOf));
+  const observedPerGame = weightedRecent(
+    games.map((w) => leagueWeekPoints(w.week, input) ?? productionOf(w, input.scoring, position)),
+  );
   if (observedPerGame == null) return null;
 
   const residualPerGame = round2(observedPerGame - expectedPerGame);
@@ -323,23 +356,42 @@ export function tallyFactorOf(signal: PlayerSignal | null): { factor: number; ne
 }
 
 /**
- * Production for one week, reconstructed the way the touchdown model does it.
+ * One week as the league scored it, when the stored season row covers it.
  *
- * Yardage at the conventional rates and touchdowns at six — receptions left
- * out, exactly as `tdDependency.ts` leaves them out, and for the same reason
- * stated there: PPR is a league setting, and a residual that moved with the
- * league's reception scoring would be measuring the rulebook rather than the
- * player. The preseason projection on the other side of the subtraction is in
- * the league's own scoring, which makes the two not quite commensurable — so
- * the comparison is deliberately read as a *direction and a magnitude*, never
- * as "he is 3.4 points short" printed to a decimal a reader would trust.
+ * The best number there is: Sleeper's own stat line times the league's own
+ * values, interceptions, fumbles and bonuses included (checked against
+ * Sleeper's matchups to the hundredth, see `core/sleeper/weekPoints.ts`).
+ */
+function leagueWeekPoints(week: number, input: ArbitrageInput): number | null {
+  const points = input.leaguePoints;
+  const through = input.leaguePointsThrough ?? 0;
+  if (!points || week < 1 || week > through) return null;
+  const value = points[week - 1];
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Production for one week, scored with the league's own rules.
+ *
+ * The fallback for a week the stored season points do not cover. Yards,
+ * touchdowns and catches at the league's values (half PPR here, plus any tight
+ * end bonus), so the number is in the same scoring as the preseason
+ * expectation it is compared with. Interceptions are not in the stored usage,
+ * so a passer is charged the league-average rate per attempt
+ * ({@link ARBITRAGE.interceptionRate}).
  *
  * Exported so a test can state the reconstruction rather than infer it.
  */
-export function productionOf(week: UsageWeek): number {
-  const yards = (week.passYards ?? 0) / 25 + (week.rushYards ?? 0) / 10 + (week.recYards ?? 0) / 10;
-  const tds = (week.rushTds ?? 0) * 6 + (week.recTds ?? 0) * 6 + (week.passTds ?? 0) * 4;
-  return yards + tds;
+export function productionOf(week: UsageWeek, scoring: ScoringProfile, position = ''): number {
+  const yards =
+    (week.passYards ?? 0) * scoring.pointsPerPassYard +
+    (week.rushYards ?? 0) * scoring.pointsPerRushYard +
+    (week.recYards ?? 0) * scoring.pointsPerRecYard;
+  const tds = (week.rushTds ?? 0) * scoring.rushTd + (week.recTds ?? 0) * scoring.recTd + (week.passTds ?? 0) * scoring.passTd;
+  const perCatch = scoring.ppr + (position.toUpperCase() === 'TE' ? scoring.teBonus : 0);
+  const catches = (week.receptions ?? 0) * perCatch;
+  const picks = (week.passAttempts ?? 0) * ARBITRAGE.interceptionRate * scoring.interception;
+  return yards + tds + catches + picks;
 }
 
 /**
@@ -415,12 +467,12 @@ function headlineFor(args: {
 }): string {
   const gap = Math.abs(args.residualPerGame).toFixed(1);
   if (args.kind === 'buy_low') {
-    return `${args.name} is running ${gap} pts a game under what he was drafted to be — the price should reflect that, and the production probably will not stay there.`;
+    return `${args.name} is running ${gap} pts a game under what he was drafted to be. The price should reflect that, and the production probably will not stay there.`;
   }
   const share = args.td.share == null ? null : Math.round(args.td.share * 100);
   return share == null
     ? `${args.name} is running ${gap} pts a game over expectation. Sell into it.`
-    : `${args.name} is running ${gap} pts a game over expectation with ${share}% of it from touchdowns — the part of a ${args.position} line that does not repeat.`;
+    : `${args.name} is running ${gap} pts a game over expectation with ${share}% of it from touchdowns, the part of a ${args.position} line that does not repeat.`;
 }
 
 function reasonsFor(args: {
@@ -453,7 +505,7 @@ function reasonsFor(args: {
 
   if (args.tally.factor > 1) {
     out.push(
-      `The newsletter tally is ${args.tally.net} over ${args.tally.items} item(s) in the last 30 days — the story is moving against him, which is ${args.kind === 'buy_low' ? 'what makes him cheap' : 'why now rather than later'}.`,
+      `The newsletter tally is ${args.tally.net} over ${args.tally.items} item(s) in the last 30 days. The story is moving against him, which is ${args.kind === 'buy_low' ? 'what makes him cheap' : 'why now rather than later'}.`,
     );
   }
 
