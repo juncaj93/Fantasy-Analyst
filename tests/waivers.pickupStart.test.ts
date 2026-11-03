@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { PICKUP_START, planPickupStart, starterOutReader, type PickupPlayer, type PickupStartRequest } from '../src/core/waivers/pickupStart.ts';
+import { PICKUP_START, planPickupStart, sharesSlot, starterOutReader, type PickupPlayer, type PickupStartRequest } from '../src/core/waivers/pickupStart.ts';
 import { planWaiverTiers, type TierPlayer, type TierRequest } from '../src/core/waivers/tiers.ts';
 import { buildRosterShape } from '../src/core/sleeper/rosterShape.ts';
 
@@ -83,7 +83,13 @@ describe('the whole-lineup gain', () => {
     expect(plan.start?.playerId).toBe('Upgrade');
     /* Against McConkey (7.6), the best the roster already has, not Egbuka. */
     expect(plan.start?.gain).toBeCloseTo(1.4, 6);
-    expect(plan.start?.over?.name).toBe('Egbuka');
+    /*
+     * Named over McConkey, the player he replaces in the best lineup, so the
+     * card's "9.0 vs 7.6" is the gain it claims. Egbuka for McConkey is
+     * Team's own swap row (3 November 2026; before, "over Egbuka").
+     */
+    expect(plan.start?.over?.name).toBe('McConkey');
+    expect(plan.start?.displaces?.name).toBe('McConkey');
   });
 
   it('says a tie or near tie softly, and a gain clearly over the threshold out loud', () => {
@@ -330,5 +336,79 @@ describe('defences', () => {
     expect(plan.consider).toEqual([]);
     expect(plan.audit[0]?.status).toBe('defence_planner');
     expect(plan.audit[0]?.gain).not.toBeNull();
+  });
+});
+
+/*
+ * Who the card names (review S1, 3 November 2026). Sleeper's week 7 lineup
+ * starts Egbuka (6.7) over McConkey (7.6), a swap of its own. The card used to
+ * name "anyone in Sleeper's lineup who leaves the new one, lowest first", so a
+ * free-agent QB read "over Egbuka". It now names the player he replaces in the
+ * best lineup, and only someone who can play a slot he can play.
+ */
+describe('who the card says he starts over', () => {
+  it('a free-agent QB over the starting QB, never over a receiver (the review case)', () => {
+    const plan = planPickupStart(request([p('StreamQB', 'QB', 21.5)]));
+    expect(plan.start?.playerId).toBe('StreamQB');
+    expect(plan.start?.slot).toBe('QB');
+    expect(plan.start?.gain).toBeCloseTo(1.1, 6);
+    /* Two of Sleeper's starters leave the best lineup (Love and Egbuka): Love is the one he replaces. */
+    expect(plan.start?.over?.name).toBe('Love');
+    expect(plan.start?.over?.points).toBe(20.4);
+    expect(plan.start?.displaces?.name).toBe('Love');
+  });
+
+  it('with the only QB on a bye, he fills the empty QB slot and names nobody', () => {
+    const r = roster().map((x) => (x.playerId === 'Love' ? { ...x, points: null, basis: 'none' as const } : x));
+    const plan = planPickupStart(request([p('StreamQB', 'QB', 21.5)], { roster: r }));
+    expect(plan.start?.slot).toBe('QB');
+    expect(plan.start?.over).toBeNull();
+    expect(plan.start?.displaces).toBeNull();
+  });
+
+  it('a back into FLEX over the receiver he really pushes out, not Sleeper\'s weakest starter', () => {
+    const plan = planPickupStart(request([p('Back', 'RB', 9.0)]));
+    expect(plan.start?.slot).toBe('FLEX');
+    expect(plan.start?.over?.name).toBe('McConkey');
+    expect(plan.start?.over?.points).toBe(7.6);
+  });
+
+  it('a receiver into the lineup after a reshuffle: Pickens to WR3, the receiver over the FLEX player', () => {
+    const plan = planPickupStart(request([p('Wideout', 'WR', 13.5)], { roster: roster(false) }));
+    expect(plan.start?.gain).toBeCloseTo(13.5 - 6.7, 6);
+    expect(plan.start?.over?.name).toBe('Egbuka');
+  });
+
+  it('a tight end over Higbee, even when Sleeper starts a weaker receiver', () => {
+    const r = roster().map((x) => (x.playerId === 'Egbuka' ? { ...x, points: 5.0 } : x));
+    const plan = planPickupStart(request([p('Tight', 'TE', 8.0)], { roster: r }));
+    expect(plan.start?.slot).toBe('TE');
+    expect(plan.start?.over?.name).toBe('Higbee');
+  });
+
+  it('a tight end who only beats the FLEX: over the FLEX receiver, at FLEX', () => {
+    const r = roster().map((x) => (x.playerId === 'Higbee' ? { ...x, points: 9.0 } : x));
+    const plan = planPickupStart(request([p('Tight', 'TE', 8.5)], { roster: r }));
+    expect(plan.start?.slot).toBe('FLEX');
+    expect(plan.start?.over?.name).toBe('McConkey');
+  });
+
+  it('when the drop was starting too, two players leave and the QB is still named over the QB', () => {
+    /* Full roster, the drop is Wilson (a starting WR): Love and Wilson both leave the best lineup. */
+    const plan = planPickupStart(
+      request([p('BigQB', 'QB', 30.0)], { openSpots: 0, dropFor: () => ({ playerId: 'Wilson', name: 'Wilson' }) }),
+    );
+    expect(plan.start?.playerId).toBe('BigQB');
+    expect(plan.start?.drop?.name).toBe('Wilson');
+    expect(plan.start?.over?.name).toBe('Love');
+    expect(plan.start?.displaces?.name).toBe('Love');
+  });
+
+  it('names a QB only over a QB: the slots say a QB and a receiver share nothing here', () => {
+    expect(sharesSlot('QB', 'WR', SHAPE)).toBe(false);
+    expect(sharesSlot('QB', 'QB', SHAPE)).toBe(true);
+    expect(sharesSlot('RB', 'WR', SHAPE)).toBe(true);
+    expect(sharesSlot('TE', 'WR', SHAPE)).toBe(true);
+    expect(sharesSlot('QB', 'WR', buildRosterShape(['QB', 'SUPER_FLEX', 'WR']))).toBe(true);
   });
 });

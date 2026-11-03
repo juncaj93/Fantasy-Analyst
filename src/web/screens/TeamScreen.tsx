@@ -1943,7 +1943,8 @@ function LineupCard({
 }
 
 /**
- * `Pick up and start Jaleel McLaughlin over Emeka Egbuka`, `7.6 vs 6.7 projected`.
+ * `Pick up and start Jaleel McLaughlin over Emeka Egbuka`, `7.6 vs 6.7 projected`:
+ * the player named is the one he replaces in the best lineup.
  *
  * Best move's own row, in its own grammar, for a free agent who beats every
  * lineup the roster can already make (`core/waivers/pickupStart.ts`). Two
@@ -1967,7 +1968,12 @@ function PickupMoveRow({
   spoken: (playerId: string) => string;
   onOpen: (slot: string, seed: string[], extra?: { note?: string[]; names?: Record<string, string> }) => void;
 }) {
-  const over = pick.over;
+  /*
+   * The player he really replaces in the best lineup (`displaces`), never
+   * whoever else Sleeper's lineup would change: a QB is only ever named over a
+   * QB (3 November 2026). `over` is the same player from a current server.
+   */
+  const over = pick.displaces ?? pick.over;
   /* His number is a full Vegas read by rule; the incumbent's is the Team row's own figure. */
   const overKnown = over != null && (weekOf(over.playerId).points != null || weekOf(over.playerId).out);
   const lastName = (name: string) => name.split(' ').slice(1).join(' ') || name;
@@ -1993,7 +1999,7 @@ function PickupMoveRow({
     ...(pick.starterOut ? [`${pick.starterOut.name}, his team's starter, is out or doubtful.`] : []),
   ];
   const slot = pick.slot ?? pick.position;
-  const seed = [over?.playerId ?? pick.displaces?.playerId, pick.playerId].filter((id): id is string => id != null);
+  const seed = [over?.playerId, pick.playerId].filter((id): id is string => id != null);
   /* Full names when they fit on one line, then initials, then surnames: the line never wraps. */
   const initial = (name: string) => (name.includes(' ') ? `${name[0]}. ${lastName(name)}` : name);
   const sentence = (n: (name: string) => string) => `Pick up and start ${n(pick.name)}${over ? ` over ${n(over.name)}` : ''}`;

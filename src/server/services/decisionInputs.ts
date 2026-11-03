@@ -213,6 +213,17 @@ export async function gatherLineupInputs(
    * roster this app does not buy lines for. See `core/startsit/modeSuggest.ts`.
    */
   const opponentIds = opponent?.playerIds ?? [];
+  /*
+   * The opponent's positions, from the players table: one keyed read of his
+   * roster (about sixteen rows). Until 3 November 2026 his players reached the
+   * 10-point rule with no position, so none could be seated in a slot and the
+   * rule read "0% of the starting slots carry a projection" every week (review
+   * S2): Team was always Balanced. The published read needs them too: in a
+   * league paying six for a passing touchdown an unknown position is refused
+   * a number (`publishedFor`).
+   */
+  const opponentPositions = await opponentPositionsOf(db, opponentIds);
+  const positionOf = (id: string) => positions.get(id) ?? opponentPositions.get(id) ?? null;
   let published: Map<string, number>;
   try {
     published = await new SleeperProjectionService(db, sleeper).publishedFor({
@@ -220,7 +231,7 @@ export async function gatherLineupInputs(
       week,
       playerIds: [...base.mine.playerIds, ...opponentIds],
       profile: base.profile,
-      positionOf: (id) => positions.get(id) ?? null,
+      positionOf,
     });
   } catch {
     published = new Map();
@@ -231,6 +242,7 @@ export async function gatherLineupInputs(
     profile: base.profile,
     rosterPositions: base.league.rosterPositions,
     opponentIds,
+    opponentPositions,
     published,
   });
 
@@ -345,6 +357,8 @@ function suggestLineupMode(opts: {
   profile: ScoringProfile;
   rosterPositions: readonly string[];
   opponentIds: readonly string[];
+  /** Each opponent player's position, from the players table. */
+  opponentPositions: ReadonlyMap<string, string>;
   published: ReadonlyMap<string, number>;
 }): ModeSuggestion {
   if (opts.opponentIds.length === 0) {
@@ -373,14 +387,34 @@ function suggestLineupMode(opts: {
    * the spend the owner declined on 9 September 2026. What is here is free:
    * Rotowire's totals are already stored for every player in the NFL.
    */
-  const opponent: SidePlayer[] = opts.opponentIds.map((playerId) => ({
-    playerId,
-    position: '',
-    marketPoints: null,
-    publishedPoints: opts.published.get(playerId) ?? null,
-  }));
+  const opponent = opponentSidePlayers(opts.opponentIds, opts.opponentPositions, opts.published);
 
   return suggestMode({ mine, opponent, shape: buildRosterShape([...opts.rosterPositions]) });
+}
+
+/**
+ * The opponent as the 10-point rule reads him: his position and Sleeper's
+ * published week, nothing priced. A player with no known position cannot be
+ * seated, which is what kept the rule silent before 3 November 2026.
+ */
+export function opponentSidePlayers(
+  opponentIds: readonly string[],
+  positions: ReadonlyMap<string, string>,
+  published: ReadonlyMap<string, number>,
+): SidePlayer[] {
+  return opponentIds.map((playerId) => ({
+    playerId,
+    position: positions.get(playerId) ?? '',
+    marketPoints: null,
+    publishedPoints: published.get(playerId) ?? null,
+  }));
+}
+
+/** The opponent's positions by id; empty on a failed read, which leaves the rule at Balanced as before. */
+async function opponentPositionsOf(db: Database, ids: readonly string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const players = await new PlayerRepo(db).listByIds([...ids]).catch(() => new Map<string, CanonicalPlayer>());
+  return new Map([...players].filter(([, p]) => Boolean(p.position)).map(([id, p]) => [id, p.position] as const));
 }
 
 /**
