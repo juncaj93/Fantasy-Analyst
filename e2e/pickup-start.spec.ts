@@ -152,3 +152,33 @@ test('a full roster with no honest drop: "Pick your drop" on one line, the optio
   await expect(notes.nth(2)).toHaveText('1. Brian Robinson: no start in weeks 6 to 8');
   await expect(notes.nth(3)).toHaveText('2. Emmett Johnson');
 });
+
+/*
+ * Review S1 (3 November 2026): a free-agent QB once read "over Egbuka", a
+ * receiver Sleeper started over McConkey. The card names the player he
+ * replaces in the best lineup (`displaces`), on one line at every width.
+ */
+test('a free-agent QB is named over the QB he replaces, never over a receiver', async ({ page }) => {
+  await withPickup(page, (f) =>
+    ({
+      start: move(f, 'start', {
+        name: 'Tyler Shough',
+        position: 'QB',
+        points: 21.5,
+        gain: 1.1,
+        margin: 1.1,
+        slot: 'QB',
+        over: { playerId: '1001', name: 'Emeka Egbuka', points: 6.7 },
+        displaces: { playerId: '1004', name: 'Jordan Love', points: 20.4 },
+      }),
+    }),
+  );
+  const row = page.getByTestId('lineup-pickup');
+  await expect(row.getByTestId('best-move-pickup-names')).toHaveText(/^Pick up and start (Tyler |T\. )?Shough over (Jordan |J\. )?Love$/);
+  await expect(row).toHaveAttribute('data-seed', /^1004,/);
+  await expect(row).not.toContainText('Egbuka');
+  await oneLine(page, 'best-move-pickup-names');
+  await oneLine(page, 'best-move-points');
+  const page_ = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(page_.scroll).toBeLessThanOrEqual(page_.client);
+});

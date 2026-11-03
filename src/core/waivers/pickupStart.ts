@@ -141,9 +141,17 @@ export interface PickupStartMove {
   margin: number;
   /** The slot he takes in that lineup. */
   slot: string | null;
-  /** The player in Sleeper's lineup now who sits for him, or null for an empty slot. */
+  /**
+   * The player the card names, `over Jordan Love`: the same player as
+   * {@link displaces}, or null when he fills a slot nobody holds. Kept as its
+   * own field for the Team card; never a different player (3 November 2026).
+   */
   over: { playerId: string; name: string; points: number | null } | null;
-  /** The player who leaves the best lineup the roster can already make. */
+  /**
+   * The player he really replaces: who leaves the best lineup the roster can
+   * already make, and always someone who can play a slot he can play. A QB
+   * only ever replaces a QB in a one-QB league. See {@link replacedOf}.
+   */
   displaces: { playerId: string; name: string; points: number } | null;
   /** Who goes to make room, when the roster is full and the planner has an honest drop. */
   drop: PickupDrop | null;
@@ -299,6 +307,7 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     if (verdict == null) continue;
 
     const lineup = verdict === 'start' ? withHim : forced;
+    const replaced = replacedOf(baseline, lineup, byId, c, request.shape, drop);
     moves.push({
       verdict,
       playerId: c.playerId,
@@ -309,8 +318,8 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
       gain,
       margin,
       slot: lineup.slots.find((s) => s.playerId === c.playerId)?.slot ?? null,
-      over: overOf(lineup, current, byId, drop),
-      displaces: displacedOf(baseline, lineup, byId),
+      over: replaced,
+      displaces: replaced,
       drop,
       pickDrop,
       starterOut: request.starterOut?.(c) ?? null,
@@ -339,35 +348,52 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
 }
 
 /**
- * The player in Sleeper's lineup now who is not in the new one, lowest number
- * first: `over Emeka Egbuka`. The drop is named only when nobody else left.
+ * Who the free agent really replaces: `Pick up and start StreamQB over Jordan Love`.
+ *
+ * Read from the best lineup the roster can already make against the best
+ * lineup with him, never from Sleeper's lineup as set. Until 3 November 2026
+ * the card named "anyone in Sleeper's lineup who is not in the new one, lowest
+ * first", so a free-agent QB 1.1 better than Love read "over Egbuka" (a WR
+ * Sleeper started over McConkey, a separate swap). Any other change Sleeper's
+ * lineup needs is its own swap on the Team rows.
+ *
+ * Adding one player changes the best lineup by at most one player, so there is
+ * normally one name to give. Two can leave when the add needs a drop who was
+ * starting; then, in order:
+ *
+ *  1. someone who can play a slot he can play (a QB only a QB here, since a QB
+ *     is not FLEX eligible; a back can replace a receiver through FLEX);
+ *  2. not the drop, who leaves to make room, not because he was beaten;
+ *  3. the lowest number.
+ *
+ * Nobody who shares a slot with him and nobody but the drop: he fills a slot
+ * nobody held (Love on a bye), and the card says the slot, not a name.
  */
-function overOf(
-  lineup: SolvedLineup,
-  current: ReadonlySet<string>,
-  byId: ReadonlyMap<string, PickupPlayer>,
-  drop: PickupDrop | null,
-): PickupStartMove['over'] {
-  const leaving = [...current]
-    .filter((id) => !lineup.starterIds.has(id) && byId.has(id))
-    .map((id) => byId.get(id)!)
-    .sort((a, b) => Number(a.playerId === drop?.playerId) - Number(b.playerId === drop?.playerId) || (a.points ?? -Infinity) - (b.points ?? -Infinity));
-  const out = leaving[0];
-  return out ? { playerId: out.playerId, name: out.name, points: out.ruledOut ? null : out.points } : null;
-}
-
-/** Who leaves the best lineup the roster could already make. */
-function displacedOf(
+function replacedOf(
   baseline: SolvedLineup,
   lineup: SolvedLineup,
   byId: ReadonlyMap<string, PickupPlayer>,
+  candidate: PickupPlayer,
+  shape: RosterShape,
+  drop: PickupDrop | null,
 ): PickupStartMove['displaces'] {
-  const out = [...baseline.starterIds]
+  const left = [...baseline.starterIds]
     .filter((id) => !lineup.starterIds.has(id))
     .map((id) => byId.get(id))
-    .filter((p): p is PickupPlayer => p != null && p.points != null)
-    .sort((a, b) => (a.points ?? 0) - (b.points ?? 0))[0];
+    .filter((p): p is PickupPlayer => p != null && p.points != null);
+  const fits = (p: PickupPlayer) => sharesSlot(candidate.position, p.position, shape);
+  const isDrop = (p: PickupPlayer) => p.playerId === drop?.playerId;
+  const pool = left.some(fits) ? left.filter(fits) : left.filter((p) => !isDrop(p));
+  const out = pool.sort((a, b) => Number(isDrop(a)) - Number(isDrop(b)) || a.points! - b.points! || a.name.localeCompare(b.name))[0];
   return out ? { playerId: out.playerId, name: out.name, points: out.points! } : null;
+}
+
+/** Is there a starting slot both positions may fill? QB and WR: none in a one-QB league. */
+export function sharesSlot(a: string, b: string, shape: RosterShape): boolean {
+  const x = a.toUpperCase();
+  const y = b.toUpperCase();
+  if (x === y) return (shape.starters[x] ?? 0) > 0 || shape.flex.some((f) => f.positions.includes(x));
+  return shape.flex.some((f) => f.positions.includes(x) && f.positions.includes(y));
 }
 
 /**
