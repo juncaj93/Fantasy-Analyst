@@ -607,6 +607,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           reserveIds: request.reserveIds,
           playoff: request.playoff,
           now: request.now,
+          addableNow: new Set(Object.entries(pickup).filter(([, v]) => v.state === 'free').map(([id]) => id)),
         }).catch(() => null);
 
   /*
@@ -786,6 +787,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
               seasonPoints: round2.seasonPointsThrough > 0 ? new Map(Object.entries(round2.seasonPoints)) : undefined,
               seasonPointsThrough: round2.seasonPointsThrough,
               positionOf: (id: string) => positionById.get(id) ?? null,
+              teamOf: (id: string) => teamOf.get(id) ?? null,
               heldSince: new Map(Object.entries(round2.heldSince)),
               draftedIds: new Set(round2.drafted),
               currentStarterIds: request.currentStarterIds,
@@ -857,12 +859,16 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
             const share = p.weekly[k] ?? 1;
             /* Doubtful this week is Team's charged number, not "Out" (`weekAvailability.ts`). */
             const charged = k === 0 && p.designation === 'doubtful' && before != null;
+            const bye = p.byeWeek === week;
+            const from = p.weekFrom?.[k];
             return {
               week,
-              points: charged ? Math.round(availableWeekPoints(before, 'doubtful') * 100) / 100 : before,
-              source: p.weekSources?.[k] ?? 'this_week',
-              bye: p.byeWeek === week,
-              out: p.byeWeek !== week && share === 0 && !charged,
+              /* A bye has no game: 0, never an earlier week's number (W1). */
+              points: bye ? 0 : charged ? Math.round(availableWeekPoints(before, 'doubtful') * 100) / 100 : before,
+              source: bye ? 'bye' : (p.weekSources?.[k] ?? 'this_week'),
+              ...(!bye && from != null ? { fromWeek: from } : {}),
+              bye,
+              out: !bye && share === 0 && !charged,
             };
           }),
         };

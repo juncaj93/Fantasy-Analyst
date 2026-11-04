@@ -67,6 +67,7 @@ import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
 import { noMoveSummary, type NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
+import { benchSummary } from '../benchSummary.ts';
 import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
@@ -385,12 +386,7 @@ export function TeamScreen({
    * computed at all, because "No better option" would then be a claim nobody
    * checked.
    */
-  const benchSummary = useMemo(() => {
-    if (!lineup?.found) return null;
-    const count = lineup.swaps.length + (lineup.fills?.length ?? 0);
-    if (count === 0) return 'No better option';
-    return `${count} strong alternative${count === 1 ? '' : 's'}`;
-  }, [lineup]);
+  const benchLine = useMemo(() => benchSummary(lineup), [lineup]);
 
   const weeklyCard = useMemo(() => {
     if (!weekly) return null;
@@ -695,7 +691,7 @@ export function TeamScreen({
                   projectionOf={(playerId) => rowWeek(evaluations.get(playerId))}
                   fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
                   evaluationOf={(playerId) => evaluations.get(playerId) ?? null}
-                  summary={benchSummary}
+                  summary={benchLine}
                   onOpen={(playerId) => openPlayer(playerId, { starting: false })}
                 />
               )}

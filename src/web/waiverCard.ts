@@ -96,6 +96,7 @@ export function shortReason(row: Pick<TierRow, 'reason' | 'reasonCode' | 'stashL
   if (/^Makes your lineup better by/.test(r)) return null;
   if ((m = r.match(/^Backup for your [A-Z/]+ (.+?), who is/))) return clip(`Backs up ${surname(m[1]!)}`);
   if ((m = r.match(/^Better depth than (.+?); he would not start yet$/))) return clip(m[1] === 'what you hold' ? 'Bench depth' : `Depth over ${initialled(m[1]!)}`);
+  if ((m = r.match(/^Cover (.+?)’s week (\d+) bye that week/))) return clip(`${surname(m[1]!)} bye wk ${m[2]}: add then`);
   if (/^Starts this week:/.test(r)) return 'Starts this week';
   /* A tie is about this week, and the gain beside it is three weeks: say which (22 October 2026). */
   if ((m = r.match(/^Ties (.+) this week$/))) return clip(m[1] === 'your best lineup' ? 'Ties your lineup this week' : `Ties ${initialled(m[1]!)} this week`);
@@ -106,10 +107,26 @@ export function shortReason(row: Pick<TierRow, 'reason' | 'reasonCode' | 'stashL
   return r ? clip(r) : null;
 }
 
-/** `+10.8`, `IR stash`, `Return unknown`: the gain chip, without the unit. */
-export function gainChip(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
+/**
+ * `+10.8`, `IR stash`, `Return unknown`: the gain chip, without the unit.
+ *
+ * The gain is the move's weighted three-week total, except on a "Starts this
+ * week" or "Ties ... this week" row, where the chip is this week's gain, the
+ * number the reason is about (review finding W11, 4 November 2026: a +7.8
+ * beside "Starts this week" was three weeks of value with no label).
+ */
+export function gainChip(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null; reason?: string }): string {
   if (row.reasonCode === 'ir_stash') return row.stashLabel === 'return unknown' ? 'Return unknown' : 'IR stash';
+  const week = thisWeekGain(row);
+  if (week != null) return `+${week.toFixed(1)}`;
   return `+${Math.max(0, row.gain).toFixed(1)}`;
+}
+
+/** This week's gain on a pick-up-and-start row, from its own reason; null on any other row. */
+function thisWeekGain(row: Pick<TierRow, 'reasonCode'> & { reason?: string }): number | null {
+  if (row.reasonCode !== 'start_now' && row.reasonCode !== 'start_tie') return null;
+  const m = (row.reason ?? '').match(/^Starts this week: \+([\d.]+) pts/);
+  return m ? Number(m[1]) : row.reasonCode === 'start_tie' ? 0 : null;
 }
 
 /** `$3–7` or `$3`: the bid band the engine set. */
@@ -140,7 +157,10 @@ export function tierCard(row: TierRow): WaiverCardModel {
   const bid = bidLabel(row.bid);
   if (row.bid.kind === 'free') all.push({ key: 'free', label: 'Free agent' });
   else if (row.bid.kind === 'claim') all.push({ key: 'waivers', label: waiverChip(row.bid.until, bid) });
-  if (row.needsSpot) all.push(row.tier === 'do_this' ? { key: 'pick', label: 'Pick your drop' } : { key: 'needs', label: 'Needs a drop' });
+  /* A bye that waits for its week is no move now: no drop chip, no open-spot chip. */
+  if (row.reasonCode === 'bye_later') {
+    /* nothing */
+  } else if (row.needsSpot) all.push(row.tier === 'do_this' ? { key: 'pick', label: 'Pick your drop' } : { key: 'needs', label: 'Needs a drop' });
   else if (row.drop?.viaReserve) all.push({ key: 'ir', label: `IR: ${surname(row.drop.name)}` });
   else if (row.drop) all.push({ key: 'drop', label: `Drop: ${surname(row.drop.name)}` });
   else all.push({ key: 'open', label: 'Open spot' });
@@ -152,7 +172,7 @@ export function tierCard(row: TierRow): WaiverCardModel {
     position: row.position,
     team: row.team,
     gain,
-    gainSpoken: gain.startsWith('+') ? `${gain} points` : gain,
+    gainSpoken: gain.startsWith('+') ? `${gain} points ${thisWeekGain(row) != null ? 'this week' : `over ${row.byWeek?.length || 3} weeks`}` : gain,
     gainTone: TIER_TONE[row.tier],
     ...(row.reasonCode === 'ir_stash' ? { stash: true } : {}),
     chips: all.slice(0, CARD_CHIPS_MAX),

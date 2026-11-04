@@ -164,7 +164,8 @@ function cellFor(id: string | null, week: number, figures: Figures, comparison: 
     }
   }
   if (f?.points == null) return { text: '—', points: 0, sleeper: false };
-  return { text: f.points.toFixed(1), points: f.points, sleeper: f.source === 'sleeper' };
+  /* An earlier week's projection standing in is Sleeper's number too, and is marked like one. */
+  return { text: f.points.toFixed(1), points: f.points, sleeper: f.source === 'sleeper' || f.fromWeek != null };
 }
 
 /** Week by week, the two players side by side, a total for three weeks, and Better on the higher one. */

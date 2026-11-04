@@ -72,6 +72,8 @@ export interface TierWeekFigure {
    */
   points: number | null;
   source: WeekSource;
+  /** The earlier week a stand-in number was projected for: "week 8 projection", never "this week". */
+  fromWeek?: number;
   bye: boolean;
   /** Not expected to play that week for another reason (Out, IR). */
   out: boolean;
@@ -175,6 +177,10 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         lastWeekPoints,
         bid: emptyBid('free', 'Free agent: first come, no bid', pickup),
       };
+    }
+    /* A bye weeks away on a deep wire: no claim now, so no bid (W12). */
+    if (m.reasonCode === 'bye_later') {
+      return { ...m, lastWeekPoints, bid: emptyBid('claim', 'No claim now: add a free one in the bye week', pickup) };
     }
     const trend = input.trending.get(m.playerId);
     const role = input.evaluations.get(m.playerId)?.role.trend;

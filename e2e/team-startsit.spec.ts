@@ -321,7 +321,7 @@ test.describe('a weekly command centre, on one screen', () => {
     await expect(page.getByTestId('bench-toggle')).toContainText(/Bench \(\d+\)/);
     // The one useful summary: either there is something better on the bench, or
     // there is not, and both are worth four words.
-    await expect(page.getByTestId('bench-toggle')).toContainText(/strong alternative|No better option/);
+    await expect(page.getByTestId('bench-toggle')).toContainText(/strong alternative|No better option|Toss-up/);
 
     await page.getByTestId('bench-toggle').click();
     await expect(page.getByTestId('team-bench')).toHaveAttribute('data-open', 'true');

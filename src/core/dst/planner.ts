@@ -56,6 +56,7 @@ import { assessStreaming, type StreamingAssessment } from '../startsit/streaming
  */
 import { weekRange } from './weeks.ts';
 import { MEANINGFUL_UPGRADE_GAIN } from '../startsit/waivers.ts';
+import { TOSSUP_POINTS } from '../startsit/tossup.ts';
 import { DEFENCE_POSITION } from '../startsit/engine.ts';
 import type { RosterShape } from '../sleeper/scoring.ts';
 import type { DstOutlook } from './outlook.ts';
@@ -188,6 +189,8 @@ export interface DstOption {
   forward: DstOutlook | null;
   /** The league's own playoff weeks. Null outside a stash window. */
   playoff: DstOutlook | null;
+  /** A free agent who can be added right now, no claim. Absent: not known. */
+  addableNow?: boolean;
 }
 
 /** The bench player an add would displace, priced the way the drop list prices one. */
@@ -477,20 +480,29 @@ export function planDst(input: DstPlanInput): DstPlan {
    */
   if (current.unavailable) {
     if (!best) return { ...unavailablePlan(playoffWeeks, cost, `${current.name} is out this week and nobody available can be scored`), current };
-    const gain = round2((best.thisWeek ?? 0) - 0);
+    /*
+     * The fill is the best defence that can be added now when it is about as
+     * good (Alex, 4 November 2026: Pittsburgh's week 9 bye). A one-week fill
+     * on a waiver claim may not clear before the game; a free agent is his
+     * the moment he is added, for $0. "About as good" is the toss-up bar.
+     */
+    const fill = byeFill(streamable);
+    const gain = round2((fill.thisWeek ?? 0) - 0);
     return {
       ...base(playoffWeeks),
       decision: 'stream',
       activation: window.activation,
       surface: true,
-      headline: `Stream ${best.team} — ${current.team} ${current.unavailableReason ?? 'unavailable'}`,
+      headline: `Stream ${fill.team} · ${current.team} ${current.unavailableReason ?? 'unavailable'}`,
       why: [
         `${current.name} ${current.unavailableReason ?? 'cannot play'} this week, so the slot needs a body for one week.`,
-        `${best.name} is the best available at ${gain.toFixed(1)} pts.`,
-        'This is a one-week fill, not a replacement — the hold decision comes back next week.',
+        fill === best
+          ? `${fill.name} is the best available at ${gain.toFixed(1)} pts${fill.addableNow ? ', and a free agent you can add now' : ''}.`
+          : `${fill.name} is a free agent you can add now at ${gain.toFixed(1)} pts; ${best.name} (${(best.thisWeek ?? 0).toFixed(1)}) needs a waiver claim.`,
+        'This is a one-week fill, not a replacement. The hold decision comes back next week.',
       ],
-      evidence: evidenceFor({ target: best, current, cost, gain, bar: 0 }),
-      target: best,
+      evidence: evidenceFor({ target: fill, current, cost, gain, bar: 0 }),
+      target: fill,
       current,
       gain,
       bar: 0,
@@ -502,7 +514,15 @@ export function planDst(input: DstPlanInput): DstPlan {
   }
 
   const byeAhead = upcomingBye(current, input.currentWeek);
-  const byeNote = byeAhead == null ? [] : [`${current.team} is on bye in week ${byeAhead} — a one-week fill will be needed`];
+  /* The bye ahead, and the best defence to fill it with on that week's outlook. */
+  const aheadFill = byeAhead == null ? null : fillForWeek(available, byeAhead);
+  const byeNote =
+    byeAhead == null
+      ? []
+      : [
+          `${current.team} is on bye in week ${byeAhead}; a one-week fill will be needed`,
+          ...(aheadFill ? [`Best fill for week ${byeAhead}: ${aheadFill.option.name} (${aheadFill.points.toFixed(1)} pts${aheadFill.option.addableNow ? ', free agent' : ''})`] : []),
+        ];
 
   if (!best) {
     return {
@@ -511,7 +531,7 @@ export function planDst(input: DstPlanInput): DstPlan {
       activation: window.activation,
       surface: byeAhead != null,
       headline: byeAhead != null ? `Hold ${current.team} · bye week ${byeAhead}` : `Hold ${current.team}`,
-      why: ['Nobody available at DEF can be scored this week, so there is nothing to stream to.'],
+      why: ['Nobody available at DEF can be scored this week, so there is nothing to stream to.', ...byeNote.slice(1)],
       current,
       cost,
       confidence: current.confidence,
@@ -581,6 +601,7 @@ export function planDst(input: DstPlanInput): DstPlan {
         ...(replacement != null
           ? [`The wire's level at DEF is ${replacement.toFixed(1)} pts, so this is not a scarce upgrade.`]
           : []),
+        ...byeNote.slice(1),
         ...(stash ? [stash.why] : []),
       ],
       evidence: evidenceFor({ target: best, current, cost, gain, bar, replacement, stash: stash?.option ?? null }),
@@ -658,6 +679,17 @@ function activationWindow(
      */
     if (current && upcomingBye(current, input.currentWeek) != null) {
       return { active: true, activation: 'active', reason: 'a bye is close enough to need covering' };
+    }
+    /*
+     * And a defence with no game this week (a bye, ruled out), however far
+     * the first kickoff is. Until 4 November 2026 this week's own bye was the
+     * one case left out: `upcomingBye` looks at later weeks, so on Monday
+     * night and Tuesday of Pittsburgh's week 9 bye, with Thursday's game more
+     * than 72 hours off, the plan was a silent "hold" and the DEF slot sat
+     * empty with nothing on screen.
+     */
+    if (current && current.unavailable && !current.locked) {
+      return { active: true, activation: 'active', reason: `${current.name} has no game this week` };
     }
     /*
      * And an empty starting slot with room to fill it, which the window was
@@ -871,6 +903,35 @@ function forwardDifference(target: DstOption, current: DstOption): number | null
   const weeks = Math.min(target.forward?.playable ?? 0, current.forward?.playable ?? 0);
   if (weeks === 0) return null;
   return round2((challenger - incumbent) * weeks);
+}
+
+/**
+ * The defence to fill a one-week hole with: the best one, unless he needs a
+ * waiver claim and a free agent is within the toss-up bar of him.
+ */
+function byeFill(streamable: readonly DstOption[]): DstOption {
+  const best = streamable[0]!;
+  if (best.addableNow !== false) return best;
+  const free = streamable.find((o) => o.addableNow === true);
+  if (free && (best.thisWeek ?? 0) - (free.thisWeek ?? 0) < TOSSUP_POINTS - 1e-9) return free;
+  return best;
+}
+
+/**
+ * The best defence to stream in a later week, on that week's outlook: the
+ * top projection, or a free agent within the toss-up bar of it. Null when no
+ * available defence has a number for that week.
+ */
+function fillForWeek(available: readonly DstOption[], week: number): { option: DstOption; points: number } | null {
+  const rated = available
+    .map((option) => ({ option, points: option.forward?.weeks.find((w) => w.week === week && !w.bye)?.points ?? null }))
+    .filter((x): x is { option: DstOption; points: number } => x.points != null && !x.option.locked)
+    .sort((a, b) => b.points - a.points);
+  const top = rated[0];
+  if (!top) return null;
+  if (top.option.addableNow !== false) return top;
+  const free = rated.find((x) => x.option.addableNow === true);
+  return free && top.points - free.points < TOSSUP_POINTS - 1e-9 ? free : top;
 }
 
 /** The week a defence's bye falls in, when it is close enough to matter. */

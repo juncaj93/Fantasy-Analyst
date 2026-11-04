@@ -77,6 +77,11 @@ export interface DstPlanRequest {
   reserveIds: string[];
   playoff: { weeks: number[]; emphasis: number };
   now?: Date;
+  /**
+   * Which free agents can be added right now, by player id (no waiver clock).
+   * Absent: not known, and no defence is called instantly addable.
+   */
+  addableNow?: ReadonlySet<string>;
 }
 
 /**
@@ -198,6 +203,7 @@ export async function assembleDstPlan(
       opponentImpliedTotal: evaluation.dst?.opponentImpliedTotal ?? null,
       forward: outlookFor(team, forward),
       playoff: stashOpen ? outlookFor(team, playoffWeeks) : null,
+      ...(request.addableNow ? { addableNow: request.addableNow.has(evaluation.playerId) } : {}),
     };
   };
 
