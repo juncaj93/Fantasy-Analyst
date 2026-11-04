@@ -54,6 +54,55 @@ import type { NflState } from '../../core/sleeper/phase.ts';
 import { resolveWeek } from '../../core/matchup/build.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
+import { TradeValueService, type Prepared } from './tradeValueService.ts';
+import { seasonWeights, totalWeight } from '../../core/tradeValue/restOfSeason.ts';
+import { nearestRejections, rankClosest, type ClosestIdea } from '../../core/trades/closest.ts';
+import { SEASON_GATES } from '../../core/trades/bilateral.ts';
+import { seasonCheckOf } from '../../core/trades/seasonCheck.ts';
+
+/**
+ * The season pricing in numbers, for the probe (review T1): which stored weeks
+ * the rates read, how many rostered players each part covered, and every
+ * rostered player's rate with what it is made of.
+ */
+export function seasonSummary(prepared: Prepared) {
+  const rostered = [...new Set(prepared.rosters.flatMap((r) => r.playerIds))];
+  const rates = rostered.map((id) => prepared.rates.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
+  const count = (keep: (r: (typeof rates)[number]) => boolean) => rates.filter(keep).length;
+  return {
+    currentWeek: prepared.horizon.currentWeek,
+    weeks: prepared.horizon.weeks,
+    weightedWeeks: totalWeight(prepared.horizon),
+    seasonPointsThrough: prepared.seasonPoints?.through ?? null,
+    aheadWeeks: prepared.aheadWeeks ?? [],
+    players: {
+      rostered: rostered.length,
+      blended: count((r) => (r.blend?.projectionWeeks ?? 0) > 0 && (r.blend?.games ?? 0) > 0),
+      projectionOnly: count((r) => (r.blend?.projectionWeeks ?? 0) > 0 && (r.blend?.games ?? 0) === 0),
+      averageOnly: count((r) => r.basis === 'season_average'),
+      weeklyOnly: count((r) => r.rate != null && r.blend == null),
+      unpriced: count((r) => r.rate == null),
+      withAhead: count((r) => (r.blend?.projectionWeeks ?? 0) > 1),
+    },
+    replacement: [...prepared.replacement].map(([position, level]) => ({ position, rate: level.rate })),
+    rates: rates.map((r) => ({
+      id: r.playerId,
+      name: r.name,
+      position: r.position,
+      team: r.team,
+      rate: r.rate,
+      weekRate: r.weekRate ?? null,
+      projection: r.blend?.projection ?? null,
+      projectionWeeks: r.blend?.projectionWeeks ?? 0,
+      production: r.blend?.production ?? null,
+      games: r.blend?.games ?? 0,
+      basis: r.basis,
+      designation: r.designation,
+      byeWeek: r.byeWeek,
+      weeksPlayed: r.games,
+    })),
+  };
+}
 
 /**
  * The client handed to the published-week read, which never uses it.
@@ -114,6 +163,12 @@ export interface TradeGathering {
    * setup step rather than a quiet market. Null when the lane ran.
    */
   arbitrageOff?: string | null;
+  /**
+   * Every roster priced on the rest of the season (review T1), the
+   * preparation the search ran on, for the season check to reuse. Null when
+   * it could not be read: the search then ran on this week, as before.
+   */
+  prepared?: Prepared | null;
 }
 
 export class SmartTradeService {
@@ -147,10 +202,10 @@ export class SmartTradeService {
    */
   async buildWithInputs(
     opts: { leagueId?: string; limit?: number } = {},
-  ): Promise<{ board: SmartTradeBoard; inputs: StartSitInput[] }> {
+  ): Promise<{ board: SmartTradeBoard; inputs: StartSitInput[]; prepared: Prepared | null }> {
     const gathered = await this.gather(opts);
     const { rejections: _dropped, ...board } = this.present(gathered);
-    return { board, inputs: gathered.request.inputs };
+    return { board, inputs: gathered.request.inputs, prepared: gathered.prepared ?? null };
   }
 
   /**
@@ -163,10 +218,27 @@ export class SmartTradeService {
    */
   async explain(
     opts: { leagueId?: string } = {},
-  ): Promise<SmartTradeBoard & { rejections: BilateralReport['rejections']; arbitrageReads: ArbitrageRead[] }> {
+  ): Promise<
+    SmartTradeBoard & {
+      rejections: BilateralReport['rejections'];
+      arbitrageReads: ArbitrageRead[];
+      closest?: ClosestIdea[];
+      season?: ReturnType<typeof seasonSummary>;
+    }
+  > {
     const gathered = await this.gather(opts);
+    const presented = this.present(gathered);
     return {
-      ...this.present(gathered),
+      ...presented,
+      /* What the season rates were built from, and each rostered player's rate: for the probe. */
+      ...(gathered.prepared ? { season: seasonSummary(gathered.prepared) } : {}),
+      /*
+       * The ideas that came nearest, each through Check a trade, and what
+       * stopped each (review T1). Diagnostic only: when the board is honestly
+       * empty, this is the "why", with the numbers. Bounded at
+       * `CLOSEST_CHECKED` season checks on the preparation already in hand.
+       */
+      ...(gathered.prepared ? { closest: this.closest(gathered, presented) } : {}),
       /*
        * The buy-low and sell-high reads the search was handed, before any gate.
        *
@@ -317,6 +389,24 @@ export class SmartTradeService {
         })
       : new Map<string, ArbitrageRead>();
 
+    /*
+     * Every roster priced on the rest of the season (review T1, November
+     * 2026): the same preparation Check a trade reads, handed the inputs just
+     * read so only the free agents behind replacement level are read again.
+     * The search finds, gates and ranks on it, and each idea's season check
+     * reuses it. Stored rows only; Sleeper is still never called. Should it
+     * fail, the search runs on this week, as it did before.
+     */
+    const prepared =
+      wanted && inputs.length > 0
+        ? await new TradeValueService(this.db, NO_SLEEPER)
+            .priceLeague({ league, rosters, state: nflState, known: inputs })
+            .catch((err): Prepared | null => {
+              warnings.push(`rest-of-season values could not be read, so ideas are priced on this week: ${String(err)}`);
+              return null;
+            })
+        : null;
+
     return {
       league,
       request: {
@@ -338,11 +428,58 @@ export class SmartTradeService {
         /* For the trade deadline (review T5). No stored state: no check. */
         currentWeek: nflState ? currentWeekOf(nflState) : undefined,
         withReserve: true,
+        ...(prepared
+          ? { season: { rates: prepared.rates, replacement: prepared.replacement, weights: seasonWeights(prepared.horizon) } }
+          : {}),
         warnings,
       },
       rosterRecords: rosters,
       arbitrageOff: off[0] ?? null,
+      prepared,
     };
+  }
+
+  private closest(
+    gathered: TradeGathering,
+    board: SmartTradeBoard & { rejections: BilateralReport['rejections'] },
+  ): ClosestIdea[] {
+    const prepared = gathered.prepared;
+    if (!prepared) return [];
+    const names = (ids: readonly string[]) => ids.map((id) => prepared.rates.get(id)?.name ?? id);
+    const partnerName = (key: string) =>
+      gathered.request.rosters.find((r) => String(r.rosterId) === key)?.ownerName ?? `Roster ${key}`;
+    const ideas = [
+      ...[...board.offers, ...(board.reserve ?? [])].map((o) => ({
+        key: o.partner.key,
+        give: o.give.map((p) => p.playerId),
+        get: o.get.map((p) => p.playerId),
+        searchReason: 'passed the search',
+      })),
+      ...nearestRejections(board.rejections, { user: SEASON_GATES.userGain, partner: SEASON_GATES.partnerHarm }).map((r) => ({
+        key: r.partnerKey,
+        give: r.give,
+        get: r.get,
+        searchReason: `${r.reason}: ${r.detail}`,
+      })),
+    ];
+    const service = new TradeValueService(this.db, NO_SLEEPER);
+    const checks = service.checkPrepared(
+      prepared,
+      ideas.map((x, i) => ({ id: String(i), partnerRosterId: Number(x.key), give: x.give, get: x.get })),
+    );
+    return rankClosest(
+      ideas.map((x, i) => {
+        const evaluation = checks.get(String(i));
+        return {
+          partner: partnerName(x.key),
+          give: names(x.give),
+          get: names(x.get),
+          check: evaluation ? seasonCheckOf(evaluation) : undefined,
+          searchReason: x.searchReason,
+        };
+      }),
+      totalWeight(prepared.horizon),
+    );
   }
 
   private async assemble(

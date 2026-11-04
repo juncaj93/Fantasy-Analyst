@@ -67,7 +67,8 @@ export function reviewCheck(label, body) {
     }
     if (!side.isMine && side.adjustments.length > 0) say(`${side.label} carries preferences and is not Alex`);
     if (Array.isArray(side.weekly) && side.weekly.length > 0) {
-      const summed = side.weekly.reduce((a, w) => a + (w.lineupAfter - w.lineupBefore), 0);
+      /* Each week at its weight: a playoff week counts 1.5 times (November 2026). */
+      const summed = side.weekly.reduce((a, w) => a + (w.lineupAfter - w.lineupBefore) * (w.weight ?? 1), 0);
       // Each week is rounded to a tenth, so the sum may drift by a little per week.
       if (Math.abs(summed - side.lineupChange) > 0.1 * side.weekly.length + 0.2) {
         say(`${side.label} weeks add to ${summed.toFixed(1)} but the lineup change is ${side.lineupChange}`);

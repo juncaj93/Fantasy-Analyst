@@ -46,13 +46,24 @@ export type TradeVerdict =
   | 'trade_away'
   | 'hold_mixed';
 
+/**
+ * What each group is called on the screen: what the news says, not a trade
+ * call (review T8, November 2026).
+ *
+ * These groups come from newsletter mention counts alone, with no projection,
+ * role or roster fit behind them, and until November 2026 they were called
+ * "Trade target", "Possible sell high" and "Trade away / reduce risk": one of
+ * Alex's starters could be told "trade away" because a newsletter soured. The
+ * trade calls on this screen are the trade ideas and Build a trade, which value
+ * the rest of the season; this list says which way the news is moving.
+ */
 export const VERDICT_LABELS: Record<TradeVerdict, string> = {
-  trade_target: 'Trade target',
-  emerging_target: 'Emerging target',
-  add_waiver: 'Add / waiver target',
-  sell_high: 'Possible sell high',
-  trade_away: 'Trade away / reduce risk',
-  hold_mixed: 'Hold — mixed signal',
+  trade_target: 'News rising',
+  emerging_target: 'News rising this week',
+  add_waiver: 'News rising, free agent',
+  sell_high: 'News cooling',
+  trade_away: 'News falling',
+  hold_mixed: 'News mixed',
 };
 
 export interface TradeWindows {
@@ -432,7 +443,7 @@ function explain(
    */
   if (verdict === 'emerging_target') {
     reasons.push(
-      `new this week — ${sign(windows.last7)} in 7 days against ${sign(priorWindow(windows))} over the 23 before`,
+      `new this week: ${sign(windows.last7)} in 7 days against ${sign(priorWindow(windows))} over the 23 before`,
     );
   } else if (windows.last7 !== 0 && Math.sign(windows.last7) === Math.sign(windows.last30)) {
     reasons.push(`still moving this week (${sign(windows.last7)})`);
@@ -447,13 +458,10 @@ function explain(
     else counterpoints.push(`${line}, which does not`);
   }
 
-  if (verdict === 'sell_high') {
-    counterpoints.push('no market price is available, so "high" is inferred from the lifetime record, not observed');
-  }
   if (verdict === 'emerging_target') {
     // Not "small sample" any more — that was the old classifier describing its
     // own bug. The case may be well evidenced; what it is not yet is durable.
-    counterpoints.push('one week of evidence — the case is new rather than established');
+    counterpoints.push('one week of evidence, so the case is new rather than established');
   }
   if (verdict === 'add_waiver' && ownership === 'free') {
     reasons.push('nobody rosters them, so no trade is needed');

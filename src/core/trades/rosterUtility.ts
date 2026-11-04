@@ -38,6 +38,31 @@ import { recommendLineup } from '../startsit/lineup.ts';
 import { marketProjection } from '../startsit/projection.ts';
 import { decisionPoints } from '../startsit/decisionPoints.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
+import { bestLineup, slotsOf, type LineupCandidate } from '../tradeValue/lineup.ts';
+import type { PlayerRate } from '../tradeValue/rate.ts';
+import { seasonValueOver, type ReplacementLevels } from '../tradeValue/evaluate.ts';
+import { perWeekValue } from '../tradeValue/restOfSeason.ts';
+
+/**
+ * Every rostered player's rest-of-season rate, for a search on the season
+ * rather than this week (review T1, November 2026).
+ *
+ * The same preparation Check a trade reads (`TradeValueService.prepare`): each
+ * player's rate blends his projections with his season average, his weeks
+ * carry his bye and any injury, and replacement level is this league's free
+ * agents. With it, a player is valued at his expected points in an average
+ * remaining week (`perWeekValue`), lineups are the best legal lineup on those
+ * numbers with a free agent behind every slot, and a package's balance is
+ * each side's season value over a free agent (`seasonValueOver`), the number
+ * Check a trade's fair-to-both rule reads. A player on a bye or out this week
+ * is valued like anybody else, on the weeks he plays.
+ */
+export interface SeasonPricing {
+  rates: ReadonlyMap<string, PlayerRate>;
+  replacement: ReplacementLevels;
+  /** One weight per remaining week (`seasonWeights`). */
+  weights: readonly number[];
+}
 
 /**
  * How much of a starting slot's worth a flex-eligible position is charged for.
@@ -244,6 +269,11 @@ export interface RosterView {
    * entry as "cannot be valued", never as "worth nothing".
    */
   valueOf: ReadonlyMap<string, number>;
+  /**
+   * Rest-of-season value over a free agent, per priced player, on a search
+   * priced on the season (`SeasonPricing`). Absent on a weekly search.
+   */
+  seasonValueOf?: ReadonlyMap<string, number>;
   positionOf: ReadonlyMap<string, string>;
   nameOf: ReadonlyMap<string, string>;
   /** Players the engine could not score at all. Never traded, never counted. */
@@ -309,10 +339,19 @@ export function buildRosterViews(opts: {
   profile: ScoringProfile;
   /** Sleeper's published week by player id, for {@link weekValueOf}. Absent: complete markets only. */
   published?: ReadonlyMap<string, number>;
+  /** Price everybody on the rest of the season instead of this week. See {@link SeasonPricing}. */
+  season?: SeasonPricing | null;
 }): Map<string, RosterView> {
   const { pool, shape, profile } = opts;
   const published = opts.published;
-  const priceOf = (evaluation: StartSitEvaluation | null | undefined) => weekValueOf(evaluation, published);
+  const season = opts.season ?? null;
+  const seasonPrice = (id: string): number | null => {
+    const rate = season?.rates.get(id);
+    if (!season || rate?.rate == null) return null;
+    return perWeekValue(rate.rate, rate.weekly, season.weights);
+  };
+  const priceOf = (evaluation: StartSitEvaluation | null | undefined) =>
+    season ? (evaluation ? seasonPrice(evaluation.playerId) : null) : weekValueOf(evaluation, published);
 
   /*
    * One evaluation per player for the whole league.
@@ -361,10 +400,11 @@ export function buildRosterViews(opts: {
     const unpricedHere = new Map<string, number>();
     for (const id of roster.playerIds) {
       const evaluation = evaluations.get(id);
-      if (!evaluation || evaluation.score == null) continue;
+      /* On the season a player with no number this week (a bye, ruled out) is still valued on his season. */
+      if (!evaluation || (evaluation.score == null && !(season && seasonPrice(id) != null))) continue;
       const price = priceOf(evaluation);
       if (price == null) {
-        if (evaluation.score > STARTABLE_FLOOR && !evaluation.ruledOut) {
+        if ((evaluation.score ?? 0) > STARTABLE_FLOOR && !evaluation.ruledOut) {
           unpricedHere.set(evaluation.position, (unpricedHere.get(evaluation.position) ?? 0) + 1);
         }
         continue;
@@ -402,6 +442,7 @@ export function buildRosterViews(opts: {
         values: rosterValues.get(roster.key) ?? new Map(),
         unpriced: rosterUnpriced.get(roster.key) ?? new Map(),
         ...(published ? { published } : {}),
+        ...(season ? { season, seasonPrice } : {}),
       }),
     );
   }
@@ -420,11 +461,15 @@ function buildView(args: {
   unpriced: ReadonlyMap<string, number>;
   scheduleKnown: boolean;
   published?: ReadonlyMap<string, number>;
+  season?: SeasonPricing;
+  seasonPrice?: (id: string) => number | null;
 }): RosterView {
   const { roster, pool, shape, profile, evaluations } = args;
   const playerIds = [...roster.playerIds];
+  const season = args.season ?? null;
 
   const valueOf = new Map<string, number>();
+  const seasonValueOf = new Map<string, number>();
   const positionOf = new Map<string, string>();
   const nameOf = new Map<string, string>();
   const unscored = new Set<string>();
@@ -441,11 +486,47 @@ function buildView(args: {
     nameOf.set(id, evaluation.name);
     if (evaluation.ruledOut) ruledOut.add(id);
     if (evaluation.ruledOut || (args.scheduleKnown && evaluation.opponent == null)) notPlaying.add(id);
-    const price = weekValueOf(evaluation, args.published);
-    if (evaluation.score == null) unscored.add(id);
+    const price = season ? (args.seasonPrice?.(id) ?? null) : weekValueOf(evaluation, args.published);
+    if (evaluation.score == null && price == null) unscored.add(id);
     else if (price == null) unpriced.add(id);
-    else valueOf.set(id, price);
+    else {
+      valueOf.set(id, price);
+      const rate = season?.rates.get(id);
+      if (season && rate) seasonValueOf.set(id, seasonValueOver(rate, season.replacement, season.weights) ?? 0);
+    }
   }
+
+  /*
+   * On the season: the best legal lineup on each player's average remaining
+   * week, with a free agent at replacement level behind every slot (as Check a
+   * trade has it, so losing a starter costs his edge over the waiver wire, not
+   * a whole slot). No kickoffs, no locks, no weekly charges.
+   */
+  const slots = season ? slotsOf(shape) : [];
+  const fills: LineupCandidate[] = [];
+  if (season) {
+    for (const [position, level] of season.replacement) {
+      const count = slots.filter((slot) => slot.eligible.has(position)).length;
+      for (let i = 0; i < count; i++) fills.push({ id: `replacement:${position}:${i}`, position, value: level.rate });
+    }
+  }
+  const seasonLineup = (ids: readonly string[]) => {
+    const candidates: LineupCandidate[] = [];
+    for (const id of ids) {
+      const value = valueOf.get(id) ?? args.seasonPrice?.(id) ?? null;
+      const position = positionOf.get(id) ?? evaluations.get(id)?.position;
+      if (value == null || !position) continue;
+      candidates.push({ id, position, value });
+    }
+    const result = bestLineup(slots, [...candidates, ...fills]);
+    const starters = new Set<string>();
+    let empty = 0;
+    for (const pick of result.picks) {
+      if (pick == null) empty += 1;
+      else if (!pick.id.startsWith('replacement:')) starters.add(pick.id);
+    }
+    return { points: round2(result.total), starters, empty };
+  };
 
   /*
    * The lineup, memoised on the exact set of players it was computed for.
@@ -460,6 +541,20 @@ function buildView(args: {
     const key = [...ids].sort().join(',');
     const hit = cache.get(key);
     if (hit) return hit;
+    if (season) {
+      const lineup = seasonLineup(ids);
+      const depth = new Map<string, number>();
+      for (const id of ids) {
+        if (lineup.starters.has(id)) continue;
+        const value = valueOf.get(id) ?? args.seasonPrice?.(id) ?? null;
+        const position = positionOf.get(id) ?? evaluations.get(id)?.position;
+        if (value == null || value <= STARTABLE_FLOOR || !position || tradeExcluded(position)) continue;
+        depth.set(position, (depth.get(position) ?? 0) + 1);
+      }
+      const entry = { points: lineup.points, starters: lineup.starters, empty: lineup.empty, depth };
+      cache.set(key, entry);
+      return entry;
+    }
 
     /*
      * No kickoff locks. A trade is about the lineups to come, not about who
@@ -535,6 +630,7 @@ function buildView(args: {
     key: roster.key,
     playerIds,
     valueOf,
+    ...(season ? { seasonValueOf } : {}),
     positionOf,
     nameOf,
     unscored,

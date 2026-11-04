@@ -13,8 +13,14 @@
  *    his own gain (below) is what protects him: the November "43 for 3" deal
  *    gained him 1.4 points.
  *  - **Both lineups gain over the rest of the season**, by more than noise:
- *    8 points for Alex (about a point a week to week 17), 3 for the partner.
- *    Not losing 0.75 this Sunday is not a reason for anyone to say yes.
+ *    about 0.9 points a week for Alex and a third of a point for the partner,
+ *    over the weeks left with a playoff week counted 1.5 times
+ *    (`restOfSeason.ts`). From week 9 that is 10.5 weighted weeks: 9.5 points
+ *    for Alex and 3.5 for the partner, the November rule's 8 and 3 (a point a
+ *    week, a third of one, over nine plain weeks) on the new scale. The bars
+ *    shrink as the weeks run out, so a week-11 deal is held to the same rate
+ *    as a week-9 one. Not losing 0.75 this Sunday is not a reason for anyone
+ *    to say yes.
  *
  * One function, read by the trade ideas (through the season check) and by
  * Build a trade, so the two cannot disagree about what fair means.
@@ -27,11 +33,25 @@ export const FAIR_TO_BOTH = {
   userEdgeMax: 0.1,
   /** The most the partner may come out ahead on value. */
   partnerEdgeMax: 0.25,
-  /** Rest-of-season lineup points Alex must gain. */
-  userMinGain: 8,
-  /** Rest-of-season lineup points the partner must gain. */
-  partnerMinGain: 3,
+  /** Rest-of-season lineup points Alex must gain, per weighted week left. */
+  userPerWeek: 0.9,
+  /** Rest-of-season lineup points the partner must gain, per weighted week left. */
+  partnerPerWeek: 1 / 3,
+  /** The bars for a caller that does not say how many weeks are left: weeks 9 to 17, 10.5 weighted weeks. */
+  userMinGain: 9.5,
+  partnerMinGain: 3.5,
 } as const;
+
+/**
+ * The two gain bars for this many weighted weeks left, to the half point.
+ * `weighted` absent: the week-9 bars, {@link FAIR_TO_BOTH.userMinGain} and
+ * {@link FAIR_TO_BOTH.partnerMinGain}.
+ */
+export function gainBars(weighted?: number | null): { user: number; partner: number } {
+  if (weighted == null || !(weighted > 0)) return { user: FAIR_TO_BOTH.userMinGain, partner: FAIR_TO_BOTH.partnerMinGain };
+  const half = (v: number) => Math.round(v * 2) / 2;
+  return { user: half(FAIR_TO_BOTH.userPerWeek * weighted), partner: half(FAIR_TO_BOTH.partnerPerWeek * weighted) };
+}
 
 export type UnfairReason = 'user_edge' | 'partner_edge' | 'user_gain' | 'partner_gain';
 
@@ -67,13 +87,16 @@ export function fairToBoth(args: {
   userGain: number;
   /** The partner's rest-of-season lineup change. */
   partnerGain: number;
+  /** Weighted weeks left (`totalWeight`), for the gain bars. Absent: the week-9 bars. */
+  weightedWeeks?: number | null;
 }): FairReading {
   const edge = valueEdge(args.giveValue, args.getValue);
+  const bars = gainBars(args.weightedWeeks);
   let reason: UnfairReason | null = null;
   if (wholePercent(edge) > wholePercent(FAIR_TO_BOTH.userEdgeMax)) reason = 'user_edge';
   else if (wholePercent(-edge) > wholePercent(FAIR_TO_BOTH.partnerEdgeMax)) reason = 'partner_edge';
-  else if (!(args.userGain >= FAIR_TO_BOTH.userMinGain)) reason = 'user_gain';
-  else if (!(args.partnerGain >= FAIR_TO_BOTH.partnerMinGain)) reason = 'partner_gain';
+  else if (!(args.userGain >= bars.user)) reason = 'user_gain';
+  else if (!(args.partnerGain >= bars.partner)) reason = 'partner_gain';
   return { fair: reason == null, edge, reason };
 }
 

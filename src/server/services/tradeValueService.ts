@@ -38,6 +38,8 @@ import { MIN_MARKET_COVERAGE } from '../../core/waivers/seasonOutlook.ts';
 import { seasonBaseline } from '../../core/vegas/season.ts';
 import { buildPlayerRate, type PlayerRate } from '../../core/tradeValue/rate.ts';
 import { needsSeasonLine } from '../../core/tradeValue/rate.ts';
+import { playedWeeksOf, productionGames, REST_OF_SEASON } from '../../core/tradeValue/restOfSeason.ts';
+import { aheadPointsKey, seasonPointsKey, type StoredSeasonPoints, type StoredWeekPoints } from '../../core/sleeper/weekPoints.ts';
 import {
   evaluateTrade,
   replacementLevels,
@@ -95,6 +97,10 @@ export interface Prepared {
   evaluated: number;
   /** The Start/Sit evaluation each rate was built from, for the trade builder's drop score. */
   evaluations?: Map<string, StartSitEvaluation>;
+  /** This season's league points by week, as read for the rates. Null when not stored. */
+  seasonPoints?: StoredSeasonPoints | null;
+  /** The later weeks Sleeper's projection was stored for, as read for the rates. */
+  aheadWeeks?: number[];
 }
 
 function labelOf(roster: RosterRecord): string {
@@ -329,16 +335,52 @@ export class TradeValueService {
     );
   }
 
-  private async evaluateDeals(
-    league: LeagueRecord,
-    rosters: RosterRecord[],
-    state: NflState | null,
-    deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
-    known?: readonly StartSitInput[],
-  ): Promise<Map<string, TradeEvaluation>> {
-    const out = new Map<string, TradeEvaluation>();
+  /**
+   * Every roster in the league priced on the rest of the season, once, for the
+   * trade ideas (review T1): the search runs on these rates and each idea's
+   * season check reads the same preparation ({@link checkPrepared}), so the
+   * board and Check a trade cannot price a player two ways. `known` is the
+   * board's own read of every rostered player (see {@link checkIdeas}).
+   */
+  async priceLeague(opts: {
+    league: LeagueRecord;
+    rosters: RosterRecord[];
+    state: NflState | null;
+    known?: readonly StartSitInput[];
+  }): Promise<Prepared> {
+    return this.prepare({
+      league: opts.league,
+      rosters: opts.rosters,
+      state: opts.state,
+      playerIds: [...new Set(opts.rosters.flatMap((r) => r.playerIds))],
+      reserveIds: [...new Set(opts.rosters.flatMap((r) => r.reserveIds))],
+      movedIds: [],
+      ...(opts.known ? { known: opts.known } : {}),
+    });
+  }
+
+  /**
+   * The trade ideas' checks on a preparation already in hand: no read at all.
+   * The same deals and the same answers {@link checkIdeas} gives.
+   */
+  checkPrepared(
+    prepared: Prepared,
+    ideas: readonly { id: string; partnerRosterId: number; give: readonly string[]; get: readonly string[] }[],
+  ): Map<string, TradeEvaluation> {
+    const mine = prepared.rosters.find((r) => r.isMine);
+    if (!mine || ideas.length === 0) return new Map<string, TradeEvaluation>();
+    return this.evaluateOn(
+      prepared,
+      ideas.map((i) => ({ id: i.id, a: mine.rosterId, b: i.partnerRosterId, aSends: i.give, bSends: i.get })),
+    );
+  }
+
+  private validDeals<D extends { a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }>(
+    rosters: readonly RosterRecord[],
+    deals: readonly D[],
+  ): D[] {
     const byId = new Map(rosters.map((r) => [r.rosterId, r] as const));
-    const valid = deals.filter((d) => {
+    return deals.filter((d) => {
       const a = byId.get(d.a);
       const b = byId.get(d.b);
       if (!a || !b || a.rosterId === b.rosterId) return false;
@@ -346,7 +388,18 @@ export class TradeValueService {
       if (d.aSends.length > MAX_PLAYERS_PER_SIDE || d.bSends.length > MAX_PLAYERS_PER_SIDE) return false;
       return d.aSends.every((id) => a.playerIds.includes(id)) && d.bSends.every((id) => b.playerIds.includes(id));
     });
-    if (valid.length === 0) return out;
+  }
+
+  private async evaluateDeals(
+    league: LeagueRecord,
+    rosters: RosterRecord[],
+    state: NflState | null,
+    deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
+    known?: readonly StartSitInput[],
+  ): Promise<Map<string, TradeEvaluation>> {
+    const byId = new Map(rosters.map((r) => [r.rosterId, r] as const));
+    const valid = this.validDeals(rosters, deals);
+    if (valid.length === 0) return new Map<string, TradeEvaluation>();
 
     const involved = [...new Set(valid.flatMap((d) => [d.a, d.b]))].map((id) => byId.get(id)!);
     const prepared = await this.prepare({
@@ -358,6 +411,18 @@ export class TradeValueService {
       movedIds: [...new Set(valid.flatMap((d) => [...d.aSends, ...d.bSends]))],
       ...(known ? { known } : {}),
     });
+    return this.evaluateOn(prepared, valid);
+  }
+
+  /** Each deal on one preparation. In memory. */
+  private evaluateOn(
+    prepared: Prepared,
+    deals: readonly { id: string; a: number; b: number; aSends: readonly string[]; bSends: readonly string[] }[],
+  ): Map<string, TradeEvaluation> {
+    const out = new Map<string, TradeEvaluation>();
+    const { league, rosters } = prepared;
+    const byId = new Map(rosters.map((r) => [r.rosterId, r] as const));
+    const valid = this.validDeals(rosters, deals);
     const sideOf = (roster: RosterRecord): TradeSide => ({
       label: labelOf(roster),
       rosterId: roster.rosterId,
@@ -579,10 +644,35 @@ export class TradeValueService {
      * The week's context does not depend on the dictionary, so the two are
      * read together instead of one after the other. Same reads, same results.
      */
-    const [players, context] = await Promise.all([
+    /*
+     * And what a rest-of-season rate needs beyond this week (review T1, T9):
+     * this season's league points by week and Sleeper's projections for the
+     * next three weeks, both already stored by the three-hourly league read.
+     * One statement, four settings rows. Missing rows leave this week's number
+     * alone, as before.
+     */
+    const aheadWeeks = horizon.weeks.slice(1, 1 + REST_OF_SEASON.aheadWeeks);
+    const [players, context, extra] = await Promise.all([
       new PlayerRepo(this.db).listAll(),
       buildStartSitContext(this.db, undefined, this.now()),
+      horizon.weeks.length === 0
+        ? Promise.resolve(new Map<string, unknown>())
+        : new SettingsRepo(this.db)
+            .getMany<unknown>([seasonPointsKey(league.season), ...aheadWeeks.map((w) => aheadPointsKey(league.season, w))])
+            .catch(() => new Map<string, unknown>()),
     ]);
+    const seasonPoints = (extra.get(seasonPointsKey(league.season)) as StoredSeasonPoints | undefined) ?? null;
+    const aheadRows = aheadWeeks
+      .map((w) => [w, extra.get(aheadPointsKey(league.season, w)) as StoredWeekPoints | undefined] as const)
+      .filter((entry): entry is readonly [number, StoredWeekPoints] => entry[1]?.points != null);
+    const aheadFor = (id: string): Map<number, number> => {
+      const out = new Map<number, number>();
+      for (const [w, row] of aheadRows) {
+        const v = row.points[id];
+        if (typeof v === 'number') out.set(w, v);
+      }
+      return out;
+    };
     const startable = startablePositions(shape);
     const positionById = new Map(players.map((p) => [p.id, p.position] as const));
     const wantDef = startable.has('DEF') && opts.movedIds.some((id) => positionById.get(id) === 'DEF');
@@ -719,12 +809,29 @@ export class TradeValueService {
           byeWeek: bye.byeWeek,
           byeKnown: bye.known,
           onReserve: reserved.has(id),
+          ahead: aheadFor(id),
+          production: productionGames({
+            leaguePoints: seasonPoints?.points?.[id] ?? null,
+            through: seasonPoints?.through ?? 0,
+            playedWeeks: playedWeeksOf(input.usageWeeks),
+          }),
         }),
       );
     }
 
     const freeAgents = freeAgentIds.map((id) => rates.get(id)).filter((p): p is PlayerRate => p != null);
-    return { league, rosters, horizon, shape, rates, replacement: replacementLevels(freeAgents), evaluated: inputs.length, evaluations };
+    return {
+      league,
+      rosters,
+      horizon,
+      shape,
+      rates,
+      replacement: replacementLevels(freeAgents),
+      evaluated: inputs.length,
+      evaluations,
+      seasonPoints,
+      aheadWeeks: aheadRows.map(([w]) => w),
+    };
   }
 }
 

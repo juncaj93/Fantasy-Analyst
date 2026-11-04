@@ -349,10 +349,11 @@ describe('the list as a whole', () => {
     expect(rob.reasons.join(' ')).toContain('still moving this week');
   });
 
-  it('admits it cannot see a market price when it says sell high', () => {
+  it('calls a falling story on a good record what it is, news cooling, not a sell (review T8)', () => {
     const fran = rankTrades(candidates).find((s) => s.playerId === 'fall')!;
     expect(fran.verdict).toBe('sell_high');
-    expect(fran.counterpoints.join(' ')).toContain('no market price');
+    expect(fran.label).toBe('News cooling');
+    expect(fran.label).not.toMatch(/sell|trade/i);
   });
 
   it('groups into sections in a fixed order and omits empty ones', () => {

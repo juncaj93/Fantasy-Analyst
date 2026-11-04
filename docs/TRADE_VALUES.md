@@ -295,12 +295,18 @@ unpriced player gets a sentence and not a number.
 
 ## Known limitations
 
-- **A rate is one week's number carried forward.** It is not regressed toward a
-  season-long rate except as a fallback. A player on a hot matchup week is a
-  little overvalued and one on a hard week a little undervalued; the matchup
-  nudges are capped at a few percent.
+- **A rate is half projection, half season average** (November 2026, review
+  T9; `core/tradeValue/restOfSeason.ts`). The projection half is this week's
+  number averaged with Sleeper's next three weeks (`sleeper.aheadPoints`,
+  skipping his bye); the other half is his points per game played this season
+  in this league's scoring (`sleeper.seasonPoints`). Under four games played
+  the projection counts more. Until then a rate was one week's number carried
+  forward, and one matchup set nine weeks. Weeks 13 to 17 have no projection
+  of their own.
 - **No return dates.** Injury weeks are assumptions, not forecasts.
-- **Every playoff week counts the same,** though only six teams play them.
+- **A playoff week counts 1.5 times** (November 2026). Every playoff week
+  counts the same, though only six teams play them, and a top-two seed's bye
+  in week 15 is not known in advance.
 - **Replacement level uses a shortlist** ordered by Sleeper's rank. A hot waiver
   add outside the top ten at his position would be missed.
 - **No picks, no FAAB** (stated on the card).

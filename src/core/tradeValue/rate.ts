@@ -48,14 +48,16 @@ import { decisionPoints } from '../startsit/decisionPoints.ts';
 import type { StartSitEvaluation } from '../startsit/engine.ts';
 import type { Designation } from '../injury/model.ts';
 import { isOutNow, weeklyAvailability } from './availability.ts';
+import { blendRate, PRODUCTION_POSITIONS, type BlendedRate } from './restOfSeason.ts';
 
-export type RateBasis = 'market' | 'published' | 'season_line' | 'recent_week' | 'none';
+export type RateBasis = 'market' | 'published' | 'season_line' | 'recent_week' | 'season_average' | 'none';
 
 export const RATE_BASIS_LABEL: Record<RateBasis, string> = {
   market: 'Vegas week',
   published: 'Sleeper projection',
   season_line: 'season line',
   recent_week: 'earlier week’s Sleeper projection',
+  season_average: 'season average',
   none: 'no projection',
 };
 
@@ -70,9 +72,21 @@ export interface PlayerRate {
   name: string;
   position: string;
   team: string;
-  /** Points per game for the rest of the season, or null when nothing supports one. */
+  /**
+   * Points per game for the rest of the season, or null when nothing supports
+   * one: half his projections, half his season average (`restOfSeason.ts`).
+   */
   rate: number | null;
+  /** Where this week's read came from. */
   basis: RateBasis;
+  /**
+   * This week's number on its own, before the blend, or null when this week is
+   * not a read of him (a bye, ruled out). For "costs you this week", never for
+   * a season value.
+   */
+  weekRate?: number | null;
+  /** What the rate is made of. Absent on a rate built before the blend. */
+  blend?: BlendedRate | null;
   /** One clause on a basis that is not the plain market, or on why there is none. */
   rateNote: string | null;
   /** The base number the rate started from, and the capped nudges added to it. Null on a season line. */
@@ -162,7 +176,14 @@ export function resolveRate(args: {
    * cleared for this league's scoring by the caller. Null when there is none.
    */
   recentWeek?: { week: number; points: number } | null;
-}): { rate: number | null; basis: RateBasis; note: string | null; parts?: { base: number; nudges: number } | null } {
+}): {
+  rate: number | null;
+  basis: RateBasis;
+  note: string | null;
+  parts?: { base: number; nudges: number } | null;
+  /** True when the rate is this week's own read of him, not a stand-in for one. */
+  fromThisWeek?: boolean;
+} {
   const { seasonLine } = args;
   const week = readWeek(args);
   const season = seasonLine != null && Number.isFinite(seasonLine) && seasonLine > 0 ? seasonLine : null;
@@ -172,6 +193,7 @@ export function resolveRate(args: {
       rate: round2(week.weekRate),
       parts: week.parts,
       basis: week.weekBasis,
+      fromThisWeek: true,
       note:
         week.weekBasis === 'published'
           ? 'no complete Vegas week, so Sleeper\u2019s published projection is the base'
@@ -227,6 +249,15 @@ export function buildPlayerRate(args: {
   onReserve?: boolean;
   /** See `resolveRate`'s `recentWeek`. */
   recentWeek?: { week: number; points: number } | null;
+  /**
+   * Sleeper's projections for him in the weeks after this one, in this
+   * league's scoring (`sleeper.aheadPoints`), by week. With `production`, what
+   * turns this week's number into a rest-of-season rate (`restOfSeason.ts`).
+   * Both absent: this week's number alone, as before November 2026.
+   */
+  ahead?: ReadonlyMap<number, number> | null;
+  /** His league points in each game he played this season (`productionGames`). */
+  production?: readonly number[] | null;
 }): PlayerRate {
   const { evaluation } = args;
   const designation = evaluation.injury.designation;
@@ -238,21 +269,62 @@ export function buildPlayerRate(args: {
     byeThisWeek,
     ...(args.recentWeek === undefined ? {} : { recentWeek: args.recentWeek }),
   });
+
+  /*
+   * The rest-of-season rate: his projections, this week and the weeks after
+   * (never his bye, never a zero published for a game he will miss), averaged
+   * with what he has scored per game. A stand-in for this week (a season line,
+   * an earlier week's projection) is used only when no later week is
+   * published for him. A defence and a kicker keep their weekly number.
+   */
+  const blending = (args.ahead != null || args.production != null) && PRODUCTION_POSITIONS.has(evaluation.position);
+  let rate = resolved.rate;
+  let basis = resolved.basis;
+  let note = resolved.note;
+  let blend: BlendedRate | null = null;
+  if (blending) {
+    const later: number[] = [];
+    for (const [week, points] of args.ahead ?? []) {
+      if (week <= (args.weeks[0] ?? 0) || !args.weeks.includes(week) || week === args.byeWeek) continue;
+      if (Number.isFinite(points) && points >= OUT_PLAYER_FLOOR) later.push(points);
+    }
+    const projections =
+      resolved.fromThisWeek && resolved.rate != null
+        ? [resolved.rate, ...later]
+        : later.length > 0
+          ? later
+          : resolved.rate != null
+            ? [resolved.rate]
+            : [];
+    blend = blendRate({ projections, production: args.production ?? [] });
+    rate = blend.rate;
+    if (!resolved.fromThisWeek && later.length > 0) {
+      basis = 'published';
+      note = byeThisWeek
+        ? 'on a bye this week, so his value comes from the weeks after'
+        : 'no number for him this week, so his value comes from the weeks after';
+    } else if (resolved.rate == null && blend.rate != null) {
+      basis = 'season_average';
+      note = 'no projection for him, so his value is his season average';
+    }
+  }
+
   const availability = weeklyAvailability({
     designation,
     onReserve: args.onReserve === true,
     weeks: args.weeks,
     byeWeek: args.byeWeek,
-    rate: resolved.rate,
+    rate,
   });
   return {
     playerId: evaluation.playerId,
     name: evaluation.name,
     position: evaluation.position,
     team: evaluation.team,
-    rate: resolved.rate,
-    basis: resolved.basis,
-    rateNote: resolved.note,
+    rate,
+    basis,
+    rateNote: note,
+    ...(blending ? { weekRate: resolved.fromThisWeek ? resolved.rate : null, blend } : {}),
     rateParts: resolved.parts ?? null,
     designation,
     games: round2(availability.games),

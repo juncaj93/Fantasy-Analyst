@@ -98,7 +98,7 @@ export function resultRows(evaluation: TradeEvaluation): ResultRow[] {
 
 /** What the card says about the deadline, or nothing. */
 export function horizonLine(horizon: TradeHorizonView): string {
-  const season = `Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoffs included.`;
+  const season = `Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoff weeks count 1.5 times.`;
   if (horizon.deadlineWeek == null) return season;
   if (horizon.deadlinePassed) return `${season} The trade deadline was week ${horizon.deadlineWeek}.`;
   const left = horizon.weeksToDeadline ?? 0;

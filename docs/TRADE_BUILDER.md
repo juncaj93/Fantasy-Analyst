@@ -17,7 +17,7 @@ Sleeper himself.
   a top-12 back league-wide by points a game this season, or a back at 12+ on
   this week's Start/Sit number, or one drafted in round 1 or 2.
 - **Want**: players on the team he picked. Mark nobody and the app suggests up
-  to four (three per team for All teams): the players who would most improve
+  to four: the players who would most improve
   his lineup, those that some 1 for 1 with a Sell mark helps both sides with
   first.
 - Marks are kept in this phone's browser storage, per league, with **Clear
@@ -28,8 +28,10 @@ Sleeper himself.
 
 Shapes: 1 for 1, 2 for 1, 1 for 2, and 2 for 2 when both lists have four
 players or fewer. A one-week pass of the lineup solver on both rosters orders
-them; the best ten per team (four per team for All teams) get the full
-evaluation.
+them; the best ten per team get the full evaluation, whether one team is
+asked, the phone sweeps every team one by one, or one request asks all teams
+at once. Until November 2026 the one-request form checked four a team and
+suggested three players, so it saw less than the phone.
 
 ### Every number is Check a trade's
 
@@ -42,14 +44,18 @@ rest-of-season numbers (`tests/trades.builderService.test.ts` asserts it).
 
 ### Alex's gain
 
-The weekly lineup change (depth and bye cover included) weighted:
+The weekly lineup change (depth and bye cover included), on each player's
+rest-of-season rate (half projection, half season average;
+`core/tradeValue/restOfSeason.ts`), weighted:
 
 | week | weight |
 | --- | --- |
-| the week a trade first affects | 3 |
-| the two after it | 2 |
-| other regular-season weeks | 1 |
+| regular-season weeks | 1 |
 | playoff weeks (15 to 17) | 1.5 |
+
+Until November 2026 the first week counted 3 and the next two 2, so one
+week's numbers led (review T1, T9). The same scale as Check a trade and the
+trade ideas.
 
 plus his preferences as Check a trade already writes them (no spare QB or TE
 unless clearly better, lean RB when value is close). A package that adds a QB
@@ -59,7 +65,7 @@ numbers: this week, the next three weeks, and the playoff weeks.
 ### Their gain and their need
 
 The same weighted change on their roster, with no preferences. **A package that
-does not help them by at least one weighted point is never shown.** Their need
+does not help them by the fair-to-both bar is never shown.** Their need
 is read off their own lineup for the next three weeks against their healthy one:
 
 - `their RB2 is Out` (a starter injured for more than one game of the next three);
@@ -83,9 +89,10 @@ players, from the same evaluation), as a share of the larger side:
 
 **Fair to both sides (November 2026, review T10).** The same rule as the trade
 ideas (`core/trades/fairToBoth.ts`): Alex's value edge at most 10%, a player
-the partner would cut counted at zero for him, Alex's lineup gaining 8+ points
-over the rest of the season and theirs 3+. Until then a deal 25% his way was
-Maybe and nothing stopped "give 43 for 3".
+the partner would cut counted at zero for him, Alex's lineup gaining about 0.9
+points per weighted week left and theirs a third of a point (9.5 and 3.5 from
+week 9). Until then a deal 25% his way was Maybe and nothing stopped "give 43
+for 3".
 
 A package that helps them less than a quarter as much as it helps Alex drops
 one level. **No percentage is ever shown**: Sleeper does not publish offers that

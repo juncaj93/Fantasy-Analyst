@@ -191,7 +191,7 @@ describe('emerging, from the ledger up', () => {
 
   it('explains an emerging call with both halves of the window', () => {
     const ranked = board({ surging: [weekly('surging', 2, 4), weekly('surging', 2, 2)] });
-    expect(ranked[0]!.reasons.join(' ')).toContain('new this week — +4 in 7 days against 0 over the 23 before');
+    expect(ranked[0]!.reasons.join(' ')).toContain('new this week: +4 in 7 days against 0 over the 23 before');
   });
 
   it('keeps the sections in the order the screen expects', () => {
@@ -227,6 +227,6 @@ describe('the sell side, from the ledger up', () => {
     ];
     const ranked = board({ star: wellRegarded }, 'mine');
     expect(ranked[0]!.verdict).toBe('sell_high');
-    expect(ranked[0]!.counterpoints.join(' ')).toContain('no market price');
+    expect(ranked[0]!.label).toBe('News cooling');
   });
 });

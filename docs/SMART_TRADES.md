@@ -97,8 +97,9 @@ percents, so there is no "slight edge to you" band any more, and an even deal
 ranks above one leaning their way. Every idea is then put through Check a
 trade (`core/trades/seasonCheck.ts`) and shown only when, over the rest of the
 season, his value edge is at most 10% (a player the partner would cut counts
-zero for him), Alex's lineup gains 8+ points and the partner's 3+
-(`core/trades/fairToBoth.ts`, the one rule Build a trade reads too), and Check
+zero for him), Alex's lineup gains about 0.9 points a weighted week left and
+the partner's a third of one (9.5 and 3.5 from week 9; see below), the one rule
+Build a trade reads too (`core/trades/fairToBoth.ts`), and Check
 a trade does not say it leans to the other team. An idea Check a trade cannot
 value is left off. The board holds ten more ideas behind the five
 (`reserve`) so one left off is replaced, not a gap.
@@ -113,7 +114,46 @@ arriving must start there. A roster with none can take a clean upgrade.
 
 **No kickoff locks.** The ideas' lineups ignore game locks, so the board is
 not blind from Sunday's first kickoff to the week rolling over (part of T1).
-The week's numbers are still the yardstick; rest-of-season value is round 2.
+
+## Round 2 (November 2026): the season, not this week
+
+Review T1 and T9. Before this round every idea was found, gated and ranked on
+this week's lineup, so early-week numbers failed nearly every deal (47 value
+gaps, 25 gains under a point) and none reached the season check.
+
+**A player's value** is his rest-of-season rate (`core/tradeValue/restOfSeason.ts`,
+the one definition Check a trade and Build a trade read too): half his
+projections (this week's number averaged with Sleeper's next three weeks,
+skipping his bye) and half what he has scored per game this season in this
+league's scoring, counting only games he played. With fewer than four games
+the projection counts more. A player on a bye or out this week is valued on
+the weeks he plays and can be traded.
+
+**The weeks.** Weeks 9 to 17; a playoff week counts 1.5 times, so the season
+is 10.5 weighted weeks from week 9. Byes, injuries and IR time are weeks he
+does not play (`availability.ts`).
+
+**The search** (`TradeValueService.priceLeague`, handed to `assembleSmartTrades`
+as `season`). Each player is priced at his expected points in an average
+remaining week; lineups are the best legal lineup on those numbers with a free
+agent at replacement level behind every slot; the value balance is each side's
+season value over a free agent, the number the fair-to-both rule reads (a raw
+weekly sum made every 2-for-1 look like an overpay). Packages inside the value
+band are scored before any outside it. The weekly gates become a first cut
+under the rule (`SEASON_GATES`): 0.45 a week for Alex, the partner no worse
+than a third of a point a week. Each surviving idea then goes through Check a
+trade on the same preparation, with no second read, and the row reads the
+season ("You +14, them +5 over the season").
+
+**The bars**, re-expressed: the November rule's 8 and 3 were a point a week
+and a third of one over nine plain weeks. On the weighted scale that is 0.9 and
+a third of a point per weighted week left, to the half point: 9.5 and 3.5 from
+week 9, 8.5 and 3 from week 10, 7.5 and 3 from week 11.
+
+**When the board is empty**, `/api/diagnostics/smart-trades` carries `closest`:
+the nearest deals, each through Check a trade, with what blocks each
+(`core/trades/closest.ts`). Demo Mode and older support snapshots carry no
+`season` and search on the week, as before.
 
 `outside_range` is the objective sanity boundary. It is evaluated **before any
 manager profile is read**, so no history can carry an offer across it — the
@@ -631,11 +671,9 @@ has seen fail is a gate nobody knows the shape of.
   generated. Sleeper publishes the picks that moved and the ledger stores them;
   valuing them is a separate lane.
 - **No 2-for-2.** Excluded until pruning it can be shown safe.
-- **Value is a weekly score, not rest-of-season.** It carries no schedule, bye
-  or playoff weighting, so a trade is priced on this week's evidence about both
-  players. This is the same limitation every other surface in the app has.
-  *Check a trade* (`docs/TRADE_VALUES.md`) is the rest-of-season view, for any
-  trade the reader brings. The ideas above are unchanged and still weekly.
+- **Rest-of-season value has no matchup view past three weeks.** Weeks 13 to
+  17 carry the player's rate, not a projection for that game: Sleeper's later
+  weeks are not stored.
 - **Need benchmarks come from rosters, not free agents.** A league where a
   position is scarce on rosters but plentiful on waivers will read as scarcer
   than it is.

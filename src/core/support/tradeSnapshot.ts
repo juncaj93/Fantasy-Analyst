@@ -169,6 +169,7 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
     ...(input.request.currentWeek ? { currentWeek: input.request.currentWeek } : {}),
     withReserve: true,
     ...(input.request.published ? { published: input.request.published } : {}),
+    ...(input.request.season ? { season: input.request.season } : {}),
   }), seasonChecks).board;
 
   /*
@@ -231,6 +232,15 @@ export function captureTradeSnapshot(input: TradeCaptureInput): SupportSnapshot<
         ...(seasonChecks.size > 0 ? { seasonChecks: [...seasonChecks] } : {}),
         ...(input.request.currentWeek ? { currentWeek: input.request.currentWeek } : {}),
         ...(input.request.published && input.request.published.size > 0 ? { published: [...input.request.published] } : {}),
+        ...(input.request.season
+          ? {
+              season: {
+                rates: [...input.request.season.rates],
+                replacement: [...input.request.season.replacement],
+                weights: [...input.request.season.weights],
+              },
+            }
+          : {}),
       },
       output,
       warnings: output.warnings,
@@ -269,6 +279,15 @@ export function replayTradeSnapshot(snapshot: SupportSnapshot<TradeOfferPayload>
     ...(inputs.currentWeek ? { currentWeek: inputs.currentWeek } : {}),
     withReserve: true,
     ...(inputs.published ? { published: new Map(inputs.published) } : {}),
+    ...(inputs.season
+      ? {
+          season: {
+            rates: new Map(inputs.season.rates),
+            replacement: new Map(inputs.season.replacement),
+            weights: inputs.season.weights,
+          },
+        }
+      : {}),
   }), new Map(inputs.seasonChecks ?? [])).board;
 
   const differences: ReplayReport['differences'] = [];

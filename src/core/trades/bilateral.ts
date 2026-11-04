@@ -50,7 +50,7 @@ import type { ArbitrageRead } from './arbitrage.ts';
 import type { OfferCategory } from './category.ts';
 import { tradeExcluded, type RosterDelta, type RosterView } from './rosterUtility.ts';
 import { counterpartNeed, scarcityLine, scarcityOf, type ScarcityCost } from './rosterFit.ts';
-import { FAIR_TO_BOTH, wholePercent } from './fairToBoth.ts';
+import { FAIR_TO_BOTH, valueEdge, wholePercent } from './fairToBoth.ts';
 import { isRareTrader } from './activity.ts';
 
 // ------------------------------------------------------------- the bounds --
@@ -301,6 +301,27 @@ export const ARBITRAGE_SCORED_SLOTS = 3;
 export const MATERIAL_HARM = 0.75;
 
 /**
+ * The same three bars on a search priced on the season (`SeasonPricing`,
+ * review T1), in points of an average remaining week.
+ *
+ * They are a first cut, not the rule. Every idea that passes them is put
+ * through Check a trade, and the fair-to-both rule there decides: about 0.9 a
+ * week for Alex and a third of a point for the partner, over the weeks left
+ * (`fairToBoth.ts`). So these sit under that rule, by about half for Alex and
+ * by a third of a point for the partner: a deal near the bar on the average
+ * week can clear it once byes, injuries and bench cover are counted week by
+ * week, and the season check, not this, is the one that says no.
+ */
+export const SEASON_GATES = {
+  /** Per average week: half the fair-to-both rate. */
+  userGain: FAIR_TO_BOTH.userPerWeek / 2,
+  /** A buy-low or sell-high may cost this much a week here; the season check still needs Alex's gain. */
+  arbitrageUserGain: -0.5,
+  /** The partner may look this much worse on the average week. */
+  partnerHarm: FAIR_TO_BOTH.partnerPerWeek,
+} as const;
+
+/**
  * Ideas held behind the board for the season check (review T3).
  *
  * The fair-to-both rule is read on the season, after the search, so some
@@ -355,8 +376,13 @@ export interface OfferPlayer {
   playerId: string;
   name: string;
   position: string;
-  /** Objective value: the comparable start/sit score. */
+  /**
+   * Objective value: the comparable start/sit score this week, or on a search
+   * priced on the season, his expected points in an average remaining week.
+   */
   value: number;
+  /** Rest-of-season value over a free agent, on a search priced on the season. */
+  seasonValue?: number;
 }
 
 export interface Fairness {
@@ -519,6 +545,12 @@ export interface Rejection {
   get: string[];
   reason: RejectionReason;
   detail: string;
+  /**
+   * The numbers it was turned away on, for a package that reached the gates:
+   * the value gap (signed, positive is the user's way) and each side's lineup
+   * change. For the probe's "closest ideas"; never on a screen.
+   */
+  measure?: { gap?: number; userGain?: number; partnerGain?: number };
 }
 
 export interface BilateralReport {
@@ -895,7 +927,7 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
     notes,
     pricing: {
       ...coverage,
-      line: surfaced.length === 0 && coverage.tooThin ? null : unpricedLine(coverage),
+      line: surfaced.length === 0 && coverage.tooThin ? null : unpricedLine(coverage, input.me.seasonValueOf != null),
     },
   };
 }
@@ -905,12 +937,15 @@ export function findBilateralTrades(input: BilateralInput): BilateralReport {
  * players by name — the ones they can do something about — capped at four so
  * the line stays a line. Null when everybody playing is priced.
  */
-export function unpricedLine(coverage: Omit<PricingCoverage, 'line'>): string | null {
+export function unpricedLine(coverage: Omit<PricingCoverage, 'line'>, seasonal = false): string | null {
   if (coverage.unpriced === 0) return null;
-  const head =
-    `${coverage.unpriced} of ${coverage.priced + coverage.unpriced} rostered players ` +
-    `${coverage.unpriced === 1 ? 'has' : 'have'} no market price this week and ` +
-    `${coverage.unpriced === 1 ? 'is' : 'are'} left out of trade ideas until the books post lines.`;
+  const head = seasonal
+    ? `${coverage.unpriced} of ${coverage.priced + coverage.unpriced} rostered players ` +
+      `${coverage.unpriced === 1 ? 'has' : 'have'} no projection and no games this season, so ` +
+      `${coverage.unpriced === 1 ? 'is' : 'are'} left out of trade ideas.`
+    : `${coverage.unpriced} of ${coverage.priced + coverage.unpriced} rostered players ` +
+      `${coverage.unpriced === 1 ? 'has' : 'have'} no market price this week and ` +
+      `${coverage.unpriced === 1 ? 'is' : 'are'} left out of trade ideas until the books post lines.`;
   const mine = coverage.mineUnpriced;
   if (mine.length === 0) return head;
   const more = mine.length > 4 ? ` and ${mine.length - 4} more` : '';
@@ -1136,6 +1171,34 @@ export function generateCandidates(args: {
   const out: TradeCandidatePackage[] = [];
   const seen = new Set<string>();
 
+  /*
+   * On the season, a package outside the fair-to-both value band goes behind
+   * every one inside it (review T1), the order Build a trade already keeps.
+   * The ordering above likes what helps the partner most, which is what
+   * overpays; on the November board 47 of the scored packages died at the
+   * value gate while balanced ones were never scored. Each side's value is
+   * its season value over a free agent, the number the rule reads.
+   */
+  const seasonValueOf = (view: RosterView, ids: readonly string[]) =>
+    ids.reduce((sum, id) => sum + (view.seasonValueOf?.get(id) ?? 0), 0);
+  const outsideBand = (give: string[], get: string[]): number => {
+    if (me.seasonValueOf == null) return 0;
+    const edge = valueEdge(seasonValueOf(me, give), seasonValueOf(them, get));
+    const inside = wholePercent(edge) <= wholePercent(FAIR_TO_BOTH.userEdgeMax) && wholePercent(-edge) <= wholePercent(FAIR_TO_BOTH.partnerEdgeMax);
+    return inside ? 0 : 1000;
+  };
+  /* The filler that brings a 2-for-1 nearest even, on the season; the first useful one on the week. */
+  const fillerFor = (give: { id: string }, target: string, giveValue: number) => {
+    const eligible = giveable.filter((g) => g.id !== give.id && (me.valueOf.get(g.id) ?? 0) <= giveValue && g.useful > 0);
+    if (me.seasonValueOf == null || eligible.length <= 1) return eligible[0];
+    const getValue = seasonValueOf(them, [target]);
+    return [...eligible].sort(
+      (a, b) =>
+        Math.abs(valueEdge(seasonValueOf(me, [give.id, a.id]), getValue)) -
+          Math.abs(valueEdge(seasonValueOf(me, [give.id, b.id]), getValue)) || a.id.localeCompare(b.id),
+    )[0];
+  };
+
   /**
    * What an arbitrage read is worth in the pruning order, in upgrade points.
    *
@@ -1216,7 +1279,7 @@ export function generateCandidates(args: {
     }
 
     const boost = arbitrageBoost(give, get);
-    out.push({ partnerKey, give, get, priority: round3(priority + boost.delta), arbitrage: boost.carries });
+    out.push({ partnerKey, give, get, priority: round3(priority + boost.delta - outsideBand(give, get)), arbitrage: boost.carries });
   };
 
   for (const target of targets) {
@@ -1238,9 +1301,7 @@ export function generateCandidates(args: {
        * not a consolidation, it is two main pieces.
        */
       if (bounds.maxPackageSize >= 2 && giveValue < targetValue) {
-        const filler = giveable.find(
-          (g) => g.id !== give.id && (me.valueOf.get(g.id) ?? 0) <= giveValue && g.useful > 0,
-        );
+        const filler = fillerFor(give, target.id, giveValue);
         if (filler) add([give.id, filler.id].sort(), [target.id], target.upgrade + give.useful * 0.5);
       }
 
@@ -1365,8 +1426,16 @@ function evaluate(args: {
   arbitrage: ReadonlyMap<string, ArbitrageRead>;
 }): OfferEvaluation | null {
   const { candidate, me, them, partner } = args;
+  const measure: NonNullable<Rejection['measure']> = {};
   const reject = (reason: RejectionReason, detail: string) => {
-    args.rejections.push({ partnerKey: partner.key, give: candidate.give, get: candidate.get, reason, detail });
+    args.rejections.push({
+      partnerKey: partner.key,
+      give: candidate.give,
+      get: candidate.get,
+      reason,
+      detail,
+      ...(Object.keys(measure).length > 0 ? { measure: { ...measure } } : {}),
+    });
     return null;
   };
 
@@ -1380,7 +1449,17 @@ function evaluate(args: {
 
   // --------------------------------------------------------- gate 1: value --
   const fairness = fairnessOf(giving, getting);
+  measure.gap = fairness.gap;
   if (fairness.band === 'outside_range') {
+    /*
+     * On the season a lineup is one small assignment, so both sides' changes
+     * are measured even here, for the probe's closest ideas. On the week the
+     * optimiser is the expensive part and this gate is first to spare it.
+     */
+    if (me.seasonValueOf != null) {
+      measure.userGain = me.delta(candidate.give, candidate.get).starterGain;
+      measure.partnerGain = them.delta(candidate.get, candidate.give).starterGain;
+    }
     return reject(
       'value_gap_outside_range',
       `objective values are ${Math.round(Math.abs(fairness.gap) * 100)}% apart, past the recommendation range`,
@@ -1407,6 +1486,7 @@ function evaluate(args: {
 
   // ------------------------------------------------ gate 2: does it help me --
   const userDelta = me.delta(candidate.give, candidate.get);
+  measure.userGain = userDelta.starterGain;
   if (!userDelta.legal) return reject('opens_hole_for_user', 'it would leave a starting slot of yours empty');
   /*
    * Every player in the package is priced — `tradeableFrom` sees to that — but
@@ -1432,13 +1512,21 @@ function evaluate(args: {
    * legal, no material harm, the counterparty's own roster logic — is the same
    * code running on the same package.
    */
-  const bar = strongest.length > 0 ? MIN_ARBITRAGE_USER_GAIN : MIN_USER_GAIN;
+  const seasonal = me.seasonValueOf != null;
+  const bar = seasonal
+    ? strongest.length > 0
+      ? SEASON_GATES.arbitrageUserGain
+      : round2(SEASON_GATES.userGain)
+    : strongest.length > 0
+      ? MIN_ARBITRAGE_USER_GAIN
+      : MIN_USER_GAIN;
+  const unit = seasonal ? ' a week' : '';
   if (userDelta.starterGain < bar) {
     return reject(
       'user_benefit_negligible',
       strongest.length > 0
-        ? `your lineup would lose ${Math.abs(userDelta.starterGain).toFixed(1)} pts, past the ${Math.abs(bar)} pt this arbitrage may cost`
-        : `your lineup would gain ${userDelta.starterGain.toFixed(1)} pts, below the ${MIN_USER_GAIN} pt bar`,
+        ? `your lineup would lose ${Math.abs(userDelta.starterGain).toFixed(1)} pts${unit}, past the ${Math.abs(bar)} pt this arbitrage may cost`
+        : `your lineup would gain ${userDelta.starterGain.toFixed(1)} pts${unit}, below the ${bar} pt bar`,
     );
   }
 
@@ -1482,16 +1570,18 @@ function evaluate(args: {
 
   // ------------------------------------ gate 3: could they defend accepting --
   const partnerDelta = them.delta(candidate.get, candidate.give);
+  measure.partnerGain = partnerDelta.starterGain;
   if (!partnerDelta.legal) {
     return reject('opens_hole_for_counterparty', 'it would leave a starting slot of theirs empty');
   }
   if (partnerDelta.unpricedMoved.length > 0) {
     return reject('unpriced_lineup', unpricedLineupDetail(them, partnerDelta.unpricedMoved, 'their'));
   }
-  if (partnerDelta.starterGain < -MATERIAL_HARM) {
+  const harm = seasonal ? SEASON_GATES.partnerHarm : MATERIAL_HARM;
+  if (partnerDelta.starterGain < -harm) {
     return reject(
       'harms_counterparty',
-      `their lineup would lose ${Math.abs(partnerDelta.starterGain).toFixed(1)} pts, which they would decline`,
+      `their lineup would lose ${Math.abs(partnerDelta.starterGain).toFixed(1)} pts${unit}, which they would decline`,
     );
   }
 
@@ -1530,7 +1620,7 @@ function evaluate(args: {
    * `applyLineupPreferences` keeps about naming correlation only when
    * correlation moved something.
    */
-  const carriedByArbitrage = strongest.length > 0 && netGain < MIN_USER_GAIN;
+  const carriedByArbitrage = strongest.length > 0 && netGain < (seasonal ? SEASON_GATES.userGain : MIN_USER_GAIN);
   const category: OfferCategory = carriedByArbitrage ? strongest[0]!.kind : 'upgrade';
 
   const breakdown = scoreOf({
@@ -1573,7 +1663,7 @@ function evaluate(args: {
       ...scarcity.costs.map((c) => scarcityLine(me, c)),
       ...caveatsFor({ me, giving, user: userSide, counterparty: partnerSide, fairness, managerFit }),
     ],
-    headline: headlineFor({ user: userSide, counterparty: partnerSide }),
+    headline: headlineFor({ user: userSide, counterparty: partnerSide, perWeek: seasonal }),
   };
 }
 
@@ -1590,7 +1680,14 @@ function playerOf(view: RosterView, id: string): OfferPlayer | null {
   const value = view.valueOf.get(id);
   const position = view.positionOf.get(id);
   if (value == null || !position) return null;
-  return { playerId: id, name: view.nameOf.get(id) ?? id, position, value: round2(value) };
+  const seasonValue = view.seasonValueOf?.get(id);
+  return {
+    playerId: id,
+    name: view.nameOf.get(id) ?? id,
+    position,
+    value: round2(value),
+    ...(seasonValue != null ? { seasonValue: Math.round(seasonValue * 10) / 10 } : {}),
+  };
 }
 
 /**
@@ -1603,10 +1700,19 @@ function playerOf(view: RosterView, id: string): OfferPlayer | null {
  * calibrated against fantasy points when the first one already is.
  */
 export function fairnessOf(give: readonly OfferPlayer[], get: readonly OfferPlayer[]): Fairness {
-  const outgoing = round2(give.reduce((sum, p) => sum + p.value, 0));
-  const incoming = round2(get.reduce((sum, p) => sum + p.value, 0));
+  /*
+   * On the season, each side's rest-of-season value over a free agent, the
+   * number Check a trade's fair-to-both rule reads (review T1). A weekly sum
+   * of raw points made every 2-for-1 look like an overpay: two bench players
+   * at 9 and 8 add to 17 against a starter at 13, yet a free agent would score
+   * 7 of each of their 9 and 8.
+   */
+  const seasonal = [...give, ...get].every((p) => p.seasonValue != null);
+  const pick = (p: OfferPlayer) => (seasonal ? (p.seasonValue ?? 0) : p.value);
+  const outgoing = round2(give.reduce((sum, p) => sum + pick(p), 0));
+  const incoming = round2(get.reduce((sum, p) => sum + pick(p), 0));
   const larger = Math.max(outgoing, incoming);
-  const gap = larger <= 0 ? 0 : round3((incoming - outgoing) / larger);
+  const gap = seasonal ? valueEdge(outgoing, incoming) : larger <= 0 ? 0 : round3((incoming - outgoing) / larger);
 
   /*
    * Fair to both sides (Alex, November 2026, review T3): his edge stops at
@@ -1898,10 +2004,10 @@ function caveatsFor(args: {
 }
 
 /** The one line a collapsed row shows. Net benefit, in the app's own units. */
-function headlineFor(args: { user: SideOutcome; counterparty: SideOutcome }): string {
+function headlineFor(args: { user: SideOutcome; counterparty: SideOutcome; perWeek?: boolean }): string {
   // Signed once, here: a negative gain printed as "+-0.2" on the 29 September board.
   const signed = (v: number) => `${Math.round(v * 10) < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
-  const mine = `${signed(args.user.starterGain)} to your lineup`;
+  const mine = `${signed(args.user.starterGain)}${args.perWeek ? ' a week' : ''} to your lineup`;
   if (args.counterparty.starterGain > 0) {
     return `${mine}, ${signed(args.counterparty.starterGain)} to theirs`;
   }
