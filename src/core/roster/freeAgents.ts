@@ -148,3 +148,39 @@ export function publishedFreeAgentIds(
   }
   return ids;
 }
+
+/**
+ * Sleeper's most-added free agents, scanned too (review finding W10, round 6).
+ *
+ * The draft-order slice and the published-week slice both miss a player whose
+ * role just grew: an undrafted back who took over a backfield, a receiver
+ * promoted after a trade. The league's managers find him first, and Sleeper's
+ * trending adds say so. The list is already read for bids (the daily
+ * capture), so this costs only the extra players' own rows in the batched
+ * input reads. At most {@link TRENDING_EXTRA} names, best rank first.
+ */
+export const TRENDING_EXTRA = 10;
+
+export function trendingFreeAgentIds(
+  players: CanonicalPlayer[],
+  opts: {
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+    /** Player id to his rank on Sleeper's trending adds (1 is the most added). Null rank: off the list now. */
+    trending: ReadonlyMap<string, { rank: number | null }>;
+    exclude: ReadonlySet<string>;
+    limit?: number;
+  },
+): string[] {
+  const byId = new Map(players.map((p) => [p.id, p] as const));
+  return [...opts.trending]
+    .filter(([id, t]) => {
+      const p = byId.get(id);
+      if (t.rank == null || !p || !p.active || opts.rosteredIds.has(id) || opts.exclude.has(id)) return false;
+      if (opts.startable.size > 0 && !opts.startable.has(p.position)) return false;
+      return !WHOLE_SLATE_POSITIONS.has(p.position.toUpperCase());
+    })
+    .sort((a, b) => (a[1].rank ?? 0) - (b[1].rank ?? 0) || a[0].localeCompare(b[0]))
+    .slice(0, opts.limit ?? TRENDING_EXTRA)
+    .map(([id]) => id);
+}

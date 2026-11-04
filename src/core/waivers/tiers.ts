@@ -22,7 +22,17 @@
  *   + Alex's roster preferences, labelled and small
  *
  * The first week counts in full and the next two at half, so a bye two weeks
- * out shows up without outweighing next Sunday. The player cut is inside the
+ * out shows up without outweighing next Sunday.
+ *
+ * **Rest of season (review round 6, November 2026).** With `season` on the
+ * request (production always sets it), the weeks run to the end of the
+ * playoffs with Trades' weights (each week once, a playoff week 1.5). The
+ * near three weeks keep their own weekly numbers; every week after is the
+ * player's rest-of-season rate (`core/value/restOfSeason.ts`, the one Trades
+ * uses), and in those weeks an empty slot is a free agent at replacement
+ * level, because one can be added that week for nothing. The drop is chosen
+ * on the same season basis, and a season starter is never the drop. Every
+ * bar is scaled to the longer horizon, so the same gain per week clears it. The player cut is inside the
  * subtraction: dropping someone who starts in week 3 costs exactly his week-3
  * points. Nothing here re-scores a player. Every number is the Start/Sit
  * decision number (`tradeValue/rate.ts`), so the betting line or projection is
@@ -166,6 +176,13 @@ export interface TierPlayer {
   weekFrom?: (number | null)[];
   /** His `rate` is Sleeper's rather than a full Vegas week: ranks two points lower. */
   rateBorrowed?: boolean;
+  /**
+   * His rest-of-season rate, the one Trades values him on
+   * (`core/value/restOfSeason.ts`): half his projections, half his points per
+   * game played. Set with {@link TierRequest.season}; the drop guards and the
+   * weeks after the near window read it. Absent: `rate`.
+   */
+  seasonRate?: number | null;
   /** `out`, `questionable`, `ir`... from the injury layer. */
   designation: string;
   byeWeek: number | null;
@@ -244,6 +261,28 @@ export interface TierRequest {
    * move, `consider` a Worth considering row. Absent: the tiers as before.
    */
   startNow?: ReadonlyMap<string, StartNowCall> | undefined;
+  /**
+   * Rest of season (review round 6, W3, W4, W9). With it, `weeks` runs to the
+   * end of the league's playoffs and `weights` are the season weights (a
+   * playoff week 1.5), the first {@link TierSeason.near} weeks are the near
+   * window as before, and every bar scales with {@link TierSeason.scale}.
+   * Absent: the three-week window, exactly as before.
+   */
+  season?: TierSeason | undefined;
+}
+
+export interface TierSeason {
+  /** How many leading weeks are the near window (their own weekly numbers). The rest are season weeks. */
+  near: number;
+  /** Replacement level by position on the rest-of-season rate: the best free agents' average. */
+  replacement: ReadonlyMap<string, number>;
+  /**
+   * The season's weighted weeks over the old window's: every bar in weighted
+   * points (Do this, Worth considering, the Watch list, a dead spot, the drop
+   * slack, the toss-up bar on a useful cut, the preferences) is multiplied by
+   * it, so each keeps its old per-week meaning on a longer horizon.
+   */
+  scale: number;
 }
 
 /** One free agent's call from `pickupStart.ts`, as the tiers read it. */
@@ -347,8 +386,10 @@ export interface WaiverTierPlan {
   consider: TierMove[];
   watch: TierMove[];
   dropReady: DeadSpot[];
-  /** The window, so a reader can see which weeks were counted. */
+  /** The near window, so a reader can see which weeks were counted week by week. */
   window: { weeks: number[]; weights: number[] };
+  /** Every week the gain counts, to the end of the playoffs, and the scale on the bars. Absent: the window only. */
+  season?: { weeks: number[]; weights: number[]; scale: number };
   thresholds: { doThis: number; consider: number; watch: number };
   /** How many free agents were valued, and how many had no number. */
   valued: number;
@@ -390,6 +431,18 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   const weeks = [...request.weeks];
   const slots = slotsOf(request.shape);
   const excluded = request.excludedPositions;
+  /*
+   * Rest of season (round 6). `near` weeks are the old window on their own
+   * weekly numbers; the weeks after are each player's season rate, and in
+   * those weeks an empty starting slot is filled by a free agent at
+   * replacement level, because one can be added that week for nothing (a
+   * free QB covers one bye week). `bar` scales every weighted-points bar.
+   */
+  const season = request.season && request.season.near < weeks.length ? request.season : null;
+  const near = season ? season.near : weeks.length;
+  const scale = season ? season.scale : 1;
+  const bar = (points: number) => points * scale;
+  const tailFill = season ? fillers(season.replacement, slots) : [];
 
   const valued = request.roster.filter((p) => p.rate != null);
   const memo = new Map<string, Valuation>();
@@ -400,7 +453,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       .join(',');
     const hit = memo.get(key);
     if (hit) return hit;
-    const result = valueRoster(players, slots, weeks, weights, request.replacement);
+    const result = valueRoster(players, slots, weeks, weights, request.replacement, { near, tailFill, tailReplacement: season?.replacement ?? null });
     memo.set(key, result);
     return result;
   };
@@ -408,6 +461,18 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   const base = value(valued);
   const overReplacement = (p: TierPlayer): number | null =>
     p.rate == null ? null : round2(p.rate - (request.replacement.get(p.position) ?? 0));
+  /*
+   * Over a free agent for the rest of the season (W9): the add and the drop
+   * on one basis, his season rate against the season replacement level. A
+   * one-week bye or one big matchup cannot move it. Without the season, this
+   * week's number as before.
+   */
+  const seasonRateOf = (p: TierPlayer): number | null => (season ? (p.seasonRate ?? p.rate) : p.rate);
+  const overSeason = (p: TierPlayer): number | null => {
+    if (!season) return overReplacement(p);
+    const rate = seasonRateOf(p);
+    return rate == null ? null : round2(rate - (season.replacement.get(p.position) ?? request.replacement.get(p.position) ?? 0));
+  };
 
   /* Who may be cut, and what each cut costs on its own. */
   const cuttable = valued.filter((p) => !p.onReserve && !excluded.has(p.position));
@@ -423,8 +488,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   for (const p of cuttable) {
     if (request.protections.has(p.playerId)) continue;
     const cost = dropCost.get(p.playerId) ?? 0;
-    const over = overReplacement(p);
-    if (startsAny(p.playerId) || cost >= TIER_RULES.deadCost) continue;
+    const over = overSeason(p);
+    if (startsAny(p.playerId) || cost >= bar(TIER_RULES.deadCost)) continue;
     if (over != null && over > TIER_RULES.deadOverReplacement) continue;
     dropReady.push({
       playerId: p.playerId,
@@ -485,7 +550,29 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const sig = signals?.get(p.playerId);
     if (!sig || !sig.inLineup || isDeadSpot(sig)) return false;
     /* An injured starter is still a starter: an injury never makes him cheaper to cut. */
-    return !(p.position === c.position && (c.rate ?? 0) >= (p.rate ?? 0) + DROP_RULES.clearlyBetter);
+    return !(p.position === c.position && (seasonRateOf(c) ?? 0) >= (seasonRateOf(p) ?? 0) + DROP_RULES.clearlyBetter);
+  };
+  /*
+   * A season starter is never the drop (round 6): anybody who would still be
+   * in the best lineup on season rates with the add on the roster, healthy,
+   * byes ignored. A bye, an injury this week or one week's matchup never makes
+   * him cheaper to cut: Jordan Love (about 22 a game) is not dropped for Sam
+   * Darnold because Darnold has the better week 9 and both have a week 11 bye.
+   */
+  const startersMemo = new Map<string, Set<string>>();
+  const seasonStarters = (c: TierCandidate): Set<string> => {
+    if (!season) return new Set<string>();
+    const hit = startersMemo.get(c.playerId);
+    if (hit) return hit;
+    const pool: LineupCandidate[] = [...valued.filter((p) => !p.onReserve), c].map((p) => ({
+      id: p.playerId,
+      position: p.position,
+      value: Math.max(0, seasonRateOf(p) ?? 0),
+    }));
+    const result = bestLineup(slots, pool);
+    const keep = new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0 && x.id !== c.playerId).map((x) => x.id));
+    startersMemo.set(c.playerId, keep);
+    return keep;
   };
   const optionsFor = (c: TierCandidate, roster: readonly TierPlayer[], spots: number): Option[] => {
     const before = value(roster);
@@ -508,7 +595,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
      */
     const reserveIds = request.openReserve > 0 ? (request.reserveEligible ?? new Set<string>()) : new Set<string>();
     for (const p of roster) if (reserveIds.has(p.playerId) && !p.onReserve && !excluded.has(p.position)) tryDrop(p, true);
-    const cOver = overReplacement(c) ?? 0;
+    const cOver = overSeason(c) ?? 0;
+    const keep = seasonStarters(c);
     const allowed = roster.filter(
       (p) =>
         !p.onReserve &&
@@ -517,6 +605,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         !excluded.has(p.position) &&
         p.rate != null &&
         !lineupLocked(p, c) &&
+        !keep.has(p.playerId) &&
         /*
          * Never cut a better player for a worse one because of a short-term bye
          * or injury: nobody further above a free agent at his position than the
@@ -524,8 +613,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
          * add's own points a game. Both, because points are not comparable
          * across positions (a quarterback's 21 is not a back's 21).
          */
-        (overReplacement(p) ?? 0) < cOver &&
-        (!signals || !readings.has(p.playerId) || (scoreOf(p.playerId) ?? 0) < (c.rate ?? 0)),
+        (overSeason(p) ?? 0) < cOver &&
+        (!signals || !readings.has(p.playerId) || (scoreOf(p.playerId) ?? 0) < (seasonRateOf(c) ?? 0)),
     );
     /*
      * With the drop score (round 2), a protected player (a high pick held as a
@@ -541,11 +630,14 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       if (!signals) return list.sort((a, b) => gainOf(b) - gainOf(a) || (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''));
       /* About as good for the lineup, then the lowest drop score; an open spot first. */
       const top = list.reduce((m, o) => Math.max(m, gainOf(o)), -Infinity);
-      const near = (o: Option) => gainOf(o) >= top - DROP_RULES.gainSlack;
+      const close = (o: Option) => gainOf(o) >= top - bar(DROP_RULES.gainSlack);
+      /* With the season (round 6): the lowest season value over a free agent is the drop, then the lowest drop score. */
+      const worth = (o: Option) => (o.drop == null ? -Infinity : season ? (overSeason(o.drop) ?? 0) : 0);
       return list.sort(
         (a, b) =>
-          Number(near(b)) - Number(near(a)) ||
-          (near(a) ? (a.drop ? (scoreOf(a.drop.playerId) ?? 99) : -1) - (b.drop ? (scoreOf(b.drop.playerId) ?? 99) : -1) : 0) ||
+          Number(close(b)) - Number(close(a)) ||
+          (close(a) && season ? worth(a) - worth(b) : 0) ||
+          (close(a) ? (a.drop ? (scoreOf(a.drop.playerId) ?? 99) : -1) - (b.drop ? (scoreOf(b.drop.playerId) ?? 99) : -1) : 0) ||
           gainOf(b) - gainOf(a) ||
           (a.drop?.name ?? '').localeCompare(b.drop?.name ?? ''),
       );
@@ -562,7 +654,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       prefs.push({
         key: 'spare_qb_te',
         label: `You don’t carry a spare ${c.position} unless he is clearly better`,
-        points: TIER_PREFS.spareQbTe,
+        points: round2(bar(TIER_PREFS.spareQbTe)),
       });
     }
     return prefs;
@@ -653,7 +745,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   };
   const stashUnknown = new Set<string>();
   for (const m of best) {
-    if (m.gain < TIER_RULES.consider && stashable(m)) {
+    const longOut = season != null && ['ir', 'pup'].includes(candidates.find((x) => x.playerId === m.playerId)?.designation ?? '');
+    if ((m.gain < bar(TIER_RULES.consider) || longOut) && stashable(m)) {
       const verdict = request.stash?.get(m.playerId) ?? null;
       m.reasonCode = 'ir_stash';
       if (verdict == null) {
@@ -670,7 +763,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   }
 
   const order = (a: TierMove, b: TierMove) =>
-    sortKey(b) - sortKey(a) || b.gain - a.gain || a.name.localeCompare(b.name);
+    sortKey(b, scale) - sortKey(a, scale) || b.gain - a.gain || a.name.localeCompare(b.name);
   const ranked = best.filter((m) => m.planExcluded == null).sort(order);
 
   const isHole = (m: TierMove) => m.reasonCode === 'hole_bye' || m.reasonCode === 'hole_injury' || m.reasonCode === 'hole_empty';
@@ -758,7 +851,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   }
   const big = doThese.some((m) => m.reasonCode === 'start_now')
     ? undefined
-    : ranked.find((m) => m.reasonCode === 'upgrade' && m.gain >= TIER_RULES.doThis);
+    : ranked.find((m) => m.reasonCode === 'upgrade' && m.gain >= bar(TIER_RULES.doThis));
   if (big) {
     big.reasonCode = 'big_upgrade';
     doThese.push(big);
@@ -789,7 +882,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     }
     const stash = m.reasonCode === 'ir_stash' && !stashUnknown.has(m.playerId) && !stashTaken;
     const tie = m.reasonCode === 'start_tie';
-    const qualifies = (m.gain >= TIER_RULES.consider && m.reasonCode !== 'ir_stash') || stash || tie;
+    const qualifies = (m.gain >= bar(TIER_RULES.consider) && m.reasonCode !== 'ir_stash') || stash || tie;
     if (qualifies && (consider.length < TIER_RULES.maxConsider || tie)) {
       m.tier = 'consider';
       if (stash) stashTaken = true;
@@ -797,7 +890,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       if (need) byNeed.set(need, m);
       continue;
     }
-    if ((m.gain >= TIER_RULES.watch || stashUnknown.has(m.playerId)) && watch.length < TIER_RULES.maxWatch) {
+    if ((m.gain >= bar(TIER_RULES.watch) || stashUnknown.has(m.playerId)) && watch.length < TIER_RULES.maxWatch) {
       m.tier = 'watch';
       watch.push(m);
       if (need) byNeed.set(need, m);
@@ -935,7 +1028,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   };
   const realHole = (m: TierMove) => isHole(m) || m.reasonCode === 'bye_depth' || m.reasonCode === 'ir_stash';
   for (const m of [...consider]) {
-    if (realHole(m) || !usefulCut(m) || clearsTossUp(m.gain)) continue;
+    if (realHole(m) || !usefulCut(m) || clearsTossUp(m.gain / scale)) continue;
     if (m.drop && used.get(m.drop.playerId) === m.name) used.delete(m.drop.playerId);
     /*
      * A "Ties this week" pickup stays Worth considering (round 4), but the
@@ -997,7 +1090,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const list = optionsFor(candidateOf(m), after, Math.max(0, request.openSpots - (first.drop ? 0 : 1)));
     const top = list.find((o) => o.drop == null || o.drop.playerId === m.drop?.playerId) ?? list[0];
     const second = top ? round2(top.lineup + top.insurance) : 0;
-    if (second < TIER_RULES.consider) m.alternativeTo = first.name;
+    if (second < bar(TIER_RULES.consider)) m.alternativeTo = first.name;
   }
 
   /*
@@ -1062,8 +1155,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     consider,
     watch,
     dropReady,
-    window: { weeks, weights },
-    thresholds: { doThis: TIER_RULES.doThis, consider: TIER_RULES.consider, watch: TIER_RULES.watch },
+    window: { weeks: weeks.slice(0, near), weights: weights.slice(0, near) },
+    ...(season ? { season: { weeks, weights, scale: round2(scale) } } : {}),
+    thresholds: { doThis: round2(bar(TIER_RULES.doThis)), consider: round2(bar(TIER_RULES.consider)), watch: round2(bar(TIER_RULES.watch)) },
     valued: candidates.length,
     unvalued,
     all: best.sort(order),
@@ -1195,8 +1289,32 @@ function startNowReason(call: StartNowCall): string {
   return call.displaces ? tieLine(call.displaces) : 'Ties your best lineup this week';
 }
 
-function sortKey(m: TierMove): number {
-  return m.gain + (m.position === 'RB' ? TIER_PREFS.rbLean : 0);
+function sortKey(m: TierMove, scale = 1): number {
+  return m.gain + (m.position === 'RB' ? TIER_PREFS.rbLean * scale : 0);
+}
+
+interface WeekSolve {
+  total: number;
+  credit: number;
+  started: Set<string>;
+  picks: (LineupCandidate | null)[];
+}
+
+/** A replacement-level stand-in's id. Never a real player, never in `started`. */
+const FILL_PREFIX = '~fill:';
+
+/**
+ * One stand-in per starting slot a position can fill, at that position's
+ * season replacement level: the free agent Alex can add in that week for
+ * nothing. Only the season weeks (after the near window) use them.
+ */
+function fillers(replacement: ReadonlyMap<string, number>, slots: readonly LineupSlotSpec[]): LineupCandidate[] {
+  const out: LineupCandidate[] = [];
+  for (const [position, rate] of replacement) {
+    const count = slots.filter((s) => s.eligible.has(position)).length;
+    for (let i = 0; i < count; i++) out.push({ id: `${FILL_PREFIX}${position}:${i}`, position, value: Math.max(0, rate) });
+  }
+  return out;
 }
 
 function valueRoster(
@@ -1205,43 +1323,75 @@ function valueRoster(
   weeks: readonly number[],
   weights: readonly number[],
   replacement: ReadonlyMap<string, number>,
+  season?: {
+    near: number;
+    tailFill: readonly LineupCandidate[];
+    tailReplacement: ReadonlyMap<string, number> | null;
+  },
 ): Valuation {
   let lineup = 0;
   let insurance = 0;
   const weekly: number[] = [];
   const starters: Set<string>[] = [];
   const picks: (LineupCandidate | null)[][] = [];
+  const near = season?.near ?? weeks.length;
+  /*
+   * A season week is each player's season rate times whether he plays, so
+   * two season weeks with the same availability are the same lineup: solved
+   * once (a roster without a bye in weeks 12 to 17 is one solve, not six).
+   */
+  const tailSolves = new Map<string, WeekSolve>();
   weeks.forEach((_, k) => {
-    /* Ranked on the minus-2 rule (`rankedIn`); the depth credit below is on his own number. */
-    const pool: LineupCandidate[] = players.map((p) => ({ id: p.playerId, position: p.position, value: rankedIn(p, k) }));
-    const raw = new Map(players.map((p) => [p.playerId, pointsIn(p, k) * (p.weekly[k] ?? 1)] as const));
-    const result = bestLineup(slots, pool);
-    /* A zero-point pick (a bye, Out) fills nothing: he is not "starting" that week. */
-    const started = new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
-    /*
-     * The insurance credit, exactly as Check a trade counts it: the best few
-     * bench players' edge over a free agent, times the share of a week a
-     * starter is expected to miss. Small on purpose.
-     */
-    const credit =
-      pool
-        .filter((c) => !started.has(c.id))
-        .map((c) => {
-          const own = raw.get(c.id) ?? 0;
-          return Math.max(0, own - (replacement.get(c.position) ?? own));
-        })
-        .filter((x) => x > 0)
-        .sort((a, b) => b - a)
-        .slice(0, TRADE_VALUE.depth.creditedBench)
-        .reduce((s, x) => s + x, 0) * TRADE_VALUE.depth.injuryRate;
+    const tail = k >= near;
+    const signature = tail ? players.map((p) => `${p.weekly[k] ?? 1}:${pointsIn(p, k)}`).join(',') : null;
+    let solve = signature != null ? tailSolves.get(signature) : undefined;
+    if (!solve) {
+      /* Ranked on the minus-2 rule (`rankedIn`); the depth credit below is on his own number. */
+      const pool: LineupCandidate[] = players.map((p) => ({ id: p.playerId, position: p.position, value: rankedIn(p, k) }));
+      const raw = new Map(players.map((p) => [p.playerId, pointsIn(p, k) * (p.weekly[k] ?? 1)] as const));
+      const level = tail && season?.tailReplacement ? season.tailReplacement : replacement;
+      solve = solveWeek(pool, raw, slots, level, tail ? (season?.tailFill ?? []) : []);
+      if (signature != null) tailSolves.set(signature, solve);
+    }
     const w = weights[k] ?? 0;
-    lineup += w * result.total;
-    insurance += w * credit;
-    weekly.push(result.total);
-    starters.push(started);
-    picks.push(result.picks);
+    lineup += w * solve.total;
+    insurance += w * solve.credit;
+    weekly.push(solve.total);
+    starters.push(solve.started);
+    picks.push(solve.picks);
   });
   return { lineup, insurance, weekly, starters, picks };
+}
+
+function solveWeek(
+  pool: readonly LineupCandidate[],
+  raw: ReadonlyMap<string, number>,
+  slots: readonly LineupSlotSpec[],
+  replacement: ReadonlyMap<string, number>,
+  fill: readonly LineupCandidate[],
+): WeekSolve {
+  const result = bestLineup(slots, fill.length > 0 ? [...pool, ...fill] : pool);
+  /* A zero-point pick (a bye, Out) fills nothing: he is not "starting" that week. A stand-in is nobody. */
+  const started = new Set(
+    result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0 && !x.id.startsWith(FILL_PREFIX)).map((x) => x.id),
+  );
+  /*
+   * The insurance credit, exactly as Check a trade counts it: the best few
+   * bench players' edge over a free agent, times the share of a week a
+   * starter is expected to miss. Small on purpose.
+   */
+  const credit =
+    pool
+      .filter((c) => !started.has(c.id))
+      .map((c) => {
+        const own = raw.get(c.id) ?? 0;
+        return Math.max(0, own - (replacement.get(c.position) ?? own));
+      })
+      .filter((x) => x > 0)
+      .sort((a, b) => b - a)
+      .slice(0, TRADE_VALUE.depth.creditedBench)
+      .reduce((s, x) => s + x, 0) * TRADE_VALUE.depth.injuryRate;
+  return { total: result.total, credit, started, picks: result.picks };
 }
 
 /**
@@ -1325,7 +1475,7 @@ function reasonFor(
       code: 'upgrade',
       reason: replaced
         ? `Starts over ${replaced.name}${change > 0 ? `, +${change.toFixed(1)} pts in week ${week}` : ''}`
-        : `Makes your lineup better by ${option.lineup.toFixed(1)} pts over the three weeks`,
+        : `Makes your lineup better by ${option.lineup.toFixed(1)} pts over the ${request.season ? 'rest of the season' : 'three weeks'}`,
     };
   }
   return { code: 'depth', reason: `Better depth than ${option.drop ? option.drop.name : 'what you hold'}; he would not start yet` };

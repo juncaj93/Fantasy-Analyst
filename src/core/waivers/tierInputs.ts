@@ -21,6 +21,7 @@ import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../
 import { buildPlayerRate, type PlayerRate } from '../tradeValue/rate.ts';
 import { replacementLevels } from '../tradeValue/evaluate.ts';
 import { byeOf, LAST_NFL_WEEK } from '../tradeValue/weeks.ts';
+import { playedWeeksOf, productionGames, seasonWeights } from '../value/restOfSeason.ts';
 import { bestLineup, slotsOf } from '../tradeValue/lineup.ts';
 import { findHandcuffs } from './yardstick.ts';
 import { dropSignal } from './signals.ts';
@@ -28,7 +29,7 @@ import { TIER_RULES, type TierCandidate, type TierPlayer, type TierProtection, t
 import type { PickupState } from './clearWindow.ts';
 import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
-import { weekNumbers, type AheadNumbers } from './aheadWeeks.ts';
+import { weekNumbers, type AheadNumbers, type WeekSource } from './aheadWeeks.ts';
 import { DROP_RULES, eliteBacks, eliteHandcuffs, type DropSignals } from './dropScore.ts';
 import { stashVerdict, type InjuryNote, type StashVerdict } from './stash.ts';
 
@@ -105,6 +106,14 @@ export interface TierInputRequest {
   draftRounds?: ReadonlyMap<string, number> | undefined;
   /** Which statuses this league's IR slots take beyond IR itself. Absent: no IR moves are suggested. */
   reserveAllows?: { out: boolean; doubtful: boolean; sus: boolean } | undefined;
+  /**
+   * Round 6: the rest of the season, from `tradeHorizon` (this week to the
+   * end of the league's playoffs, and which of those weeks are playoff weeks).
+   * With it a pickup is judged on the points he adds to the best lineup over
+   * the whole season, playoff weeks counted 1.5 times, on the rest-of-season
+   * rate Trades uses. Absent: the three-week window, as before.
+   */
+  season?: { weeks: readonly number[]; playoffWeeks: readonly number[] } | null | undefined;
 }
 
 export interface TierInputs {
@@ -129,6 +138,25 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
 
   const evaluations = new Map<string, StartSitEvaluation>();
   const rates = new Map<string, PlayerRate>();
+  /*
+   * The season: every week from the window's first to the end of the
+   * playoffs. Only when the window sits at its start; otherwise (the season is
+   * over, a horizon from another week) the window alone, as before.
+   */
+  const horizonWeeks = [...(input.season?.weeks ?? [])];
+  const seasonWeeks = horizonWeeks.filter((w) => w >= (window.weeks[0] ?? Infinity));
+  const seasonOn =
+    seasonWeeks.length > window.weeks.length && window.weeks.every((w, k) => seasonWeeks[k] === w) && horizonWeeks[0] === input.week;
+  const seasonRange = { from: input.week, to: horizonWeeks[horizonWeeks.length - 1] ?? input.week };
+  const seasonRates = new Map<string, PlayerRate>();
+  const aheadFor = (id: string): Map<number, number> => {
+    const out = new Map<number, number>();
+    for (const [week, points] of input.ahead?.sleeper ?? []) {
+      const v = points.get(id);
+      if (typeof v === 'number') out.set(week, v);
+    }
+    return out;
+  };
   const rateOf = (i: StartSitInput): PlayerRate => {
     const evaluation = evaluatePlayer(i, input.profile);
     evaluations.set(i.player.id, evaluation);
@@ -145,6 +173,35 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       onReserve: reserved.has(i.player.id),
     });
     rates.set(i.player.id, rate);
+    if (seasonOn) {
+      /*
+       * His season value: the same `buildPlayerRate` Trades calls, over the
+       * whole horizon, with Sleeper's next three weeks and his points per game
+       * played. The bye over the season's weeks, or the window's when the
+       * longer fixture list has a gap.
+       */
+      const long = team ? byeOf(input.fixtures, team, seasonRange) : { known: false, byeWeek: null };
+      const seasonBye = long.known ? long : bye;
+      seasonRates.set(
+        i.player.id,
+        buildPlayerRate({
+          evaluation,
+          ...(input.published ? { published: input.published } : {}),
+          seasonLine: null,
+          recentWeek: input.recentPublished?.get(i.player.id) ?? null,
+          weeks: horizonWeeks,
+          byeWeek: seasonBye.byeWeek,
+          byeKnown: seasonBye.known,
+          onReserve: reserved.has(i.player.id),
+          ahead: aheadFor(i.player.id),
+          production: productionGames({
+            leaguePoints: input.seasonPoints?.get(i.player.id) ?? null,
+            through: input.seasonPointsThrough ?? 0,
+            playedWeeks: playedWeeksOf(i.usageWeeks),
+          }),
+        }),
+      );
+    }
     return rate;
   };
 
@@ -161,6 +218,34 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
     });
     /* Sleeper's number, not a full Vegas week: the minus-2 rule ranks it lower (`rankingNumber`). */
     const rateBorrowed = rate.basis === 'published' || rate.basis === 'recent_week';
+    const long = seasonRates.get(rate.playerId);
+    if (seasonOn && long) {
+      /*
+       * The near window as before, then each season week at his season rate
+       * (his own number when he has no season rate), with the season's
+       * availability: a bye is 0, an injury the weeks it implies.
+       */
+      const tail = seasonWeeks.slice(window.weeks.length);
+      const value = long.rate ?? rate.rate;
+      const at = (week: number) => long.weekly[week - input.week] ?? 1;
+      return {
+        playerId: rate.playerId,
+        name: rate.name,
+        position: rate.position,
+        team: rate.team,
+        rate: rate.rate,
+        seasonRate: long.rate ?? rate.rate,
+        weekly: [...rate.weekly.slice(offset, offset + window.weeks.length), ...tail.map(at)],
+        weekValues: [...numbers.map((n) => n.points), ...tail.map(() => value)],
+        weekSources: [...numbers.map((n) => n.source), ...tail.map((w): WeekSource => (w === long.byeWeek ? 'bye' : 'season'))],
+        weekBorrowed: [...numbers.map((n) => (n.source === 'sleeper' ? true : n.source === 'bye' ? false : rateBorrowed)), ...tail.map(() => false)],
+        weekFrom: [...numbers.map((n) => n.fromWeek ?? null), ...tail.map(() => null)],
+        rateBorrowed,
+        designation: rate.designation,
+        byeWeek: rate.byeWeek ?? (long.byeWeek != null && tail.includes(long.byeWeek) ? long.byeWeek : null),
+        onReserve: rate.onReserve,
+      };
+    }
     return {
       playerId: rate.playerId,
       name: rate.name,
@@ -193,6 +278,12 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
 
   const replacement = new Map<string, number>();
   for (const [position, level] of replacementLevels(candidateRates.map((c) => c.rate))) replacement.set(position, level.rate);
+  /* The season replacement level: Trades' own rule (the best three free agents' average) on season rates. */
+  const seasonReplacement = new Map<string, number>();
+  if (seasonOn) {
+    const free = candidateRates.map((c) => seasonRates.get(c.rate.playerId)).filter((r): r is PlayerRate => r != null);
+    for (const [position, level] of replacementLevels(free)) seasonReplacement.set(position, level.rate);
+  }
 
   /*
    * Handcuffs. With this season's points: only the direct backup to an elite
@@ -293,11 +384,23 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
   const openSpots = Math.max(0, benchRoom - input.rosterInputs.filter((i) => !reserved.has(i.player.id)).length);
   const openReserve = Math.max(0, input.reserveSlots - input.reserveIds.length);
 
+  /*
+   * The season's weights are Trades' (every week once, a playoff week 1.5).
+   * The bars were set in the old window's weighted points (1, 1, 0.5 while
+   * this week is open, else 1, 0.5, 0.5), so they scale by the season's
+   * weighted weeks over the window's: the same gain per week clears them.
+   */
+  const seasonW = seasonOn ? seasonWeights({ weeks: seasonWeeks, playoffWeeks: [...(input.season?.playoffWeeks ?? [])] }) : [];
+  const windowSum = windowWeights(window.thisWeekOpen).reduce((a, b) => a + b, 0);
+  const seasonSum = seasonW.reduce((a, b) => a + b, 0);
   return {
     request: {
       shape: input.shape,
-      weeks: window.weeks,
-      weights: window.thisWeekOpen ? TIER_RULES.openWeights : TIER_RULES.weights,
+      weeks: seasonOn ? seasonWeeks : window.weeks,
+      weights: seasonOn ? seasonW : window.thisWeekOpen ? TIER_RULES.openWeights : TIER_RULES.weights,
+      ...(seasonOn
+        ? { season: { near: window.weeks.length, replacement: seasonReplacement, scale: Math.round((seasonSum / windowSum) * 1000) / 1000 } }
+        : {}),
       leadWeeks: window.thisWeekOpen ? 2 : 1,
       roster,
       candidates,

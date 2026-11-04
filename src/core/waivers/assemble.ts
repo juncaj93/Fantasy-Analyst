@@ -244,6 +244,12 @@ export interface WaiverAssemblyRequest {
    */
   ahead?: AheadNumbers | null | undefined;
   /**
+   * Round 6: this week to the end of the league's playoffs (`tradeHorizon`),
+   * and which of those weeks are playoff weeks. With it the tiers judge a
+   * pickup and a drop on the whole season. Absent: the three-week window.
+   */
+  seasonHorizon?: { weeks: readonly number[]; playoffWeeks: readonly number[] } | null | undefined;
+  /**
    * Waivers round 2 (October 2026): the need-aware rivals, the drop score and
    * the stash rules. Plain records so a support snapshot carries them as they
    * are. Absent: the planner and the bids behave exactly as before.
@@ -759,7 +765,11 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       const fixtures: ScheduleTeamWeek[] =
         request.dstSources && clubs.length > 0
           ? await request.dstSources
-              .scheduleForTeams(request.season, clubs, { from: request.week, to: request.week + 3 })
+              .scheduleForTeams(request.season, clubs, {
+                from: request.week,
+                /* Byes through the end of the playoffs when the tiers value the season (round 6). */
+                to: Math.max(request.week + 3, ...(request.seasonHorizon?.weeks ?? [])),
+              })
               .catch(() => [] as ScheduleTeamWeek[])
           : [];
       const inputs = buildTierInputs({
@@ -781,6 +791,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         reserveSlots: request.reserveSlots ?? shape.irSlots,
         excludedPositions: new Set([DEFENCE_POSITION]),
         ahead: request.ahead ?? null,
+        ...(request.seasonHorizon ? { season: request.seasonHorizon } : {}),
         ...(round2
           ? {
               /* No season row yet (a fresh deploy): the drop and handcuff reads stay as before. */

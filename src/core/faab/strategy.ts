@@ -25,7 +25,7 @@
  */
 
 import type { LeagueBudgetState, RosterBudget } from './budget.ts';
-import { myBudget, standingAfterSpend } from './budget.ts';
+import { myBudget, playoffReserve, standingAfterSpend } from './budget.ts';
 import type { PriceSummary } from './bids.ts';
 import { MIN_PRICE_SAMPLE, percentile } from './bids.ts';
 
@@ -348,7 +348,10 @@ export function recommendBid(opts: {
   }
 
   const total = budgetState.rule.total as number;
-  const remaining = mine?.remaining as number;
+  /* The playoff reserve (round 6): nothing suggested here spends the last $20 before the playoffs. */
+  const left = mine?.remaining as number;
+  const reserve = playoffReserve(left, season);
+  const remaining = reserve.spendable as number;
 
   const demand = demandLevel(inputs, budgetState);
   const { share, components } = worthShare(inputs, season);
@@ -361,7 +364,7 @@ export function recommendBid(opts: {
    * all, because $0 is not a bid and "he is worth something, bid nothing" is
    * not advice.
    */
-  const disciplined = Math.min(worth, spendableNow(remaining, season));
+  const disciplined = Math.min(worth, spendableNow(left, season));
   const valued = Math.max(worth > 0 ? 1 : 0, Math.min(disciplined, remaining));
 
   /*
@@ -386,7 +389,7 @@ export function recommendBid(opts: {
    * valuation, so a reader who disagrees can see exactly how far they may go.
    */
   const uncontested = inputs.rivalsWithNeed === 0 && valued > UNCONTESTED_BID;
-  const recommended = uncontested ? Math.min(UNCONTESTED_BID, valued) : valued;
+  const recommended = Math.min(remaining, uncontested ? Math.min(UNCONTESTED_BID, valued) : valued);
 
   /*
    * The ceiling is your own valuation plus a bounded tolerance, capped by the
@@ -398,6 +401,9 @@ export function recommendBid(opts: {
 
   const reasons = buildReasons(inputs, expected, recommended, worth, demand, prices, season);
   const reserveFor = opts.reserveFor ?? null;
+  if (reserve.held > 0 && disciplined > remaining) {
+    reasons.push(`Capped at $${remaining} to keep $${reserve.held} for the playoffs.`);
+  }
   if (reserveFor && recommended < worth) {
     reasons.push(`Held below his value to ${reserveFor}.`);
   }

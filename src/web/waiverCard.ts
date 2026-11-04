@@ -122,6 +122,11 @@ export function gainChip(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabe
   return `+${Math.max(0, row.gain).toFixed(1)}`;
 }
 
+/** What a gain covers, said aloud: a season total past the three-week window (round 6). */
+function gainSpan(weeks: number): string {
+  return weeks > 3 ? 'over the rest of the season' : `over ${weeks || 3} weeks`;
+}
+
 /** This week's gain on a pick-up-and-start row, from its own reason; null on any other row. */
 function thisWeekGain(row: Pick<TierRow, 'reasonCode'> & { reason?: string }): number | null {
   if (row.reasonCode !== 'start_now' && row.reasonCode !== 'start_tie') return null;
@@ -172,7 +177,7 @@ export function tierCard(row: TierRow): WaiverCardModel {
     position: row.position,
     team: row.team,
     gain,
-    gainSpoken: gain.startsWith('+') ? `${gain} points ${thisWeekGain(row) != null ? 'this week' : `over ${row.byWeek?.length || 3} weeks`}` : gain,
+    gainSpoken: gain.startsWith('+') ? `${gain} points ${thisWeekGain(row) != null ? 'this week' : gainSpan(row.byWeek?.length ?? 0)}` : gain,
     gainTone: TIER_TONE[row.tier],
     ...(row.reasonCode === 'ir_stash' ? { stash: true } : {}),
     chips: all.slice(0, CARD_CHIPS_MAX),
