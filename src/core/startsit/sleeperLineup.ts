@@ -204,8 +204,8 @@ export function buildLineupVerdicts(input: {
    * will show a reordering the app deliberately refused to explain. That is the
    * defect of 8 September in a new costume.
    *
-   * `recommendLineup` withholds a swap whose gain is under
-   * {@link MIN_SWAP_GAIN}, and its assignment separately protects an incumbent
+   * `recommendLineup` withholds a swap inside the toss-up bar
+   * (`tossup.ts`), and its assignment separately protects an incumbent
    * from an unpriced challenger. Where it withheld one, the honest row is
    * `keep`: the reader's own lineup stands, which is exactly what the guard is
    * for. Absent means "no swap list was passed", and every difference is then

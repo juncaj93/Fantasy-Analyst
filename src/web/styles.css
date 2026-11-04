@@ -9793,6 +9793,8 @@ div.matchup-result {
   line-height: 1.25;
 }
 .cmp2-tie { font-size: 0.76rem; line-height: 1.25; color: var(--text-dim); text-align: center; }
+.cmp2-tie .cmp2-tossup-label, .cmp2-tie .cmp2-lean { display: block; }
+.cmp2-tie .cmp2-lean { font-weight: 700; color: var(--paper-ink); }
 .best-move-warn { font-weight: 600; color: var(--warn); }
 .best-move-hold { grid-template-columns: minmax(0, 1fr); }
 

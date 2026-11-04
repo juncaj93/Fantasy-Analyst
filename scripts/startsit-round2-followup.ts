@@ -27,7 +27,8 @@ import { buildExpectation } from '../src/core/startsit/expectation.ts';
 import { pillFor } from '../src/core/startsit/pills.ts';
 import { assembleLineup } from '../src/core/startsit/assemble.ts';
 import { compareStartSit } from '../src/core/startsit/engine.ts';
-import { TIE_BAND as PILL_TIEBREAK_BAND, type Posture } from '../src/core/startsit/tiebreak.ts';
+import { type Posture } from '../src/core/startsit/tiebreak.ts';
+import { TOSSUP_POINTS as PILL_TIEBREAK_BAND } from '../src/core/startsit/tossup.ts';
 import { buildLineupVerdicts } from '../src/core/startsit/sleeperLineup.ts';
 import { rehydrateLeagueRules, rehydrateStartSitInputs } from '../src/core/support/inseason.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
@@ -157,7 +158,7 @@ for (const slot of withPosture.slots) {
     if (holder.decision.basis !== 'market' || b.decision.basis !== 'market') continue;
     if (Math.abs(holder.decision.points - b.decision.points) > PILL_TIEBREAK_BAND) continue;
     const cmp = compareStartSit([byId.get(holder.playerId)!, byId.get(b.playerId)!], profile, { mode: inputs.mode, published });
-    console.log(`  Compare ${holder.name} vs ${b.name}: ${cmp.tie ? cmp.tie.line : `start ${cmp.evaluations.find((e) => e.playerId === cmp.recommendedPlayerId)?.name}`} (margin ${r2(cmp.margin)})`);
+    console.log(`  Compare ${holder.name} vs ${b.name}: ${cmp.tossUp ? `toss-up, lean ${cmp.tossUp.leanName}` : `start ${cmp.evaluations.find((e) => e.playerId === cmp.recommendedPlayerId)?.name}`} (margin ${r2(cmp.margin)})`);
     shown++;
   }
 }

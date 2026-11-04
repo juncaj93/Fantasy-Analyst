@@ -6,9 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { buildExpectation } from '../src/core/startsit/expectation.ts';
 import { compareStartSit, evaluatePlayer, type StartSitInput } from '../src/core/startsit/engine.ts';
-import { LINEUP_PREFERENCE_TOLERANCE, recommendLineup } from '../src/core/startsit/lineup.ts';
+import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { pillFor } from '../src/core/startsit/pills.ts';
-import { TIE_BAND, isTie, postureFrom, tieLine } from '../src/core/startsit/tiebreak.ts';
+import { postureFrom, tieLine } from '../src/core/startsit/tiebreak.ts';
+import { TOSSUP_POINTS, isTossUp } from '../src/core/startsit/tossup.ts';
 import type { PlayerProp } from '../src/core/vegas/types.ts';
 import { player } from './helpers/players.ts';
 
@@ -76,10 +77,9 @@ describe('reading a pill off the lines', () => {
   });
 });
 
-describe('the tie (23 October 2026)', () => {
-  it('uses the lineup’s own close-call band, 0.6 points', () => {
-    expect(TIE_BAND).toBe(LINEUP_PREFERENCE_TOLERANCE);
-    expect(TIE_BAND).toBe(0.6);
+describe('the toss-up (4 November 2026, it was a 0.6 tie)', () => {
+  it('is one bar of two points', () => {
+    expect(TOSSUP_POINTS).toBe(2);
   });
 
   it('reads posture off the projected margin, and nothing when it is unknown', () => {
@@ -89,11 +89,11 @@ describe('the tie (23 October 2026)', () => {
     expect(postureFrom(0)).toBeNull();
   });
 
-  it('is a tie inside the band and a lead outside it', () => {
-    expect(isTie(10.4, 10.0)).toBe(true);
-    expect(isTie(10.6, 10.0)).toBe(true);
-    expect(isTie(10.7, 10.0)).toBe(false);
-    expect(isTie(10.0, null)).toBe(false);
+  it('is a toss-up inside the bar and a lead outside it', () => {
+    expect(isTossUp({ points: 10.6 }, { points: 10.0 })).toBe(true);
+    expect(isTossUp({ points: 11.99 }, { points: 10.0 })).toBe(true);
+    expect(isTossUp({ points: 12.0 }, { points: 10.0 })).toBe(false);
+    expect(isTossUp({ points: 10.0 }, { points: null })).toBe(false);
   });
 
   it('says it in the words Waivers uses', () => {
@@ -116,13 +116,13 @@ describe('a close call in a comparison and in the lineup', () => {
     expect(a.pill?.pill).toBe('steady');
     expect(b.pill?.pill).toBe('explosive');
     expect(a.score! - b.score!).toBeGreaterThan(0);
-    expect(a.score! - b.score!).toBeLessThanOrEqual(TIE_BAND);
+    expect(a.score! - b.score!).toBeLessThan(TOSSUP_POINTS);
   });
 
-  it('Compare claims no winner: no pick, and the tie line naming the other player', () => {
+  it('Compare claims no winner: no pick, a toss-up that names the lean', () => {
     const out = compareStartSit([steady(), deep()], LEAGUE);
     expect(out.recommendedPlayerId).toBeNull();
-    expect(out.tie).toEqual({ playerId: 'deep', name: 'Deep Guy', line: 'Ties Deep Guy this week' });
+    expect(out.tossUp).toEqual({ leanPlayerId: 'slot', leanName: 'Slot Guy', otherPlayerId: 'deep', otherName: 'Deep Guy' });
     expect(out.reasons.join(' ')).not.toMatch(/close call|gets the nod/i);
   });
 
@@ -134,12 +134,13 @@ describe('a close call in a comparison and in the lineup', () => {
     });
     const out = compareStartSit([steady(), far()], LEAGUE);
     expect(out.recommendedPlayerId).toBe('slot');
-    expect(out.tie).toBeUndefined();
+    expect(out.tossUp).toBeUndefined();
   });
 
   it('the lineup suggests no change inside the band', () => {
     const shape = buildRosterShape(['WR', 'BN']);
     const out = recommendLineup([steady(), deep()], shape, LEAGUE, { currentStarterIds: ['deep'] });
     expect(out.swaps).toEqual([]);
+    expect(out.tossUps?.map((t) => t.inPlayerId)).toEqual(['slot']);
   });
 });

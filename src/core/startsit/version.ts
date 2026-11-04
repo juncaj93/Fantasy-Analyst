@@ -93,4 +93,12 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * starter rank within 0.05 points, the lineup with the latest kickoff in FLEX
  * is preferred; locked games never move and nothing is said.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@8', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@9`, 4 November 2026: one toss-up bar (`tossup.ts`). Under two
+ * points on the ranking numbers is a toss-up on Team, Compare and Pick up and
+ * start: the lean is named, no change is suggested. Never against a real hole
+ * (Out, IR, suspended, Doubtful, a bye, an empty slot). It replaces the 0.75
+ * swap bar, the 0.6 tie of `lineup@7`, Compare's 0.75 close call and the 0.5
+ * pickup bar. Scores are unchanged.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@9', STARTSIT_ENGINE_VERSION);

@@ -207,18 +207,32 @@ describe('the answer the Team screen would give', () => {
    */
   const level = () =>
     roster().map((p) => (p.playerId === 'mine-6' ? { ...p, projection: 6.9 } : p));
+  /*
+   * Since 4 November 2026 the echo needs what Team needs: two points on paper
+   * (`tossup.ts`). Reed at 4.9 leaves Harvey 2.26 ahead; a win-probability bar
+   * nothing can clear stands in for a matchup the change cannot swing.
+   */
+  const wide = () =>
+    roster().map((p) => (p.playerId === 'mine-6' ? { ...p, projection: 4.9 } : p));
+  const unswingable = (players: MatchupPlayerInput[]) => decide(players, 0.99).decision;
 
   it('names the same man the lineup names, when nothing clears the bar', () => {
-    const decision = atTheBar(level());
+    const decision = unswingable(wide());
     expect(decision.best).toBeNull();
     expect(decision.onProjection?.inPlayerId).toBe('harvey');
   });
 
   it('is the man the app ranks highest, not the highest published figure', () => {
     /* Concepcion's 8.28 is larger and his ranked 6.28 is not. */
-    const decision = atTheBar(level());
+    const decision = unswingable(wide());
     expect(decision.onProjection).not.toBeNull();
     expect(decision.onProjection?.inPlayerId).not.toBe('concepcion');
+  });
+
+  it('echoes nothing for a toss-up: Harvey 0.26 ahead is no change on Team either', () => {
+    const decision = atTheBar(level());
+    expect(decision.best).toBeNull();
+    expect(decision.onProjection).toBeNull();
   });
 
   it('never displaces a change this model does believe in', () => {
@@ -243,7 +257,7 @@ describe('the answer the Team screen would give', () => {
   });
 
   it('carries a reason that does not overstate what it is worth', () => {
-    const decision = atTheBar(level());
+    const decision = unswingable(wide());
     expect(decision.onProjection?.reason).toMatch(/not enough to swing this matchup/i);
   });
 });

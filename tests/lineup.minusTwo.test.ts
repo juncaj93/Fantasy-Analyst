@@ -125,10 +125,12 @@ describe('Compare', () => {
     expect(c.margin).toBeCloseTo(points(c, 'm') - points(c, 'w'), 2);
   });
 
-  it('keeps the priced pick when the Sleeper-only player is ahead by less than 2, and names him second', () => {
+  it('keeps the priced lean when the Sleeper-only player is ahead by less than 2, and names him second', () => {
     const base = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 12)], {});
     const c = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 12), candidate('m', 'Ladd McConkey', 'WR', 3)], { m: points(base, 'w') + 1 });
-    expect(c.recommendedPlayerId).toBe('w');
+    /* One point behind after the discount: a toss-up that leans to the priced player (4 November 2026). */
+    expect(c.recommendedPlayerId).toBeNull();
+    expect(c.tossUp?.leanPlayerId).toBe('w');
     expect(c.sleeperOnly).toMatchObject({ playerId: 'm' });
     expect(c.sleeperOnly!.aheadBy).toBeCloseTo(1, 1);
   });

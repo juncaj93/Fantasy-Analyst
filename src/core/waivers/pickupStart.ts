@@ -31,9 +31,10 @@
  *
  * ## The rule
  *
- *  - `gain` at least {@link PICKUP_START.gain}: **start**. Best move says
- *    `Pick up and start <player>`. Small on purpose: Alex wants the heads-up
- *    even for a small margin.
+ *  - `gain` clearing the toss-up bar (`TOSSUP_POINTS`, two points, the same
+ *    bar as Team and Compare since 4 November 2026; it was 0.5): **start**.
+ *    Best move says `Pick up and start <player>`. Filling a slot nobody holds,
+ *    or replacing a Doubtful starter, is a real hole and needs no bar.
  *  - Otherwise `margin` no worse than {@link PICKUP_START.tie} below zero: a
  *    **tie or small gain** (anything from a 0.05 loss up to just under the
  *    headline, so a gain of 0.2 is here too). No headline; a softer Worth
@@ -52,11 +53,10 @@ import { solveLineup, type SolvablePlayer, type SolvedLineup } from '../startsit
 import type { DecisionBasis } from '../startsit/decisionPoints.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import type { PickupState } from './clearWindow.ts';
+import { clearsTossUp, isRealHole, TOSSUP_POINTS } from '../startsit/tossup.ts';
 
 /** The thresholds, in this week's lineup points. */
 export const PICKUP_START = {
-  /** A whole-lineup gain this large is a Best move headline. */
-  gain: 0.5,
   /**
    * How far below the best owned lineup still reads as a tie: half a tenth,
    * so two players who print the same number at one decimal tie.
@@ -109,8 +109,6 @@ export interface PickupStartRequest {
   spotChoices?: (playerId: string) => PickupSpotChoice[];
   /** A teammate starter at his position who is Out or Doubtful, or null. */
   starterOut?: (player: PickupPlayer) => { playerId: string; name: string } | null;
-  /** Override {@link PICKUP_START.gain}, for tests. */
-  gain?: number;
 }
 
 export interface PickupDrop {
@@ -211,7 +209,6 @@ function solvable(p: PickupPlayer, forced = false): SolvablePlayer {
 }
 
 export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
-  const threshold = request.gain ?? PICKUP_START.gain;
   const current = new Set(request.currentStarterIds);
   const owned = request.roster.filter(
     (p) =>
@@ -284,9 +281,19 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     const instant = !c.locked && state?.state === 'free';
     /* A position no slot takes cannot be forced in, and is not a tie. */
     const seats = forced.starterIds.has(c.playerId);
+    /*
+     * The toss-up bar, or a real hole: he fills a slot nobody in the best
+     * owned lineup held, or the man he replaces there is Doubtful. Out and IR
+     * players are never in that lineup, so their hole is already in `gain`.
+     */
+    const beaten = [...baseline.starterIds].filter((id) => !withHim.starterIds.has(id) && id !== drop?.playerId);
+    const hole =
+      seats &&
+      gain > 1e-9 &&
+      (beaten.length === 0 || beaten.some((id) => isRealHole({ designation: byId.get(id)?.designation ?? null })));
     const verdict: 'start' | 'consider' | null = !seats
       ? null
-      : gain >= threshold - 1e-9
+      : clearsTossUp(gain) || hole
         ? 'start'
         : margin >= -PICKUP_START.tie - 1e-9
           ? 'consider'
@@ -336,7 +343,7 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     .slice(0, PICKUP_START.maxTies);
 
   return {
-    threshold,
+    threshold: TOSSUP_POINTS,
     tieTolerance: PICKUP_START.tie,
     bestOwned: baseline.total,
     bestOwnedSlots: baseline.slots,
