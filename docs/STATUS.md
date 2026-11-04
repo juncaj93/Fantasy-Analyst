@@ -105,7 +105,8 @@ Unknown still means unknown. A player who cannot be scored is listed separately
 as undecidable — never silently benched — and no swap is proposed against a
 current starter whose score is unknown. The current-lineup total is withheld
 entirely when any current starter is unscorable, rather than treating the gap
-as zero. Swaps below 0.75 pts are not suggested at all.
+as zero. A swap under 2 points is a toss-up and is not suggested (`tossup.ts`,
+4 November 2026; it was 0.75 pts), unless the starter is a real hole.
 
 **CI fixed.** The `wrangler deploy --dry-run` step ran without `dist/web`
 existing, so every run on `main` was red. It builds first now.

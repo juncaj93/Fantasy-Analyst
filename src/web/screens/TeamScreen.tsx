@@ -1819,6 +1819,12 @@ function LineupCard({
    * empty, which is the more urgent line. The app never adds him.
    */
   const pick = !useFill && pickup?.start ? pickup.start : null;
+  /*
+   * A toss-up (under two points, `core/startsit/tossup.ts`, 4 November 2026):
+   * only when nothing clears the bar. It names the lean and both numbers and
+   * suggests no change; the rows keep Sleeper's lineup.
+   */
+  const [tossUp = null] = lineup.tossUps ?? [];
   /* A free agent who only ties is one line in the sheet, never the headline. */
   const ties = (pickup?.consider ?? []).map((t) =>
     t.gain >= 0.05
@@ -1920,6 +1926,29 @@ function LineupCard({
               <PillChip pill={pillOf(best.inPlayerId)} />
             </span>
             {warningLine}
+          </span>
+          <span className="dense-chevron" aria-hidden="true">›</span>
+        </button>
+      ) : tossUp ? (
+        <button
+          type="button"
+          className="matchup-best-move best-move-row"
+          data-testid="lineup-tossup"
+          data-seed={`${tossUp.outPlayerId},${tossUp.inPlayerId}`}
+          aria-label={`Best move: toss-up, lean ${tossUp.inName} over ${tossUp.outName} at ${tossUp.slot}, ${spoken(tossUp.inPlayerId)} against ${spoken(tossUp.outPlayerId)} projected. No change. Compare them.`}
+          onClick={() => onOpen(tossUp.slot, [tossUp.outPlayerId, tossUp.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
+        >
+          <span className="matchup-best-move-body">
+            {head}
+            <span className="matchup-best-move-swap">
+              <span className="matchup-best-move-names">
+                Toss-up: lean {tossUp.inName} over {tossUp.outName}
+              </span>
+              <span className="matchup-best-move-slot">{tossUp.slot}</span>
+            </span>
+            <span className="matchup-best-move-metrics" data-testid="best-move-points">
+              {num(tossUp.inPlayerId)} vs {num(tossUp.outPlayerId)} projected
+            </span>
           </span>
           <span className="dense-chevron" aria-hidden="true">›</span>
         </button>

@@ -64,10 +64,14 @@ describe('the minus-2 rule decides the same way on every screen that picks', () 
     expect(screens.lineup.bench.map((e: { playerId: string }) => e.playerId)).toContain('m_wr5');
   });
 
-  it('Compare picks him over the priced 12.5, and the priced 15 over him', async () => {
-    expect((await screens.compareOf([SLEEPER_ONLY, 'm_wr5'])).recommendedPlayerId).toBe(SLEEPER_ONLY);
+  it('Compare leans to him over the priced 12.5, and to the priced 15 over him (both toss-ups since 4 November 2026)', async () => {
+    /* 14 against 12.5 and 15 against 14: both under the two-point bar, so a lean, not a Start. */
+    const wider = await screens.compareOf([SLEEPER_ONLY, 'm_wr5']);
+    expect(wider.recommendedPlayerId).toBeNull();
+    expect(wider.tossUp?.leanPlayerId).toBe(SLEEPER_ONLY);
     const closer = await screens.compareOf([SLEEPER_ONLY, 'm_wr2']);
-    expect(closer.recommendedPlayerId).toBe('m_wr2');
+    expect(closer.recommendedPlayerId).toBeNull();
+    expect(closer.tossUp?.leanPlayerId).toBe('m_wr2');
     expect(closer.sleeperOnly?.playerId).toBe(SLEEPER_ONLY);
   });
 });

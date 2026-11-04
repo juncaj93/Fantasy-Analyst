@@ -69,6 +69,7 @@ import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
+import { isRealHole, isTossUp } from './tossup.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
 /** One row's opponent, and what the defence model makes of it. */
@@ -287,6 +288,13 @@ export interface LineupRecommendation {
    * Stevenson` — see {@link buildSwaps}.
    */
   fills: LineupFill[];
+  /**
+   * Changes the lineup leans to and does not suggest: inside the toss-up bar
+   * (`tossup.ts`, under two points, no real hole). Best move says "Toss-up"
+   * with both numbers; the rows keep Sleeper's lineup. Biggest gain first.
+   * Optional on the wire: cached responses from older workers lack it.
+   */
+  tossUps?: LineupSwap[];
   /** Total recommended points, and the current lineup's total for comparison. */
   recommendedPoints: number;
   currentPoints: number | null;
@@ -311,9 +319,6 @@ export interface LineupRecommendation {
   }[];
 }
 
-/** A swap has to be worth this many points before it is worth suggesting. */
-export const MIN_SWAP_GAIN = 0.75;
-
 /**
  * How much projection a lineup-level preference may spend.
  *
@@ -333,7 +338,6 @@ export function recommendLineup(
   profile: ScoringProfile,
   opts: {
     currentStarterIds?: string[];
-    minSwapGain?: number;
     /** Floor, Balanced or Ceiling. Applied to every evaluation. */
     mode?: StartSitMode;
     /** Reference time, injected so tests are deterministic. */
@@ -370,7 +374,6 @@ export function recommendLineup(
     opponentExposure?: ReadonlyMap<string, OpponentExposure>;
   } = {},
 ): LineupRecommendation {
-  const minGain = opts.minSwapGain ?? MIN_SWAP_GAIN;
   const mode = opts.mode ?? 'balanced';
   const now = opts.now ?? new Date();
   const currentStarters = new Set(opts.currentStarterIds ?? []);
@@ -426,6 +429,7 @@ export function recommendLineup(
       undecidable,
       swaps: [],
       fills: [],
+      tossUps: [],
       recommendedPoints: 0,
       currentPoints: null,
       confidence: 'low',
@@ -575,14 +579,7 @@ export function recommendLineup(
    */
   for (const evaluation of evaluations) evaluation.decision = decisionPoints(evaluation, opts.published);
 
-  const { swaps, fills } = buildSwaps(
-    filled,
-    slots,
-    currentStarters,
-    evaluations,
-    minGain,
-    opts.published,
-  );
+  const { swaps, fills, tossUps } = buildSwaps(filled, slots, currentStarters, evaluations, opts.published);
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -697,6 +694,7 @@ export function recommendLineup(
     undecidable,
     swaps,
     fills,
+    tossUps,
     recommendedPoints,
     currentPoints,
     confidence,
@@ -1384,9 +1382,8 @@ function buildSwaps(
   slots: SlotSpec[],
   currentStarters: Set<string>,
   evaluations: StartSitEvaluation[],
-  minGain: number,
   published?: ReadonlyMap<string, number>,
-): { swaps: LineupSwap[]; fills: LineupFill[] } {
+): { swaps: LineupSwap[]; fills: LineupFill[]; tossUps: LineupSwap[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
   const positionOf = (id: string): string => byId.get(id)?.position ?? '';
@@ -1402,6 +1399,7 @@ function buildSwaps(
 
   const swaps: LineupSwap[] = [];
   const fills: LineupFill[] = [];
+  const tossUps: LineupSwap[] = [];
   const used = new Set<string>();
 
   /*
@@ -1432,10 +1430,13 @@ function buildSwaps(
      *
      * Only against a lineup the caller actually gave. With none, every slot
      * would read as empty, and "we were not told" is not "Sleeper is empty".
+     *
+     * An empty slot is a real hole, so the toss-up bar never applies here:
+     * anybody with a number beats nobody.
      */
     if (currentStarters.size > 0 && seated([...lineup, incoming.playerId]) > before) {
       const gain = round2(incomingBasis.points);
-      if (gain < minGain) continue;
+      if (!(gain > 0)) continue;
       lineup.add(incoming.playerId);
       fills.push({
         slot: slot.slot,
@@ -1474,7 +1475,33 @@ function buildSwaps(
      */
     const outgoingBasis = rankingPoints(outgoing, published);
     const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
-    if (gain < minGain) continue;
+    if (!(gain > 0)) continue;
+    /*
+     * The toss-up bar (`tossup.ts`): under two points on the ranking numbers,
+     * the lineup keeps Sleeper's man and Best move says "Toss-up". Never when
+     * the man sitting is a real hole (Out, IR, suspended, Doubtful, a bye).
+     */
+    const hole = isRealHole({
+      ruledOut: outgoing.ruledOut,
+      onReserve: outgoing.onReserve ?? false,
+      designation: outgoing.injury?.designation ?? null,
+    });
+    const tossUp = isTossUp(
+      { points: incomingBasis.points, borrowed: incomingBasis.borrowed },
+      { points: outgoingBasis?.points ?? null, borrowed: outgoingBasis?.borrowed ?? false, hole },
+    );
+    if (tossUp) {
+      tossUps.push({
+        slot: slot.slot,
+        inPlayerId: incoming.playerId,
+        inName: incoming.name,
+        outPlayerId: outgoing.playerId,
+        outName: outgoing.name,
+        gain,
+        reason: 'Toss-up',
+      });
+      continue;
+    }
     used.add(outgoing.playerId);
     lineup.delete(outgoing.playerId);
     lineup.add(incoming.playerId);
@@ -1493,6 +1520,7 @@ function buildSwaps(
   return {
     swaps: swaps.sort((a, b) => b.gain - a.gain),
     fills: fills.sort((a, b) => b.gain - a.gain),
+    tossUps: tossUps.sort((a, b) => b.gain - a.gain),
   };
 }
 

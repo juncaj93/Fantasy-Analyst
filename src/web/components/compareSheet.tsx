@@ -37,7 +37,6 @@ import { orderFilterChips } from '../../core/sleeper/eligibility.ts';
 import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
 import { compareTable } from '../compareTable.ts';
-import { shortReason } from '../waiverCard.ts';
 import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 
 /** Up to four fit a 360px phone side by side. Matched by the server. */
@@ -449,7 +448,8 @@ function Picker({
 
 function rankedColumns(comparison: StartSitComparison): StartSitEvaluation[] {
   const points = (e: StartSitEvaluation) => weekPointsOf(e).points ?? -Infinity;
-  const pick = comparison.recommendedPlayerId;
+  /* A toss-up's lean stands where the pick would (4 November 2026). */
+  const pick = comparison.recommendedPlayerId ?? comparison.tossUp?.leanPlayerId ?? null;
   /* The pick, then the Sleeper-only second choice beside him, then everybody by number. */
   const second = comparison.sleeperOnly?.playerId ?? null;
   const rank = (e: StartSitEvaluation) => (e.playerId === pick ? 0 : e.playerId === second ? 1 : 2);
@@ -477,9 +477,8 @@ export function Verdict({
   const comparable = comparison.slot?.comparable ?? true;
   const pick = comparable ? comparison.recommendedPlayerId : null;
   const second = comparable ? comparison.sleeperOnly ?? null : null;
-  /* A tie (top two within 0.6 pts): the leader's card says so where Start would be, and nobody gets Start. */
-  const tie = comparable && pick == null ? comparison.tie ?? null : null;
-  const tieLeader = tie ? (comparison.evaluations.find((x) => x.playerId !== tie.playerId)?.playerId ?? null) : null;
+  /* A toss-up (under two points, 4 November 2026): the lean's card says "Lean" where Start would be, and nobody gets Start. */
+  const lean = comparable && pick == null ? (comparison.tossUp?.leanPlayerId ?? null) : null;
   /* Photos scale with the room each card has: largest for two, still well up for four. */
   const faceSize = faceOverride ?? (columns.length <= 2 ? 96 : columns.length === 3 ? 76 : 56);
   return (
@@ -524,9 +523,10 @@ export function Verdict({
                   <span className="cmp2-start">
                     <CheckIcon size={12} /> Start
                   </span>
-                ) : tie && e.playerId === tieLeader ? (
-                  <span className="cmp2-tie" data-testid="compare-tie">
-                    {shortReason({ reason: tie.line, reasonCode: 'start_tie' }) ?? tie.line}
+                ) : lean != null && e.playerId === lean ? (
+                  <span className="cmp2-tie" data-testid="compare-tossup">
+                    <span className="cmp2-tossup-label">Toss-up</span>
+                    <span className="cmp2-lean">Lean</span>
                   </span>
                 ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />

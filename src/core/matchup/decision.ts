@@ -32,6 +32,7 @@ import { winProbabilityWithSwap, type SimulationResult } from './simulate.ts';
 import type { PlayerDistribution } from './distribution.ts';
 import type { MatchupPlayerInput } from './types.ts';
 import { rankingNumber } from '../startsit/decisionPoints.ts';
+import { isRealHole, isTossUp } from '../startsit/tossup.ts';
 
 /**
  * How much win probability a swap has to be worth before it is *offered*.
@@ -184,7 +185,19 @@ export function assessLineupDecision(opts: {
        * Ranked on the app's own basis so the man named here is the man the Team
        * screen names, rather than a second opinion arrived at independently.
        */
-      if (rankedPoints(candidate) > rankedPoints(starter)) {
+      /*
+       * And only past the toss-up bar (`tossup.ts`, 4 November 2026), as on
+       * Team: a starter who is a real hole always counts.
+       */
+      const tossUp = isTossUp(
+        { points: candidate.projection ?? 0, borrowed: candidate.projectionBorrowed === true },
+        {
+          points: starter.projection ?? 0,
+          borrowed: starter.projectionBorrowed === true,
+          hole: isRealHole({ ruledOut: starter.ruledOut, designation: starter.designation ?? null }),
+        },
+      );
+      if (rankedPoints(candidate) > rankedPoints(starter) && !tossUp) {
         byProjection.push({ starter, candidate, slot: slot.slot, winNow, winAfter, gain, pointsDelta });
       }
 

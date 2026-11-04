@@ -1331,11 +1331,11 @@ export interface StartSitComparison {
   recommendedPlayerId: string | null;
   margin: number | null;
   /**
-   * The top two within 0.6 pts: who the leader ties and the line shown where
-   * the Start pick would be. `recommendedPlayerId` is null then. Absent from
-   * older workers.
+   * A toss-up (under two points, `core/startsit/tossup.ts`): the lean is named
+   * and the sheet says "Lean" where Start would be. `recommendedPlayerId` is
+   * null then. Absent from older workers.
    */
-  tie?: { playerId: string; name: string; line: string };
+  tossUp?: { leanPlayerId: string; leanName: string; otherPlayerId: string; otherName: string };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
    * lost on the two-point discount: a marked second choice. Absent from older workers.
@@ -1532,6 +1532,8 @@ export interface LineupRecommendation {
   swaps: LineupSwap[];
   /** Optional: a server from before fills existed sends none. */
   fills?: LineupFill[];
+  /** Changes under the toss-up bar: Best move says "Toss-up", the rows keep. Absent from older workers. */
+  tossUps?: LineupSwap[];
   recommendedPoints: number;
   currentPoints: number | null;
   confidence: string;

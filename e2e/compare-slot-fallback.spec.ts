@@ -49,17 +49,22 @@ test('a TE added to a Compare opened on a WR row is a FLEX comparison, with a St
 });
 
 /*
- * A tie (23 October 2026): two players within 0.6 points. The leader's card
- * says "Ties <name> this week" in the Waivers card's words, and nobody gets Start.
+ * A toss-up (4 November 2026): two players within two points. The lean's card
+ * says "Toss-up" and "Lean" where Start would be, and nobody gets Start.
  */
-test('a close call is a tie line, not a Start pick', async ({ page }) => {
+test('a close call is a toss-up with a lean, not a Start pick', async ({ page }) => {
   await page.route('**/api/startsit/compare', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     const [lead, other] = body.evaluations as { playerId: string; name: string }[];
     await route.fulfill({
       response,
-      body: JSON.stringify({ ...body, recommendedPlayerId: null, tie: { playerId: other!.playerId, name: other!.name, line: `Ties ${other!.name} this week` }, evaluations: [lead, other, ...body.evaluations.slice(2)] }),
+      body: JSON.stringify({
+        ...body,
+        recommendedPlayerId: null,
+        tossUp: { leanPlayerId: lead!.playerId, leanName: lead!.name, otherPlayerId: other!.playerId, otherName: other!.name },
+        evaluations: [lead, other, ...body.evaluations.slice(2)],
+      }),
     });
   });
   await inSeason(page);
@@ -75,7 +80,9 @@ test('a close call is a tie line, not a Start pick', async ({ page }) => {
   await page.getByTestId('compare-add').click();
   await expect(page.getByTestId('comparison')).toBeVisible();
   await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveCount(0);
-  await expect(page.getByTestId('compare-tie')).toHaveText(/^Ties [A-Z]\. .+ this week$/);
+  await expect(page.getByTestId('compare-tossup')).toHaveText('Toss-upLean');
+  /* On the lean's card, and only there. */
+  await expect(page.locator('[data-testid="compare-column"]').filter({ has: page.getByTestId('compare-tossup') })).toHaveCount(1);
   /* Both numbers stay on the cards; only the Start pick is withheld. */
   const scores = page.getByTestId('compare-column').getByTestId('compare-score');
   await expect(scores).toHaveCount(2);
