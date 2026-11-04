@@ -186,6 +186,9 @@ test('a Sleeper-only player ahead is a marked second choice, never a second Star
   await page.route('**/api/startsit/compare', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
+    /* A clear pick for this drawing test: the demo pair may be a toss-up under the two-point bar. */
+    body.recommendedPlayerId = body.recommendedPlayerId ?? body.tossUp?.leanPlayerId;
+    delete body.tossUp;
     const pick = body.evaluations.find((e: { playerId: string }) => e.playerId === body.recommendedPlayerId);
     const other = body.evaluations.find((e: { playerId: string }) => e.playerId !== body.recommendedPlayerId);
     other.decision = { ...other.decision, basis: 'published', points: pick.decision.points + 1.6 };

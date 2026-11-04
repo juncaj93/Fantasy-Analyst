@@ -214,7 +214,9 @@ test('after Compare the chips follow the ranking, however they were chosen', asy
   const ranked = await cards();
   expect(ranked).not.toEqual(ids);
   await expect.poll(chips).toEqual(ranked);
-  await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveAttribute('data-player-id', ranked[0]!);
+  /* The first card is the Start pick, or the lean when the call is a toss-up (4 November 2026). */
+  const first = page.locator(`[data-testid="compare-column"][data-player-id="${ranked[0]!}"]`);
+  await expect(first.locator('.cmp2-start, [data-testid="compare-tossup"]')).toHaveCount(1);
 
   // Reopening the list keeps that order.
   await page.getByTestId('compare-add').click();
