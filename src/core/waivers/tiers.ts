@@ -711,9 +711,20 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * its week (it becomes a hole in the window's lead weeks and the free agent
    * goes first). A thin wire still says "add him now".
    */
+  /*
+   * Measured on the bye week alone: how much each free agent at his position
+   * adds in that week. A total would let one candidate's edge in another week
+   * hide equal cover (3 November: Malik Willis also "started over" Love in
+   * week 9, so Aaron Rodgers, as good in week 11, did not count).
+   */
   const byeLater = (m: TierMove): boolean => {
-    if (m.reasonCode !== 'bye_depth' || !/ is on bye in week \d+$/.test(m.reason)) return false;
-    const peers = ranked.filter((x) => needOf(x) === m.reason && x.gain >= m.gain - TOSSUP_POINTS);
+    const bye = m.reason.match(/ is on bye in week (\d+)$/);
+    if (m.reasonCode !== 'bye_depth' || !bye) return false;
+    const k = weeks.indexOf(Number(bye[1]));
+    if (k < 0) return false;
+    const fill = (x: TierMove) => x.byWeek[k]?.change ?? 0;
+    const top = Math.max(...ranked.filter((x) => x.position === m.position).map(fill));
+    const peers = ranked.filter((x) => x.position === m.position && fill(x) > 0 && fill(x) >= top - TOSSUP_POINTS);
     return peers.length >= TIER_RULES.deepWire;
   };
 

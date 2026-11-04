@@ -191,6 +191,20 @@ describe("W12: a bye two weeks out waits for its week when the wire is deep", ()
     expect(later!.drop).toBeNull();
   });
 
+  it('counts equal cover in the bye week, whatever else a candidate adds in other weeks', () => {
+    /* 3 November: Malik Willis also edged Love in week 9; Rodgers was as good in week 11 and did not count. */
+    const qb = (id: string, values: number[], over: Partial<TierCandidate> = {}) =>
+      fa(id, 'QB', values[0]!, { weekValues: values, weekSources: ['this_week', 'sleeper', 'sleeper'], ...over });
+    const plan = planWaiverTiers(
+      request({
+        roster: roster({ Love: loveBye11 }),
+        candidates: [qb('Willis', [22, 18, 18]), qb('Rodgers', [16, 18, 18], { instant: true }), qb('Murray', [16, 17.5, 17.5], { instant: true })],
+      }),
+    );
+    expect(plan.consider.filter((m) => m.position === 'QB')).toEqual([]);
+    expect(plan.watch.some((m) => m.reasonCode === 'bye_later')).toBe(true);
+  });
+
   it('a thin wire still says add him now', () => {
     const plan = planWaiverTiers(request({ roster: roster({ Love: loveBye11 }), candidates: [fa('Stroud', 'QB', 18.4)] }));
     expect(plan.consider.find((m) => m.playerId === 'Stroud')?.reasonCode).toBe('bye_depth');

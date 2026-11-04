@@ -317,6 +317,31 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     expect(plan!.current?.unavailableReason).toBe('is on bye');
   });
 
+  it('calls a week with no row a bye when the slate and his other weeks are on record', async () => {
+    /* How the stored schedule holds a bye (`byeWeeks`): Pittsburgh's week 9, 3 November 2026. */
+    await new NflScheduleRepo(db).save(
+      [...fixtures('JAX', [{ week: 2, opponent: 'CAR' }, { week: 4, opponent: 'TEN' }]), ...fixtures('CAR', [{ week: 3, opponent: 'TEN' }])],
+      '2026-09-01T00:00:00.000Z',
+    );
+    const bye = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [bye],
+      candidateInputs: [],
+      lineup: recommendLineup([bye], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-08T12:00:00.000Z'),
+    });
+
+    expect(plan!.current?.unavailableReason).toBe('is on bye');
+  });
+
   it('does not call an unread fixture a bye', async () => {
     // No schedule saved at all: the honest answer is that this app has not read
     // one, not that the NFL gave Jacksonville the week off.
