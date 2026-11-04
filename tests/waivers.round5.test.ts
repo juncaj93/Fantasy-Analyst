@@ -188,6 +188,7 @@ describe("W12: a bye two weeks out waits for its week when the wire is deep", ()
     const later = plan.watch.find((m) => m.reasonCode === 'bye_later');
     expect(later).toBeDefined();
     expect(later!.reason).toBe('Cover Love’s week 11 bye that week; free QBs will be there');
+    expect(later!.drop).toBeNull();
   });
 
   it('a thin wire still says add him now', () => {
@@ -238,6 +239,7 @@ describe("W12: a bye two weeks out waits for its week when the wire is deep", ()
     const row = view.watch.find((r) => r.reasonCode === 'bye_later')!;
     expect(row.bid.recommended).toBeNull();
     expect(tierCard(row).reason).toBe('Love bye wk 11: add then');
+    expect(tierCard(row).chips.map((c) => c.key)).toEqual(['waivers']);
   });
 });
 

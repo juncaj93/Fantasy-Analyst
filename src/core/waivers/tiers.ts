@@ -964,6 +964,16 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     m.needsSpot = [];
   }
 
+  /* A bye that waits for its week costs nobody now: no drop is named on it. */
+  for (const m of watch) {
+    if (m.reasonCode !== 'bye_later') continue;
+    if (m.drop && used.get(m.drop.playerId) === m.name) used.delete(m.drop.playerId);
+    m.drop = null;
+    m.dropCost = null;
+    delete m.needsSpot;
+    m.competesWith = [];
+  }
+
   /*
    * A "Do this" move and a consider move can fill the same hole. Measured on
    * the roster after the "Do this" move at his position lands, a consider move

@@ -157,7 +157,10 @@ export function tierCard(row: TierRow): WaiverCardModel {
   const bid = bidLabel(row.bid);
   if (row.bid.kind === 'free') all.push({ key: 'free', label: 'Free agent' });
   else if (row.bid.kind === 'claim') all.push({ key: 'waivers', label: waiverChip(row.bid.until, bid) });
-  if (row.needsSpot) all.push(row.tier === 'do_this' ? { key: 'pick', label: 'Pick your drop' } : { key: 'needs', label: 'Needs a drop' });
+  /* A bye that waits for its week is no move now: no drop chip, no open-spot chip. */
+  if (row.reasonCode === 'bye_later') {
+    /* nothing */
+  } else if (row.needsSpot) all.push(row.tier === 'do_this' ? { key: 'pick', label: 'Pick your drop' } : { key: 'needs', label: 'Needs a drop' });
   else if (row.drop?.viaReserve) all.push({ key: 'ir', label: `IR: ${surname(row.drop.name)}` });
   else if (row.drop) all.push({ key: 'drop', label: `Drop: ${surname(row.drop.name)}` });
   else all.push({ key: 'open', label: 'Open spot' });
