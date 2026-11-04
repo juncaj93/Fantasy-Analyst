@@ -120,4 +120,12 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * cover two weeks out waits on a deep wire and a free agent leads a claim
  * that is no better; an add that cuts a useful player clears the toss-up bar.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@17', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@18`, 4 November 2026, review round 6 (W3, W4, W9, W10): a pickup is
+ * judged on the points he adds to the best lineup over the rest of the season,
+ * playoff weeks 1.5 times, on Trades' rest-of-season rate
+ * (`core/value/restOfSeason.ts`), every bar scaled to the longer horizon. The
+ * drop is chosen on the same season basis, and a season starter is never the
+ * drop. Bids keep $20 for the playoffs. Sleeper's trending adds are scanned.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@18', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

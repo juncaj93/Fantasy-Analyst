@@ -12,7 +12,7 @@
 
 import { recommendBid } from '../faab/strategy.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
-import { myBudget } from '../faab/budget.ts';
+import { myBudget, playoffReserve } from '../faab/budget.ts';
 import type { PriceSummary } from '../faab/bids.ts';
 import { adviseBid, type BidPosture, type BidSignals, type ClaimRecord, type RivalContext, type RivalSeat, buildRivalProfiles } from './bidModel.ts';
 import { STYLE_PRIORS } from './managerSeeds.ts';
@@ -41,6 +41,11 @@ export interface TierBid {
   posture?: BidPosture;
   /** Set when the record is thin. */
   thin: string | null;
+  /**
+   * The playoff reserve (round 6, W3): dollars held back this week, and
+   * whether holding them lowered this bid. Absent on older responses.
+   */
+  reserve?: { held: number; capped: boolean };
   /** When a claim clears, ISO. */
   until: string | null;
   /**
@@ -54,8 +59,10 @@ export interface BidTrace {
   signals: BidSignals;
   /** The advice before the value ceiling. */
   advised: { recommended: number; low: number; high: number };
-  /** FAAB left, the cap on any bid. */
+  /** FAAB left. The cap on any bid is this less the playoff reserve until the playoffs. */
   remaining: number | null;
+  /** What a bid may spend now: FAAB left less the playoff reserve. */
+  spendable?: number | null;
   /** The league's claims this season that are not voided, and its targets a run. */
   validClaims: number;
   targetsPerRun: number;
@@ -93,6 +100,8 @@ export interface WaiverTiersView {
   watch: TierRow[];
   dropReady: DeadSpot[];
   window: WaiverTierPlan['window'];
+  /** Round 6: the weeks the gain counts to the end of the playoffs, and the bar scale. Absent on older responses. */
+  season?: WaiverTierPlan['season'];
   thresholds: WaiverTierPlan['thresholds'];
   valued: number;
   unvalued: number;
@@ -161,6 +170,8 @@ export interface TierViewInput {
 export function buildTiersView(input: TierViewInput): WaiverTiersView {
   const usesFaab = input.budgets?.rule.usesFaab ?? input.rules?.usesFaab ?? true;
   const remaining = input.budgets ? (myBudget(input.budgets)?.remaining ?? null) : null;
+  /* Until the playoffs, no suggested bid takes Alex below the reserve (D5): the cap is what is left less $20. */
+  const reserve = playoffReserve(remaining, { week: input.week, finalWeek: input.finalWeek });
   const { profiles, targetsPerRun, validClaims } = buildRivalProfiles({ seats: input.seats, claims: input.claims });
 
   const postureOf = (m: TierMove): BidPosture =>
@@ -192,19 +203,26 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
       freshDrop: pickup?.state === 'waivers' && pickup.reason === 'dropped' && (input.held.has(m.playerId) || input.paidFor.has(m.playerId)),
     };
     const posture = postureOf(m);
-    const advice = adviseBid({
-      signals,
-      profiles,
-      targetsPerRun,
-      validClaims,
-      remaining,
-      rivals: input.rivalsFor?.(m.position),
-      position: m.position,
-      posture: input.rivalsFor ? posture : undefined,
-    });
+    const adviseAt = (cap: number | null) =>
+      adviseBid({
+        signals,
+        profiles,
+        targetsPerRun,
+        validClaims,
+        remaining: cap,
+        rivals: input.rivalsFor?.(m.position),
+        position: m.position,
+        posture: input.rivalsFor ? posture : undefined,
+      });
+    const advice = adviseAt(reserve.spendable);
     const ceiling = posture === 'stash' ? null : ceilingFor(m, input);
     const overCeiling = ceiling != null && advice.recommended > ceiling;
     const recommended = overCeiling ? ceiling : advice.recommended;
+    /* Did the reserve lower the bid? The same advice with the whole budget, compared. */
+    const whole = reserve.held > 0 ? adviseAt(remaining) : advice;
+    const uncapped = ceiling != null ? Math.min(ceiling, whole.recommended) : whole.recommended;
+    const capped = reserve.held > 0 && reserve.spendable != null && uncapped > (recommended ?? 0);
+    const reserveNote = capped ? ` Capped at $${reserve.spendable} to keep $${reserve.held} for the playoffs.` : '';
     return {
       ...m,
       lastWeekPoints,
@@ -213,9 +231,10 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         recommended,
         low: Math.min(advice.low, recommended ?? advice.low),
         high: overCeiling ? ceiling : advice.high,
-        reason: overCeiling
-          ? `${advice.why}. He is worth about $${ceiling} to you, less than the $${advice.recommended} it likely takes, so bid $${ceiling} only if you want him anyway.`
-          : advice.reason,
+        reason:
+          (overCeiling
+            ? `${advice.why}. He is worth about $${ceiling} to you, less than the $${advice.recommended} it likely takes, so bid $${ceiling} only if you want him anyway.`
+            : advice.reason) + reserveNote,
         ceiling,
         overCeiling,
         likely: advice.rivals
@@ -224,11 +243,13 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
           .map((r) => ({ name: r.name, chance: r.chance, style: STYLE_PRIORS[r.style].label, ...(r.why !== undefined ? { why: r.why } : {}) })),
         ...(input.rivalsFor ? { posture } : {}),
         thin: advice.thin,
+        ...(reserve.held > 0 ? { reserve: { held: reserve.held, capped } } : {}),
         until: pickup?.until ?? null,
         trace: {
           signals,
           advised: { recommended: advice.recommended, low: advice.low, high: advice.high },
           remaining,
+          spendable: reserve.spendable,
           validClaims,
           targetsPerRun,
           expectedBidders: advice.expectedRivals,
@@ -253,6 +274,7 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
     watch: input.plan.watch.map(rowFor),
     dropReady: input.plan.dropReady,
     window: input.plan.window,
+    ...(input.plan.season ? { season: input.plan.season } : {}),
     thresholds: input.plan.thresholds,
     valued: input.plan.valued,
     unvalued: input.plan.unvalued,
@@ -301,7 +323,8 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
 /** What he is worth to this roster, from the pricing pass's valuation. */
 function ceilingFor(m: TierMove, input: TierViewInput): number | null {
   if (!input.budgets || !input.prices) return null;
-  const weights = input.plan.window.weights.reduce((a, b) => a + b, 0) || 1;
+  /* A per-week gain: the season's weighted weeks when the gain is a season total (round 6). */
+  const weights = (input.plan.season ?? input.plan.window).weights.reduce((a, b) => a + b, 0) || 1;
   const role = input.evaluations.get(m.playerId)?.role;
   const rec = recommendBid({
     inputs: {

@@ -211,6 +211,38 @@ export function myBudget(state: LeagueBudgetState): RosterBudget | null {
 }
 
 /**
+ * Money kept for the playoffs (review round 6, W3; Alex's decision D5,
+ * November 2026: balanced, spend on real starters, save the rest).
+ *
+ * A contender's most expensive injury is in week 15, and in this league no
+ * winning claim this season has been over $19. So until the playoffs begin,
+ * no suggested bid takes Alex's FAAB below {@link PLAYOFF_RESERVE}: a bid's
+ * cap is what is left less the reserve. From the first playoff week the whole
+ * budget is his to spend. One rule, read by every bid the app suggests (the
+ * tier bids, the value ceiling and the board's prices).
+ */
+export const PLAYOFF_RESERVE = 20;
+
+export interface ReserveRead {
+  /** What a bid may spend now. Null when the budget is unknown. */
+  spendable: number | null;
+  /** Dollars held back for the playoffs this week (0 once they begin). */
+  held: number;
+}
+
+/** `season.finalWeek` is the last regular-season week; the playoffs begin the week after. */
+export function playoffReserve(
+  remaining: number | null | undefined,
+  season: { week: number; finalWeek: number },
+): ReserveRead {
+  if (remaining == null || !Number.isFinite(remaining)) return { spendable: null, held: 0 };
+  const left = Math.max(0, remaining);
+  if (season.week > season.finalWeek) return { spendable: left, held: 0 };
+  const held = Math.min(left, PLAYOFF_RESERVE);
+  return { spendable: left - held, held };
+}
+
+/**
  * How many managers I would still out-money at a given spend.
  *
  * The comparison the opportunity-cost card is built on, and it deliberately

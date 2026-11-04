@@ -274,6 +274,8 @@ export interface WaiverPlanInputs {
    * `vegas` only on a waiver@11 capture, and never read back.
    */
   ahead?: { vegas?: [number, Record<string, number>][]; sleeper: [number, Record<string, number>][] } | null;
+  /** Round 6: the season the tiers value a pickup over (weeks to the end of the playoffs). Absent on older files. */
+  seasonHorizon?: { weeks: number[]; playoffWeeks: number[] } | null;
   /**
    * Waivers round 2's inputs, exactly as the assembly took them: rival season
    * rows keyed by roster id (no Sleeper user id), season points, weeks held,

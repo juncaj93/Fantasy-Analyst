@@ -48,7 +48,7 @@ import { decisionPoints } from '../startsit/decisionPoints.ts';
 import type { StartSitEvaluation } from '../startsit/engine.ts';
 import type { Designation } from '../injury/model.ts';
 import { isOutNow, weeklyAvailability } from './availability.ts';
-import { blendRate, PRODUCTION_POSITIONS, type BlendedRate } from './restOfSeason.ts';
+import { PRODUCTION_POSITIONS, restOfSeasonBlend, type BlendedRate } from '../value/restOfSeason.ts';
 
 export type RateBasis = 'market' | 'published' | 'season_line' | 'recent_week' | 'season_average' | 'none';
 
@@ -283,22 +283,17 @@ export function buildPlayerRate(args: {
   let note = resolved.note;
   let blend: BlendedRate | null = null;
   if (blending) {
-    const later: number[] = [];
-    for (const [week, points] of args.ahead ?? []) {
-      if (week <= (args.weeks[0] ?? 0) || !args.weeks.includes(week) || week === args.byeWeek) continue;
-      if (Number.isFinite(points) && points >= OUT_PLAYER_FLOOR) later.push(points);
-    }
-    const projections =
-      resolved.fromThisWeek && resolved.rate != null
-        ? [resolved.rate, ...later]
-        : later.length > 0
-          ? later
-          : resolved.rate != null
-            ? [resolved.rate]
-            : [];
-    blend = blendRate({ projections, production: args.production ?? [] });
+    const read = restOfSeasonBlend({
+      thisWeek: { rate: resolved.rate, fromThisWeek: resolved.fromThisWeek === true },
+      ahead: args.ahead,
+      production: args.production,
+      weeks: args.weeks,
+      byeWeek: args.byeWeek,
+      floor: OUT_PLAYER_FLOOR,
+    });
+    blend = read.blend;
     rate = blend.rate;
-    if (!resolved.fromThisWeek && later.length > 0) {
+    if (!resolved.fromThisWeek && read.laterWeeks > 0) {
       basis = 'published';
       note = byeThisWeek
         ? 'on a bye this week, so his value comes from the weeks after'

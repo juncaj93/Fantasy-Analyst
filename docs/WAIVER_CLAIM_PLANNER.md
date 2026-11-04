@@ -9,6 +9,33 @@
 > (2.5 / 3.0 over a starter, 0.5 / 1.0 over a bench player) still build the
 > board that an older cached response draws, and nothing else.
 
+## Round 6 of the November review (4 November 2026, waiver@18)
+
+Findings W3, W4, W9 and W10 of `docs/REVIEW_2026-11.md`.
+
+- **Pickups are judged on the rest of the season.** The gain is the points a
+  move adds to the best lineup (the same solver, every slot and FLEX) from the
+  first week it counts to the end of the playoffs. Each week counts once and a
+  playoff week 1.5 times, Trades' weights. The near three weeks keep their own
+  weekly numbers; every later week is the player's rest-of-season rate, the
+  one Trades uses (`core/value/restOfSeason.ts`: half his projections for this
+  week and the next three skipping his bye, half his points per game played).
+  In a later week an empty slot is a free agent at replacement level, so a bye
+  in week 13 costs a starter one week over a free agent, not a whole week.
+- **The bars scale.** Do this, Worth considering, the Watch list, a dead spot,
+  the drop slack, the toss-up bar on a useful cut and the preferences are the
+  old window's bars times the season's weighted weeks over the window's (10.5
+  over 2.5 at week 9, so Do this is 16.8 season points). A real hole this week
+  and "pick up and start" are unchanged.
+- **Drops are chosen on the same basis.** Over a free agent on season rates,
+  the lowest goes first. Anyone still in the best season lineup with the add
+  on the roster is never the drop: Jordan Love is not cut for Sam Darnold's
+  better week 9. IR stashes stay protected.
+- **$20 is kept for the playoffs** (`faab/budget.ts`, `playoffReserve`). Until
+  week 15 no suggested bid takes Alex's FAAB below $20; a capped bid says so.
+- **Sleeper's trending adds are scanned** (the top 10 free agents), beside the
+  draft-order and published-week slices.
+
 ## Round 2 (13 October 2026, waiver@13)
 
 Alex's feedback on the live screen: the bid named RonJonathan, who holds three

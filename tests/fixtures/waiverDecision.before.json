@@ -6,7 +6,7 @@
    "tier": "do_this",
    "reasonCode": "hole_empty",
    "reason": "Nobody on your roster can start at QB in week 1",
-   "gain": 55.15,
+   "gain": 92.38,
    "byWeek": [
     {
      "week": 1,
@@ -19,6 +19,62 @@
     {
      "week": 3,
      "change": 22.06
+    },
+    {
+     "week": 4,
+     "change": 1.69
+    },
+    {
+     "week": 5,
+     "change": 1.69
+    },
+    {
+     "week": 6,
+     "change": 1.69
+    },
+    {
+     "week": 7,
+     "change": 1.69
+    },
+    {
+     "week": 8,
+     "change": 1.69
+    },
+    {
+     "week": 9,
+     "change": 1.69
+    },
+    {
+     "week": 10,
+     "change": 1.69
+    },
+    {
+     "week": 11,
+     "change": 1.69
+    },
+    {
+     "week": 12,
+     "change": 1.69
+    },
+    {
+     "week": 13,
+     "change": 1.69
+    },
+    {
+     "week": 14,
+     "change": 1.69
+    },
+    {
+     "week": 15,
+     "change": 1.69
+    },
+    {
+     "week": 16,
+     "change": 1.69
+    },
+    {
+     "week": 17,
+     "change": 1.69
     }
    ],
    "drop": null,
@@ -42,7 +98,7 @@
    "tier": "do_this",
    "reasonCode": "hole_empty",
    "reason": "Nobody on your roster can start at RB in week 1",
-   "gain": 38.65,
+   "gain": 46.38,
    "byWeek": [
     {
      "week": 1,
@@ -55,6 +111,62 @@
     {
      "week": 3,
      "change": 15.46
+    },
+    {
+     "week": 4,
+     "change": 0
+    },
+    {
+     "week": 5,
+     "change": 0
+    },
+    {
+     "week": 6,
+     "change": 0
+    },
+    {
+     "week": 7,
+     "change": 0
+    },
+    {
+     "week": 8,
+     "change": 0
+    },
+    {
+     "week": 9,
+     "change": 0
+    },
+    {
+     "week": 10,
+     "change": 0
+    },
+    {
+     "week": 11,
+     "change": 0
+    },
+    {
+     "week": 12,
+     "change": 0
+    },
+    {
+     "week": 13,
+     "change": 0
+    },
+    {
+     "week": 14,
+     "change": 0
+    },
+    {
+     "week": 15,
+     "change": 0
+    },
+    {
+     "week": 16,
+     "change": 0
+    },
+    {
+     "week": 17,
+     "change": 0
     }
    ],
    "drop": null,
@@ -71,48 +183,12 @@
    }
   },
   {
-   "playerId": "1019",
-   "name": "Grant Aldous",
-   "tier": "do_this",
-   "reasonCode": "hole_empty",
-   "reason": "Nobody on your roster can start at TE in week 1",
-   "gain": 27.83,
-   "byWeek": [
-    {
-     "week": 1,
-     "change": 11.13
-    },
-    {
-     "week": 2,
-     "change": 11.13
-    },
-    {
-     "week": 3,
-     "change": 11.13
-    }
-   ],
-   "drop": null,
-   "needsSpot": null,
-   "bestDrops": null,
-   "alternatives": [
-    "Miles Barrowman"
-   ],
-   "competesWith": [],
-   "bid": {
-    "kind": "free",
-    "recommended": null,
-    "low": null,
-    "high": null,
-    "reason": "Free agent: first come, no bid"
-   }
-  },
-  {
    "playerId": "1007",
    "name": "Owen Fitzgerald",
    "tier": "do_this",
    "reasonCode": "hole_empty",
    "reason": "Nobody on your roster can start at WR in week 1",
-   "gain": 26.83,
+   "gain": 40.71,
    "byWeek": [
     {
      "week": 1,
@@ -125,6 +201,62 @@
     {
      "week": 3,
      "change": 10.73
+    },
+    {
+     "week": 4,
+     "change": 0.55
+    },
+    {
+     "week": 5,
+     "change": 0.55
+    },
+    {
+     "week": 6,
+     "change": 0.55
+    },
+    {
+     "week": 7,
+     "change": 0.55
+    },
+    {
+     "week": 8,
+     "change": 0.55
+    },
+    {
+     "week": 9,
+     "change": 0.55
+    },
+    {
+     "week": 10,
+     "change": 0.55
+    },
+    {
+     "week": 11,
+     "change": 0.55
+    },
+    {
+     "week": 12,
+     "change": 0.55
+    },
+    {
+     "week": 13,
+     "change": 0.55
+    },
+    {
+     "week": 14,
+     "change": 0.55
+    },
+    {
+     "week": 15,
+     "change": 0.55
+    },
+    {
+     "week": 16,
+     "change": 0.55
+    },
+    {
+     "week": 17,
+     "change": 0.55
     }
    ],
    "drop": null,
@@ -143,12 +275,104 @@
    }
   },
   {
+   "playerId": "1019",
+   "name": "Grant Aldous",
+   "tier": "do_this",
+   "reasonCode": "hole_empty",
+   "reason": "Nobody on your roster can start at TE in week 1",
+   "gain": 35.47,
+   "byWeek": [
+    {
+     "week": 1,
+     "change": 11.13
+    },
+    {
+     "week": 2,
+     "change": 11.13
+    },
+    {
+     "week": 3,
+     "change": 11.13
+    },
+    {
+     "week": 4,
+     "change": 0.13
+    },
+    {
+     "week": 5,
+     "change": 0.13
+    },
+    {
+     "week": 6,
+     "change": 0.13
+    },
+    {
+     "week": 7,
+     "change": 0.13
+    },
+    {
+     "week": 8,
+     "change": 0.13
+    },
+    {
+     "week": 9,
+     "change": 0.13
+    },
+    {
+     "week": 10,
+     "change": 0.13
+    },
+    {
+     "week": 11,
+     "change": 0.13
+    },
+    {
+     "week": 12,
+     "change": 0.13
+    },
+    {
+     "week": 13,
+     "change": 0.13
+    },
+    {
+     "week": 14,
+     "change": 0.13
+    },
+    {
+     "week": 15,
+     "change": 0.13
+    },
+    {
+     "week": 16,
+     "change": 0.13
+    },
+    {
+     "week": 17,
+     "change": 0.13
+    }
+   ],
+   "drop": null,
+   "needsSpot": null,
+   "bestDrops": null,
+   "alternatives": [
+    "Miles Barrowman"
+   ],
+   "competesWith": [],
+   "bid": {
+    "kind": "free",
+    "recommended": null,
+    "low": null,
+    "high": null,
+    "reason": "Free agent: first come, no bid"
+   }
+  },
+  {
    "playerId": "1006",
    "name": "Julian Reyes",
    "tier": "consider",
    "reasonCode": "bye_depth",
    "reason": "Nobody on your roster can start at RB in week 3",
-   "gain": 14.3,
+   "gain": 21.45,
    "byWeek": [
     {
      "week": 1,
@@ -161,6 +385,62 @@
     {
      "week": 3,
      "change": 14.3
+    },
+    {
+     "week": 4,
+     "change": 0
+    },
+    {
+     "week": 5,
+     "change": 0
+    },
+    {
+     "week": 6,
+     "change": 0
+    },
+    {
+     "week": 7,
+     "change": 0
+    },
+    {
+     "week": 8,
+     "change": 0
+    },
+    {
+     "week": 9,
+     "change": 0
+    },
+    {
+     "week": 10,
+     "change": 0
+    },
+    {
+     "week": 11,
+     "change": 0
+    },
+    {
+     "week": 12,
+     "change": 0
+    },
+    {
+     "week": 13,
+     "change": 0
+    },
+    {
+     "week": 14,
+     "change": 0
+    },
+    {
+     "week": 15,
+     "change": 0
+    },
+    {
+     "week": 16,
+     "change": 0
+    },
+    {
+     "week": 17,
+     "change": 0
     }
    ],
    "drop": null,
@@ -187,7 +467,7 @@
   "weights": [
    1,
    1,
-   0.5
+   1
   ]
  },
  "freeAgentRule": "In this league a dropped player is on waivers for 2 days, and a player whose game has started waits for the Wednesday run; anyone else is an instant add.",
@@ -195,25 +475,25 @@
   {
    "rank": 1,
    "headline": "Add Rhys Donnelly · free agent",
-   "detail": "Nobody on your roster can start at QB in week 1 · +55.1 pts",
+   "detail": "Nobody on your roster can start at QB in week 1 · +92.4 pts",
    "qualifier": null
   },
   {
    "rank": 2,
    "headline": "Add Bo Ashworth · free agent",
-   "detail": "Nobody on your roster can start at RB in week 1 · +38.6 pts",
+   "detail": "Nobody on your roster can start at RB in week 1 · +46.4 pts",
    "qualifier": null
   },
   {
    "rank": 3,
-   "headline": "Add Grant Aldous · free agent",
-   "detail": "Nobody on your roster can start at TE in week 1 · +27.8 pts",
+   "headline": "Add Owen Fitzgerald · free agent",
+   "detail": "Nobody on your roster can start at WR in week 1 · +40.7 pts",
    "qualifier": null
   },
   {
    "rank": 4,
-   "headline": "Add Owen Fitzgerald · free agent",
-   "detail": "Nobody on your roster can start at WR in week 1 · +26.8 pts",
+   "headline": "Add Grant Aldous · free agent",
+   "detail": "Nobody on your roster can start at TE in week 1 · +35.5 pts",
    "qualifier": null
   }
  ],

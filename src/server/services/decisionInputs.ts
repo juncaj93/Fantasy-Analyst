@@ -37,7 +37,7 @@ import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
-import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION, publishedFreeAgentIds } from '../../core/roster/freeAgents.ts';
+import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION, publishedFreeAgentIds, trendingFreeAgentIds } from '../../core/roster/freeAgents.ts';
 import { AdpRepo, type AdpValue } from '../repos/adp.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
@@ -64,6 +64,7 @@ import type { Database } from '../db.ts';
 import { DepthChartRepo } from '../repos/nflverse.ts';
 import { WeekPointsService } from './weekPointsService.ts';
 import { readWaiverAhead } from './waiverAhead.ts';
+import { tradeHorizon } from '../../core/tradeValue/weeks.ts';
 import { readWaiverRound2 } from './waiverRound2.ts';
 import { lastCompletedWeek } from '../../core/sleeper/weekPoints.ts';
 import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
@@ -637,7 +638,14 @@ export async function gatherWaiverInputs(
         exclude: new Set([...scanned, ...inWindow]),
       })
     : [];
-  const candidateIds = [...scanned, ...inWindow, ...byWeek];
+  /* Sleeper's most-added free agents too (W10): a role that just grew is rarely near the top of a draft order. */
+  const trendingIds = trendingFreeAgentIds(players, {
+    rosteredIds,
+    startable,
+    trending: strategy?.trending ?? new Map(),
+    exclude: new Set([...scanned, ...inWindow, ...byWeek]),
+  });
+  const candidateIds = [...scanned, ...inWindow, ...byWeek, ...trendingIds];
 
   /*
    * The roster's inputs, and the depth chart read that needs them, as one
@@ -823,6 +831,11 @@ export async function gatherWaiverInputs(
       lastWeekPoints,
       recentPublished,
       ahead,
+      /* Round 6: the season the tiers value a pickup over, from the league's own playoff settings. */
+      seasonHorizon: (() => {
+        const horizon = tradeHorizon({ leagueSettings: league.leagueSettings, currentWeek: week });
+        return { weeks: horizon.weeks, playoffWeeks: horizon.playoffWeeks };
+      })(),
       ...(Number.isFinite(reserveSlots) ? { reserveSlots } : {}),
       /*
        * The positions this league may not read a published total for, so a
