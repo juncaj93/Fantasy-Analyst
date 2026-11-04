@@ -178,7 +178,8 @@ export function SmartTradeSheet({
               {sideLine({
                 gives: offer.give,
                 gets: offer.get,
-                gain: offer.user.starterGain,
+                gain: offer.seasonCheck?.you ?? offer.user.starterGain,
+                season: offer.seasonCheck?.you != null,
                 depth: offer.user.depthChange,
               })}
             </dd>
@@ -189,7 +190,8 @@ export function SmartTradeSheet({
               {sideLine({
                 gives: offer.get,
                 gets: offer.give,
-                gain: offer.counterparty.starterGain,
+                gain: offer.seasonCheck?.them ?? offer.counterparty.starterGain,
+                season: offer.seasonCheck?.them != null,
                 depth: offer.counterparty.depthChange,
               })}
             </dd>
@@ -335,19 +337,23 @@ function managerCue(offer: OfferEvaluation): string | null {
   return null;
 }
 
-/** `Give A and B, gain 3.4 pts, lose 1 bench player`. */
+/** `B in, A out: +14 pts over the season, +1 bench option`. */
 function sideLine(args: {
   gives: { name: string }[];
   gets: { name: string }[];
   gain: number;
+  /** The gain is rest-of-season points (Check a trade's), not one week's. */
+  season?: boolean;
   depth: number;
 }): string {
-  const points = args.gain > 0 ? `+${args.gain.toFixed(1)} pts` : args.gain < 0 ? `${args.gain.toFixed(1)} pts` : 'no change';
+  const shown = args.season ? Math.round(args.gain).toString() : args.gain.toFixed(1);
+  const unit = args.season ? ' pts over the season' : ' pts';
+  const points = args.gain > 0 ? `+${shown}${unit}` : args.gain < 0 ? `${shown}${unit}` : 'no change';
   const depth =
     args.depth === 0
       ? ''
       : `, ${args.depth > 0 ? '+' : ''}${args.depth} bench option${Math.abs(args.depth) === 1 ? '' : 's'}`;
-  return `${names(args.gets)} in, ${names(args.gives)} out — ${points}${depth}`;
+  return `${names(args.gets)} in, ${names(args.gives)} out: ${points}${depth}`;
 }
 
 function evidenceLine(offer: OfferEvaluation): string {

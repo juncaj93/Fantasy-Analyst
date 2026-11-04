@@ -30,7 +30,7 @@
  * was resolved, so there was nothing to read history *for*.
  */
 
-import { buildRosterViews, type RosterView } from './rosterUtility.ts';
+import { buildRosterViews, type RosterView, type SeasonPricing } from './rosterUtility.ts';
 import {
   TRADE_BOUNDS,
   findBilateralTrades,
@@ -115,6 +115,13 @@ export interface TradeAssemblyRequest {
    * complete markets only, and a partial market is never a price.
    */
   published?: ReadonlyMap<string, number> | undefined;
+  /**
+   * Every rostered player priced on the rest of the season, from Check a
+   * trade's own preparation (review T1, November 2026). With it the search
+   * finds, gates and ranks on the season; absent (Demo Mode, an older support
+   * snapshot) it is the weekly search it always was.
+   */
+  season?: SeasonPricing | null | undefined;
   /** Surfaced offers, bounded by the engine at twenty whatever is asked for. */
   limit?: number | undefined;
   /**
@@ -242,6 +249,7 @@ export function assembleSmartTrades(request: TradeAssemblyRequest): TradeAssembl
     shape: request.shape,
     profile: request.profile,
     ...(request.published ? { published: request.published } : {}),
+    ...(request.season ? { season: request.season } : {}),
   });
 
   const me = views.get(String(mine.rosterId));

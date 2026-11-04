@@ -208,6 +208,8 @@ export async function captureSupportSnapshot(
         sleeper,
         gathered.league.id,
         ideasToCheck(assembleSmartTrades(gathered.request)),
+        gathered.request.inputs,
+        gathered.prepared ?? null,
       );
       return captureTradeSnapshot({
         gitSha,
@@ -222,6 +224,7 @@ export async function captureSupportSnapshot(
           limit: gathered.request.limit,
           currentWeek: gathered.request.currentWeek,
           warnings: gathered.request.warnings ?? [],
+          ...(gathered.request.season ? { season: gathered.request.season } : {}),
           seasonChecks,
         },
         nflState: nflState as never,

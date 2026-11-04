@@ -32,6 +32,7 @@ import {
   type BuilderTeam,
 } from '../src/core/trades/builder.ts';
 import { BUILDER_ADVISORY, BUILDER_WILLINGNESS, followUpChip, rankKey, rankPackages, topAcrossTeams } from '../src/core/trades/builderResponse.ts';
+import { gainBars } from '../src/core/trades/fairToBoth.ts';
 
 const POSITIONS = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'FLEX', 'DEF', 'BN', 'BN', 'BN', 'BN', 'BN', 'BN'];
 const SETTINGS = { playoff_week_start: 15, playoff_teams: 6, playoff_round_type: 0, trade_deadline: 11 };
@@ -162,8 +163,9 @@ describe('a package that helps both sides', () => {
   it('is shown, with both gains positive', () => {
     expect(result.status).toBe('ok');
     expect(pkg).toBeDefined();
-    expect(pkg!.alex.weighted).toBeGreaterThan(BUILDER.minGain);
-    expect(pkg!.them.weighted).toBeGreaterThan(BUILDER.minGain);
+    /* The fair-to-both bars over the weeks left (week 5 to 17: 14.5 weighted weeks, 13 and 5). */
+    expect(pkg!.alex.weighted).toBeGreaterThanOrEqual(gainBars(14.5).user);
+    expect(pkg!.them.weighted).toBeGreaterThanOrEqual(gainBars(14.5).partner);
     expect(pkg!.alex.restOfSeason).toBeGreaterThan(0);
     expect(pkg!.them.restOfSeason).toBeGreaterThan(0);
   });

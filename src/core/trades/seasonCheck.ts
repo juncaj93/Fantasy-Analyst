@@ -64,6 +64,8 @@ export interface SeasonEvaluationLike {
   insufficientReason: string | null;
   verdict: { kind: SeasonCheck['kind']; headline: string } | null;
   confidence: 'high' | 'medium' | 'low';
+  /** Weighted weeks left, for the gain bars. */
+  weightedWeeks?: number;
   /** The user's side (`a`) and the partner's (`b`). Absent on an older shape: then fairness is not read. */
   a?: SideLike | null;
   b?: SideLike | null;
@@ -89,6 +91,7 @@ export function seasonCheckOf(evaluation: SeasonEvaluationLike): SeasonCheck {
     getValue: a.incoming.reduce((sum, p) => sum + (p.rosValue ?? 0), 0),
     userGain: a.net,
     partnerGain: b.net,
+    weightedWeeks: evaluation.weightedWeeks ?? null,
   });
   return {
     ...base,
@@ -112,6 +115,19 @@ export function contradicts(check: SeasonCheck | undefined): boolean {
   if (check.status !== 'ok') return true;
   if (check.kind === 'leans_b' || check.kind === 'favors_b') return true;
   return check.unfair != null;
+}
+
+/**
+ * The idea's one line, on the season (review T1): both sides' rest-of-season
+ * gains, the numbers the fair-to-both rule reads. Null without them.
+ */
+export function seasonHeadline(check: SeasonCheck | undefined): string | null {
+  if (!check || check.status !== 'ok' || check.you == null || check.them == null) return null;
+  const signed = (v: number) => {
+    const n = Math.round(v);
+    return n > 0 ? `+${n}` : n < 0 ? `\u2212${Math.abs(n)}` : '0';
+  };
+  return `You ${signed(check.you)}, them ${signed(check.them)} over the season`;
 }
 
 /** The short form for a card: four words at most. */
@@ -173,7 +189,9 @@ export function applySeasonChecks<T extends { offers: OfferEvaluation[]; notes: 
     const involved = [...offer.give, ...offer.get].map((p) => p.playerId);
     if (involved.some((id) => spoken.has(id))) continue;
     for (const id of involved) spoken.add(id);
-    kept.push(check ? { ...offer, seasonCheck: check } : offer);
+    /* The row's one line reads the season, not one week, once the season is known. */
+    const headline = seasonHeadline(check);
+    kept.push(check ? { ...offer, seasonCheck: check, ...(headline ? { headline } : {}) } : offer);
   }
   const notes = [...board.notes];
   if (kept.length === 0 && dropped.length > 0) {

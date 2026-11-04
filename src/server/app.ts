@@ -2850,16 +2850,18 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   router.get('/api/trades/smart', async (ctx) => {
     const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 5) || 5, 20);
     const leagueId = ctx.url.searchParams.get('leagueId');
-    const { board, inputs } = await new SmartTradeService(ctx.env.db).buildWithInputs({
+    const { board, inputs, prepared } = await new SmartTradeService(ctx.env.db).buildWithInputs({
       limit,
       ...(leagueId ? { leagueId } : {}),
     });
     /*
      * Held to Check a trade's answer (finding T3, October 2026): an idea the
      * rest-of-season check says favours the other team is left off, and every
-     * idea shown carries that verdict. See `core/trades/seasonCheck.ts`.
+     * idea shown carries that verdict. See `core/trades/seasonCheck.ts`. The
+     * search priced the league on the season already (review T1), so the
+     * checks reuse that preparation and read nothing more.
      */
-    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, ideasToCheck(board), inputs);
+    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, ideasToCheck(board), inputs, prepared);
     return jsonResponse(applySeasonChecks(board, checks).board);
   });
 
@@ -2872,7 +2874,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    */
   router.get('/api/diagnostics/smart-trades', async (ctx) => {
     const leagueId = ctx.url.searchParams.get('leagueId');
-    return jsonResponse(await new SmartTradeService(ctx.env.db).explain(leagueId ? { leagueId } : {}));
+    /* `cost=1` meters the rows read, for the probe's budget line (as Build a trade's route does). */
+    const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+    const result = await new SmartTradeService(metered?.db ?? ctx.env.db).explain(leagueId ? { leagueId } : {});
+    return jsonResponse(metered ? { ...result, cost: metered.cost() } : result);
   });
 
   /**

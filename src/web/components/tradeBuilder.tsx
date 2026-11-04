@@ -175,7 +175,7 @@ export function TradeBuilderFold({ leagueId }: { leagueId: string }) {
             <InfoLine
               testId="trade-builder-deadline"
               text={closed ? `Trades closed after week ${horizon.deadlineWeek}` : `Trades close after week ${horizon.deadlineWeek} · ${horizon.weeksToDeadline ?? 0} wks left`}
-              detail={`Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoffs included`}
+              detail={`Weeks ${horizon.currentWeek}–${horizon.lastWeek}, playoff weeks count 1.5 times`}
             />
           ) : null}
 

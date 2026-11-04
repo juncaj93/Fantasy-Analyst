@@ -43,6 +43,8 @@ import type { LineupAssembly } from '../startsit/assemble.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 import type { WaiverAssembly, WaiverRound2Inputs } from '../waivers/assemble.ts';
 import type { TradeAssembly } from '../trades/assemble.ts';
+import type { PlayerRate } from '../tradeValue/rate.ts';
+import type { ReplacementLevel } from '../tradeValue/evaluate.ts';
 import type { MatchupResponse } from '../matchup/build.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { DstPlanRequest } from '../dst/assemble.ts';
@@ -445,6 +447,13 @@ export interface TradeOfferInputs {
   currentWeek?: number;
   /** Sleeper's published week by player id, the ideas' fallback number (15 October 2026). Absent on older snapshots. */
   published?: [string, number][];
+  /**
+   * Every rostered player priced on the rest of the season, the free agents'
+   * replacement level and each remaining week's weight: what the search ran
+   * on (review T1, November 2026). Absent on an older snapshot, which replays
+   * on the week as it was searched.
+   */
+  season?: { rates: [string, PlayerRate][]; replacement: [string, ReplacementLevel][]; weights: number[] };
   /**
    * The behavioural half, with both of its `Map`s hoisted and keyed by alias.
    *

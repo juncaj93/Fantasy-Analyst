@@ -21,11 +21,12 @@
  * ## How a package is read
  *
  *  - **Alex's gain** is the weekly lineup change (depth and bye cover
- *    included), counted most for the week a trade first affects, then the two
- *    after it, then the rest of the regular season, with playoff weeks weighted
- *    up; plus his stated preferences from Check a trade (no spare QB or TE,
- *    lean RB). What he gives up is already in it: the lineup is rebuilt without
- *    him.
+ *    included) over the rest of the season, a playoff week counted 1.5 times
+ *    (`restOfSeason.ts`, the scale Check a trade and the trade ideas use),
+ *    on each player's rest-of-season rate; plus his stated preferences from
+ *    Check a trade (no spare QB or TE, lean RB). What he gives up is already
+ *    in it: the lineup is rebuilt without him. Until November 2026 this week
+ *    counted three times and the next two twice, so one week's numbers led.
  *  - **Their gain** is the same, on their roster, with no preferences. A
  *    package that does not help them is never shown.
  *  - **Balance** is each side's rest-of-season value over a free agent. Inside
@@ -52,6 +53,7 @@ import { evaluateTrade, type ReplacementLevels, type SideResult, type TradeEvalu
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import type { PlayerRate } from '../tradeValue/rate.ts';
 import type { TradeHorizon } from '../tradeValue/weeks.ts';
+import { seasonWeights } from '../tradeValue/restOfSeason.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import { isDeadSpot, readDrops, type DropSignals } from '../waivers/dropScore.ts';
 import { tradeExcluded } from './rosterUtility.ts';
@@ -74,10 +76,6 @@ import {
 } from './builderResponse.ts';
 
 export const BUILDER = {
-  /** Week weights for the ranking number: the first week, the two after it, other regular weeks, playoff weeks. */
-  weights: { first: 3, nextTwo: 2, regular: 1, playoff: 1.5 },
-  /** Weighted points either side must gain to count as helped. */
-  minGain: 1,
   /**
    * Balance bands, as Alex's edge in rest-of-season value over the larger side.
    * Up to `even` either way is about even. Past Alex's edge of
@@ -90,13 +88,15 @@ export const BUILDER = {
   band: { even: 0.1, maybe: 0.25, longShot: 0.45 },
   /** Their players suggested per team when Alex marked none there. */
   suggestionsPerTeam: 4,
-  /** Fewer when every team is asked at once, to keep the request bounded. */
-  suggestionsAllTeams: 3,
   /** Alex's players considered when "also consider unmarked" is on. */
   givePool: 6,
-  /** Full evaluations per team, and per team when all teams are asked. */
+  /**
+   * Full evaluations per team, the same whether one team is asked, the phone
+   * sweeps all of them one by one, or one request asks every team at once.
+   * Until November 2026 the one-request form checked four packages a team (and
+   * suggested three players), so it saw less than the phone did.
+   */
   evaluatedPerTeam: 10,
-  evaluatedAllTeams: 4,
   /** Packages shown for one team, and across all teams (at most two per team there). */
   shownPerTeam: 3,
   shownAll: 5,
@@ -291,7 +291,7 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
         /* Asking every team at once, only players some deal could bring back: the budget is too small for the rest. */
         .filter((x) => x.gain > 0.05 && (!allLike || x.pair > -Infinity))
         .sort((a, b) => Number(b.pair > -Infinity) - Number(a.pair > -Infinity) || (b.pair > -Infinity ? b.pair - a.pair : b.gain - a.gain) || a.id.localeCompare(b.id))
-        .slice(0, all ? BUILDER.suggestionsAllTeams : BUILDER.suggestionsPerTeam)
+        .slice(0, BUILDER.suggestionsPerTeam)
         .map((x) => x.id);
       get = suggested;
     }
@@ -330,7 +330,7 @@ export function buildTradePackages(input: BuilderInput): BuilderResult {
       return { team, give: s.give, get: s.get, priority: fair ? priority : priority - 1000 };
     });
     generated += candidates.length;
-    const cap = all ? BUILDER.evaluatedAllTeams : BUILDER.evaluatedPerTeam;
+    const cap = BUILDER.evaluatedPerTeam;
     const ordered = candidates.sort((a, b) => b.priority - a.priority || key(a).localeCompare(key(b)));
     for (let i = cap; i < ordered.length; i++) hide('pruned_by_bound');
 
@@ -442,9 +442,9 @@ function evaluatePackage(
 
   /* Alex's preference: no spare QB or TE unless clearly better (Check a trade's own line). */
   if (a.adjustments.some((x) => x.key === 'second_qb_te')) return { hidden: 'spare_qb_te' };
-  /* Both lineups must gain: weighted toward the coming weeks, and over the whole season too. */
-  if (aWeighted < BUILDER.minGain || a.net + (moveCost?.net ?? 0) <= 0) return { hidden: 'no_gain_for_you' };
-  if (bWeighted < BUILDER.minGain || b.net <= 0) return { hidden: 'no_gain_for_them' };
+  /* A side that gains nothing at all is said first; how much is enough is the fair-to-both rule below. */
+  if (a.net + (moveCost?.net ?? 0) <= 0) return { hidden: 'no_gain_for_you' };
+  if (b.net <= 0) return { hidden: 'no_gain_for_them' };
 
   /*
    * Fair to both sides, the same rule the trade ideas keep (`fairToBoth.ts`).
@@ -455,7 +455,13 @@ function evaluatePackage(
   const cuts = new Set(b.mustDrop ? [b.mustDrop.playerId] : []);
   const giveValue = round1(sentValue(a.outgoing, cuts));
   const getValue = round1(a.incoming.reduce((s, p) => s + (p.rosValue ?? 0), 0));
-  const fair = fairToBoth({ giveValue, getValue, userGain: a.net + (moveCost?.net ?? 0), partnerGain: b.net });
+  const fair = fairToBoth({
+    giveValue,
+    getValue,
+    userGain: a.net + (moveCost?.net ?? 0),
+    partnerGain: b.net,
+    weightedWeeks: evaluation.weightedWeeks ?? null,
+  });
   const edge = fair.edge;
   if (fair.reason === 'user_edge') return { hidden: 'outside_band' };
   if (fair.reason === 'partner_edge') return { hidden: 'you_overpay' };
@@ -889,11 +895,9 @@ function tradeable(p: PlayerRate): boolean {
 
 /* ---------------------------------------------------------------- reading -- */
 
+/** The trade tools' one scale: a regular week once, a playoff week 1.5 times. */
 function weekWeights(horizon: TradeHorizon): number[] {
-  const playoff = new Set(horizon.playoffWeeks);
-  return horizon.weeks.map((week, i) =>
-    i === 0 ? BUILDER.weights.first : i <= 2 ? BUILDER.weights.nextTwo : playoff.has(week) ? BUILDER.weights.playoff : BUILDER.weights.regular,
-  );
+  return seasonWeights(horizon);
 }
 
 function weeklyDelta(side: SideResult): number[] {

@@ -19,7 +19,8 @@
  *     for each remaining week:
  *       best legal lineup from the roster, plus replacement-level free agents,
  *       each player's points scaled by whether he plays that week (bye, injury)
- *     sum the weeks; do it again with the trade made; subtract.
+ *     sum the weeks, a playoff week counted 1.5 times (`restOfSeason.ts`);
+ *     do it again with the trade made; subtract.
  *
  * That one subtraction answers the questions a count cannot. A third quarterback
  * adds nothing because he never enters a lineup. A wide receiver upgrade is worth
@@ -54,6 +55,7 @@ import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '
 import { isOutNow } from './availability.ts';
 import type { PlayerRate, RateBasis } from './rate.ts';
 import type { TradeHorizon } from './weeks.ts';
+import { seasonWeights } from './restOfSeason.ts';
 
 export const TRADE_VALUE = {
   /** How many free agents, best first, set the replacement level at a position. */
@@ -153,7 +155,10 @@ export interface PlayerLine {
   injuryNote: string | null;
   byeWeek: number | null;
   byeInside: boolean;
-  /** Points over replacement for the rest of the season, floored at zero. Null with no rate. */
+  /**
+   * Points over replacement for the rest of the season, floored at zero, a
+   * playoff week counted at its weight. Null with no rate.
+   */
   rosValue: number | null;
   /** Weeks he would be in the starting lineup, on the roster that holds him. */
   startsWeeks: number;
@@ -177,8 +182,11 @@ export interface SideResult {
   isMine: boolean;
   /** Change in the best projected lineup over the remaining weeks. */
   lineupChange: number;
-  /** The same, week by week, so a total can be checked against the weeks it came from. */
-  weekly?: { week: number; lineupBefore: number; lineupAfter: number; depthBefore: number; depthAfter: number }[];
+  /**
+   * The same, week by week, so a total can be checked against the weeks it
+   * came from: each week's change times its `weight` adds to the total.
+   */
+  weekly?: { week: number; lineupBefore: number; lineupAfter: number; depthBefore: number; depthAfter: number; weight?: number }[];
   /** Change in the small depth credit. */
   depthChange: number;
   /** Alex's preferences. Empty for every other team. */
@@ -214,6 +222,11 @@ export interface TradeEvaluation {
   /** Why there is no verdict, when there is not one. */
   insufficientReason: string | null;
   weeks: { first: number; last: number; count: number };
+  /**
+   * The weeks left, a playoff week counted at its weight: what the season
+   * numbers are summed over (`restOfSeason.ts`). Absent on an older body.
+   */
+  weightedWeeks?: number;
   a: SideResult | null;
   b: SideResult | null;
   verdict: Verdict | null;
@@ -242,8 +255,10 @@ function valueRoster(opts: {
   slots: readonly LineupSlotSpec[];
   replacement: ReplacementLevels;
   horizon: TradeHorizon;
+  /** One weight per horizon week. */
+  weights: readonly number[];
 }): RosterValue {
-  const { players, slots, replacement, horizon } = opts;
+  const { players, slots, replacement, horizon, weights } = opts;
   const priced = players.filter((p) => p.rate != null);
   const starts = new Map<string, number[]>();
   const byWeek: { week: number; lineup: number; depth: number }[] = [];
@@ -265,7 +280,8 @@ function valueRoster(opts: {
       ...fills,
     ];
     const result = bestLineup(slots, candidates);
-    lineup += result.total;
+    const weight = weights[index] ?? 1;
+    lineup += weight * result.total;
 
     const started = new Set<string>();
     for (const pick of result.picks) {
@@ -286,23 +302,41 @@ function valueRoster(opts: {
         .slice(0, TRADE_VALUE.depth.creditedBench)
         .reduce((sum, x) => sum + x.credit, 0) * TRADE_VALUE.depth.injuryRate;
     const isSpare = (position: string) => position === 'QB' || position === 'TE';
-    depth.neutral += credited(() => true);
-    depth.noQbTe += credited((position) => !isSpare(position));
-    depth.noQbTeDef += credited((position) => !isSpare(position) && (position !== 'DEF' || week >= defPrepWeek));
+    depth.neutral += weight * credited(() => true);
+    depth.noQbTe += weight * credited((position) => !isSpare(position));
+    depth.noQbTeDef += weight * credited((position) => !isSpare(position) && (position !== 'DEF' || week >= defPrepWeek));
     byWeek.push({ week, lineup: result.total, depth: credited(() => true) });
   });
 
   return { lineup, depth, starts, byWeek };
 }
 
+/**
+ * A player's rest-of-season value over a free agent: every week he plays, his
+ * rate less the free agent's, a playoff week counted at its weight. Zero when
+ * a free agent is as good. The one definition the trade tools share (the
+ * value balance in Check a trade, Build a trade and the trade ideas).
+ */
+export function seasonValueOver(
+  player: Pick<PlayerRate, 'rate' | 'position' | 'weekly' | 'games'>,
+  replacement: ReplacementLevels,
+  weights: readonly number[],
+): number | null {
+  const level = replacement.get(player.position);
+  if (player.rate == null || level == null) return null;
+  const edge = Math.max(0, player.rate - level.rate);
+  const weeks =
+    player.weekly.length > 0 ? player.weekly.reduce((sum, share, i) => sum + share * (weights[i] ?? 1), 0) : player.games;
+  return Math.max(0, round1(weeks * edge));
+}
+
 function lineFor(
   player: PlayerRate,
   replacement: ReplacementLevels,
   starts: Map<string, number[]>,
+  weights: readonly number[],
 ): PlayerLine {
-  const level = replacement.get(player.position);
-  const rosValue =
-    player.rate == null || level == null ? null : Math.max(0, round1(player.games * (player.rate - level.rate)));
+  const rosValue = seasonValueOver(player, replacement, weights);
   return {
     playerId: player.playerId,
     name: player.name,
@@ -330,12 +364,12 @@ function rosterCapacity(shape: RosterShape): number {
 }
 
 /** Who gets cut when a trade leaves a team over its limit: the player worth least to keep. */
-function pickDrop(players: readonly PlayerRate[], replacement: ReplacementLevels): PlayerRate | null {
+function pickDrop(players: readonly PlayerRate[], replacement: ReplacementLevels, weights: readonly number[]): PlayerRate | null {
   if (players.length === 0) return null;
   const keep = (p: PlayerRate): number => {
     if (p.rate == null) return -1;
-    const level = replacement.get(p.position)?.rate ?? 0;
-    return p.games * Math.max(0, p.rate - level);
+    if (!replacement.has(p.position)) return p.games * Math.max(0, p.rate);
+    return seasonValueOver(p, replacement, weights) ?? 0;
   };
   return [...players].sort((x, y) => keep(x) - keep(y) || x.name.localeCompare(y.name))[0] ?? null;
 }
@@ -362,8 +396,15 @@ export function evaluateTrade(input: {
   aSends: readonly string[];
   /** Players side B sends to A. */
   bSends: readonly string[];
+  /**
+   * One weight per horizon week. Absent: a regular week counts once and a
+   * playoff week 1.5 times (`seasonWeights`), the trade tools' one scale.
+   */
+  weights?: readonly number[];
 }): TradeEvaluation {
   const { horizon, shape, replacement, a, b } = input;
+  const weights = input.weights ?? seasonWeights(horizon);
+  const totalWeight = weights.reduce((x, y) => x + y, 0);
   const weeks = { first: horizon.weeks[0] ?? horizon.currentWeek, last: horizon.lastWeek, count: horizon.weeks.length };
   const levels = [...replacement].map(([position, level]) => ({ position, ...level }));
   const empty = (reason: string): TradeEvaluation => ({
@@ -430,15 +471,15 @@ export function evaluateTrade(input: {
      */
     const target = Math.max(input.rosterLimit ?? rosterCapacity(shape), side.roster.length);
     while (after.length > target) {
-      const cut = pickDrop(after, replacement);
+      const cut = pickDrop(after, replacement, weights);
       if (!cut) break;
       mustDrop ??= cut;
       cutCount += 1;
       after = after.filter((p) => p.playerId !== cut.playerId);
     }
 
-    const before = valueRoster({ players: side.roster, slots, replacement, horizon });
-    const post = valueRoster({ players: after, slots, replacement, horizon });
+    const before = valueRoster({ players: side.roster, slots, replacement, horizon, weights });
+    const post = valueRoster({ players: after, slots, replacement, horizon, weights });
 
     const lineupChange = post.lineup - before.lineup;
     const depthChange = post.depth.neutral - before.depth.neutral;
@@ -467,7 +508,7 @@ export function evaluateTrade(input: {
         if (incoming.length === 0 || kept.length < 2) continue;
         const bestBefore = Math.max(0, ...side.roster.filter((p) => p.position === position).map((p) => p.rate ?? 0));
         const bestAfter = Math.max(0, ...kept.map((p) => p.rate ?? 0));
-        const improvement = (bestAfter - bestBefore) * horizon.weeks.length;
+        const improvement = (bestAfter - bestBefore) * totalWeight;
         if (improvement < TRADE_VALUE.prefs.clearUpgradePoints) {
           adjustments.push({
             key: 'second_qb_te',
@@ -476,8 +517,8 @@ export function evaluateTrade(input: {
           });
         }
       }
-      const rbIn = inn.filter((p) => p.position === 'RB').reduce((s, p) => s + (lineFor(p, replacement, post.starts).rosValue ?? 0), 0);
-      const rbOut = out.filter((p) => p.position === 'RB').reduce((s, p) => s + (lineFor(p, replacement, before.starts).rosValue ?? 0), 0);
+      const rbIn = inn.filter((p) => p.position === 'RB').reduce((s, p) => s + (lineFor(p, replacement, post.starts, weights).rosValue ?? 0), 0);
+      const rbOut = out.filter((p) => p.position === 'RB').reduce((s, p) => s + (lineFor(p, replacement, before.starts, weights).rosValue ?? 0), 0);
       const lean = TRADE_VALUE.prefs.rbLean * (rbIn - rbOut);
       if (Math.abs(lean) >= 0.05) {
         adjustments.push({ key: 'rb_lean', label: 'You lean RB-heavy when value is close', points: round1(lean) });
@@ -486,8 +527,8 @@ export function evaluateTrade(input: {
 
     // Held to a small share of what moved, and always shown.
     const gross = Math.max(
-      inn.reduce((s, p) => s + (lineFor(p, replacement, post.starts).rosValue ?? 0), 0),
-      out.reduce((s, p) => s + (lineFor(p, replacement, before.starts).rosValue ?? 0), 0),
+      inn.reduce((s, p) => s + (lineFor(p, replacement, post.starts, weights).rosValue ?? 0), 0),
+      out.reduce((s, p) => s + (lineFor(p, replacement, before.starts, weights).rosValue ?? 0), 0),
     );
     const cap = Math.max(TRADE_VALUE.prefs.capFloor, TRADE_VALUE.prefs.capShare * gross);
     const rawTotal = adjustments.reduce((s, x) => s + x.points, 0);
@@ -523,14 +564,15 @@ export function evaluateTrade(input: {
         lineupAfter: round1(post.byWeek[i]?.lineup ?? w.lineup),
         depthBefore: round1(w.depth),
         depthAfter: round1(post.byWeek[i]?.depth ?? w.depth),
+        weight: weights[i] ?? 1,
       })),
       depthChange: round1(depthChange),
       adjustments,
       adjustmentTotal,
       net: round1(lineupChange + depthChange + adjustmentTotal),
-      incoming: inn.map((p) => lineFor(p, replacement, post.starts)),
-      outgoing: out.map((p) => lineFor(p, replacement, before.starts)),
-      mustDrop: mustDrop ? lineFor(mustDrop, replacement, before.starts) : null,
+      incoming: inn.map((p) => lineFor(p, replacement, post.starts, weights)),
+      outgoing: out.map((p) => lineFor(p, replacement, before.starts, weights)),
+      mustDrop: mustDrop ? lineFor(mustDrop, replacement, before.starts, weights) : null,
       cutCount,
       unvaluedStarters,
     };
@@ -548,7 +590,20 @@ export function evaluateTrade(input: {
   const { confidence, confidenceReasons } = confidenceFor(ra, rb, moved, levels);
   const caveats = caveatsFor(ra, rb, horizon, levels);
 
-  return { status: 'ok', insufficientReason: null, weeks, a: ra, b: rb, verdict, reasons, caveats, confidence, confidenceReasons, replacement: levels };
+  return {
+    status: 'ok',
+    insufficientReason: null,
+    weeks,
+    weightedWeeks: Math.round(totalWeight * 100) / 100,
+    a: ra,
+    b: rb,
+    verdict,
+    reasons,
+    caveats,
+    confidence,
+    confidenceReasons,
+    replacement: levels,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -662,6 +717,13 @@ function confidenceFor(
     lower('medium');
     reasons.push(
       `${listNames(earlier.map((p) => p.name))} ${earlier.length === 1 ? 'has' : 'have'} no number this week, so ${earlier.length === 1 ? 'he is' : 'they are'} valued on an earlier week’s Sleeper projection.`,
+    );
+  }
+  const averaged = moved.filter((p) => p.basis === 'season_average');
+  if (averaged.length > 0) {
+    lower('medium');
+    reasons.push(
+      `${listNames(averaged.map((p) => p.name))} ${averaged.length === 1 ? 'has' : 'have'} no projection, so ${averaged.length === 1 ? 'he is' : 'they are'} valued on this season’s average.`,
     );
   }
   const published = moved.filter((p) => p.basis === 'published');

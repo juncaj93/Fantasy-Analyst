@@ -24,4 +24,10 @@ import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
  * (`core/injury/weekAvailability.ts`): a Questionable player is a whole game,
  * a Doubtful one his rate less six points. Later weeks keep their assumption.
  */
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@4',LINEUP_ENGINE_VERSION);
+/**
+ * `trade@5`, 4 November 2026 (review T1, T9): a player's trade rate is his
+ * rest-of-season rate, half his projections (this week and the next three)
+ * and half his season average, and a playoff week counts 1.5 times. The trade
+ * ideas find, gate and rank on it, not on this week's lineup.
+ */
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@5',LINEUP_ENGINE_VERSION);

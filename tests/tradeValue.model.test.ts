@@ -23,6 +23,7 @@ import {
   type TradeSide,
 } from '../src/core/tradeValue/evaluate.ts';
 import { playoffLength, tradeHorizon } from '../src/core/tradeValue/weeks.ts';
+import { seasonWeights } from '../src/core/tradeValue/restOfSeason.ts';
 import type { StartSitEvaluation } from '../src/core/startsit/engine.ts';
 
 /** Tony's Pizza Fantasy, as Sleeper publishes it. */
@@ -399,7 +400,8 @@ describe('what a trade does to a lineup', () => {
     expect(r.status).toBe('ok');
     expect(r.a!.lineupChange).toBe(0);
     // Depth credit for a spare quarterback is small: a tenth of his edge, on a good day.
-    expect(r.a!.depthChange).toBeLessThan(10);
+    // (Weeks 5 to 17, the three playoff weeks counted 1.5 times: 14.5 weighted weeks.)
+    expect(r.a!.depthChange).toBeLessThan(11.5);
     expect(r.a!.incoming[0]!.startsWeeks).toBe(0);
   });
 
@@ -421,8 +423,9 @@ describe('what a trade does to a lineup', () => {
     const r = run(a, b, ['a-wr1'], []);
     // 17 ppg gone. The lineup cascades: the other receivers move up and the open
     // flex goes to the best free agent anywhere (the 10 ppg back), so the cost is
-    // 17 - 10 = 7 ppg over 13 weeks, not 17 and not a hole.
-    expect(r.a!.lineupChange).toBeCloseTo(-7 * 13, 0);
+    // 17 - 10 = 7 ppg over 13 weeks, not 17 and not a hole. Ten regular weeks
+    // and three playoff weeks at 1.5: 14.5 weighted weeks.
+    expect(r.a!.lineupChange).toBeCloseTo(-7 * 14.5, 0);
   });
 
   it('a bye costs the one week and only when nobody good is behind him', () => {
@@ -441,9 +444,10 @@ describe('what a trade does to a lineup', () => {
     const a = side('A', roster('a'));
     const b = side('B', roster('b', {}, [rate('b-rb3', 'RB', 15)]));
     const r = run(a, b, [], ['b-rb3']);
-    // He takes the 10.5 ppg receiver's flex slot: +4.5 ppg over 13 weeks.
+    // He takes the 10.5 ppg receiver's flex slot: +4.5 ppg over 13 weeks, the
+    // three playoff weeks counted 1.5 times (14.5 weighted weeks).
     expect(r.a!.incoming[0]!.startsWeeks).toBe(13);
-    expect(r.a!.lineupChange).toBeCloseTo(4.5 * 13, 0);
+    expect(r.a!.lineupChange).toBeCloseTo(4.5 * 14.5, 0);
   });
 
   it('is not roster-blind: the same player is worth different amounts to different teams', () => {
@@ -771,11 +775,12 @@ describe('what the card says, and what it shows its working with', () => {
     expect(out.insufficientReason).not.toMatch(/Thursday/);
   });
 
-  it('reports each side\u2019s lineup week by week, and the weeks add to the total', () => {
+  it('reports each side\u2019s lineup week by week, and the weeks add to the total at their weights', () => {
     const r = run(side('Alex', roster('a'), true), side('Dermot', roster('b', { wr1: 9 })), ['a-wr1'], ['b-wr1']);
+    const weights = seasonWeights(HORIZON);
     for (const s of [r.a!, r.b!]) {
       expect(s.weekly).toHaveLength(13);
-      const summed = s.weekly!.reduce((acc, w) => acc + (w.lineupAfter - w.lineupBefore), 0);
+      const summed = s.weekly!.reduce((acc, w, i) => acc + (w.lineupAfter - w.lineupBefore) * weights[i]!, 0);
       expect(Math.abs(summed - s.lineupChange)).toBeLessThan(0.1 * 13 + 0.2);
     }
   });
