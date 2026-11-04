@@ -197,6 +197,7 @@ export async function assembleDstPlan(
         input,
         scheduleByTeam.get(team) ?? [],
         request.week,
+        thisWeekFixtures.length > 0,
       ),
       locked: evaluation.lock.locked,
       opponent: evaluation.opponent,
@@ -353,15 +354,20 @@ function earliestKickoff(fixtures: readonly ScheduleTeamWeek[], now: Date): stri
  * no byes at all — it was simply false.
  *
  * So the bye is now read from the schedule, which is the only source that can
- * answer it: a bye is a row for this team in this week whose opponent is null,
- * which is how `parseSchedule` represents one. No row means this app does not
- * know, and it says that instead.
+ * answer it: a row for this team in this week whose opponent is null, or (the
+ * way the stored schedule actually holds one, `byeWeeks` in `nfl/schedule.ts`)
+ * no row for him this week while this week's slate and his other weeks are
+ * both on record. Pittsburgh's week 9 bye read "has no game this app has read
+ * yet" on 3 November 2026 for want of the second form. With no slate or no
+ * other weeks for him, this app does not know, and it says that instead.
  */
 function unavailableReason(
   evaluation: { ruledOut: boolean; lock: { locked: boolean }; score: number | null; statusFlag: string | null },
   input: StartSitInput,
   fixtures: readonly ScheduleTeamWeek[],
   week: number,
+  /** This week's slate is on record for the league (some club has a fixture). */
+  weekRead = false,
 ): string | null {
   if (evaluation.ruledOut) return `is ${(evaluation.statusFlag ?? 'out').toLowerCase()}`;
   if (evaluation.lock.locked) return 'has already kicked off';
@@ -369,6 +375,7 @@ function unavailableReason(
 
   const thisWeek = fixtures.find((f) => f.week === week) ?? null;
   if (thisWeek && thisWeek.opponent == null) return 'is on bye';
+  if (thisWeek == null && weekRead && fixtures.some((f) => f.week !== week)) return 'is on bye';
   if (input.game == null && thisWeek == null) return 'has no game this app has read yet';
   return 'cannot be scored this week';
 }
