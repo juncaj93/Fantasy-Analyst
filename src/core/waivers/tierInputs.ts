@@ -90,6 +90,8 @@ export interface TierInputRequest {
   seasonPointsThrough?: number | undefined;
   /** Positions, for "is he a running back" across the league. */
   positionOf?: ((playerId: string) => string | null) | undefined;
+  /** Clubs, for which past week was each club's bye (`pastByeWeeks`). Absent: no bye is skipped. */
+  teamOf?: ((playerId: string) => string | null) | undefined;
   /** Players on this roster added by transaction, with the week. Absent from it and drafted: held since the draft. */
   heldSince?: ReadonlyMap<string, { week: number; how: string }> | undefined;
   draftedIds?: ReadonlySet<string> | undefined;
@@ -147,13 +149,18 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
   };
 
   const toTier = (rate: PlayerRate): TierPlayer => {
+    const rateWeek = rate.basis === 'recent_week' ? (input.recentPublished?.get(rate.playerId)?.week ?? null) : null;
     const numbers = weekNumbers({
       playerId: rate.playerId,
       rate: rate.rate,
       weeks: window.weeks,
       currentWeek: input.week,
       ahead: input.ahead,
+      byeWeek: rate.byeWeek,
+      rateWeek,
     });
+    /* Sleeper's number, not a full Vegas week: the minus-2 rule ranks it lower (`rankingNumber`). */
+    const rateBorrowed = rate.basis === 'published' || rate.basis === 'recent_week';
     return {
       playerId: rate.playerId,
       name: rate.name,
@@ -163,6 +170,9 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       weekly: rate.weekly.slice(offset, offset + window.weeks.length),
       weekValues: numbers.map((n) => n.points),
       weekSources: numbers.map((n) => n.source),
+      weekBorrowed: numbers.map((n) => (n.source === 'sleeper' ? true : n.source === 'bye' ? false : rateBorrowed)),
+      weekFrom: numbers.map((n) => n.fromWeek ?? null),
+      rateBorrowed,
       designation: rate.designation,
       byeWeek: rate.byeWeek,
       onReserve: rate.onReserve,
@@ -178,7 +188,7 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       tier.weekly = [0, ...tier.weekly.slice(1)];
     }
     const drop = dropSignal(input.trendingDrops?.get(i.player.id));
-    return { ...tier, planExcluded: drop.planExcluded };
+    return { ...tier, planExcluded: drop.planExcluded, instant: input.pickup[i.player.id]?.state === 'free' };
   });
 
   const replacement = new Map<string, number>();
@@ -231,10 +241,18 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
   if (season) {
     const through = input.seasonPointsThrough ?? Math.max(0, ...[...season.values()].map((w) => w.length));
     const lineup = new Set(input.currentStarterIds ?? []);
+    /*
+     * A bye is a week off, not a bad week (review finding W8, 4 November
+     * 2026): his club's bye is skipped in recent form and in the season
+     * average's weeks, so a player just off his bye does not lose a third of
+     * his recent form to a game that was never played.
+     */
+    const pastBye = input.teamOf ? pastByeWeeks(season, through, input.teamOf) : new Map<string, number>();
     for (const p of roster) {
       if (p.rate == null) continue;
       const weeks = season.get(p.playerId) ?? [];
-      const recent = [through, through - 1, through - 2].filter((w) => w >= 1).map((w) => weeks[w - 1] ?? 0);
+      const form = formWeeks(weeks, through, pastBye.get(p.team.toUpperCase()) ?? null);
+      const recent = form.recent;
       const ws = windowWeights(window.thisWeekOpen);
       const projection =
         ws.reduce((sum, w, k) => sum + w * (p.weekValues?.[k] ?? p.rate ?? 0) * (p.weekly[k] ?? 1), 0) / Math.max(1e-9, ws.reduce((a, b) => a + b, 0));
@@ -245,7 +263,7 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
         name: p.name,
         position: p.position,
         seasonPoints: Math.round(weeks.reduce((a, b) => a + b, 0) * 10) / 10,
-        weeksPlayed: through,
+        weeksPlayed: form.weeks,
         recent,
         projection: Math.round(projection * 100) / 100,
         role: trend?.startsWith('rising') ? 'rising' : trend?.startsWith('falling') ? 'falling' : trend === 'stable' ? 'stable' : null,
@@ -296,6 +314,47 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
     rates,
     evaluations,
   };
+}
+
+/**
+ * A player's last three weeks, newest first, and the weeks his season
+ * average divides by, both with his club's bye left out (W8): 10, bye, 10
+ * reads as 10 and 10 and the week before, never as a zero.
+ */
+export function formWeeks(points: readonly number[], through: number, bye: number | null): { recent: number[]; weeks: number } {
+  const recent: number[] = [];
+  for (let w = through; w >= 1 && recent.length < 3; w--) if (w !== bye) recent.push(points[w - 1] ?? 0);
+  return { recent, weeks: bye != null && bye >= 1 && bye <= through ? Math.max(0, through - 1) : through };
+}
+
+/**
+ * Each club's bye week so far this season, read from the season's points
+ * alone: the week in which (almost) nobody now on that club scored, while
+ * the club's other weeks had scorers. One or two players traded in may still
+ * have scored for an old club that week, so up to two count as nobody. A
+ * club with no such week, or two of them, has none.
+ */
+export function pastByeWeeks(
+  season: ReadonlyMap<string, readonly number[]>,
+  through: number,
+  teamOf: (playerId: string) => string | null,
+): Map<string, number> {
+  const counts = new Map<string, number[]>();
+  for (const [id, weeks] of season) {
+    const team = (teamOf(id) ?? '').toUpperCase();
+    if (!team) continue;
+    const row = counts.get(team) ?? Array.from({ length: through }, () => 0);
+    for (let w = 1; w <= through; w++) if ((weeks[w - 1] ?? 0) !== 0) row[w - 1]! += 1;
+    counts.set(team, row);
+  }
+  const out = new Map<string, number>();
+  for (const [team, row] of counts) {
+    const busy = [...row].sort((a, b) => b - a)[0] ?? 0;
+    if (busy < 5) continue;
+    const quiet = row.map((n, i) => ({ n, week: i + 1 })).filter((x) => x.n <= 2);
+    if (quiet.length === 1) out.set(team, quiet[0]!.week);
+  }
+  return out;
 }
 
 /** Whether a free agent can be added before his own game this week. */

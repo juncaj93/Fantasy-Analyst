@@ -56,6 +56,8 @@
  */
 
 import { tieLine } from '../startsit/tiebreak.ts';
+import { rankingNumber } from '../startsit/decisionPoints.ts';
+import { clearsTossUp, TOSSUP_POINTS } from '../startsit/tossup.ts';
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import { TRADE_VALUE } from '../tradeValue/evaluate.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
@@ -102,6 +104,12 @@ export const TIER_RULES = {
   deadOverReplacement: 0.5,
   /** An injured-reserve stash has to be this far above a free agent when healthy. */
   stashOverReplacement: 3,
+  /**
+   * A bye more than a week out is covered in its own week, not now, when at
+   * least this many free agents would fill it about as well (within the
+   * toss-up bar of the best). Review finding W12, 4 November 2026.
+   */
+  deepWire: 3,
 } as const;
 
 /** Alex's preferences, as labelled line items. */
@@ -127,7 +135,9 @@ export type TierReasonCode =
   /** Starts this week and beats every lineup the roster can already make (`pickupStart.ts`). */
   | 'start_now'
   /** Ties the best lineup the roster can already make this week. */
-  | 'start_tie';
+  | 'start_tie'
+  /** A bye weeks away on a deep wire: nothing to claim now; cover it in its week (W12). */
+  | 'bye_later';
 
 /** One player as the planner reads him. */
 export interface TierPlayer {
@@ -146,6 +156,16 @@ export interface TierPlayer {
   weekValues?: (number | null)[];
   /** Where each `weekValues` entry came from, for the row's sheet. */
   weekSources?: WeekSource[];
+  /**
+   * Per window week: the number is Sleeper's (Rotowire's) rather than a full
+   * set of Vegas lines, so it ranks two points lower (`rankingNumber`, the
+   * minus-2 rule every screen uses). Absent: every week is a Vegas number.
+   */
+  weekBorrowed?: boolean[];
+  /** Per window week: the earlier week a stand-in number was projected for. */
+  weekFrom?: (number | null)[];
+  /** His `rate` is Sleeper's rather than a full Vegas week: ranks two points lower. */
+  rateBorrowed?: boolean;
   /** `out`, `questionable`, `ir`... from the injury layer. */
   designation: string;
   byeWeek: number | null;
@@ -156,6 +176,8 @@ export interface TierPlayer {
 export interface TierCandidate extends TierPlayer {
   /** Why he may not be planned, said on his row. */
   planExcluded?: string | null;
+  /** A free agent he is now: an add with no claim and no bid. Absent: not known. */
+  instant?: boolean;
 }
 
 export interface TierProtection {
@@ -258,8 +280,8 @@ export interface TierMove {
   byWeek: { week: number; change: number }[];
   /** Points a game, healthy. */
   rate: number;
-  /** His number for each window week and where it came from. */
-  weekNumbers: { week: number; points: number; source: WeekSource }[];
+  /** His number for each window week and where it came from (a bye is 0, source `bye`). */
+  weekNumbers: { week: number; points: number; source: WeekSource; fromWeek?: number }[];
   prefs: TierPreference[];
   /**
    * Who he would replace on the roster. Null: an open spot. `reason` says why
@@ -565,7 +587,10 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       insurance: option.insurance,
       byWeek,
       rate: c.rate ?? 0,
-      weekNumbers: weeks.map((week, k) => ({ week, points: round2(pointsIn(c, k)), source: c.weekSources?.[k] ?? 'this_week' })),
+      weekNumbers: weeks.map((week, k) => {
+        const from = c.weekFrom?.[k];
+        return { week, points: round2(pointsIn(c, k)), source: c.weekSources?.[k] ?? 'this_week', ...(from != null ? { fromWeek: from } : {}) };
+      }),
       prefs,
       drop: option.drop
         ? {
@@ -658,6 +683,41 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     isHole(m) || m.reasonCode === 'bye_depth' || m.reasonCode === 'injury_backup' ? m.reason : null;
 
   /*
+   * A free agent before a claim for the same need, when he is as good (review
+   * findings W6 and W12, 4 November 2026). A free agent costs $0 and is his
+   * the moment he is added; a claim costs FAAB and may lose. So when the best
+   * answer to a need is on waivers and a free agent answers it within the
+   * toss-up bar, the free agent leads and the claim rides as his alternative.
+   */
+  const instantOf = new Map(candidates.map((c) => [c.playerId, c.instant === true] as const));
+  for (let i = 0; i < ranked.length; i++) {
+    const top = ranked[i]!;
+    const need = needOf(top);
+    if (!need || instantOf.get(top.playerId)) continue;
+    if (ranked.slice(0, i).some((x) => needOf(x) === need)) continue;
+    const j = ranked.findIndex((x, k) => k > i && needOf(x) === need && instantOf.get(x.playerId) && x.gain >= top.gain - TOSSUP_POINTS);
+    if (j < 0) continue;
+    const [free] = ranked.splice(j, 1);
+    ranked.splice(i, 0, free!);
+  }
+
+  /*
+   * A bye more than a week out, on a deep wire, is nothing to do yet (W12).
+   * On 3 November the pick was "C.J. Stroud for Jordan Love's week 11 bye,
+   * $5" in week 9, with Darnold, Rodgers and Murray all free: the whole gain
+   * was week 11, measured against an empty slot rather than against the free
+   * quarterbacks who would still be there. With {@link TIER_RULES.deepWire}
+   * or more free agents within the toss-up bar of the best, the move waits for
+   * its week (it becomes a hole in the window's lead weeks and the free agent
+   * goes first). A thin wire still says "add him now".
+   */
+  const byeLater = (m: TierMove): boolean => {
+    if (m.reasonCode !== 'bye_depth' || !/ is on bye in week \d+$/.test(m.reason)) return false;
+    const peers = ranked.filter((x) => needOf(x) === m.reason && x.gain >= m.gain - TOSSUP_POINTS);
+    return peers.length >= TIER_RULES.deepWire;
+  };
+
+  /*
    * Do this: every different starting hole in the coming week (a QB bye and a
    * TE bye are two), and at most one big upgrade. Depth for a bye two weeks
    * out is worth considering however large, because nothing needs doing about
@@ -705,6 +765,15 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const holder = need ? byNeed.get(need) : undefined;
     if (holder) {
       if (holder.alternatives.length < TIER_RULES.maxAlternatives) holder.alternatives.push(m.name);
+      continue;
+    }
+    if (byeLater(m)) {
+      const bye = m.reason.match(/^Your [A-Z/]+ (.+) is on bye in week (\d+)$/);
+      m.reasonCode = 'bye_later';
+      m.reason = bye ? `Cover ${bye[1]}’s week ${bye[2]} bye that week; free ${m.position}s will be there` : m.reason;
+      m.tier = 'watch';
+      watch.unshift(m);
+      if (need) byNeed.set(need, m);
       continue;
     }
     const stash = m.reasonCode === 'ir_stash' && !stashUnknown.has(m.playerId) && !stashTaken;
@@ -763,7 +832,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         alternatives: m.alternatives,
         ...(m.stashLabel !== undefined ? { stashLabel: m.stashLabel } : {}),
         reasonCode: KEPT_REASONS.has(m.reasonCode) ? m.reasonCode : replaced.reasonCode,
-        reason: m.reasonCode === 'ir_stash' || m.reasonCode === 'start_now' || m.reasonCode === 'start_tie' ? m.reason : replaced.reason,
+        reason: KEPT_REASONS.has(m.reasonCode) && m.reasonCode !== 'big_upgrade' ? m.reason : replaced.reason,
       });
     }
     if (option.drop) used.set(option.drop.playerId, m.name);
@@ -837,6 +906,42 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       watch.unshift(m);
     }
   }
+  /*
+   * The toss-up bar on the drop side (review finding W7; Alex's bar of two
+   * points, 4 November 2026, `tossup.ts`). A move that cuts somebody useful
+   * has to gain at least {@link TOSSUP_POINTS} net of what that player was
+   * worth (the gain already subtracts him); under it, cutting a player who
+   * plays for a pickup is noise, and the move goes to the Watch list. Useful
+   * means anybody but a drop-ready spot or a dead spot. A real hole (a
+   * starter on bye or Out, an empty slot, bye cover) gets the pickup at any
+   * gain, and an IR stash is judged as one.
+   */
+  const deadIds = new Set(dropReady.map((d) => d.playerId));
+  const usefulCut = (m: TierMove): boolean => {
+    if (!m.drop || m.drop.viaReserve) return false;
+    const sig = signals?.get(m.drop.playerId);
+    return !deadIds.has(m.drop.playerId) && !(sig && isDeadSpot(sig));
+  };
+  const realHole = (m: TierMove) => isHole(m) || m.reasonCode === 'bye_depth' || m.reasonCode === 'ir_stash';
+  for (const m of [...consider]) {
+    if (realHole(m) || !usefulCut(m) || clearsTossUp(m.gain)) continue;
+    if (m.drop && used.get(m.drop.playerId) === m.name) used.delete(m.drop.playerId);
+    /*
+     * A "Ties this week" pickup stays Worth considering (round 4), but the
+     * app no longer names a player who plays as its drop: it says "Needs a
+     * drop" with the cheapest few, and Alex picks.
+     */
+    if (m.reasonCode === 'start_tie') {
+      m.drop = null;
+      m.dropCost = null;
+      m.needsSpot = spotCandidates(new Set(used.keys()));
+      continue;
+    }
+    consider.splice(consider.indexOf(m), 1);
+    m.tier = 'watch';
+    watch.unshift(m);
+  }
+
   /*
    * The Watch list: never two rows on one drop, anywhere on the screen. Each
    * name takes a spot nobody above (or above it on this list) is using: an
@@ -1027,7 +1132,10 @@ function comingWeekLineup(players: readonly TierPlayer[], slots: readonly Lineup
        * healthy number pushed Braelon Allen out of it). The one exception is
        * a bye: a week off, not a lost job, so he counts at his own number.
        */
-      value: p.byeWeek != null && p.byeWeek === week ? (p.rate ?? 0) : pointsIn(p, 0) * (p.weekly[0] ?? 1),
+      value:
+        p.byeWeek != null && p.byeWeek === week
+          ? Math.max(0, rankingNumber(p.rate ?? 0, p.rateBorrowed ?? false))
+          : rankedIn(p, 0),
     }));
   const result = bestLineup(slots, pool);
   return new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
@@ -1037,9 +1145,27 @@ function pointsIn(p: TierPlayer, k: number): number {
   return p.weekValues?.[k] ?? p.rate ?? 0;
 }
 
+/**
+ * What he is ranked on in window week `k`: his number for that week, two
+ * points lower when it is Sleeper's rather than a full Vegas week, times
+ * whether he plays (review finding W2, 4 November 2026).
+ *
+ * The minus-2 rule is the one `rankingNumber` every other screen ranks on
+ * (Team, Best move, Compare, Matchup since #412). The tiers solved their own
+ * lineups on raw numbers, so a Sleeper-only free agent at 12.5 "started over"
+ * a priced receiver at 9.0 by 3.5 and was a "Do this"; ranked, he is 10.5 and
+ * +1.5. Ranking only: every number a sheet shows is the undocked one. Never
+ * below zero, so a zero still means "does not start".
+ */
+function rankedIn(p: TierPlayer, k: number): number {
+  const share = p.weekly[k] ?? 1;
+  if (share <= 0) return 0;
+  return Math.max(0, rankingNumber(pointsIn(p, k), p.weekBorrowed?.[k] ?? false)) * share;
+}
+
 /** The ordering number: the gain, with the RB lean. Never printed as points. */
 /** Reasons a different drop does not change: they are about the add, not the cut. */
-const KEPT_REASONS: ReadonlySet<TierReasonCode> = new Set(['ir_stash', 'big_upgrade', 'start_now', 'start_tie']);
+const KEPT_REASONS: ReadonlySet<TierReasonCode> = new Set(['ir_stash', 'big_upgrade', 'start_now', 'start_tie', 'bye_later']);
 
 /** `Starts this week: +0.9 pts on your best lineup`, or `Ties Ladd McConkey this week`. */
 function startNowReason(call: StartNowCall): string {
@@ -1065,11 +1191,9 @@ function valueRoster(
   const starters: Set<string>[] = [];
   const picks: (LineupCandidate | null)[][] = [];
   weeks.forEach((_, k) => {
-    const pool: LineupCandidate[] = players.map((p) => ({
-      id: p.playerId,
-      position: p.position,
-      value: pointsIn(p, k) * (p.weekly[k] ?? 1),
-    }));
+    /* Ranked on the minus-2 rule (`rankedIn`); the depth credit below is on his own number. */
+    const pool: LineupCandidate[] = players.map((p) => ({ id: p.playerId, position: p.position, value: rankedIn(p, k) }));
+    const raw = new Map(players.map((p) => [p.playerId, pointsIn(p, k) * (p.weekly[k] ?? 1)] as const));
     const result = bestLineup(slots, pool);
     /* A zero-point pick (a bye, Out) fills nothing: he is not "starting" that week. */
     const started = new Set(result.picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
@@ -1081,7 +1205,10 @@ function valueRoster(
     const credit =
       pool
         .filter((c) => !started.has(c.id))
-        .map((c) => Math.max(0, c.value - (replacement.get(c.position) ?? c.value)))
+        .map((c) => {
+          const own = raw.get(c.id) ?? 0;
+          return Math.max(0, own - (replacement.get(c.position) ?? own));
+        })
         .filter((x) => x > 0)
         .sort((a, b) => b - a)
         .slice(0, TRADE_VALUE.depth.creditedBench)

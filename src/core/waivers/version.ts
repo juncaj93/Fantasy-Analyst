@@ -114,4 +114,10 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * whole game and a Doubtful one is his rate less six points, in the tiers and
  * on the yardstick, which no longer charges half a point for Questionable.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@16', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@17`, 4 November 2026, review round 5: the tiers rank on the minus-2
+ * rule; a bye week is 0, and a bye is skipped in the drop score's form; bye
+ * cover two weeks out waits on a deep wire and a free agent leads a claim
+ * that is no better; an add that cuts a useful player clears the toss-up bar.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@17', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

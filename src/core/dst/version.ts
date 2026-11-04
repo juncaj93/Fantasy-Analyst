@@ -17,4 +17,9 @@
 import { composeEngineVersion } from '../engineVersion.ts';
 import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
 
-export const DST_ENGINE_VERSION = composeEngineVersion('dst@1', STARTSIT_ENGINE_VERSION);
+/*
+ * `dst@2`, 4 November 2026: a defence with no game this week (a bye) always
+ * gets its fill named, however far the first kickoff is, and a free agent
+ * about as good as a waiver claim is the fill.
+ */
+export const DST_ENGINE_VERSION = composeEngineVersion('dst@2', STARTSIT_ENGINE_VERSION);
