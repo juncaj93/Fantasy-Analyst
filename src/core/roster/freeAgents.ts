@@ -184,3 +184,51 @@ export function trendingFreeAgentIds(
     .slice(0, opts.limit ?? TRENDING_EXTRA)
     .map(([id]) => id);
 }
+
+/**
+ * How many free agents per position the scan also takes by last week's
+ * points (review finding W10, round 8).
+ *
+ * Projections and the draft order both lag a breakout: the free agent who
+ * just scored 24 is still projected like a backup. Last week's actual points
+ * are stored for every player (`sleeper.seasonPoints.<season>`, read on every
+ * Waivers load for the drop score), so ranking by them costs no read; the
+ * extra players cost only their own rows in the batched input reads.
+ */
+export const LAST_WEEK_EXTRA_PER_POSITION = 3;
+
+/**
+ * The top free-agent scorers of the last finished week at each position,
+ * leaving out anyone already in `exclude`. `seasonPoints` is league points by
+ * week (index 0 is week 1); `week` is the finished week to rank on. Defences
+ * are scanned whole already and are skipped. Nobody under a point is taken.
+ */
+export function lastWeekScorerIds(
+  players: CanonicalPlayer[],
+  opts: {
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+    seasonPoints: Readonly<Record<string, readonly number[]>>;
+    week: number;
+    exclude: ReadonlySet<string>;
+    perPosition?: number;
+  },
+): string[] {
+  if (!(opts.week >= 1)) return [];
+  const perPosition = opts.perPosition ?? LAST_WEEK_EXTRA_PER_POSITION;
+  const byPosition = new Map<string, { id: string; points: number; name: string }[]>();
+  for (const p of players) {
+    if (!p.active || opts.rosteredIds.has(p.id) || opts.exclude.has(p.id)) continue;
+    if (opts.startable.size > 0 && !opts.startable.has(p.position)) continue;
+    if (WHOLE_SLATE_POSITIONS.has(p.position.toUpperCase())) continue;
+    const points = opts.seasonPoints[p.id]?.[opts.week - 1];
+    if (points == null || !(points >= 1)) continue;
+    (byPosition.get(p.position) ?? byPosition.set(p.position, []).get(p.position)!).push({ id: p.id, points, name: p.fullName });
+  }
+  const ids: string[] = [];
+  for (const bucket of byPosition.values()) {
+    bucket.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    for (const p of bucket.slice(0, perPosition)) ids.push(p.id);
+  }
+  return ids;
+}

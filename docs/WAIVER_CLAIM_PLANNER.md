@@ -9,6 +9,46 @@
 > (2.5 / 3.0 over a starter, 0.5 / 1.0 over a bench player) still build the
 > board that an older cached response draws, and nothing else.
 
+## Round 8 of the November review (5 November 2026, waiver@20)
+
+Finding W5 (and the W10 scan) of `docs/REVIEW_2026-11.md`, on Alex's decisions
+of 5 November 2026. Alex's four kinds of waiver move are a starter now, cover
+for a bye or injury, an upside stash and a block. The tiers had the first two;
+this round adds the other two, each its own short line under Worth
+considering ("Stash and block"), with the spot it uses under it.
+
+- **Block** (`core/waivers/block.ts`, `blockPickup`). Only this week's
+  opponent, from the stored matchup row (`matchup_forecasts`, the read Team
+  uses; no row, no block). He must clearly need the position: adding the free
+  agent raises his best lineup this week by at least the 2-point toss-up bar.
+  That is a starter Out, Doubtful, on IR or on bye with no bench cover, or a
+  weak starter the free agent beats by 2 or more. Both sides on Sleeper's
+  published week, with the shared availability rule; his players' statuses are
+  the worse of Sleeper's and the injury report's. It costs Alex no starter (an
+  open bench spot or a drop-ready player nobody else uses), bids $1 to $3, and
+  never takes him under the $20 playoff reserve. Only while this week's games
+  are ahead, and only a free agent who can be in a lineup before his own game.
+  Line: `Block: Name (opponent needs a WR), bid $1 to $3`.
+- **Upside stash** (`core/waivers/upsideStash.ts`, `upsideStash`). A free
+  agent who adds nothing this week but has a clear path to starting for Alex
+  in the playoffs, on one of two paths read from stored data: back by week 16
+  from an injury (Sleeper's note, `stash.ts`) and good enough healthy to start
+  in Alex's best season lineup; or a back second on his club's depth chart
+  behind a top-12 back (points a game this season) who is hurt now, whose
+  role would start for Alex. The spot: an open IR slot the league's IR takes,
+  else an open bench spot, else a drop-ready player. Never anyone who plays.
+  Bid $0 to $1. At most one a week, the return path first. A healthy player
+  whose value is simply later in the year is already counted by the season
+  value of round 6, so it needs no third path.
+- **The IR return cutoff is week 16** (`STASH_RULES.lastReturnWeek`, was 14):
+  back by week 16 still plays the semifinal and the final.
+- **A rival's Doubtful starter counts as Out** in both rival reads (the
+  competition count in `intel.ts` and the need-aware bid read in
+  `rivalNeed.ts`), through `isOutThisWeek`, the rule every screen uses.
+- **The scan reads last week's top free-agent scorers** (three a position,
+  `lastWeekScorerIds`, from the stored season row) and the backs behind hurt
+  top backs (`stashScanIds`). The snapshot's `context.pool` names both slices.
+
 ## Round 6 of the November review (4 November 2026, waiver@18)
 
 Findings W3, W4, W9 and W10 of `docs/REVIEW_2026-11.md`.
@@ -153,7 +193,8 @@ then one row a run), and refreshed by the Wednesday derive.
 
 From Sleeper's injury status, body part and note: a torn ACL or Achilles, or
 "season-ending" or "for the season", is never offered. A timeline in the note
-counts from this week; a return after week 14 is never offered. No timeline (the
+counts from this week; a return after week 16 is never offered (week 14 until
+round 8). No timeline (the
 usual case on IR) is a Watch list name labelled `return unknown`. A plain Out is
 back soon.
 

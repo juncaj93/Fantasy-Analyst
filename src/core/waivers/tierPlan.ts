@@ -22,6 +22,8 @@ import type { PickupState, WaiverRules } from './clearWindow.ts';
 import type { WaiverClaimGroup, WaiverClaimLine, WaiverClaimPlan } from './claimPlan.ts';
 import { FREE_AGENT_PHRASE } from './claimPlan.ts';
 import type { StartSitEvaluation } from '../startsit/engine.ts';
+import type { BlockLine } from './block.ts';
+import type { UpsideStashLine } from './upsideStash.ts';
 
 export interface TierBid {
   /** `free`: first come, no bid. `claim`: on waivers, bid. `none`: this league does not bid. */
@@ -138,6 +140,18 @@ export interface WaiverTiersView {
    * Nothing decides on it. Absent on older responses.
    */
   weekFigures?: Record<string, { name: string; position: string; team: string; weeks: TierWeekFigure[] }>;
+  /**
+   * Round 8 (review W5): a free agent with a clear path to starting for you
+   * in the playoffs, for a spot you are not using and $0 to $1
+   * (`upsideStash.ts`). Null or absent: none this week.
+   */
+  upsideStash?: UpsideStashLine | null;
+  /**
+   * Round 8 (review W5, decision D7): a free agent your opponent this week
+   * needs and would start, for $1 to $3 and a spot you are not using
+   * (`block.ts`). Null or absent: none this week.
+   */
+  block?: BlockLine | null;
   /** The rival read, per manager: record, need is per player. Not drawn. */
   bidderReads?: { name: string; rate: number; seasons: string[]; source: 'history' | 'seed'; remaining: number | null; interest: Record<string, number>; chase: number }[];
 }

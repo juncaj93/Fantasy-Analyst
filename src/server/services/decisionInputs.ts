@@ -36,7 +36,16 @@ import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
-import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION, publishedFreeAgentIds, trendingFreeAgentIds } from '../../core/roster/freeAgents.ts';
+import {
+  boundedFreeAgentIds,
+  FREE_AGENTS_PER_POSITION,
+  lastWeekScorerIds,
+  publishedFreeAgentIds,
+  trendingFreeAgentIds,
+} from '../../core/roster/freeAgents.ts';
+import { eliteBackRates, stashScanIds } from '../../core/waivers/upsideStash.ts';
+import { InjuryService } from './injuryService.ts';
+import type { Designation } from '../../core/injury/model.ts';
 import { AdpRepo, type AdpValue } from '../repos/adp.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
@@ -464,7 +473,8 @@ export async function gatherComparisonDisplay(
 export interface WaiverDecisionInputs extends LeagueDecisionBase {
   /** Everything `assembleWaiverPlan` takes, minus the clock. */
   request: Omit<WaiverAssemblyRequest, 'now' | 'generatedAt'>;
-  pool: { scanned: number; perPosition: number };
+  /** How the wire was bounded; round 8 names the free agents its two new slices added. */
+  pool: { scanned: number; perPosition: number; lastWeekIds?: string[]; stashIds?: string[] };
   /** The FAAB summary the response envelope prints. Null in a priority league. */
   strategy: Awaited<ReturnType<LeagueStrategyService['context']>>;
   weeksRead: number | null;
@@ -538,6 +548,28 @@ export async function gatherWaiverInputs(
   ]);
 
   /*
+   * Waivers round 2: one batched settings read (the season's points, Sleeper's
+   * depth and injury notes, the rivals' history); this season's record from
+   * the claims in hand. Read before the scan since round 8, because two of the
+   * scan's slices rank on it (last week's points, the backs behind hurt top
+   * backs). Same one read as before, only earlier.
+   */
+  const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
+  const round2 = await readWaiverRound2(db, {
+    leagueId: league.id,
+    season: league.season,
+    rosters,
+    mine,
+    strategy,
+    positionOf: (id) => positionOfId.get(id) ?? null,
+    reserveAllows: {
+      out: Number(league.leagueSettings['reserve_allow_out']) === 1,
+      doubtful: Number(league.leagueSettings['reserve_allow_doubtful']) === 1,
+      sus: Number(league.leagueSettings['reserve_allow_sus']) === 1,
+    },
+  }).catch(() => null);
+
+  /*
    * The wire scan, plus anybody this league dropped inside the waiver window.
    *
    * The bounded scan orders by draft rank and takes the top of each position,
@@ -550,7 +582,6 @@ export async function gatherWaiverInputs(
     const p = players.find((x) => x.id === id);
     return p != null && p.active && (startable.size === 0 || startable.has(p.position));
   });
-  const positionOfId = new Map(players.map((p) => [p.id, p.position ?? null] as const));
   /*
    * And the best few at each position by this week's published number (18
    * October 2026): the free agent whose week just changed, a backup whose
@@ -576,7 +607,57 @@ export async function gatherWaiverInputs(
     trending: strategy?.trending ?? new Map(),
     exclude: new Set([...scanned, ...inWindow, ...byWeek]),
   });
-  const candidateIds = [...scanned, ...inWindow, ...byWeek, ...trendingIds];
+  /*
+   * Last week's top free-agent scorers too (W10, round 8): a breakout scores
+   * before his projection moves. From the stored season row, the last week it
+   * covers, so it costs no read.
+   */
+  const lastWeekIds = round2
+    ? lastWeekScorerIds(players, {
+        rosteredIds,
+        startable,
+        seasonPoints: round2.seasonPoints,
+        week: round2.seasonPointsThrough,
+        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds]),
+      })
+    : [];
+  /*
+   * And the back behind every hurt top back (round 8, the upside stash's
+   * "next man up"): rarely near the top of any other ordering. Sleeper's depth
+   * and injury notes, already in the same row.
+   */
+  const stashIds = round2
+    ? stashScanIds({
+        players,
+        rosteredIds,
+        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds]),
+        depthOrder: new Map(Object.entries(round2.depthOrder)),
+        injuryStatus: new Map(Object.entries(round2.injuryNotes).map(([id, n]) => [id, n.status] as const)),
+        elite: eliteBackRates(new Map(Object.entries(round2.seasonPoints)), (id) => positionOfId.get(id) === 'RB'),
+      })
+    : [];
+  const candidateIds = [...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds, ...stashIds];
+
+  /*
+   * Who Alex plays this week (round 8, the block line): the stored matchup
+   * row's opponent, one indexed lookup and no request, the same read Team
+   * uses. His players' designations are resolved against the injury report
+   * too, so the worse status wins on his side exactly as on Alex's.
+   */
+  const opponentRead = (async (): Promise<WaiverAssemblyRequest['opponent']> => {
+    const row = await new MatchupRepo(db)
+      .latest({ leagueId: league.id, season: league.season, week, rosterId: mine.rosterId })
+      .catch(() => null);
+    const roster = row?.opponentRosterId == null ? null : (rosters.find((r) => r.rosterId === row.opponentRosterId) ?? null);
+    if (!roster || roster.isMine) return null;
+    const byId = new Map(players.map((p) => [p.id, p] as const));
+    const states = await new InjuryService(db)
+      .statesFor(roster.playerIds.map((id) => ({ playerId: id, status: byId.get(id)?.status ?? null })), { season: league.season })
+      .catch(() => new Map());
+    const designations: Record<string, Designation> = {};
+    for (const [id, state] of states) if (state.designation !== 'unknown') designations[id] = state.designation;
+    return { rosterId: roster.rosterId, designations };
+  })();
 
   /*
    * The roster's inputs, and the depth chart read that needs them, as one
@@ -697,20 +778,7 @@ export async function gatherWaiverInputs(
           .catch(() => new Map<string, { week: number; points: number }>());
   const [thisWeekPoints, priorWeekPoints] = await pointsRead;
   const ahead = await aheadRead;
-  /* Waivers round 2: one batched settings read; this season's record from the claims in hand. */
-  const round2 = await readWaiverRound2(db, {
-    leagueId: league.id,
-    season: league.season,
-    rosters,
-    mine,
-    strategy,
-    positionOf: (id) => positionOfId.get(id) ?? null,
-    reserveAllows: {
-      out: Number(league.leagueSettings['reserve_allow_out']) === 1,
-      doubtful: Number(league.leagueSettings['reserve_allow_doubtful']) === 1,
-      sus: Number(league.leagueSettings['reserve_allow_sus']) === 1,
-    },
-  }).catch(() => null);
+  const opponent = await opponentRead;
   const completed = lastCompletedWeek(
     week,
     [...rosterInputs, ...candidateInputs].map((i) => i.kickoff ?? null),
@@ -733,7 +801,12 @@ export async function gatherWaiverInputs(
     players,
     strategy,
     weeksRead: strategy?.bidHistory.weeksRead.length ?? null,
-    pool: { scanned: candidateIds.length, perPosition: FREE_AGENTS_PER_POSITION },
+    pool: {
+      scanned: candidateIds.length,
+      perPosition: FREE_AGENTS_PER_POSITION,
+      ...(lastWeekIds.length > 0 ? { lastWeekIds } : {}),
+      ...(stashIds.length > 0 ? { stashIds } : {}),
+    },
     request: {
       shape,
       profile,
@@ -798,6 +871,7 @@ export async function gatherWaiverInputs(
       observations: strategy?.bidHistory.observations ?? [],
       history,
       round2,
+      opponent,
       /*
        * A league that starts no defence does not have its schedule read to be
        * told so — see `WaiverAssemblyRequest.dstSources`.

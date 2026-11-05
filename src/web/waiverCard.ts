@@ -13,6 +13,8 @@
 
 import type { TierRow } from '../core/waivers/tierPlan.ts';
 import type { WaiverBoardRow } from '../core/waivers/board.ts';
+import type { BlockLine } from '../core/waivers/block.ts';
+import type { UpsideStashLine } from '../core/waivers/upsideStash.ts';
 
 /** The fixed set of chips a card may carry, two at most. */
 export interface CardChip {
@@ -401,4 +403,28 @@ export function boardSheet(row: WaiverBoardRow): WaiverSheetModel {
     period: 'this',
     drops: [],
   };
+}
+
+/**
+ * The stash and block lines (round 8), in the words Alex chose:
+ * `Block: Name (opponent needs a WR), bid $1 to $3`. One short reason, then
+ * the bid; the room it uses is the faint second line ({@link roomLine}).
+ */
+export function extraLine(kind: 'stash' | 'block', line: Pick<UpsideStashLine, 'name' | 'reason' | 'bid'>): string {
+  const bid = extraBid(line.bid);
+  return `${kind === 'stash' ? 'Stash' : 'Block'}: ${line.name} (${line.reason})${bid ? `, ${bid}` : ''}`;
+}
+
+/** `bid $1 to $3`, `bid $0 to $1`, `free agent, no bid`; nothing in a league that does not bid. */
+function extraBid(bid: UpsideStashLine['bid']): string | null {
+  if (bid.kind === 'free') return 'free agent, no bid';
+  if (bid.kind === 'none') return null;
+  return bid.low === bid.high ? `bid $${bid.low}` : `bid $${bid.low} to $${bid.high}`;
+}
+
+/** Where he goes: `Drop Antonio Williams (drop-ready)`, `Open bench spot`, `Open IR slot`. */
+export function roomLine(room: UpsideStashLine['room'] | BlockLine['room']): string {
+  if (room.kind === 'reserve') return 'Open IR slot';
+  if (room.kind === 'open') return 'Open bench spot';
+  return `Drop ${room.name} (drop-ready)`;
 }

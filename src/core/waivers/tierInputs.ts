@@ -461,7 +461,8 @@ export function pastByeWeeks(
 }
 
 /** Whether a free agent can be added before his own game this week. */
-function addableBefore(input: StartSitInput, pickup: PickupState | undefined, now: Date): boolean {
+/** Can he be in a lineup before his own game: not kicked off, and a claim clears before it. */
+export function addableBefore(input: Pick<StartSitInput, 'kickoff'>, pickup: PickupState | undefined, now: Date): boolean {
   const kickoff = input.kickoff ? Date.parse(input.kickoff) : Number.NaN;
   if (!Number.isFinite(kickoff)) return true;
   if (kickoff <= now.getTime()) return false;
@@ -470,10 +471,15 @@ function addableBefore(input: StartSitInput, pickup: PickupState | undefined, no
   return Number.isFinite(until) && until < kickoff;
 }
 
+/** Whether this league's IR slot takes a player with this designation today: IR always, the rest where the league allows. */
+export function reserveTakes(designation: string, allows: { out: boolean; doubtful: boolean; sus: boolean } | null | undefined): boolean {
+  const d = designation;
+  return d === 'ir' || (allows != null && ((d === 'out' && allows.out) || (d === 'doubtful' && allows.doubtful) || (d === 'suspended' && allows.sus)));
+}
+
 /** Rostered players this league's IR slots would take today. */
 function reserveEligibleOf(roster: readonly TierPlayer[], allows: { out: boolean; doubtful: boolean; sus: boolean }): Set<string> {
-  const ok = (d: string) => d === 'ir' || (d === 'out' && allows.out) || (d === 'doubtful' && allows.doubtful) || (d === 'suspended' && allows.sus);
-  return new Set(roster.filter((p) => !p.onReserve && ok(p.designation)).map((p) => p.playerId));
+  return new Set(roster.filter((p) => !p.onReserve && reserveTakes(p.designation, allows)).map((p) => p.playerId));
 }
 
 /**

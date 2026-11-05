@@ -23,6 +23,9 @@
  * manager needs anyone at the position.
  */
 
+import { normalizeDesignation, type Designation } from '../injury/model.ts';
+import { isOutThisWeek } from '../injury/weekAvailability.ts';
+
 /** The need multiplier by state and position. 1 is the league's typical bidder. */
 export const NEED_FACTORS = {
   QB: { hole: 3, soon: 1.7, thin: 1.1, backup: 0.4, surplus: 0.25 },
@@ -39,8 +42,24 @@ export const NEED_FACTORS = {
  */
 export const STARTABLE_FLOOR: Readonly<Record<string, number>> = { QB: 12, RB: 6, WR: 6, TE: 5 };
 
-/** Designations that keep a player out of a week. */
-const OUT = new Set(['out', 'ir', 'pup', 'sus', 'suspended', 'na', 'nfi', 'doubtful', 'inactive', 'cov']);
+/**
+ * Roster states Sleeper writes that are not injury designations but still
+ * keep a player off the field this week (not active, inactive, the COVID
+ * list). Injury designations go through the shared rule instead.
+ */
+const ROSTER_OUT = new Set(['na', 'inactive', 'cov']);
+
+/**
+ * Whether a rival's player can play this week: the shared availability rule
+ * (`weekAvailability.ts`), so Doubtful counts as Out exactly as it does on
+ * Team, Compare and Matchup (review round 8). A designation already resolved
+ * against the injury report wins over Sleeper's raw status.
+ */
+export function rivalOut(p: Pick<NeedRosterPlayer, 'status' | 'designation'>): boolean {
+  if (p.designation != null) return isOutThisWeek(p.designation);
+  const raw = (p.status ?? '').trim().toLowerCase();
+  return ROSTER_OUT.has(raw) || isOutThisWeek(normalizeDesignation(p.status).designation);
+}
 
 /**
  * `hole`: nobody to start in the coming week. `soon`: the hole is the week
@@ -57,6 +76,8 @@ export interface NeedRosterPlayer {
   team: string;
   /** Sleeper's injury status or designation, any case. */
   status: string | null;
+  /** The designation resolved against the injury report too, when the caller has it. Wins over `status`. */
+  designation?: Designation | null;
   /** In an injured-reserve slot. */
   onReserve?: boolean;
   /** This week's projection in league scoring, when known. */
@@ -91,7 +112,7 @@ export function positionNeed(request: NeedRequest, position: string): PositionNe
   const table = NEED_FACTORS[pos as keyof typeof NEED_FACTORS] ?? { hole: 1.5, soon: 1.2, thin: 1, backup: 1, surplus: 0.8 };
   const players = request.roster.filter((p) => p.position.toUpperCase() === pos && !p.onReserve);
   const floor = STARTABLE_FLOOR[pos];
-  const healthy = (p: NeedRosterPlayer) => !OUT.has((p.status ?? '').toLowerCase());
+  const healthy = (p: NeedRosterPlayer) => !rivalOut(p);
   const weight = (p: NeedRosterPlayer) => (floor != null && p.projection != null && p.projection < floor ? 0.5 : 1);
 
   const startable = request.weeks.map((week) =>
@@ -125,7 +146,7 @@ function needReason(
   if (state === 'hole' || state === 'soon') {
     if (count === 0) return `no ${pos} on his roster`;
     const byes = holeWeek == null ? [] : players.filter((p) => request.onBye(p.team, holeWeek) === true);
-    const hurt = players.filter((p) => OUT.has((p.status ?? '').toLowerCase()));
+    const hurt = players.filter((p) => rivalOut(p));
     if (byes.length > 0 && hurt.length + byes.length >= count) {
       return `${pos} on bye in week ${holeWeek}, no ${count > 1 ? 'healthy ' : ''}backup`;
     }

@@ -10,9 +10,12 @@
  *    body part and note, the only injury text Sleeper's public player file
  *    carries: a torn ACL or Achilles, or the words season-ending or "for the
  *    season".
- * 2. **He has to be back before the playoffs** (week {@link STASH_RULES.playoffStart}
- *    in this league). A return after week {@link STASH_RULES.lastReturnWeek}
- *    is never recommended.
+ * 2. **He has to be back in time to help in the playoffs** (weeks
+ *    {@link STASH_RULES.playoffStart} to 17 in this league). A return after
+ *    week {@link STASH_RULES.lastReturnWeek} is never recommended: a player
+ *    back by week 16 still plays two playoff weeks, the semifinal and the
+ *    final (Alex, 5 November 2026; review W4). Until then the cutoff was week
+ *    14, so a player due back in week 15 or 16 was never offered.
  * 3. **An unknown return is a Watch list name**, labelled `return unknown`,
  *    never "Worth considering". Sleeper's file almost never carries a date,
  *    so this is the common case for anyone on IR.
@@ -22,7 +25,8 @@
 
 export const STASH_RULES = {
   playoffStart: 15,
-  lastReturnWeek: 14,
+  /** The latest useful return: back by week 16 still helps a playoff run. */
+  lastReturnWeek: 16,
 } as const;
 
 /** What Sleeper's player file says about one injured player. */
@@ -58,14 +62,14 @@ export function stashVerdict(opts: { designation: string; note: InjuryNote | nul
   if (timeline != null) {
     const week = opts.week + timeline;
     return week > STASH_RULES.lastReturnWeek
-      ? { kind: 'too_late', week, label: `back around week ${week}, after the playoffs start` }
+      ? { kind: 'too_late', week, label: `back around week ${week}, too late for the playoffs` }
       : { kind: 'back_by', week, label: `back around week ${week}` };
   }
   const status = (opts.note?.status ?? opts.designation ?? '').toLowerCase();
   if (status === 'out' && opts.designation === 'out') {
     const week = opts.week + 1;
     return week > STASH_RULES.lastReturnWeek
-      ? { kind: 'too_late', week, label: `back week ${week} at the earliest, after the playoffs start` }
+      ? { kind: 'too_late', week, label: `back week ${week} at the earliest, too late for the playoffs` }
       : { kind: 'back_by', week, label: `Out this week, expected back soon` };
   }
   return { kind: 'unknown', label: 'return unknown' };

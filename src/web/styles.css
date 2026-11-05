@@ -10725,3 +10725,15 @@ div.matchup-result {
 .wsheet-drops { margin-top: var(--sp-3); }
 .cmp2-better { font-size: 0.72rem; font-weight: 700; color: var(--text-dim); }
 .wrow-more { min-height: var(--tap); text-align: center; font-weight: 600; color: var(--accent); }
+
+/*
+ * Waivers' stash and block lines (round 8): the pick, its one reason and the
+ * bid on one line that wraps at 360 rather than clipping the bid.
+ */
+.player-name.extra-line {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-size: 0.94rem;
+}
