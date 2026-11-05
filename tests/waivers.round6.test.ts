@@ -405,4 +405,45 @@ describe('a bye-cover pickup counts the bye, not a toss-up (Kirk Cousins, 4 Nove
     expect(m.byWeek[0]!.change).toBe(2.12);
     expect(m.lineupGain).toBe(20.5);
   });
+
+  /*
+   * A season starter is protected against a toss-up. Only Love is a free
+   * drop here: every bench player is held (a hold is cut only when nobody
+   * else can be), so the old code cut Love for a QB 1.71 a week better.
+   */
+  const held = new Map(roster.filter((x) => x.playerId !== 'Love').map((x) => [x.playerId, { kind: 'market_hold' as const, note: 'kept' }] as const));
+  const plan = (add: TierPlayer) =>
+    planWaiverTiers({
+      shape: SHAPE, weeks, weights, leadWeeks: 2, roster, candidates: [add], openSpots: 0, openReserve: 0,
+      protections: held, excludedPositions: new Set(['DEF']), replacement,
+      season: { near: 3, replacement, scale: 4.2 },
+    });
+
+  it('within 2.0 of Love on season value: Love stays protected, is not the drop, and is not "replaced"', () => {
+    const m = plan(cousins).all.find((x) => x.name === 'Cousins')!;
+    expect(m.drop?.name).not.toBe('Love');
+    /* The weeks Cousins only edges Love (1.59 to 1.80) count for nothing: the bye week is the gain. */
+    expect(m.lineupGain).toBe(18.38);
+    expect(m.reason).not.toMatch(/Starts over Love/);
+  });
+
+  it('a QB 1.71 a week better than Love, with no bye to cover, is no move at all', () => {
+    const steady = { ...cousins, weekly: all(1), byeWeek: null, weekValues: [18.59, 18.94, 22.95, 22.95, 22.95, 22.95, 22.95, 22.95, 22.95] };
+    const noBye = roster.map((x) => (x.playerId === 'Love' ? { ...x, weekly: all(1), byeWeek: null, weekValues: [16.88, 17.23, 21.24, 21.24, 21.24, 21.24, 21.24, 21.24, 21.24] } : x));
+    const p = planWaiverTiers({
+      shape: SHAPE, weeks, weights, leadWeeks: 2, roster: noBye, candidates: [steady], openSpots: 0, openReserve: 0,
+      protections: held, excludedPositions: new Set(['DEF']), replacement,
+      season: { near: 3, replacement, scale: 4.2 },
+    });
+    const m = p.all.find((x) => x.name === 'Cousins')!;
+    expect(m.drop?.name).not.toBe('Love');
+    expect(m.lineupGain).toBe(0);
+    expect([...p.doThese, ...p.consider].map((x) => x.name)).not.toContain('Cousins');
+  });
+
+  it('2.0 or more better than Love on season value: Love may be replaced and cut', () => {
+    const better = { ...cousins, seasonRate: 23.3, weekValues: [18.68, 18.82, 18.38, 23.3, 23.3, 23.3, 23.3, 23.3, 23.3] };
+    const m = plan(better).all.find((x) => x.name === 'Cousins')!;
+    expect(m.drop?.name).toBe('Love');
+  });
 });

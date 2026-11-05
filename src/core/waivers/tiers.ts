@@ -574,6 +574,26 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     startersMemo.set(c.playerId, keep);
     return keep;
   };
+  /*
+   * And a season starter keeps his job against a toss-up (Alex, 4 November
+   * 2026): with the season, a player in the roster's own best season lineup
+   * is replaced only by an add who beats him on season value by the toss-up
+   * bar or more ({@link TOSSUP_POINTS}) and can fill his slot. Kirk Cousins
+   * rated 1.71 a week above Jordan Love: under the bar, so Love stays
+   * protected, is never the drop, and no week of Cousins "starting over"
+   * him by less than the bar is counted.
+   */
+  const rosterStarters = (() => {
+    if (!season) return new Set<string>();
+    const pool: LineupCandidate[] = valued
+      .filter((p) => !p.onReserve)
+      .map((p) => ({ id: p.playerId, position: p.position, value: Math.max(0, seasonRateOf(p) ?? 0) }));
+    return new Set(bestLineup(slots, pool).picks.filter((x): x is LineupCandidate => x != null && x.value > 0).map((x) => x.id));
+  })();
+  const shareSlot = (a: string, b: string) => slots.some((x) => x.eligible.has(a) && x.eligible.has(b));
+  const starterHolds = (p: TierPlayer, c: TierCandidate): boolean =>
+    rosterStarters.has(p.playerId) &&
+    !(shareSlot(c.position, p.position) && (seasonRateOf(c) ?? 0) >= (seasonRateOf(p) ?? 0) + TOSSUP_POINTS);
   const optionsFor = (c: TierCandidate, roster: readonly TierPlayer[], spots: number): Option[] => {
     const before = value(roster);
     const out: Option[] = [];
@@ -606,6 +626,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
         p.rate != null &&
         !lineupLocked(p, c) &&
         !keep.has(p.playerId) &&
+        !starterHolds(p, c) &&
         /*
          * Never cut a better player for a worse one because of a short-term bye
          * or injury: nobody further above a free agent at his position than the
@@ -662,7 +683,16 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
 
   const moveFor = (c: TierCandidate, option: Option, before: Valuation): TierMove => {
     const byWeek = weeks.map((week, k) => ({ week, change: round2((option.after.weekly[k] ?? 0) - (before.weekly[k] ?? 0)) }));
-    const { code, reason } = reasonFor(c, option, before, byWeek, request, weeks);
+    const found = reasonFor(c, option, before, byWeek, request, weeks);
+    let { code, reason } = found;
+    /* Week k only edges out a season starter who holds his job (under the bar): a toss-up, not a gain. */
+    const tossUpOverStarter = (k: number): boolean => {
+      const change = byWeek[k]?.change ?? 0;
+      if (!season || change <= 0 || change >= TOSSUP_POINTS) return false;
+      const was = before.starters[k] ?? new Set<string>();
+      const now = option.after.starters[k] ?? new Set<string>();
+      return valued.some((p) => was.has(p.playerId) && !now.has(p.playerId) && starterHolds(p, c));
+    };
     /*
      * A hole move counts the hole, not a toss-up (Alex, 4 November 2026). Kirk
      * Cousins covered Jordan Love's week 11 bye for +16.4, and the season total
@@ -673,6 +703,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
      * every week he costs it. The week-by-week changes stay as they are.
      */
     const holeMove = code === 'hole_bye' || code === 'hole_injury' || code === 'hole_empty' || code === 'bye_depth';
+    const anyTossUp = season != null && byWeek.some((_, k) => tossUpOverStarter(k));
     const lineup = holeMove
       ? round2(
           byWeek.reduce((sum, w, k) => {
@@ -680,7 +711,17 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
             return sum + (counts ? (weights[k] ?? 0) * w.change : 0);
           }, 0),
         )
-      : option.lineup;
+      : anyTossUp
+        ? round2(byWeek.reduce((sum, w, k) => sum + (tossUpOverStarter(k) ? 0 : (weights[k] ?? 0) * w.change), 0))
+        : option.lineup;
+    /* An upgrade that only edges a starter who holds his job does not "start over" him. */
+    if (code === 'upgrade' && anyTossUp && /^Starts over /.test(reason)) {
+      const held = valued.find((p) => rosterStarters.has(p.playerId) && reason.startsWith(`Starts over ${p.name}`) && starterHolds(p, c));
+      if (held) {
+        code = 'depth';
+        reason = `A toss-up with ${held.name} for the season; ${held.name} keeps the start`;
+      }
+    }
     const raw = round2(lineup + option.insurance);
     const prefs = prefsFor(c, option);
     const gain = round2(raw + prefs.reduce((s, p) => s + p.points, 0));
