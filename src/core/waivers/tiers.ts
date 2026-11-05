@@ -661,11 +661,29 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   };
 
   const moveFor = (c: TierCandidate, option: Option, before: Valuation): TierMove => {
-    const raw = round2(option.lineup + option.insurance);
-    const prefs = prefsFor(c, option);
-    const gain = round2(raw + prefs.reduce((s, p) => s + p.points, 0));
     const byWeek = weeks.map((week, k) => ({ week, change: round2((option.after.weekly[k] ?? 0) - (before.weekly[k] ?? 0)) }));
     const { code, reason } = reasonFor(c, option, before, byWeek, request, weeks);
+    /*
+     * A hole move counts the hole, not a toss-up (Alex, 4 November 2026). Kirk
+     * Cousins covered Jordan Love's week 11 bye for +16.4, and the season total
+     * also gave him +1.6 to +1.8 in seven other weeks for "starting over" Love:
+     * a gap under the toss-up bar is a coin flip, not points (`tossup.ts`). So a
+     * hole or bye-cover move counts its hole weeks (a starter on bye or Out,
+     * nobody to start), any week he beats the lineup by the bar or more, and
+     * every week he costs it. The week-by-week changes stay as they are.
+     */
+    const holeMove = code === 'hole_bye' || code === 'hole_injury' || code === 'hole_empty' || code === 'bye_depth';
+    const lineup = holeMove
+      ? round2(
+          byWeek.reduce((sum, w, k) => {
+            const counts = w.change < 0 || w.change >= TOSSUP_POINTS || holeWeek(c, request, before, k);
+            return sum + (counts ? (weights[k] ?? 0) * w.change : 0);
+          }, 0),
+        )
+      : option.lineup;
+    const raw = round2(lineup + option.insurance);
+    const prefs = prefsFor(c, option);
+    const gain = round2(raw + prefs.reduce((s, p) => s + p.points, 0));
     return {
       playerId: c.playerId,
       name: c.name,
@@ -675,7 +693,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
       reasonCode: code,
       reason,
       gain,
-      lineupGain: option.lineup,
+      lineupGain: lineup,
       insurance: option.insurance,
       byWeek,
       rate: c.rate ?? 0,
@@ -1479,6 +1497,21 @@ function reasonFor(
     };
   }
   return { code: 'depth', reason: `Better depth than ${option.drop ? option.drop.name : 'what you hold'}; he would not start yet` };
+}
+
+/**
+ * Whether week `k` is a real hole for him to fill: a starter at a slot he
+ * fills cannot play that week (a bye, Out), or the best the roster can put at
+ * such a slot is under {@link TIER_RULES.holePoints}, or nobody.
+ */
+function holeWeek(c: TierCandidate, request: TierRequest, before: Valuation, k: number): boolean {
+  const slots = slotsOf(request.shape);
+  const weak = (before.picks[k] ?? []).some(
+    (pick, i) => slots[i]!.eligible.has(c.position) && (pick == null || pick.value < TIER_RULES.holePoints),
+  );
+  if (weak) return true;
+  const missing = missingStarter(c, request, before, k);
+  return missing != null && (missing.weekly[k] ?? 1) === 0;
 }
 
 /** The rostered starter who cannot play in window week `k`, at a slot the candidate fills. */

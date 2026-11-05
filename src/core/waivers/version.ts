@@ -128,4 +128,10 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * drop is chosen on the same season basis, and a season starter is never the
  * drop. Bids keep $20 for the playoffs. Sleeper's trending adds are scanned.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@18', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@19`, 4 November 2026: a hole or bye-cover move counts its hole weeks,
+ * any week it clears the 2-point toss-up bar, and every week it costs; a
+ * sub-bar "starts over" week is a toss-up and adds nothing (Kirk Cousins was
+ * +30.9 for Jordan Love's one bye week, 16.4 of it the bye).
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@19', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
