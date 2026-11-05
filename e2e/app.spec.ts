@@ -1688,8 +1688,9 @@ test.describe('team, ADP import and start/sit', () => {
     await expect(base).toHaveCount(2);
     const column = page.locator('[data-testid="compare-column"][data-player-id="1011"]');
     const score = (await column.getByTestId('compare-score').textContent())!.split(',')[0]!.trim();
-    // ...and his score is either a dash or a Sleeper fallback, carrying the fallback marker and no word.
-    if (score !== '–') await expect(column.getByTestId('compare-score')).toHaveClass(/num-sleeper/);
+    // ...and his score is a dash, Out (he is Doubtful, which counts as Out since 5 November 2026),
+    // or a Sleeper fallback carrying the fallback marker and no word.
+    if (score !== '–' && score !== 'Out') await expect(column.getByTestId('compare-score')).toHaveClass(/num-sleeper/);
     await expect(column.getByTestId('sleeper-tag')).toHaveCount(0);
     await expect(page.getByTestId('comparison')).not.toContainText('unknown');
   });

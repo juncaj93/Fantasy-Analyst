@@ -75,7 +75,11 @@ test.describe('the recommended lineup, at a glance', () => {
      * disagrees with it — the tight end on injured reserve is in the seeded
      * lineup, and his slot is precisely the one worth showing him in.
      */
-    expect(await filled.count(), 'the demo roster fills five slots').toBe(5);
+    /*
+     * Four since 5 November 2026: the roster's one receiver is Doubtful, and
+     * Doubtful counts as Out, so his WR slot says why rather than holding him.
+     */
+    expect(await filled.count(), 'the demo roster fills four slots').toBe(4);
 
     const surface = await page.getByTestId('starters-group').evaluate((el) => getComputedStyle(el).backgroundColor);
     for (const card of await filled.all()) {
@@ -159,7 +163,8 @@ test.describe('the recommended lineup, at a glance', () => {
       has: page.locator('[data-testid="starter-proj"]', { hasText: '—' }),
     });
     expect(await unpriced.count(), 'the demo lineup has an unpriced starter').toBeGreaterThan(0);
-    await expect(unpriced.first()).toHaveAttribute('aria-label', /projection unavailable/i);
+    /* An unpriced player says "projection unavailable"; a ruled-out one "no projection shown". Either is words. */
+    await expect(unpriced.first()).toHaveAttribute('aria-label', /projection unavailable|no projection shown/i);
 
     await page.getByTestId('bench-toggle').click();
     const bench = page.getByTestId('bench-row').first();
