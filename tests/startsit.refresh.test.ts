@@ -8,7 +8,7 @@
  * Each of those is a test here.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockVegasProvider } from '../src/core/vegas/mockProvider.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { StartSitRefreshService, DEDUPE_SECONDS } from '../src/server/services/startSitRefresh.ts';
@@ -68,11 +68,33 @@ class BrokenProvider extends MockVegasProvider {
 const source = <T extends { source: string }>(report: { sources: T[] }, name: string): T =>
   report.sources.find((s) => s.source === name)!;
 
+/** Sunday 13 September 2026, 11 AM ET: the morning tap every test here is about. */
+const PINNED = new Date('2026-09-13T15:00:00Z');
+
 describe('the Start/Sit refresh', () => {
   let db: NodeSqliteDatabase;
+  /*
+   * No real clock and no real network (5 November 2026). "Runs again once the
+   * dedupe window has passed" timed out on main twice in a row on a Thursday
+   * morning: the injury and usage steps fetched the live injury report and
+   * nflverse file whenever their stored checks looked stale against the real
+   * clock, and a slow answer ran past the 5-second limit. The clock is pinned
+   * (Date only; timers stay real, so database work runs as normal) and any
+   * fetch fails at once, so a source that would reach out reports itself
+   * unavailable in milliseconds. Nothing asserted here depends on a live feed.
+   */
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(PINNED);
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('no network in this test');
+    });
     db = await createTestDb();
     await seedDemoData(db);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it('reports every source it orchestrates, including the one it has no feed for', async () => {
