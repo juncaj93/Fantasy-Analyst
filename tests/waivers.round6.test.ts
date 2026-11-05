@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildTierInputs, type TierInputRequest } from '../src/core/waivers/tierInputs.ts';
-import { planWaiverTiers, type WaiverTierPlan } from '../src/core/waivers/tiers.ts';
+import { planWaiverTiers, type TierPlayer, type WaiverTierPlan } from '../src/core/waivers/tiers.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { tradeHorizon } from '../src/core/tradeValue/weeks.ts';
 import { buildPlayerRate } from '../src/core/tradeValue/rate.ts';
@@ -347,5 +347,62 @@ describe('one rest-of-season function for Trades and Waivers', () => {
     });
     expect(love.seasonRate).toBe(trade.rate);
     expect(trade.rate).toBeGreaterThan(20);
+  });
+});
+
+describe('a bye-cover pickup counts the bye, not a toss-up (Kirk Cousins, 4 November)', () => {
+  /*
+   * The live card: Cousins covered Love's week 11 bye (+16.38) and was also
+   * credited +1.59 to +1.80 in seven other weeks for "starting over" Love, all
+   * under the 2.0 toss-up bar, for +30.89. Built here on the planner's own
+   * rows: weeks 9 to 17, playoffs 1.5, Love on bye in week 11, Cousins in 13.
+   */
+  const weeks = [9, 10, 11, 12, 13, 14, 15, 16, 17];
+  const weights = [1, 1, 1, 1, 1, 1, 1.5, 1.5, 1.5];
+  const all = (v: number) => weeks.map(() => v);
+  const row = (id: string, position: string, values: number[], weekly: number[] = all(1), byeWeek: number | null = null): TierPlayer => ({
+    playerId: id, name: id, position, team: 'XX', rate: values[0]!, seasonRate: values[3]!, weekly, weekValues: values, designation: 'healthy', byeWeek,
+  });
+  const loveWeekly = weeks.map((w) => (w === 11 ? 0 : 1));
+  const roster: TierPlayer[] = [
+    row('Love', 'QB', [16.88, 17.23, 0, 21.24, 21.24, 21.24, 21.24, 21.24, 21.24], loveWeekly, 11),
+    row('RB1', 'RB', all(16)), row('RB2', 'RB', all(13)), row('RB3', 'RB', all(10)),
+    row('WR1', 'WR', all(15)), row('WR2', 'WR', all(13)), row('WR3', 'WR', all(11)), row('WR4', 'WR', all(9)),
+    row('TE1', 'TE', all(9)), row('DEF1', 'DEF', all(7)),
+    row('RB4', 'RB', all(8)), row('WR5', 'WR', all(8)), row('TE2', 'TE', all(7)), row('RB5', 'RB', all(6)), row('WR6', 'WR', all(6)),
+    row('Lemon', 'WR', all(2)),
+  ];
+  const cousinsWeekly = weeks.map((w) => (w === 13 ? 0 : 1));
+  const cousins = row('Cousins', 'QB', [18.68, 18.82, 18.38, 22.95, 22.95, 22.95, 22.95, 22.95, 22.95], cousinsWeekly, 13);
+  const replacement = new Map([['QB', 17], ['RB', 7], ['WR', 7], ['TE', 6]]);
+
+  it('counts only week 11, never the sub-2-point weeks over Love', () => {
+    const p = planWaiverTiers({
+      shape: SHAPE, weeks, weights, leadWeeks: 2, roster, candidates: [cousins], openSpots: 0, openReserve: 0,
+      protections: new Map(), excludedPositions: new Set(['DEF']), replacement,
+      season: { near: 3, replacement, scale: 4.2 },
+    });
+    const m = p.all.find((x) => x.name === 'Cousins')!;
+    expect(m.reasonCode).toBe('bye_depth');
+    expect(m.drop?.name).toBe('Lemon');
+    /* The week-by-week changes are still shown as they are... */
+    expect(m.byWeek.map((w) => w.change)).toEqual([1.8, 1.59, 18.38, 1.71, 0, 1.71, 1.71, 1.71, 1.71]);
+    /* ...but the gain is the bye week alone: 18.38, not 18.38 + 14.51. */
+    expect(m.lineupGain).toBe(18.38);
+    /* The chip: that, plus the small backup-depth credit Trades also counts. Before the fix, 32.9 and more. */
+    expect(m.gain).toBeCloseTo(m.lineupGain + m.insurance, 2);
+    expect(m.gain).toBeLessThan(21);
+  });
+
+  it('a week he beats Love by 2.0 or more still counts', () => {
+    const big = { ...cousins, weekValues: [19.0, 18.82, 18.38, 22.95, 22.95, 22.95, 22.95, 22.95, 22.95] };
+    const p = planWaiverTiers({
+      shape: SHAPE, weeks, weights, leadWeeks: 2, roster, candidates: [big], openSpots: 0, openReserve: 0,
+      protections: new Map(), excludedPositions: new Set(['DEF']), replacement,
+      season: { near: 3, replacement, scale: 4.2 },
+    });
+    const m = p.all.find((x) => x.name === 'Cousins')!;
+    expect(m.byWeek[0]!.change).toBe(2.12);
+    expect(m.lineupGain).toBe(20.5);
   });
 });
