@@ -17,7 +17,8 @@
  * demonstration of something the product does not do.
  */
 
-import { isRuledOut, normalizeDesignation } from '../injury/model.ts';
+import { normalizeDesignation, type Designation } from '../injury/model.ts';
+import { isOutThisWeek } from '../injury/weekAvailability.ts';
 import {
   COMPETITION_UNKNOWN,
   assessCompetition,
@@ -81,6 +82,12 @@ export function waiverLeagueIntel(opts: {
    * falls back to counting bodies. See `teamNeedsFor`.
    */
   projections?: ReadonlyMap<string, number> | null;
+  /**
+   * Designations already resolved against the injury report (the worse of
+   * Sleeper's and the report's), by player id. Absent for a player: his
+   * Sleeper status, through the same normalisation.
+   */
+  designations?: Readonly<Record<string, Designation>> | null;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   /**
@@ -147,11 +154,18 @@ export function waiverLeagueIntel(opts: {
    * against a private list of status strings. One definition of "ruled out",
    * everywhere.
    */
+  /*
+   * Doubtful counts as Out here too (review round 8, 5 November 2026): the
+   * shared rule (`weekAvailability.ts`), not "ruled out" alone, so a rival
+   * whose only starter is Doubtful needs the position. Where the caller
+   * resolved a player against the injury report too (the weekly opponent's
+   * roster), the worse of the two statuses is the one read.
+   */
   const meta = new Map<string, { position: string | null; unavailable?: boolean }>();
   for (const p of opts.players) {
     meta.set(p.id, {
       position: p.position || null,
-      unavailable: isRuledOut(normalizeDesignation(p.status).designation),
+      unavailable: isOutThisWeek(opts.designations?.[p.id] ?? normalizeDesignation(p.status).designation),
     });
   }
 

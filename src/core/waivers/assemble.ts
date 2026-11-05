@@ -75,6 +75,11 @@ import { decisionPoints } from '../startsit/decisionPoints.ts';
 import { buildTiersView, tierClaimPlan, type TierWeekFigure, type WaiverTiersView } from './tierPlan.ts';
 import { blendRivalTendency, seedTendency, type RivalSeasonAggregate } from './rivalHistory.ts';
 import { positionNeed } from './rivalNeed.ts';
+import { blockPickup, type BlockCandidate, type BlockPlayer, type BlockRoom } from './block.ts';
+import { eliteBackRates, upsideStash } from './upsideStash.ts';
+import { addableBefore, reserveTakes, type TierInputs } from './tierInputs.ts';
+import { myBudget, playoffReserve } from '../faab/budget.ts';
+import { DESIGNATION_SEVERITY, normalizeDesignation, type Designation } from '../injury/model.ts';
 import { seedFor } from './managerSeeds.ts';
 import type { RivalContext } from './bidModel.ts';
 import type { InjuryNote } from './stash.ts';
@@ -254,6 +259,13 @@ export interface WaiverAssemblyRequest {
    * are. Absent: the planner and the bids behave exactly as before.
    */
   round2?: WaiverRound2Inputs | null | undefined;
+  /**
+   * Round 8: who Alex plays this week (the stored matchup row's opponent), and
+   * that roster's designations resolved against the injury report, the worse
+   * of the two winning. Read by the block line and by the rival reads. Absent
+   * or null: no block line, and the rival reads use Sleeper's status alone.
+   */
+  opponent?: { rosterId: number; designations: Record<string, Designation> } | null | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -568,6 +580,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
     shape,
     /* Sleeper's published week, read for every rostered player: who has a weak starter. */
     projections: request.published ?? null,
+    designations: request.opponent?.designations ?? null,
     budgets: request.budgets,
     prices: request.prices,
     observations: request.observations,
@@ -882,7 +895,24 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           }),
         };
       }
-      return { ...view, weekFigures };
+      /* Round 8: the upside stash and the block, each its own short line, never on a spot another line uses. */
+      const lines = (() => {
+        try {
+          return stashAndBlock(request, inputs, plan, view, fixtures, pickup);
+        } catch {
+          return { upsideStash: null, block: null };
+        }
+      })();
+      const listed = new Set([lines.upsideStash?.playerId, lines.block?.playerId].filter((x): x is string => x != null));
+      return {
+        ...view,
+        /* One player, one line: a stash or a block is not also on the Watch list. */
+        watch: listed.size > 0 ? view.watch.filter((r) => !listed.has(r.playerId)) : view.watch,
+        weekFigures,
+        /* Only when there is one: an empty line costs every response bytes for nothing. */
+        ...(lines.upsideStash ? { upsideStash: lines.upsideStash } : {}),
+        ...(lines.block ? { block: lines.block } : {}),
+      };
     } catch {
       return null;
     }
@@ -1011,6 +1041,7 @@ function rivalReader(
           position: (p.position ?? '').toUpperCase(),
           team: (p.team ?? '').toUpperCase(),
           status: p.status ?? null,
+          designation: request.opponent?.designations[p.id] ?? null,
           onReserve: reserve.has(p.id),
           projection: request.published?.get(p.id) ?? null,
         }));
@@ -1023,4 +1054,123 @@ function rivalReader(
     memo.set(pos, out);
     return out;
   };
+}
+
+/**
+ * The upside stash and the block (review W5, round 8), from what the tiers
+ * already hold: the same roster, wire, verdicts and fixtures, and the same
+ * room. A spot is used once: the moves Do this and Worth considering name
+ * come first, then the stash, then the block.
+ */
+function stashAndBlock(
+  request: WaiverAssemblyRequest,
+  inputs: TierInputs,
+  plan: WaiverTierPlan,
+  view: WaiverTiersView,
+  fixtures: readonly ScheduleTeamWeek[],
+  pickup: Readonly<Record<string, PickupState>>,
+): Pick<NonNullable<WaiverAssembly['tiers']>, 'upsideStash' | 'block'> {
+  const round2 = request.round2 ?? null;
+  const shown = [...(view.doThese ?? []), ...view.consider];
+  const taken = new Set(shown.map((m) => m.playerId));
+  const excluded = new Set([DEFENCE_POSITION]);
+
+  /* The room the shown moves leave: open bench spots, open IR slots, drop-ready players nobody cuts. */
+  const usedDrops = new Set(shown.map((m) => m.drop?.playerId).filter((x): x is string => x != null));
+  let open = Math.max(0, inputs.request.openSpots - shown.filter((m) => m.drop == null && m.needsSpot == null).length);
+  let reserve = Math.max(0, inputs.request.openReserve - shown.filter((m) => m.drop?.viaReserve).length);
+  const dropReady = plan.dropReady.filter((d) => !usedDrops.has(d.playerId)).map((d) => ({ playerId: d.playerId, name: d.name }));
+
+  const usesFaab = request.budgets?.rule.usesFaab ?? request.waiverWindow?.rules.usesFaab ?? true;
+  const remaining = request.budgets ? (myBudget(request.budgets)?.remaining ?? null) : null;
+  const finalWeek = request.history?.finalWeek ?? request.strategy?.finalWeek ?? 14;
+  const spendable = playoffReserve(remaining, { week: request.week, finalWeek }).spendable;
+  const firstMoves = new Map(plan.all.map((m) => [m.playerId, m] as const));
+
+  const positionOf = new Map(request.players.map((p) => [p.id, (p.position ?? '').toUpperCase()] as const));
+  const stash = round2
+    ? upsideStash({
+        shape: request.shape,
+        roster: inputs.request.roster.map((p) => ({ ...p, seasonRate: p.seasonRate ?? p.rate })),
+        candidates: inputs.request.candidates.map((c) => ({
+          ...c,
+          seasonRate: c.seasonRate ?? c.rate,
+          free: pickup[c.playerId]?.state === 'free',
+          helpsNow: (firstMoves.get(c.playerId)?.byWeek[0]?.change ?? 0) > 0,
+          planExcluded: c.planExcluded != null,
+        })),
+        taken,
+        excludedPositions: excluded,
+        verdicts: inputs.request.stash ?? new Map(),
+        reserveTakes: (d) => reserveTakes(d, round2.reserveAllows ?? null),
+        room: { reserve, open, dropReady },
+        players: request.players,
+        depthOrder: new Map(Object.entries(round2.depthOrder)),
+        injuryStatus: new Map(Object.entries(round2.injuryNotes).map(([id, n]) => [id, n.status] as const)),
+        elite: eliteBackRates(new Map(Object.entries(round2.seasonPoints)), (id) => positionOf.get(id) === 'RB'),
+        spendable,
+        usesFaab,
+      })
+    : null;
+  if (stash) {
+    taken.add(stash.playerId);
+    if (stash.room.kind === 'reserve') reserve -= 1;
+    else if (stash.room.kind === 'open') open -= 1;
+  }
+  const stashDrop = stash?.room.kind === 'drop' ? stash.room.playerId : null;
+
+  /* The block is about this week's game: only while it is still ahead. */
+  const opponent = request.opponent ? (request.rosters.find((r) => r.rosterId === request.opponent!.rosterId && !r.isMine) ?? null) : null;
+  let block = null;
+  if (opponent && inputs.window.thisWeekOpen) {
+    const byId = new Map(request.players.map((p) => [p.id, p] as const));
+    const playing = new Set(fixtures.filter((f) => f.week === request.week && f.opponent).map((f) => f.team.toUpperCase()));
+    const onBye = (team: string) => playing.size > 0 && team.length > 0 && !playing.has(team.toUpperCase());
+    const reserved = new Set(opponent.reserveIds ?? []);
+    const theirs: BlockPlayer[] = opponent.playerIds
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => p != null)
+      .map((p) => ({
+        playerId: p.id,
+        name: p.fullName,
+        position: (p.position ?? '').toUpperCase(),
+        team: (p.team ?? '').toUpperCase(),
+        points: request.published?.get(p.id) ?? null,
+        designation: request.opponent!.designations[p.id] ?? normalizeDesignation(p.status).designation,
+        onBye: onBye(p.team ?? ''),
+        onReserve: reserved.has(p.id),
+      }));
+    const inputOf = new Map(request.candidateInputs.map((i) => [i.player.id, i] as const));
+    const wire: BlockCandidate[] = inputs.request.candidates.map((c) => ({
+      playerId: c.playerId,
+      name: c.name,
+      position: c.position,
+      team: c.team,
+      points: request.published?.get(c.playerId) ?? null,
+      designation: asDesignation(c.designation),
+      onBye: onBye(c.team),
+      addable: c.planExcluded == null && addableBefore(inputOf.get(c.playerId) ?? {}, pickup[c.playerId], request.now),
+      free: pickup[c.playerId]?.state === 'free',
+    }));
+    const room: BlockRoom[] = [
+      ...(open > 0 ? [{ kind: 'open' as const }] : []),
+      ...dropReady.filter((d) => d.playerId !== stashDrop).map((d) => ({ kind: 'drop' as const, playerId: d.playerId, name: d.name })),
+    ];
+    block = blockPickup({
+      shape: request.shape,
+      opponent: { rosterId: opponent.rosterId, roster: theirs },
+      candidates: wire,
+      taken,
+      excludedPositions: excluded,
+      room,
+      spendable,
+      usesFaab,
+    });
+  }
+  return { upsideStash: stash, block };
+}
+
+/** The app's designation word as the shared type; anything else is unknown. */
+function asDesignation(d: string): Designation {
+  return d in DESIGNATION_SEVERITY ? (d as Designation) : 'unknown';
 }

@@ -768,7 +768,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   const best: TierMove[] = [];
   const excludedFas: { playerId: string; name: string; reason: string }[] = [];
   for (const c of candidates) {
-    /* A season-ending injury, or a return after the playoffs start, is never offered. */
+    /* A season-ending injury, or a return after week 16, is never offered. */
     const verdict = request.stash?.get(c.playerId);
     if (verdict && (verdict.kind === 'season_ending' || verdict.kind === 'too_late')) {
       excludedFas.push({ playerId: c.playerId, name: c.name, reason: verdict.label });

@@ -12,7 +12,7 @@ import { useState } from 'react';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import { PlayerIdentity } from './common.tsx';
 import { FoldedGroup, WaiverCard } from './waiverCard.tsx';
-import { byGain, tierCard } from '../waiverCard.ts';
+import { byGain, extraLine, roomLine, tierCard } from '../waiverCard.ts';
 
 /** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window (`Return unknown` when nobody knows when). */
 export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
@@ -61,6 +61,40 @@ export function DropReadyRows({ tiers }: { tiers: WaiverTiersView }) {
 }
 
 /**
+ * The upside stash and the block (round 8): each its own short line, the
+ * pick and one reason, with the spot it uses under it. Nothing to tap: the
+ * line is the whole answer, and nothing here adds, drops or bids.
+ */
+export function ExtraLines({ tiers }: { tiers: WaiverTiersView }) {
+  const rows = [
+    ...(tiers.upsideStash ? [{ kind: 'stash' as const, line: tiers.upsideStash }] : []),
+    ...(tiers.block ? [{ kind: 'block' as const, line: tiers.block }] : []),
+  ];
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <div className="section-title" data-testid="tier-extra-title">
+        Stash and block
+      </div>
+      <section className="slot-group" data-testid="tier-extra">
+        {rows.map(({ kind, line }) => (
+          <div key={kind} className="player-row" data-testid={`waiver-${kind}-line`} data-player-id={line.playerId}>
+            <div className="player-row-top">
+              <span className="player-identity">
+                <PlayerIdentity position={line.position} />
+                <span className="team-logo" aria-hidden="true" />
+              </span>
+              <span className="player-name extra-line">{extraLine(kind, line)}</span>
+            </div>
+            <div className="verdict-line faint">{roomLine(line.room)}</div>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
+/**
  * Everything below "Do this" on Waivers (22 October 2026: the page fits one
  * screen): Worth considering open, three rows then "Show all"; the Watch list
  * and Drop-ready folded into one row each, like Team's Bench.
@@ -99,6 +133,7 @@ export function TierSections({
           </section>
         </>
       ) : null}
+      <ExtraLines tiers={tiers} />
       <FoldedGroup label="Watch list" count={tiers.watch.length} testId="tier-watch">
         <section data-testid="tier-watch">
           {byGain(tiers.watch).map((row) => (

@@ -100,7 +100,8 @@ export interface WaiverCaptureInput {
   /** Everything `assembleWaiverPlan` is about to be handed, minus the clock. */
   request: Omit<WaiverAssemblyRequest, 'now' | 'generatedAt' | 'players'>;
   /** How the wire was bounded, for the sentence that explains a thin board. */
-  pool: { scanned: number; perPosition: number };
+  /** Round 8: the free agents last week's points and the hurt-top-back scan added, by id. Absent on older files. */
+  pool: { scanned: number; perPosition: number; lastWeekIds?: string[]; stashIds?: string[] };
   nflState: NflState | null;
   props: { fetchedAt: string | null; provider: string | null; events: number };
   /** Weeks of transaction history read, for the freshness block. Null if unknown. */
@@ -315,6 +316,8 @@ export async function captureWaiverSnapshot(
           : { seasonHorizon: { weeks: [...input.request.seasonHorizon.weeks], playoffWeeks: [...input.request.seasonHorizon.playoffWeeks] } }),
         /* Already keyed by roster id and free of names: carried as it is. */
         ...(input.request.round2 === undefined ? {} : { round2: input.request.round2 }),
+        /* Round 8: this week's opponent by roster id and his designations by player id. No names. */
+        ...(input.request.opponent === undefined ? {} : { opponent: input.request.opponent }),
         bidStyles,
         rosters,
         players: players.kept.map(capturePlayer),
@@ -481,6 +484,7 @@ export function waiverRequestFromSnapshot(snapshot: SupportSnapshot<WaiverPlanPa
     ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
     ...(inputs.seasonHorizon == null ? {} : { seasonHorizon: inputs.seasonHorizon }),
     ...(inputs.round2 === undefined ? {} : { round2: inputs.round2 }),
+    ...(inputs.opponent === undefined ? {} : { opponent: inputs.opponent }),
     rosters: inputs.rosters.map((roster) => ({
       ...roster,
       bidStyle: (inputs.bidStyles?.[String(roster.rosterId)] as BidderStyle | undefined) ?? null,

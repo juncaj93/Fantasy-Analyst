@@ -134,4 +134,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * sub-bar "starts over" week is a toss-up and adds nothing (Kirk Cousins was
  * +30.9 for Jordan Love's one bye week, 16.4 of it the bye).
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@19', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@20`, 5 November 2026, review round 8 (W5, W10): an upside stash line
+ * (`upsideStash.ts`) and a block line for this week's opponent (`block.ts`);
+ * an injured free agent back by week 16 is a stash (was 14); a rival's
+ * Doubtful starter counts as Out in the competition read; last week's top
+ * free-agent scorers and the backs behind hurt top backs are scanned.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@20', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

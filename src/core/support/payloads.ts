@@ -42,6 +42,7 @@ import type { SeasonCheck } from '../trades/seasonCheck.ts';
 import type { LineupAssembly } from '../startsit/assemble.ts';
 import type { SeasonMarketKey } from '../vegas/types.ts';
 import type { WaiverAssembly, WaiverRound2Inputs } from '../waivers/assemble.ts';
+import type { Designation } from '../injury/model.ts';
 import type { TradeAssembly } from '../trades/assemble.ts';
 import type { PlayerRate } from '../tradeValue/rate.ts';
 import type { ReplacementLevel } from '../tradeValue/evaluate.ts';
@@ -211,7 +212,7 @@ export interface WaiverPlanPayload {
   request: { leagueId: string; week: number };
   context: InSeasonContext & {
     /** How the wire was bounded, so a thin answer is never a mystery. */
-    pool: { scanned: number; perPosition: number };
+    pool: { scanned: number; perPosition: number; lastWeekIds?: string[]; stashIds?: string[] };
   };
   freshness: InSeasonFreshness & {
     /** Whether the league publishes a budget, and whether any of it was read. */
@@ -282,6 +283,8 @@ export interface WaiverPlanInputs {
    * Sleeper's depth order and injury notes. Absent on older files.
    */
   round2?: WaiverRound2Inputs | null;
+  /** Round 8: this week's opponent (roster id) and his designations resolved against the injury report. */
+  opponent?: { rosterId: number; designations: Record<string, Designation> } | null;
   /**
    * Each seeded manager's bidding style, by roster id, taken from the real
    * name before it became `Manager N`. Without it the capture's own bids treat
