@@ -21,7 +21,7 @@ import type { StartSitEvaluation } from '../../src/core/startsit/engine.ts';
 import { injurySeason } from '../../src/server/services/injuryService.ts';
 import { createTestDb } from './db.ts';
 import { player } from './players.ts';
-import { FETCHED_AT, LEAGUE, MINE, THEIRS, envFor, seed } from './tradeLeague.ts';
+import { FETCHED_AT, LEAGUE, MINE, THEIRS, boardFor, envFor, seed } from './tradeLeague.ts';
 
 /** Questionable starter, Doubtful bench player, Sleeper-only receiver (one posted line, 16 on Sleeper's week). */
 export const QUESTIONABLE = 'm_wr3';
@@ -32,6 +32,11 @@ export const HEALTHY = 'm_wr1';
 export const NUDGED = 'm_wr2';
 /** A bench back Sleeper still calls Questionable and this week's injury report calls Out. */
 export const SOURCES_SPLIT = 'm_bn2';
+/**
+ * A Doubtful receiver on a full 24-point market, in Sleeper's lineup (5 November
+ * 2026). Under the old six-point charge he still read 18 and started.
+ */
+export const DOUBTFUL_STAR = 'm_dstar';
 
 export interface ScreenNumbers {
   team: number | null;
@@ -50,8 +55,8 @@ export interface CrossScreen {
   waivers: Json;
   trade: Json;
   compare: Json;
-  /** A Compare of exactly these players, the sheet's own request. */
-  compareOf(playerIds: string[]): Promise<Json>;
+  /** A Compare of exactly these players, the sheet's own request, in a mode when given. */
+  compareOf(playerIds: string[], mode?: string): Promise<Json>;
 }
 
 export async function readEveryScreen(): Promise<CrossScreen> {
@@ -62,6 +67,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     player({ id: DOUBTFUL, fullName: 'M_BN1', position: 'WR', team: 'DAL', status: 'Doubtful' }),
     player({ id: SLEEPER_ONLY, fullName: 'M_SL', position: 'WR', team: 'KC' }),
     player({ id: SOURCES_SPLIT, fullName: 'M_BN2', position: 'RB', team: 'NE', status: 'Questionable' }),
+    player({ id: DOUBTFUL_STAR, fullName: 'M_DSTAR', position: 'WR', team: 'KC', status: 'Doubtful' }),
   ]);
   /* This week's report, published now: Out. The worse word stands on every screen. */
   await db
@@ -72,8 +78,9 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     )
     .bind(SOURCES_SPLIT, injurySeason(), new Date().toISOString(), new Date().toISOString())
     .run();
-  const ids = [...MINE.map((p) => p[0]), SLEEPER_ONLY];
-  const mineStarters = MINE.slice(0, 9).map((p) => p[0]);
+  const ids = [...MINE.map((p) => p[0]), SLEEPER_ONLY, DOUBTFUL_STAR];
+  /* Sleeper starts the Doubtful star at WR in place of m_wr3's slot neighbour m_wr4. */
+  const mineStarters = MINE.slice(0, 9).map((p) => (p[0] === 'm_wr4' ? DOUBTFUL_STAR : p[0]));
   const theirStarters = THEIRS.slice(0, 9).map((p) => p[0]);
   await new LeagueRepo(db).replaceRosters(LEAGUE, [
     { leagueId: LEAGUE, rosterId: 1, ownerId: 'me', ownerName: 'Alex', playerIds: ids, starterIds: mineStarters, reserveIds: [], isMine: true, settings: null },
@@ -91,6 +98,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   });
   const snapshot = await props.snapshotId('test', 'evt-2', FETCHED_AT);
   await props.saveConsensus(snapshot!, [
+    ...boardFor(DOUBTFUL_STAR, 'WR', 24),
     { playerId: SLEEPER_ONLY, sourcePlayerName: 'M_SL', market: 'anytime_td', line: null, overPrice: -110, underPrice: -110, bookCount: 3, consensusMethod: 'median', books: ['a', 'b', 'c'], impliedProbability: 0.3 },
   ]);
   await new SleeperProjectionsRepo(db).save(
@@ -134,12 +142,13 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   const asked = [QUESTIONABLE, DOUBTFUL, SLEEPER_ONLY, HEALTHY];
   const trade = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${asked.join(',')}&get=t_rb1`);
   const tradeNudged = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${NUDGED},${SOURCES_SPLIT}&get=t_rb1`);
-  const compareOf = async (playerIds: string[]): Promise<Json> =>
+  const tradeStar = await get(`/api/leagues/${LEAGUE}/trades/check?a=1&b=2&give=${DOUBTFUL_STAR}&get=t_rb1`);
+  const compareOf = async (playerIds: string[], mode?: string): Promise<Json> =>
     (await (
       await app(
         new Request('https://app.test/api/startsit/compare', {
           method: 'POST',
-          body: JSON.stringify({ leagueId: LEAGUE, playerIds }),
+          body: JSON.stringify({ leagueId: LEAGUE, playerIds, ...(mode ? { mode } : {}) }),
           headers: { 'content-type': 'application/json' },
         }),
         env,
@@ -147,6 +156,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     ).json()) as Json;
   const compare = await compareOf(asked);
   const compareNudged = await compareOf([NUDGED, HEALTHY, SOURCES_SPLIT]);
+  const compareStar = await compareOf([DOUBTFUL_STAR, HEALTHY]);
 
   const teamEvaluations: StartSitEvaluation[] = [...lineup.starters, ...lineup.bench, ...lineup.undecidable];
   const matchupPlayers: Json[] = [
@@ -173,10 +183,10 @@ export async function readEveryScreen(): Promise<CrossScreen> {
       const week = waivers.tiers?.weekFigures?.[playerId]?.weeks?.[0];
       const waiverNumber = week == null ? null : week.out ? 0 : week.points;
       /* Trades: this week's rate times this week's share. */
-      const rate = [...(trade.evaluation?.a?.outgoing ?? []), ...(tradeNudged.evaluation?.a?.outgoing ?? [])].find((p: Json) => p.playerId === playerId);
+      const rate = [...(trade.evaluation?.a?.outgoing ?? []), ...(tradeNudged.evaluation?.a?.outgoing ?? []), ...(tradeStar.evaluation?.a?.outgoing ?? [])].find((p: Json) => p.playerId === playerId);
       const tradeNumber = rate?.rate == null ? null : Math.round(rate.rate * (rate.weekly?.[0] ?? 1) * 100) / 100;
       /* Compare: the card's number (`weekPointsOf`), `Out` as zero. */
-      const c = [...(compare.evaluations ?? []), ...(compareNudged.evaluations ?? [])].find((x: Json) => x.playerId === playerId);
+      const c = [...(compare.evaluations ?? []), ...(compareNudged.evaluations ?? []), ...(compareStar.evaluations ?? [])].find((x: Json) => x.playerId === playerId);
       return {
         team,
         matchup: card?.projectedFinal ?? null,

@@ -64,12 +64,12 @@ import type { RosterShape } from '../sleeper/scoring.ts';
 import type { ScoringProfile } from '../sleeper/scoring.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from './engine.ts';
 import { assessReplacement, type ReplacementAssessment } from './replacement.ts';
-import { assessCorrelation, type OpponentExposure } from './correlation.ts';
 import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
-import { isRealHole, isTossUp } from './tossup.ts';
+import { isRealHole, isTossUp, tossUpLean, type LeanTag } from './tossup.ts';
+import { spreadPoints } from './spread.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
 /** One row's opponent, and what the defence model makes of it. */
@@ -247,9 +247,19 @@ export interface LineupSwap {
   inName: string;
   outPlayerId: string;
   outName: string;
-  /** Points gained by making this change. */
+  /**
+   * Points gained by making this change. On a toss-up, the lean's ranking
+   * number less the other man's: negative when Floor or Ceiling leans to the
+   * lower number of the two.
+   */
   gain: number;
   reason: string;
+  /**
+   * A toss-up only: "safer" under Floor, "more upside" under Ceiling
+   * (`tossUpLean`, 5 November 2026). On a toss-up `in` is the lean and `out`
+   * the other man, whichever of them Sleeper starts.
+   */
+  leanTag?: LeanTag;
 }
 
 /** A slot Sleeper has left empty, and the player this lineup puts in it. */
@@ -319,19 +329,6 @@ export interface LineupRecommendation {
   }[];
 }
 
-/**
- * How much projection a lineup-level preference may spend.
- *
- * The whole of the second-order reasoning below — correlation in Ceiling,
- * diversification in Floor — is only ever allowed to choose between players who
- * are already within this much of each other. That is what "bounded, and never
- * overpowering player quality" means in code: below the tolerance the players
- * are a coin flip and the shape of the lineup is a reasonable way to break the
- * tie; above it, the better player starts, and no amount of stacking changes
- * that.
- */
-export const LINEUP_PREFERENCE_TOLERANCE = 0.6;
-
 export function recommendLineup(
   inputs: StartSitInput[],
   shape: RosterShape,
@@ -353,25 +350,6 @@ export function recommendLineup(
      * that holds that claim; see `sleeperProjectionFallback.test.ts`.
      */
     published?: ReadonlyMap<string, number>;
-    /**
-     * The games the opponent has stacked this week, keyed by game.
-     *
-     * The second half of the shape reasoning, and the half that was missing.
-     * {@link shapeScore} reads *this* lineup — my quarterback with my receiver,
-     * my starters piled into one game — and says nothing at all about the
-     * lineup being played against, which in head-to-head is half the question:
-     * a game the opponent owns both ends of is the game that beats you if it
-     * goes off, and the game you want to be in if you are chasing points.
-     *
-     * Absent or empty is the ordinary state and changes nothing —
-     * `assessCorrelation` returns zero points for an empty exposure map, in
-     * Balanced, and for a player whose game is unknown. See `correlation.ts`
-     * for the bound, which is the reason this can be let into a lineup pass at
-     * all: it may move {@link CORRELATION.maxPoints} and it only ever speaks
-     * about players who are already inside {@link LINEUP_PREFERENCE_TOLERANCE}
-     * of each other.
-     */
-    opponentExposure?: ReadonlyMap<string, OpponentExposure>;
   } = {},
 ): LineupRecommendation {
   const mode = opts.mode ?? 'balanced';
@@ -449,8 +427,8 @@ export function recommendLineup(
    * your injured-reserve tight end" is not a recommendation, it is a bug, and
    * an empty slot with a warning is the honest version of the same situation.
    *
-   * Doubtful is deliberately not gated here: it is a strong penalty and a real
-   * decision, and a doubtful player is sometimes genuinely the best available.
+   * Doubtful is gated the same way since 5 November 2026 (`weekAvailability.ts`,
+   * Alex's decision): he almost never plays, so he is benched and replaced.
    */
   const ruledOut = scored.filter((e) => e.ruledOut);
   const playable = scored.filter((e) => !e.ruledOut);
@@ -494,41 +472,16 @@ export function recommendLineup(
   }
 
   /*
-   * Two passes over a lineup that is already chosen, in this order.
-   *
-   * The preference pass may change *who* starts, but only between players
-   * inside {@link LINEUP_PREFERENCE_TOLERANCE} of each other. The placement
-   * pass never changes who starts at all — it only decides which slot each of
-   * them occupies, which is free and is worth real money on a Sunday.
+   * The placement pass never changes who starts: it only decides which slot
+   * each starter occupies. The Floor and Ceiling preference pass that used to
+   * run first (stacks in Ceiling, one game at most in Floor, within 0.6
+   * points) is gone since 5 November 2026: the mode changes who starts only
+   * through a toss-up's lean, and a toss-up never changes the lineup
+   * (`tossup.ts`, `mode.ts`).
    */
-  /*
-   * Floor and Ceiling are preferences over a lineup that has already been
-   * ranked, so a player nobody has ranked is not theirs to move.
-   *
-   * The mechanism is "swap a starter for a bench player within
-   * {@link LINEUP_PREFERENCE_TOLERANCE} points of him, when the shape
-   * improves", and two unpriced players are *always* inside that tolerance —
-   * their scores are nudges a point apart — so the guard that makes this worth
-   * at most a tie stops holding and Ceiling mode would stack a lineup on
-   * correlation alone while the card underneath stayed silent about it.
-   *
-   * This used to be switched off only when the *entire* roster was unpriced,
-   * which is the same all-or-nothing mistake as rule 2 in the module docblock:
-   * one priced quarterback restored the whole pass over eight players it still
-   * could not rank. The unpriced are withheld from the pass instead, so the
-   * priced players keep their preference and Balanced still returns at once.
-   */
-  const preferenceNotes = applyLineupPreferences(
-    assignment,
-    slots,
-    playable,
-    mode,
-    lockedIds,
-    opts.opponentExposure ?? new Map(),
-  );
   preferLateFlexOnTies(assignment, slots, playable, lockedIds, opts.published);
   const placementNotes = optimiseSlotPlacement(assignment, slots, lockedIds);
-  notes.push(...preferenceNotes, ...placementNotes);
+  notes.push(...placementNotes);
 
   const filled: LineupSlot[] = slots.map((s, index) => {
     const player = assignment.get(index) ?? null;
@@ -579,7 +532,10 @@ export function recommendLineup(
    */
   for (const evaluation of evaluations) evaluation.decision = decisionPoints(evaluation, opts.published);
 
-  const { swaps, fills, tossUps } = buildSwaps(filled, slots, currentStarters, evaluations, opts.published);
+  const built = buildSwaps(filled, slots, currentStarters, evaluations, opts.published);
+  const { swaps, fills } = built;
+  /* Inside a toss-up the week's mode picks the lean (5 November 2026, `tossUpLean`). */
+  const tossUps = leanTossUps(built, { mode, slots, filled, currentStarters, evaluations, lockedIds, published: opts.published });
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -776,179 +732,6 @@ function applyReplacementRisk(
   }
 
   return out;
-}
-
-/**
- * Lineup-shaped preferences, worth at most a tie.
- *
- * Ceiling mode likes correlation: a quarterback and one of his own
- * pass-catchers double up on the same touchdown, which is what a week you win
- * by forty looks like. Floor mode likes the opposite — two starters whose
- * afternoon depends on the same game is one weather delay away from a lost
- * week.
- *
- * Both are expressed as the *same* mechanism: consider swapping a starter for a
- * bench player who is within {@link LINEUP_PREFERENCE_TOLERANCE} points, and
- * take the swap only when the shape improves. Nothing here can start a worse
- * player by any margin that matters, and nothing here forces a stack: with no
- * near-equal alternative, no swap happens at all.
- */
-function applyLineupPreferences(
-  assignment: Map<number, StartSitEvaluation>,
-  slots: SlotSpec[],
-  playable: StartSitEvaluation[],
-  mode: StartSitMode,
-  lockedIds: Set<string>,
-  opponentExposure: ReadonlyMap<string, OpponentExposure>,
-): string[] {
-  if (mode === 'balanced') return [];
-  const notes: string[] = [];
-  const started = new Set([...assignment.values()].map((e) => e.playerId));
-  /*
-   * Only players a market has priced, on both sides of the trade.
-   *
-   * The tolerance below is measured in points, and points are what an unpriced
-   * player does not have — his score is a sum of nudges, so every unpriced pair
-   * reads as near-equal and the shape preference wins by default. Withholding
-   * them is the same rule the assignment and the swap card keep, asked here.
-   */
-  const bench = playable.filter(
-    (e) => !started.has(e.playerId) && !lockedIds.has(e.playerId) && hasCompleteMarket(e),
-  );
-  if (bench.length === 0) return notes;
-
-  for (const [index, current] of [...assignment.entries()]) {
-    if (lockedIds.has(current.playerId)) continue;
-    if (!hasCompleteMarket(current)) continue;
-    const spec = slots[index]!;
-    const candidates = bench
-      .filter((e) => spec.accepts.includes(e.position))
-      .filter((e) => (current.score ?? 0) - (e.score ?? 0) <= LINEUP_PREFERENCE_TOLERANCE)
-      .filter((e) => !started.has(e.playerId));
-    if (candidates.length === 0) continue;
-
-    const lineup = [...assignment.values()];
-    const currentShape = shapeScore(lineup, mode);
-    /*
-     * What being in the opponent's biggest game is worth to the incumbent.
-     *
-     * Read once per slot rather than once per candidate, because it is a fact
-     * about the player already in it. Zero whenever there is no exposure map,
-     * in Balanced, and for a player whose fixture is unknown.
-     */
-    const currentCorrelation = assessCorrelation(participantOf(current), opponentExposure, mode);
-    let best: { player: StartSitEvaluation; gain: number; correlation: string | null } | null = null;
-
-    for (const candidate of candidates) {
-      const swapped = lineup.map((e) => (e.playerId === current.playerId ? candidate : e));
-      // The projection given up, against the shape gained. Both in points, so
-      // the comparison is not between a number and a preference.
-      const cost = (current.score ?? 0) - (candidate.score ?? 0);
-      /*
-       * …and the opponent's half of the same argument.
-       *
-       * `shapeScore` above asks what this lineup looks like to itself.
-       * `assessCorrelation` asks what it looks like across the net: Ceiling pays
-       * to be in the game the opponent has stacked, Floor pays to be out of it,
-       * and Balanced never reaches here at all. Bounded to
-       * {@link CORRELATION.maxPoints} per player by that module, so the pair of
-       * reads below can move a swap and can never be most of the reason for
-       * one — and the tolerance filter above has already refused every
-       * candidate this could otherwise have talked into a lineup.
-       */
-      const candidateCorrelation = assessCorrelation(participantOf(candidate), opponentExposure, mode);
-      const correlationGain = candidateCorrelation.points - currentCorrelation.points;
-      const gain = shapeScore(swapped, mode) - currentShape + correlationGain - cost;
-      if (gain > 0.01 && (!best || gain > best.gain)) {
-        best = {
-          player: candidate,
-          gain: round2(gain),
-          // Named only when the opponent read is what tipped it. A note that
-          // claimed correlation on a swap the shape score would have made
-          // anyway would be describing reasoning that did not happen.
-          correlation: correlationGain > 0.01 ? candidateCorrelation.display : null,
-        };
-      }
-    }
-
-    if (best) {
-      assignment.set(index, best.player);
-      started.delete(current.playerId);
-      started.add(best.player.playerId);
-      const within = `who projects within ${LINEUP_PREFERENCE_TOLERANCE} points`;
-      notes.push(
-        best.correlation
-          ? mode === 'ceiling'
-            ? `Ceiling mode: ${best.player.name} starts over ${current.name}, ${within} — ${best.correlation}, and that is the game worth being in if you are chasing.`
-            : `Floor mode: ${best.player.name} starts over ${current.name}, ${within} — ${current.name} is in the game the opponent is stacked in, which is the one that beats a lead.`
-          : mode === 'ceiling'
-            ? `Ceiling mode: ${best.player.name} starts over ${current.name}, ${within}, because his game correlates with the rest of the lineup.`
-            : `Floor mode: ${best.player.name} starts over ${current.name}, ${within}, to avoid leaning the lineup on one game.`,
-      );
-    }
-  }
-  return notes;
-}
-
-/**
- * The shape of a lineup, in points, for the mode being asked about.
- *
- * Ceiling counts quarterback-to-pass-catcher pairs on the same NFL team, and
- * pass-catchers on both sides of one game — the two correlations that
- * genuinely compound. Floor counts the opposite: how concentrated the lineup is
- * in a single game.
- *
- * Deliberately tiny numbers. This is a tie-breaker measured on the same scale
- * as the projection it is competing with, and it is meant to lose every fair
- * fight.
- */
-function shapeScore(lineup: StartSitEvaluation[], mode: StartSitMode): number {
-  if (mode === 'ceiling') {
-    let bonus = 0;
-    const quarterbacks = lineup.filter((e) => e.position === 'QB');
-    for (const qb of quarterbacks) {
-      const catchers = lineup.filter((e) => e.team === qb.team && (e.position === 'WR' || e.position === 'TE'));
-      // The first pairing is the one worth having; a third body from the same
-      // offence is variance without much extra correlation.
-      bonus += Math.min(catchers.length, 2) * 0.25;
-      // A pass-catcher on the other side of the quarterback's own game: the
-      // shootout case, and worth less than owning both ends of a touchdown.
-      const opposing = lineup.filter(
-        (e) => qb.opponent != null && e.team === qb.opponent && (e.position === 'WR' || e.position === 'TE'),
-      );
-      bonus += Math.min(opposing.length, 1) * 0.15;
-    }
-    return round2(bonus);
-  }
-
-  // Floor: a small charge for every starter past the first in one game.
-  const perGame = new Map<string, number>();
-  for (const player of lineup) {
-    const key = gameKey(player);
-    if (!key) continue;
-    perGame.set(key, (perGame.get(key) ?? 0) + 1);
-  }
-  let penalty = 0;
-  for (const count of perGame.values()) if (count > 2) penalty += (count - 2) * 0.2;
-  return round2(-penalty);
-}
-
-/** Both teams in one game, in a stable order, so two players match on it. */
-function gameKey(player: StartSitEvaluation): string | null {
-  if (!player.team || !player.opponent) return null;
-  return [player.team, player.opponent].sort().join('@');
-}
-
-/**
- * An evaluation reduced to the three fields the correlation read needs.
- *
- * Built through {@link gameKey} rather than beside it, which is the point: the
- * key the opponent's exposure map is keyed by and the key this lineup's own
- * concentration is counted by have to be the same string, or the two halves of
- * the shape argument would silently be about different games.
- */
-function participantOf(player: StartSitEvaluation): { playerId: string; name: string; gameId: string | null } {
-  return { playerId: player.playerId, name: player.name, gameId: gameKey(player) };
 }
 
 /**
@@ -1522,6 +1305,141 @@ function buildSwaps(
     fills: fills.sort((a, b) => b.gain - a.gain),
     tossUps: tossUps.sort((a, b) => b.gain - a.gain),
   };
+}
+
+/**
+ * The week's mode picks each toss-up's lean (Alex's decision, 5 November 2026).
+ *
+ * Outside a toss-up nothing here moves: expected points decide, and the
+ * swaps and fills above are untouched. Inside one (under two points, never
+ * against a real hole) {@link tossUpLean} is asked, the same function Compare
+ * asks, so the sheet a toss-up opens leans the same way.
+ *
+ *  - A toss-up the optimiser found (a bench man edging Sleeper's starter)
+ *    keeps its lean under Balanced, and under Floor or Ceiling may lean back
+ *    to Sleeper's man: then `in` is Sleeper's starter and `out` the bench man.
+ *  - Under Floor or Ceiling only: a bench man just behind Sleeper's starter
+ *    (inside the bar) whom the mode prefers is a toss-up too. Under Balanced
+ *    the lean there is Sleeper's own man, which is no news.
+ *
+ * Either way it stays a toss-up: no lineup change, never a Best move headline
+ * of its own (`tossup.ts`).
+ */
+function leanTossUps(
+  built: { swaps: LineupSwap[]; fills: LineupFill[]; tossUps: LineupSwap[] },
+  ctx: {
+    mode: StartSitMode;
+    slots: SlotSpec[];
+    /** The recommended lineup, slot by slot: where each starter is named. */
+    filled: LineupSlot[];
+    currentStarters: Set<string>;
+    evaluations: StartSitEvaluation[];
+    lockedIds: Set<string>;
+    published?: ReadonlyMap<string, number>;
+  },
+): LineupSwap[] {
+  const byId = new Map(ctx.evaluations.map((e) => [e.playerId, e]));
+  const sideOf = (e: StartSitEvaluation) => {
+    const basis = rankingPoints(e, ctx.published);
+    return basis == null ? null : { points: basis.points, borrowed: basis.borrowed, position: e.position, spread: e.spread ?? null };
+  };
+
+  const out: LineupSwap[] = [];
+  for (const t of built.tossUps) {
+    const incoming = byId.get(t.inPlayerId);
+    const outgoing = byId.get(t.outPlayerId);
+    const a = incoming ? sideOf(incoming) : null;
+    const b = outgoing ? sideOf(outgoing) : null;
+    if (!a || !b) {
+      out.push(t);
+      continue;
+    }
+    const { lean, tag } = tossUpLean(a, b, ctx.mode);
+    const tagged = tag ? { leanTag: tag } : {};
+    if (lean === 'a') {
+      out.push({ ...t, ...tagged });
+    } else {
+      out.push({
+        slot: t.slot,
+        inPlayerId: t.outPlayerId,
+        inName: t.outName,
+        outPlayerId: t.inPlayerId,
+        outName: t.inName,
+        gain: round2(rankingNumber(b.points, b.borrowed) - rankingNumber(a.points, a.borrowed)),
+        reason: 'Toss-up',
+        ...tagged,
+      });
+    }
+  }
+
+  if (ctx.mode !== 'balanced' && ctx.currentStarters.size > 0) {
+    /* The lineup as Best move leaves it: Sleeper's, with the swaps and fills made. */
+    const lineup = new Set(ctx.currentStarters);
+    for (const sw of built.swaps) {
+      lineup.delete(sw.outPlayerId);
+      lineup.add(sw.inPlayerId);
+    }
+    for (const f of built.fills) lineup.add(f.inPlayerId);
+    const named = new Set<string>([
+      ...built.swaps.flatMap((sw) => [sw.inPlayerId, sw.outPlayerId]),
+      ...built.fills.map((f) => f.inPlayerId),
+      ...out.flatMap((t) => [t.inPlayerId, t.outPlayerId]),
+    ]);
+    const positionOf = (id: string) => byId.get(id)?.position ?? '';
+    const seated = (ids: Iterable<string>) => seatable([...ids].map(positionOf), ctx.slots);
+    const before = seated(lineup);
+    const movable = (e: StartSitEvaluation) =>
+      !ctx.lockedIds.has(e.playerId) && !e.ruledOut && !e.onReserve && !named.has(e.playerId);
+    const bench = ctx.evaluations.filter((e) => !lineup.has(e.playerId) && movable(e));
+
+    for (const starterId of lineup) {
+      const starter = byId.get(starterId);
+      if (!starter || !movable(starter)) continue;
+      const s = sideOf(starter);
+      if (!s) continue;
+      if (isRealHole({ ruledOut: starter.ruledOut, onReserve: starter.onReserve ?? false, designation: starter.injury?.designation ?? null })) continue;
+      let pick: { bench: StartSitEvaluation; edge: number; tag: LeanTag | null; gap: number } | null = null;
+      for (const candidate of bench) {
+        if (named.has(candidate.playerId)) continue;
+        const c = sideOf(candidate);
+        if (!c) continue;
+        const gap = rankingNumber(s.points, s.borrowed) - rankingNumber(c.points, c.borrowed);
+        if (gap < 0) continue;
+        if (!isTossUp({ points: s.points, borrowed: s.borrowed }, { points: c.points, borrowed: c.borrowed, hole: false })) continue;
+        const after = [...lineup].filter((id) => id !== starterId);
+        after.push(candidate.playerId);
+        if (seated(after) < before) continue;
+        const { lean, tag } = tossUpLean(s, c, ctx.mode);
+        if (lean !== 'b') continue;
+        /* The candidate the mode likes most, measured the way the lean is. */
+        const sign = ctx.mode === 'floor' ? -1 : 1;
+        const swing = (x: typeof c) => spreadPoints(x.spread, x.points, x.position);
+        const edge = rankingNumber(c.points, c.borrowed) + sign * swing(c) - (rankingNumber(s.points, s.borrowed) + sign * swing(s));
+        if (!pick || edge > pick.edge) pick = { bench: candidate, edge, tag, gap };
+      }
+      if (!pick) continue;
+      named.add(pick.bench.playerId);
+      named.add(starterId);
+      out.push({
+        slot: ctx.filled.find((sl) => sl.playerId === starterId)?.slot ?? narrowestSlot(positionOf(starterId), ctx.slots),
+        inPlayerId: pick.bench.playerId,
+        inName: pick.bench.name,
+        outPlayerId: starterId,
+        outName: starter.name,
+        gain: round2(-pick.gap),
+        reason: 'Toss-up',
+        ...(pick.tag ? { leanTag: pick.tag } : {}),
+      });
+    }
+  }
+
+  return out.sort((a, b) => b.gain - a.gain);
+}
+
+/** The narrowest slot that takes a position, for a starter the recommended lineup does not hold. */
+function narrowestSlot(position: string, slots: SlotSpec[]): string {
+  const fitting = slots.filter((sl) => sl.accepts.includes(position)).sort((a, b) => a.accepts.length - b.accepts.length);
+  return fitting[0]?.slot ?? position;
 }
 
 /**

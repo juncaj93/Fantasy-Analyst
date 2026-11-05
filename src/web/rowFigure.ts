@@ -10,8 +10,10 @@
  * a number that does not apply may not quietly look like one that does.
  *
  *  - **Ruled out** shows no forecast at all. The row says `Out`, and the figure
- *    he would have had lives only in the tooltip and the spoken label.
- *  - **Questionable or doubtful** shows the forecast with the *same* injury
+ *    he would have had lives only in the tooltip and the spoken label. Doubtful
+ *    is ruled out too since 5 November 2026 (`weekAvailability.ts`).
+ *  - **An injury charge** (none is left today: Questionable costs nothing)
+ *    shows the forecast with the *same* injury
  *    charge the start/sit score applies (the evaluation's `status` component),
  *    drawn in the caution colour, with the undiscounted figure struck through
  *    under it. A reader sees both what the app ranks him at and why.

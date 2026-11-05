@@ -4,7 +4,7 @@
  * Before it, the same Questionable player read four ways: full value on Team,
  * 0.616 of his number on Matchup, 0.8 of a game in the trade and waiver rates,
  * and half a point down on the waiver yardstick. Each case below fails on the
- * code before that date.
+ * code before that date. Doubtful counts as Out since 5 November 2026.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -40,9 +40,9 @@ function matchupPlayer(over: Partial<MatchupPlayerInput>): MatchupPlayerInput {
 }
 
 describe('the rule', () => {
-  it('is full value for Questionable, six points off for Doubtful, nothing for ruled out', () => {
+  it('is full value for Questionable, nothing for Doubtful or ruled out (Doubtful as Out since 5 November 2026)', () => {
     expect(weekAvailability('questionable')).toEqual({ charge: 0, out: false, warn: true });
-    expect(weekAvailability('doubtful')).toEqual({ charge: -6, out: false, warn: true });
+    expect(weekAvailability('doubtful')).toEqual({ charge: -99, out: true, warn: true });
     for (const d of ['out', 'ir', 'pup', 'suspended'] as const) expect(weekAvailability(d).out, d).toBe(true);
     expect(weekAvailability('healthy')).toEqual({ charge: 0, out: false, warn: false });
     expect(weekAvailability('unknown')).toEqual({ charge: 0, out: false, warn: false });
@@ -50,7 +50,7 @@ describe('the rule', () => {
 
   it('never takes a week below zero', () => {
     expect(availableWeekPoints(21.01, 'questionable')).toBe(21.01);
-    expect(availableWeekPoints(8.5, 'doubtful')).toBe(2.5);
+    expect(availableWeekPoints(18, 'doubtful')).toBe(0);
     expect(availableWeekPoints(4, 'doubtful')).toBe(0);
     expect(availableWeekPoints(15, 'out')).toBe(0);
   });
@@ -85,12 +85,13 @@ describe('Trades and the waiver tiers', () => {
     expect(weeklyAvailability({ designation: 'questionable', weeks, byeWeek: null, rate: 7.74 }).weekly).toEqual([1, 1, 1]);
   });
 
-  it('count a Doubtful player at his rate less six points this week, and whole after', () => {
-    const a = weeklyAvailability({ designation: 'doubtful', weeks, byeWeek: null, rate: 10 });
-    expect(a.weekly[0]).toBeCloseTo(0.4, 10);
-    expect(a.weekly.slice(1)).toEqual([1, 1]);
-    expect(10 * a.weekly[0]!).toBeCloseTo(availableWeekPoints(10, 'doubtful'), 10);
-    expect(weekShare('doubtful', 5)).toBe(0);
+  it('count a Doubtful player as missing this week only, and whole after', () => {
+    const a = weeklyAvailability({ designation: 'doubtful', weeks, byeWeek: null, rate: 18 });
+    expect(a.weekly).toEqual([0, 1, 1]);
+    expect(18 * a.weekly[0]!).toBe(availableWeekPoints(18, 'doubtful'));
+    expect(weekShare('doubtful', 18)).toBe(0);
+    /* Out keeps its two-week assumption; Doubtful is back the week after. */
+    expect(weeklyAvailability({ designation: 'out', weeks, byeWeek: null, rate: 18 }).weekly).toEqual([0, 0.5, 1]);
   });
 
   it('keep the multi-week assumption for a ruled-out player', () => {
@@ -114,8 +115,10 @@ describe('the waiver yardstick', () => {
     expect(r.availabilityNote).toBe('Questionable');
   });
 
-  it('charges a Doubtful player six points', () => {
-    const r = readYardstick({ ...questionable, injury: { ...questionable.injury, designation: 'doubtful' } }, [], 7.69);
-    expect(r.availability).toBe(-6);
+  it('reads a Doubtful player as Out: no partial charge, the status still named', () => {
+    const doubtful = readYardstick({ ...questionable, injury: { ...questionable.injury, designation: 'doubtful' } }, [], 7.69);
+    const out = readYardstick({ ...questionable, injury: { ...questionable.injury, designation: 'out' } }, [], 7.69);
+    expect(doubtful.availability).toBe(out.availability);
+    expect(doubtful.availabilityNote).toMatch(/^Doubtful/);
   });
 });

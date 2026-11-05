@@ -215,7 +215,8 @@ export function buildInsights(input: InsightInput): HeroInsight[] {
     if (!player.starting || player.side !== 'mine' || !player.ruledOut) continue;
     if (distributionById.get(player.playerId)?.phase !== 'not_started') continue;
 
-    const replacement = input.decision.options.find((o) => o.outPlayerId === player.playerId) ?? null;
+    /* Who takes the slot: the bench player Team's ranking rule puts there (`decision.ts`). */
+    const replacement = (input.decision.fills ?? []).find((o) => o.outPlayerId === player.playerId) ?? null;
     candidates.push({
       key: `ruled-out:${player.playerId}`,
       kind: 'injury',

@@ -220,29 +220,24 @@ interface MatchupBody {
     degraded: boolean;
     slots: { slot: string }[];
     decision: {
-      best: {
+      fills: {
         slot: string;
         outPlayerId: string;
         inPlayerId: string;
         winNow: number;
         winAfter: number;
         gain: number;
-        reason: string;
-      } | null;
+      }[];
     };
   } | null;
 }
 
 describe('the matchup showcase', () => {
-  it('offers one legal, unlocked, material move — and prices it in win probability', async () => {
+  it('fills the ruled-out starter\'s slot — and prices it in win probability', async () => {
     const body = await get<MatchupBody>('matchup-injury-swing', `${LEAGUE}/matchup`);
-    const best = body.forecast!.decision.best;
-    expect(best, 'a best move').toBeTruthy();
-
-    /* Materiality is the model's threshold, not this test's opinion. */
-    expect(best!.gain).toBeGreaterThan(0.02);
+    const best = body.forecast!.decision.fills[0];
+    expect(best, 'a fill for the hole').toBeTruthy();
     expect(best!.winAfter).toBeGreaterThan(best!.winNow);
-    expect(best!.reason.length).toBeGreaterThan(0);
 
     /* The player leaving the lineup is the one the report ruled out. */
     const cards = await get<{ cards: Record<string, { headline: { verdict: string; detail: string } }> }>(
@@ -254,7 +249,7 @@ describe('the matchup showcase', () => {
     expect(card?.headline.detail).toMatch(/out/i);
   });
 
-  it('and says hold when there is nothing worth doing', async () => {
+  it('and fills nothing when no starter is a hole', async () => {
     /*
      * The no-change path, on a scenario read before anything has kicked off —
      * which is when a lineup change is worth the most and therefore the
@@ -264,7 +259,7 @@ describe('the matchup showcase', () => {
     expect(body.found).toBe(true);
     expect(body.forecast!.phase).toBe('pregame');
     expect(body.forecast!.degraded).toBe(false);
-    expect(body.forecast!.decision.best, 'nothing clears the bar').toBeNull();
+    expect(body.forecast!.decision.fills, 'no hole to fill').toEqual([]);
   });
 
   it('prices both defences, because the league starts one', async () => {

@@ -136,7 +136,6 @@ const lineup = assembleLineup({
   published: lineupIn.published,
   publishedRefusal: lineupIn.publishedRefusal,
   unknownPlayers: lineupIn.unknownPlayers,
-  opponentExposure: lineupIn.opponentExposure,
   now: NOW,
 } as Parameters<typeof assembleLineup>[0]);
 const swap = lineup.swaps[0];

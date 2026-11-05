@@ -80,8 +80,8 @@ export const AVAILABLE: AvailabilityAssessment = {
 /**
  * Turn the normalized state into points.
  *
- * The order matters and is the brief's: Out is a hard gate, Doubtful is a
- * near-gate, Questionable is contextual, and no designation costs nothing at
+ * The order matters and is the brief's: Out and Doubtful are a hard gate
+ * (Doubtful since 5 November 2026, `weekAvailability.ts`), Questionable is contextual, and no designation costs nothing at
  * all — a player with a history and no current designation is a healthy player.
  */
 export function availabilityPenalty(state: InjuryState): AvailabilityAssessment {
@@ -95,15 +95,6 @@ export function availabilityPenalty(state: InjuryState): AvailabilityAssessment 
       gate: true,
       display: describe(state),
       note: `${label(state)} — not a playable starter.`,
-    };
-  }
-
-  if (designation === 'doubtful') {
-    return {
-      points: rule.charge,
-      gate: false,
-      display: describe(state),
-      note: `${label(state)} — very unlikely to play.`,
     };
   }
 

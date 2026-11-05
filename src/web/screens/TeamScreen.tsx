@@ -1931,7 +1931,7 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-tossup"
           data-seed={`${tossUp.outPlayerId},${tossUp.inPlayerId}`}
-          aria-label={`Best move: toss-up, lean ${tossUp.inName} over ${tossUp.outName} at ${tossUp.slot}, ${spoken(tossUp.inPlayerId)} against ${spoken(tossUp.outPlayerId)} projected. No change. Compare them.`}
+          aria-label={`Best move: toss-up, lean ${tossUp.inName} over ${tossUp.outName}${tossUp.leanTag ? `, ${tossUp.leanTag}` : ''}, at ${tossUp.slot}, ${spoken(tossUp.inPlayerId)} against ${spoken(tossUp.outPlayerId)} projected. No change. Compare them.`}
           onClick={() => onOpen(tossUp.slot, [tossUp.outPlayerId, tossUp.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
         >
           <span className="matchup-best-move-body">
@@ -1939,6 +1939,7 @@ function LineupCard({
             <span className="matchup-best-move-swap">
               <span className="matchup-best-move-names">
                 Toss-up: lean {tossUp.inName} over {tossUp.outName}
+                {tossUp.leanTag ? <span data-testid="tossup-lean-tag"> ({tossUp.leanTag})</span> : null}
               </span>
               <span className="matchup-best-move-slot">{tossUp.slot}</span>
             </span>

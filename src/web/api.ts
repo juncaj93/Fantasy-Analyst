@@ -1335,7 +1335,14 @@ export interface StartSitComparison {
    * and the sheet says "Lean" where Start would be. `recommendedPlayerId` is
    * null then. Absent from older workers.
    */
-  tossUp?: { leanPlayerId: string; leanName: string; otherPlayerId: string; otherName: string };
+  tossUp?: {
+    leanPlayerId: string;
+    leanName: string;
+    otherPlayerId: string;
+    otherName: string;
+    /** "safer" under Floor, "more upside" under Ceiling (5 November 2026). Absent under Balanced and from older workers. */
+    leanTag?: 'safer' | 'more upside';
+  };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
    * lost on the two-point discount: a marked second choice. Absent from older workers.
@@ -1475,6 +1482,8 @@ export interface LineupSwap {
   outName: string;
   gain: number;
   reason: string;
+  /** A toss-up only: "safer" under Floor, "more upside" under Ceiling. `in` is the lean (5 November 2026). */
+  leanTag?: 'safer' | 'more upside';
 }
 
 /** An empty Sleeper slot this lineup fills. Names nobody to bench. */
@@ -2013,7 +2022,7 @@ export type { PlayerLeverage } from '../core/matchup/needs.ts';
  * draws one needs to be able to name its type without reaching past this
  * module into core.
  */
-export type { LineupDecision, LineupImpact } from '../core/matchup/decision.ts';
+export type { LineupDecision, HoleFill } from '../core/matchup/decision.ts';
 
 import type { MatchupForecast } from '../core/matchup/model.ts';
 import type { WeeklyCard } from '../core/startsit/weekCard.ts';

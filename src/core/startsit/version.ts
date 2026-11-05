@@ -55,8 +55,14 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * `startsit@6`, 15 October 2026: the uncertainty penalty is text only, for
  * players and defences alike (Alex's decision). A thinly or singly booked
  * market no longer loses points for it, hence the bump.
+ *
+ * `startsit@7`, 5 November 2026: Doubtful counts as Out (Alex's decision,
+ * review S8), and Floor and Ceiling no longer weight any component (review
+ * S3): every mode gives a player the same number. Each evaluation carries his
+ * spread (`spread.ts`), read only by a toss-up's lean. Scores move for a
+ * Doubtful player and in Floor and Ceiling weeks, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@6';
+export const STARTSIT_ENGINE_VERSION = 'startsit@7';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
@@ -101,4 +107,11 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@6';
  * swap bar, the 0.6 tie of `lineup@7`, Compare's 0.75 close call and the 0.5
  * pickup bar. Scores are unchanged.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@9', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@10`, 5 November 2026: the mode picks a toss-up's lean and nothing
+ * else (`tossUpLean`): Floor the safer player, Ceiling the one with more
+ * upside, Balanced the higher number. The Floor/Ceiling preference pass that
+ * swapped starters within 0.6 points for stacks or spread games is gone, so
+ * every mode starts the same players.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@10', STARTSIT_ENGINE_VERSION);

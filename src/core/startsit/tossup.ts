@@ -21,12 +21,19 @@
  *    suspended, Doubtful, on a bye, or a slot nobody holds. The gap there is
  *    large by construction, and the bar must not hide it.
  *
+ * Inside a toss-up the lean follows the week's mode (5 November 2026,
+ * {@link tossUpLean}): Floor leans to the safer player, Ceiling to the one with
+ * more upside, Balanced to the higher number. Outside a toss-up the higher
+ * number decides in every mode.
+ *
  * Ordering is a different matter and stays where it is: the kickoff-smart
  * order for exact near-ties (`KICKOFF_TIE` in `lineup.ts`) only decides who is
  * listed first between two equal numbers, and calls no winner.
  */
 
 import { rankingNumber } from './decisionPoints.ts';
+import type { StartSitMode } from './mode.ts';
+import { spreadPoints, type SpreadReading } from './spread.ts';
 
 /** Points under which two options are a toss-up. */
 export const TOSSUP_POINTS = 2.0;
@@ -73,4 +80,50 @@ export function isTossUp(lean: TossUpSide, other: TossUpSide): boolean {
 /** Whether a whole-lineup gain clears the bar. The same bar, for gains already summed. */
 export function clearsTossUp(gain: number): boolean {
   return gain >= TOSSUP_POINTS - 1e-9;
+}
+
+/** The two words a lean may carry, after "lean X". */
+export type LeanTag = 'safer' | 'more upside';
+
+/** One side of a toss-up, for the lean: his number, and how far his week swings. */
+export interface LeanSide {
+  points: number;
+  borrowed?: boolean;
+  position: string;
+  spread?: SpreadReading | null;
+}
+
+export interface TossUpLean {
+  /** Which side the toss-up leans to. */
+  lean: 'a' | 'b';
+  /** The one-word reason under Floor or Ceiling; null under Balanced. */
+  tag: LeanTag | null;
+}
+
+/**
+ * Which way a toss-up leans, for the week's mode (Alex's decision, 5 November
+ * 2026). The one function Team and Compare both ask.
+ *
+ *  - **Balanced**: the higher ranking number.
+ *  - **Floor**: the better bad week, his ranking number less his swing
+ *    (`spread.ts`). "Safer".
+ *  - **Ceiling**: the better good week, his ranking number plus his swing.
+ *    "More upside".
+ *
+ * Only call it inside a toss-up (`isTossUp`): outside one the higher number
+ * decides in every mode, and a lean that could overturn a clear call would be
+ * the old 10% trim back by another door. A dead level falls back to Balanced,
+ * and Balanced's own tie to side `a`.
+ */
+export function tossUpLean(a: LeanSide, b: LeanSide, mode: StartSitMode): TossUpLean {
+  const ra = rankingNumber(a.points, a.borrowed ?? false);
+  const rb = rankingNumber(b.points, b.borrowed ?? false);
+  const balanced: 'a' | 'b' = rb > ra + 1e-9 ? 'b' : 'a';
+  if (mode === 'balanced') return { lean: balanced, tag: null };
+  const swing = (side: LeanSide) => spreadPoints(side.spread, side.points, side.position);
+  const sign = mode === 'floor' ? -1 : 1;
+  const ea = ra + sign * swing(a);
+  const eb = rb + sign * swing(b);
+  const lean: 'a' | 'b' = Math.abs(ea - eb) < 1e-9 ? balanced : eb > ea ? 'b' : 'a';
+  return { lean, tag: mode === 'floor' ? 'safer' : 'more upside' };
 }

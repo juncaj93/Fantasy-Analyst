@@ -28,6 +28,7 @@ import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { StartSitMode } from '../../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../../core/startsit/defense.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
+import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
 import type { Database } from '../db.ts';
 
 /**
@@ -68,6 +69,13 @@ export async function startSitInputsFor(
      * and the drop list's alike. Absent for callers with no roster in hand.
      */
     reserveIds?: readonly string[];
+    /**
+     * This season's points by week for every player, the stored row
+     * `sleeper.seasonPoints.<season>` ({@link readSeasonPoints}). Read only by
+     * a player's spread, which only a toss-up's lean under Floor or Ceiling
+     * reads (5 November 2026). Team and Compare pass it; nothing else needs it.
+     */
+    seasonPoints?: Readonly<Record<string, readonly number[]>> | null;
   } = {},
 ): Promise<StartSitInput[]> {
   if (playerIds.length === 0) return [];
@@ -199,6 +207,7 @@ export async function startSitInputsFor(
       injury: injuries.get(id) ?? null,
       usage: usage.get(id) ?? undefined,
       usageWeeks: weeks.get(id) ?? undefined,
+      ...(opts.seasonPoints?.[id] ? { seasonPoints: opts.seasonPoints[id] } : {}),
       game: game ? { spread: game.spread, total: game.total, opponent: game.opponent } : null,
       opponent: game?.opponent ?? null,
       /*
@@ -338,6 +347,23 @@ export interface StartSitContext {
    * "nobody is known to be on a bye".
    */
   playing?: ReadonlySet<string> | null;
+}
+
+/**
+ * This season's points by week for every player: one settings row, built by
+ * the league read (`weekPointsService.ts`). Null when it has not been built or
+ * cannot be read; a spread then falls back to the betting lines and the
+ * position (`spread.ts`), and no number moves either way.
+ */
+export async function readSeasonPoints(
+  db: Database,
+  season: string | null | undefined,
+): Promise<Readonly<Record<string, readonly number[]>> | null> {
+  if (!season) return null;
+  const row = await new SettingsRepo(db)
+    .get<StoredSeasonPoints | null>(seasonPointsKey(season), null)
+    .catch(() => null);
+  return row?.points ?? null;
 }
 
 export async function buildStartSitContext(

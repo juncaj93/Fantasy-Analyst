@@ -34,7 +34,7 @@ import { assessGameScript, NO_GAME_SCRIPT, type GameContext, type GameScriptAsse
 import { gameLineOf, type GameLine } from './gameLine.ts';
 import { assessMarketComparability, COMPARABLE, type MarketComparability } from './comparability.ts';
 import { compareWithMarket, type MarketAgreement } from './market.ts';
-import { modeWeightFor, type StartSitMode } from './mode.ts';
+import type { StartSitMode } from './mode.ts';
 import { classifyRole, UNCLASSIFIED, type RoleProfile } from './roleProfile.ts';
 import { assessTdDependency, NO_TD_DATA, type TdDependencyAssessment } from './tdDependency.ts';
 import { assessUsage, NO_USAGE, type UsageAssessment } from './usageTrend.ts';
@@ -45,7 +45,8 @@ import { decisionPoints, settleOnPublishedWeek, type DecisionPoints } from './de
 import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
-import { isRealHole, isTossUp, TOSSUP_POINTS } from './tossup.ts';
+import { readSpread, type SpreadReading } from './spread.ts';
+import { isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, type LeanTag } from './tossup.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
 export interface StartSitInput {
@@ -85,6 +86,13 @@ export interface StartSitInput {
    * means no usage source, and every one of those answers "unknown".
    */
   usageWeeks?: UsageWeek[];
+  /**
+   * This season's points by week in this league's scoring, week 1 first, zero
+   * where he did not score: the stored row `sleeper.seasonPoints.<season>`.
+   * Read only by his spread (`spread.ts`), never by his number. Absent when
+   * the row has not been built.
+   */
+  seasonPoints?: readonly number[] | null;
   /** The spread and total for his game, when the market has priced it. */
   game?: GameContext | null;
   /**
@@ -179,14 +187,12 @@ export interface StartSitComponent {
   /**
    * Points-denominated where possible, so components stay interpretable.
    *
-   * This is the value **after** the mode multiplier, because it is the number
-   * that actually moved the score and a breakdown that shows anything else is
-   * not a breakdown. `baseValue` and `modeWeight` keep the arithmetic visible.
+   * The number that actually moved the score.
    */
   value: number;
-  /** The value before the Floor/Ceiling multiplier. */
+  /** The same value. Kept on the wire for cached responses from older workers. */
   baseValue: number;
-  /** What the mode did to it. 1 in Balanced, and 1 for anything mode-neutral. */
+  /** Always 1 since 5 November 2026: the mode changes no number (`mode.ts`). */
   modeWeight: number;
   unknown: boolean;
   /**
@@ -307,6 +313,12 @@ export interface StartSitEvaluation {
    * player with no pill, which is most of them.
    */
   pill?: PillReading;
+  /**
+   * How far his week can swing, as a share of his number (`spread.ts`, 5
+   * November 2026). Read only by a toss-up's lean under Floor or Ceiling;
+   * never part of the score. Optional on the wire for older cached responses.
+   */
+  spread?: SpreadReading;
 }
 
 export interface StartSitComparison {
@@ -329,7 +341,14 @@ export interface StartSitComparison {
    * Compare says "Lean" where Start would be; there is no recommendation then
    * (`recommendedPlayerId` is null), so nothing reads it as a Start.
    */
-  tossUp?: { leanPlayerId: string; leanName: string; otherPlayerId: string; otherName: string };
+  tossUp?: {
+    leanPlayerId: string;
+    leanName: string;
+    otherPlayerId: string;
+    otherName: string;
+    /** "safer" under Floor, "more upside" under Ceiling (`tossUpLean`). Absent under Balanced. */
+    leanTag?: LeanTag;
+  };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
    * lost on the two-point discount: the second choice. See `pickOrder.ts`.
@@ -350,7 +369,7 @@ export const STATUS_PENALTY: Record<string, number> = {
   IR: -99,
   SUS: -99,
   PUP: -99,
-  DOUBTFUL: -6,
+  DOUBTFUL: -99,
   QUESTIONABLE: -1.5,
 };
 
@@ -400,12 +419,11 @@ export function evaluatePlayer(
   const textOnly = new Set(rules.textOnly);
 
   /**
-   * Add a component, with the mode multiplier applied once and recorded.
+   * Add a component. Every component goes through here.
    *
-   * Every component goes through here. That is what makes "the mode reweights
-   * one argument rather than running a second engine" a property of the code
-   * rather than a claim in a comment: there is exactly one place a Floor or
-   * Ceiling weight can be applied, and it cannot change a component's sign.
+   * The Floor and Ceiling multipliers that were applied here are gone (5
+   * November 2026, `mode.ts`): the mode only picks a toss-up's lean, so every
+   * mode gives a player the same number.
    */
   const push = (component: Omit<StartSitComponent, 'baseValue' | 'modeWeight' | 'value'> & { value: number }) => {
     /*
@@ -416,12 +434,12 @@ export function evaluatePlayer(
       components.push({ ...component, value: 0, baseValue: 0, modeWeight: 1, textOnly: true });
       return components[components.length - 1]!;
     }
-    const weight = component.unknown ? 1 : modeWeightFor(component.key, mode, component.value);
+    /* The mode changes no number since 5 November 2026 (`mode.ts`): every weight is 1. */
     components.push({
       ...component,
       baseValue: round2(component.value),
-      modeWeight: weight,
-      value: round2(component.value * weight),
+      modeWeight: 1,
+      value: round2(component.value),
     });
     return components[components.length - 1]!;
   };
@@ -699,6 +717,7 @@ export function evaluatePlayer(
     components,
     score,
     ...(pill ? { pill } : {}),
+    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, expectation }),
     confidence,
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
@@ -786,12 +805,11 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
   };
 
   const push = (component: Omit<StartSitComponent, 'baseValue' | 'modeWeight' | 'value'> & { value: number }) => {
-    const weight = component.unknown ? 1 : modeWeightFor(component.key, mode, component.value);
     components.push({
       ...component,
       baseValue: round2(component.value),
-      modeWeight: weight,
-      value: round2(component.value * weight),
+      modeWeight: 1,
+      value: round2(component.value),
     });
   };
 
@@ -873,6 +891,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     expectation,
     components,
     score,
+    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, expectation: null }),
     confidence,
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
@@ -1170,9 +1189,29 @@ export function compareStartSit(
       hole: isRealHole({ ruledOut: e.ruledOut, onReserve: e.onReserve ?? false, designation: e.injury?.designation ?? null }),
     };
   };
-  const tossUp = runnerUp && isTossUp(sideOf(best), sideOf(runnerUp))
-    ? { leanPlayerId: best.playerId, leanName: best.name, otherPlayerId: runnerUp.playerId, otherName: runnerUp.name }
-    : null;
+  /*
+   * Inside a toss-up the week's mode picks the lean (5 November 2026,
+   * `tossUpLean`): Floor the safer of the two, Ceiling the one with more
+   * upside, Balanced the higher number. The same function Team asks.
+   */
+  const leanSideOf = (e: StartSitEvaluation) => ({
+    points: e.decision?.points ?? 0,
+    borrowed: e.decision?.basis === 'published',
+    position: e.position,
+    spread: e.spread ?? null,
+  });
+  let tossUp: NonNullable<StartSitComparison['tossUp']> | null = null;
+  if (runnerUp && isTossUp(sideOf(best), sideOf(runnerUp))) {
+    const { lean, tag } = tossUpLean(leanSideOf(best), leanSideOf(runnerUp), mode);
+    const [leanTo, other] = lean === 'a' ? [best, runnerUp] : [runnerUp, best];
+    tossUp = {
+      leanPlayerId: leanTo.playerId,
+      leanName: leanTo.name,
+      otherPlayerId: other.playerId,
+      otherName: other.name,
+      ...(tag ? { leanTag: tag } : {}),
+    };
+  }
   if (sleeperOnly) {
     reasons.push(`${sleeperOnly.name} projects ${sleeperOnly.aheadBy.toFixed(1)} higher on Sleeper only, with no complete Vegas market yet`);
   }

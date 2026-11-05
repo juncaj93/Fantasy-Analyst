@@ -526,7 +526,9 @@ export function Verdict({
                 ) : lean != null && e.playerId === lean ? (
                   <span className="cmp2-tie" data-testid="compare-tossup">
                     <span className="cmp2-tossup-label">Toss-up</span>
-                    <span className="cmp2-lean">Lean</span>
+                    <span className="cmp2-lean" data-testid="compare-lean">
+                      Lean{comparison.tossUp?.leanTag ? ` (${comparison.tossUp.leanTag})` : ''}
+                    </span>
                   </span>
                 ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />

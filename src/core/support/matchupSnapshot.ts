@@ -480,27 +480,26 @@ export async function replayMatchupSnapshot(snapshot: SupportSnapshot<MatchupPay
   };
 }
 
-/** Whether a change is being offered, and — when it is not — exactly why not. */
+/** Whether a hole is being filled, and — when one is not — exactly why not. */
 function verdictOf(response: MatchupResponse): string {
   const decision = response.forecast?.decision;
   if (decision == null) return 'no-forecast';
-  if (decision.best != null) return 'swap';
   /*
-   * `note` is the whole of the distinction the brief asks for.
-   *
-   * "Hold your lineup" is one word on the screen and four different states
-   * underneath it: every candidate locked, nobody legal for the slot, a legal
-   * candidate that does not improve the odds, and no bench at all. The decision
-   * layer writes which one into `note` — see `core/matchup/decision.ts` — and
-   * comparing the note is the only way a replay can tell them apart, so it is
-   * compared as part of the verdict rather than beside it.
+   * Since 5 November 2026 the matchup model only names who takes a real hole
+   * (Out, Doubtful, IR, a bye); its win-chance swap search is gone. Older
+   * snapshots carry `best`, newer ones `fills`, and both read here.
    */
+  const fills = (decision as { fills?: unknown[] }).fills ?? [];
+  if (fills.length > 0 || (decision as { best?: unknown }).best != null) return 'swap';
   return `hold: ${decision.note ?? 'no reason given'}`;
 }
 
-/** The swap, as ids and both win probabilities, so before/after is checkable. */
+/** The fill, as ids and both win probabilities, so before/after is checkable. */
 function swapOf(response: MatchupResponse): string {
-  const best = response.forecast?.decision.best ?? null;
+  const decision = response.forecast?.decision as
+    | { fills?: { inPlayerId: string; slot: string; outPlayerId: string; winNow: number; winAfter: number }[]; best?: { inPlayerId: string; slot: string; outPlayerId: string; winNow: number; winAfter: number } | null }
+    | undefined;
+  const best = decision?.fills?.[0] ?? decision?.best ?? null;
   return best == null
     ? 'none'
     : `${best.inPlayerId} into ${best.slot} over ${best.outPlayerId} (${best.winNow} → ${best.winAfter})`;

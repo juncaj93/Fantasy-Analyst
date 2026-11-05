@@ -65,14 +65,10 @@ if (!f) {
 const pct = (v: number | null | undefined) => (v == null ? '-' : `${Math.round(v * 100)}%`);
 console.log(`projected final: mine ${f.teams.mine.projectedFinal?.toFixed(1)} · theirs ${f.teams.theirs.projectedFinal?.toFixed(1)}`);
 console.log(`win probability: mine ${pct(f.teams.mine.winProbability)}`);
-const best = f.decision?.best;
-console.log(
-  best
-    ? `best move: start ${best.inName} over ${best.outName} (${best.slot}) · ${best.pointsDelta >= 0 ? '+' : ''}${best.pointsDelta.toFixed(1)} pts · ${pct(best.winNow)} -> ${pct(best.winAfter)}`
-    : `best move: hold (${f.decision?.note ?? 'no change clears the bar'})`,
-);
-for (const o of f.decision?.options ?? []) {
-  console.log(`  option: start ${o.inName} over ${o.outName} (${o.slot}) · ${o.pointsDelta.toFixed(1)} pts · ${pct(o.winAfter)}`);
+const fills = f.decision?.fills ?? [];
+console.log(fills.length === 0 ? `holes filled: none (${f.decision?.note ?? 'no hole'})` : 'holes filled:');
+for (const o of fills) {
+  console.log(`  ${o.inName} takes ${o.slot} from ${o.outName} · ${pct(o.winNow)} -> ${pct(o.winAfter)}`);
 }
 console.log('\nstarters (slot, mine, theirs)');
 for (const s of f.slots) {

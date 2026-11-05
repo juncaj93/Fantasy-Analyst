@@ -164,10 +164,11 @@ describe('inside the engine', () => {
     const healthy = evaluatePlayer(candidate('a', 'A', 'WR', 10), HALF_PPR);
     const doubtful = evaluatePlayer(candidate('a', 'A', 'WR', 10, { status: 'Doubtful' }), HALF_PPR);
     const out = evaluatePlayer(candidate('a', 'A', 'WR', 10, { status: 'Out' }), HALF_PPR);
-    // A -6 on a 10-point player is 60%: far past the budget, and untouched.
-    expect(component(doubtful, 'status').value).toBe(-6);
+    // The gate is far past the budget, and untouched. Doubtful is the gate too since 5 November 2026.
+    expect(component(doubtful, 'status').value).toBe(-99);
     expect(component(doubtful, 'status').preBudgetValue).toBeUndefined();
-    expect(doubtful.score!).toBeCloseTo(healthy.score! - 6, 1);
+    expect(doubtful.ruledOut).toBe(true);
+    expect(healthy.ruledOut).toBe(false);
     expect(out.ruledOut).toBe(true);
     expect(out.score!).toBeLessThan(-80);
   });
