@@ -90,7 +90,7 @@ const FREE: Spec[] = [
 ];
 
 /** A priced player's whole board, so the market is complete and not a fragment. */
-function boardFor(id: string, position: string, points: number): PlayerProp[] {
+export function boardFor(id: string, position: string, points: number): PlayerProp[] {
   const make = (market: PlayerProp['market'], line: number | null, p: number | null = null): PlayerProp => ({
     playerId: id,
     sourcePlayerName: id.toUpperCase(),

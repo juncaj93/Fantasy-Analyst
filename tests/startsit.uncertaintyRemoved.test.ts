@@ -42,7 +42,8 @@ const uncertainty = (e: ReturnType<typeof evaluatePlayer>) => e.components.find(
 
 describe('uncertainty is out of the score', () => {
   it('bumps the engine version', () => {
-    expect(STARTSIT_ENGINE_VERSION).toBe('startsit@6');
+    /* `startsit@6` took it out; later bumps (Doubtful as Out, `startsit@7`) keep it out. */
+    expect(Number(STARTSIT_ENGINE_VERSION.split('@')[1])).toBeGreaterThanOrEqual(6);
     expect(SCORING_RULES.textOnly).toContain('uncertainty');
   });
 

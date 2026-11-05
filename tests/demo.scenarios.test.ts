@@ -265,7 +265,8 @@ describe('the weekly scenarios build a legal lineup', () => {
     expect(lineup.recommendedPoints).toBeGreaterThan(0);
   });
 
-  it('Floor, Balanced and Ceiling are three answers, not one', async () => {
+  /* Since 5 November 2026 the mode changes no number; it only picks a toss-up's lean (`mode.ts`). */
+  it('Floor, Balanced and Ceiling give the same lineup points', async () => {
     const runtime = await runtimeFor('sunday-pregame');
     const points = await Promise.all(
       (['floor', 'balanced', 'ceiling'] as const).map(async (mode) => {
@@ -273,7 +274,7 @@ describe('the weekly scenarios build a legal lineup', () => {
         return (res.body as LineupRecommendation).recommendedPoints;
       }),
     );
-    expect(new Set(points).size).toBeGreaterThan(1);
+    expect(new Set(points).size).toBe(1);
   });
 
   /**
@@ -596,7 +597,7 @@ describe('the matchup scenarios forecast a real afternoon', () => {
     expect(hero.urgency).toBe('act_now');
     expect(hero.winImpact).toBeGreaterThan(0.05);
 
-    const swap = forecast.decision.options.find((o) => o.outPlayerId === hero.playerId);
+    const swap = forecast.decision.fills.find((o) => o.outPlayerId === hero.playerId);
     expect(swap, 'a legal replacement exists for the ruled-out starter').toBeTruthy();
     expect(swap!.gain).toBeGreaterThan(0);
 

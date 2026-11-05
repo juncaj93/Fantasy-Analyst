@@ -21,7 +21,8 @@ import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
 /**
  * `matchup@3`, 23 October 2026: availability is Team's rule
  * (`core/injury/weekAvailability.ts`). No play-chance mix: a Questionable
- * player is simulated at full value, a Doubtful one six points down, and the
+ * player is simulated at full value, a Doubtful one six points down (zero since
+ * `matchup@5`), and the
  * "genuine question" alert is gone with the mix it priced.
  */
 /**
@@ -29,4 +30,10 @@ import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
  * number (`decisionPoints`: the market or Sleeper's week plus the Opponent and
  * Recent news nudges), and the card prints that number, not the bare market.
  */
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@4', STARTSIT_ENGINE_VERSION);
+/**
+ * `matchup@5`, 5 November 2026: the win-chance swap search is gone (its own
+ * 2% bar and favorite/underdog reasoning, never drawn on a screen). The model
+ * only names who takes a real hole, by Team's ranking rule (`decision.ts`).
+ * A Doubtful player is simulated at zero, as Out.
+ */
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@5', STARTSIT_ENGINE_VERSION);

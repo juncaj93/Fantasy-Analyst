@@ -145,7 +145,7 @@ import { SleeperSyncService } from './services/sleeperSync.ts';
 import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService, refreshPublishedWeek } from './services/startSitRefresh.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
-import { startSitInputsFor, buildStartSitContext } from './services/startSitInputs.ts';
+import { startSitInputsFor, buildStartSitContext, readSeasonPoints } from './services/startSitInputs.ts';
 import { D1QuotaService } from './services/d1QuotaService.ts';
 /* And the one assembly of everything the defence planner reads. */
 import { playoffContextFor } from './services/dstPlanService.ts';
@@ -895,7 +895,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       }
       throw err;
     }
-    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props, mode, modeSuggestion, opponentExposure } =
+    const { league, mine, shape, profile, inputs, published, publishedRefusal, unknownPlayers, props, mode, modeSuggestion } =
       gathered;
 
     /*
@@ -921,7 +921,6 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       published,
       publishedRefusal,
       unknownPlayers,
-      opponentExposure,
     });
 
     return jsonResponse({
@@ -3437,8 +3436,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     }
 
     const mode = normalizeMode(body?.mode ?? null);
+    /*
+     * This season's weekly points only when a mode asks for a lean (5 November
+     * 2026, `spread.ts`): Balanced leans to the higher number and reads nothing more.
+     */
+    const seasonPoints = mode === 'balanced' ? null : await readSeasonPoints(db, league.season);
     const [inputs, freshness] = await Promise.all([
-      startSitInputsFor(db, requested, { mode }),
+      startSitInputsFor(db, requested, { mode, seasonPoints }),
       new PropsRepo(db).freshness(),
     ]);
 

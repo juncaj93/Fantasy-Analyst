@@ -700,9 +700,10 @@ describe('Matchup / Best Move', () => {
      * is legal for that slot" from "nothing on the bench is better". One word on
      * the screen, four states underneath it.
      */
-    if (decision.best) {
-      expect(decision.best.winAfter).toBeGreaterThan(decision.best.winNow);
-      expect(decision.best.inPlayerId).not.toBe(decision.best.outPlayerId);
+    const fill = decision.fills[0];
+    if (fill) {
+      expect(fill.winAfter).toBeGreaterThan(fill.winNow);
+      expect(fill.inPlayerId).not.toBe(fill.outPlayerId);
     } else {
       expect(decision.note, 'a hold with no reason is a hold nobody can diagnose').toBeTruthy();
     }
@@ -719,7 +720,7 @@ describe('Matchup / Best Move', () => {
     sealed(snapshot);
 
     const decision = snapshot.decision.output.forecast!.decision;
-    expect(decision.best, 'advice nobody can act on is worse than silence').toBeNull();
+    expect(decision.fills, 'advice nobody can act on is worse than silence').toEqual([]);
     expect((await replayMatchupSnapshot(snapshot)).outcome).toBe('reproduced');
   });
 
@@ -741,7 +742,7 @@ describe('Matchup / Best Move', () => {
      * know that holding is right. `Hold your lineup` from a degraded forecast is
      * the single most misleading thing this screen could say.
      */
-    expect(forecast.decision.best).toBeNull();
+    expect(forecast.decision.fills).toEqual([]);
     expect(forecast.teams.mine.winProbability).toBeNull();
     expect((await replayMatchupSnapshot(snapshot)).outcome).toBe('reproduced');
   });

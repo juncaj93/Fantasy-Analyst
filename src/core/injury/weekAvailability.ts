@@ -10,13 +10,15 @@
  *
  *  - **Questionable**, and every status that is not Doubtful or ruled out:
  *    full value, shown as a warning chip.
- *  - **Doubtful**: six points off the week (`AVAILABILITY.doubtful`), never
- *    below zero.
+ *  - **Doubtful**: counts as Out this week (Alex's decision, 5 November 2026;
+ *    review S8). Zero points, benched and replaced. A Doubtful player almost
+ *    never plays, and the six points this used to take off left an 18-point
+ *    Doubtful star starting over a healthy 11. The chip still says Doubtful.
  *  - **Out, IR, PUP, suspended**: ruled out, nothing this week.
  *
  * Only this week. What a designation means for later weeks is the trade
  * model's own assumption (`tradeValue/availability.ts`) and is not a screen's
- * number.
+ * number: a Doubtful player misses this week and is back the week after.
  */
 
 import { isRuledOut, type Designation } from './model.ts';
@@ -24,7 +26,6 @@ import { isRuledOut, type Designation } from './model.ts';
 /** The anchors. `ruledOut` is a gate, not a penalty: large enough that nothing lifts him over somebody available. */
 export const AVAILABILITY = {
   ruledOut: -99,
-  doubtful: -6,
   /** Shown, not scored, since 13 October 2026. */
   questionable: 0,
 } as const;
@@ -32,7 +33,7 @@ export const AVAILABILITY = {
 export interface WeekAvailability {
   /** Points added to his healthy week. Zero or negative; the gate value when ruled out. */
   charge: number;
-  /** Out, IR, PUP or suspended: not a playable starter. */
+  /** Out, IR, PUP, suspended or Doubtful: not a playable starter this week. */
   out: boolean;
   /** A designation the reader should see as a chip. True for everything but healthy and unknown. */
   warn: boolean;
@@ -40,12 +41,16 @@ export interface WeekAvailability {
 
 export function weekAvailability(designation: Designation): WeekAvailability {
   if (designation === 'healthy' || designation === 'unknown') return { charge: 0, out: false, warn: false };
-  if (isRuledOut(designation)) return { charge: AVAILABILITY.ruledOut, out: true, warn: true };
-  if (designation === 'doubtful') return { charge: AVAILABILITY.doubtful, out: false, warn: true };
+  if (isOutThisWeek(designation)) return { charge: AVAILABILITY.ruledOut, out: true, warn: true };
   return { charge: AVAILABILITY.questionable, out: false, warn: true };
 }
 
-/** His healthy week after the rule: zero when ruled out, the charge taken off otherwise, never below zero. */
+/** Out, IR, PUP, suspended, or Doubtful: no game this week, on every screen. */
+export function isOutThisWeek(designation: Designation): boolean {
+  return isRuledOut(designation) || designation === 'doubtful';
+}
+
+/** His healthy week after the rule: zero when out this week, the charge taken off otherwise, never below zero. */
 export function availableWeekPoints(healthy: number, designation: Designation): number {
   const rule = weekAvailability(designation);
   if (rule.out) return 0;
@@ -55,7 +60,7 @@ export function availableWeekPoints(healthy: number, designation: Designation): 
 /**
  * The same rule as a share of his healthy week, for the models that count
  * games rather than points (the trade and waiver rates). Questionable is a
- * whole game; Doubtful is whatever six points leaves of his number.
+ * whole game; Doubtful and ruled out are none.
  */
 export function weekShare(designation: Designation, healthy: number | null): number {
   const rule = weekAvailability(designation);

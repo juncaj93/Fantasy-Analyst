@@ -416,7 +416,7 @@ export function buildForecast(input: ForecastInput): MatchupForecast {
   const leverage = degraded ? [] : rankLeverage(result, input.players, distributions);
   const clinch = assessClinch(result, distributions);
   const decision = degraded
-    ? { best: null, options: [], considered: 0, note: 'No forecast is available, so no lineup comparison can be made.' }
+    ? { fills: [], considered: 0, note: 'No forecast is available, so no lineup comparison can be made.' }
     : assessLineupDecision({ result, players: input.players, distributions, slots: input.slots });
 
   const names = shortNamesFor(input.players.map((p) => ({ playerId: p.playerId, name: p.name })));

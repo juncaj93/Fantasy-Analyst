@@ -10,18 +10,23 @@
 import { expect, test, type Page } from '@playwright/test';
 import { inSeason } from './helpers.ts';
 
-async function openFromWrRow(page: Page) {
+/*
+ * Opened from the RB row: the demo roster's one receiver is Doubtful, and
+ * Doubtful counts as Out since 5 November 2026, so no WR row has a player.
+ * The point is the same: the opening slot gives way to the slot both share.
+ */
+async function openFromRbRow(page: Page) {
   await inSeason(page);
   await page.goto('/');
   await page.getByTestId('tab-team').click();
   await expect(page.getByTestId('starters-title')).toBeVisible();
-  await page.locator('[data-testid="starter-row"][data-slot="WR"]').first().click();
+  await page.locator('button[data-testid="starter-row"][data-slot="RB"]').first().click();
   await page.getByTestId('weekly-compare').click();
   await expect(page.getByTestId('compare-sheet')).toBeVisible();
 }
 
-test('a TE added to a Compare opened on a WR row is a FLEX comparison, with a Start pick', async ({ page }) => {
-  await openFromWrRow(page);
+test('a TE added to a Compare opened on an RB row is a FLEX comparison, with a Start pick', async ({ page }) => {
+  await openFromRbRow(page);
   const sheet = page.getByTestId('compare-sheet');
   if (!(await page.getByTestId('compare-picker').isVisible())) await page.getByTestId('compare-add').click();
   await page.getByTestId('compare-tab-all').click();
@@ -33,7 +38,7 @@ test('a TE added to a Compare opened on a WR row is a FLEX comparison, with a St
 
   const sub = sheet.locator('.cmp-title-sub');
   await expect(sub).toContainText('FLEX slot');
-  await expect(sub).not.toContainText('WR slot');
+  await expect(sub).not.toContainText('RB slot');
   await expect(page.locator('[data-testid="compare-column"][data-pick="true"]')).toHaveCount(1);
 
   /* One line, nothing clipped, at this width. */

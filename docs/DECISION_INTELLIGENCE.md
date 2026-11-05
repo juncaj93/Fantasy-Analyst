@@ -158,10 +158,9 @@ optimal for slot eligibility. On top of it:
   could legally take his slot and their kickoff times;
 - **slot placement** then moves the later kickoff into the wider slot whenever
   both are legal — same starters, same points, more options at four o'clock;
-- **shape preferences** (correlation in Ceiling, game diversification in Floor)
-  may only choose between players within `LINEUP_PREFERENCE_TOLERANCE` = 0.6
-  points of each other. Below that the players are a tie; above it the better
-  player starts.
+- **Floor and Ceiling** change no starter and no number (5 November 2026):
+  they only pick a toss-up's lean (`tossUpLean` in `tossup.ts`). The shape
+  preferences that used to swap starters within 0.6 points are gone.
 
 ### Refresh
 

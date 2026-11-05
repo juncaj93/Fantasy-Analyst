@@ -53,11 +53,11 @@ describe('availability, for a lineup', () => {
     }
   });
 
-  it('penalises Doubtful heavily without gating it', () => {
+  it('gates Doubtful exactly like Out (5 November 2026)', () => {
     const assessment = availabilityPenalty(state('doubtful'));
-    expect(assessment.points).toBe(AVAILABILITY.doubtful);
-    expect(assessment.gate).toBe(false);
-    expect(assessment.points).toBeLessThan(AVAILABILITY.questionable);
+    expect(assessment.points).toBe(AVAILABILITY.ruledOut);
+    expect(assessment.gate).toBe(true);
+    expect(assessment.note).toContain('not a playable starter');
     expect(AVAILABILITY.questionable).toBe(0);
   });
 

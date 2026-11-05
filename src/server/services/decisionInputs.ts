@@ -21,8 +21,7 @@ import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
-import { startSitInputsFor, buildStartSitContext, type StartSitContext } from './startSitInputs.ts';
-import { opponentExposure, type OpponentExposure } from '../../core/startsit/correlation.ts';
+import { startSitInputsFor, buildStartSitContext, readSeasonPoints } from './startSitInputs.ts';
 import { MatchupRepo } from '../repos/matchup.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
 import type { SeasonMarketKey } from '../../core/vegas/types.ts';
@@ -134,14 +133,6 @@ export interface LineupDecisionInputs extends LeagueDecisionBase {
   /** One sentence naming a position this league may not read a published total for. */
   publishedRefusal: string | null;
   unknownPlayers: number;
-  /**
-   * The games the opponent's starters are stacked in, for the Floor/Ceiling pass.
-   *
-   * Empty in Balanced weeks, on a bye, and before the Matchup screen has
-   * written this week's pairing — all of which the optimiser reads as "no
-   * opinion" rather than as an absence of correlation.
-   */
-  opponentExposure: ReadonlyMap<string, OpponentExposure>;
 }
 
 export async function gatherLineupInputs(
@@ -166,7 +157,7 @@ export async function gatherLineupInputs(
    * fixture and defence reads.
    */
   const context = await buildStartSitContext(db);
-  const inputs = await startSitInputsFor(db, base.mine.playerIds, { context, reserveIds: base.mine.reserveIds });
+  const gathered = await startSitInputsFor(db, base.mine.playerIds, { context, reserveIds: base.mine.reserveIds });
 
   /*
    * Rotowire's published week, for the players this app could not price.
@@ -181,7 +172,7 @@ export async function gatherLineupInputs(
    * before it existed, and a blank column is a state the screen already knows
    * how to say out loud; taking the lineup down for it would be absurd.
    */
-  const positions = new Map(inputs.map((input) => [input.player.id, input.player.position ?? null]));
+  const positions = new Map(gathered.map((input) => [input.player.id, input.player.position ?? null]));
   const week = resolveWeek(null, base.nflState?.week ?? null, base.nflState?.seasonType ?? null);
 
   /*
@@ -239,13 +230,23 @@ export async function gatherLineupInputs(
   }
 
   const modeSuggestion = suggestLineupMode({
-    inputs,
+    inputs: gathered,
     profile: base.profile,
     rosterPositions: base.league.rosterPositions,
     opponentIds,
     opponentPositions,
     published,
   });
+
+  /*
+   * This season's weekly points, for a toss-up's lean (5 November 2026,
+   * `spread.ts`): one settings row, and only in a Floor or Ceiling week.
+   * Balanced leans to the higher number and needs nothing more.
+   */
+  const seasonPoints = modeSuggestion.mode === 'balanced' ? null : await readSeasonPoints(db, base.league.season);
+  const inputs = seasonPoints
+    ? gathered.map((i) => (seasonPoints[i.player.id] ? { ...i, seasonPoints: seasonPoints[i.player.id] } : i))
+    : gathered;
 
   return {
     ...base,
@@ -255,79 +256,9 @@ export async function gatherLineupInputs(
     published,
     publishedRefusal: publishedRefusalNote(base.profile, positions),
     unknownPlayers: base.mine.playerIds.length - inputs.length,
-    opponentExposure: await gatherOpponentExposure(db, {
-      mode: modeSuggestion.mode,
-      starterIds: opponent?.starterIds ?? [],
-      context,
-    }),
   };
 }
 
-/**
- * Which games the opponent has stacked, for the one pass that can use it.
- *
- * `core/startsit/correlation.ts` has been built, bounded and tested since the
- * shape work and had no caller: the lineup's Floor/Ceiling pass reasoned about
- * this lineup's own concentration and knew nothing at all about the lineup it
- * is being played against. This is the read that closes that, and it is
- * deliberately the smallest one that can.
- *
- * ## What it costs, measured rather than assumed
- *
- * One `players` lookup by primary key over the opponent's starting slots —
- * nine ids in this league, one `IN (...)` against the table's own key. Nothing
- * else: the fixture list, the totals and the spreads all come off the
- * {@link StartSitContext} the caller has already built for its own roster, so
- * the schedule half is free.
- *
- * It is emphatically **not** `startSitInputsFor` over a second roster. That
- * would buy props, injuries, usage weeks and evidence for twelve more players,
- * which is the spend the owner declined on 9 September 2026 and the reason the
- * opponent's side of the Matchup screen is unpriced. Which *game* somebody is
- * in is a fact about the fixture list, and the fixture list is already open.
- *
- * ## And it is skipped whenever it could not be read
- *
- * Balanced takes no view on correlation — `assessCorrelation` says so itself —
- * so a Balanced week pays nothing at all rather than paying for a map that
- * would be multiplied by zero. Same for a roster on a bye, a week the Matchup
- * screen has not written a pairing for, and a failed read: all three end at an
- * empty map, which the optimiser reads as no opinion.
- */
-export async function gatherOpponentExposure(
-  db: Database,
-  opts: { mode: StartSitMode; starterIds: readonly string[]; context: StartSitContext },
-): Promise<ReadonlyMap<string, OpponentExposure>> {
-  if (opts.mode === 'balanced' || opts.starterIds.length === 0) return new Map();
-
-  const ids = opts.starterIds.filter((id) => id && id !== '0');
-  if (ids.length === 0) return new Map();
-
-  const players = await new PlayerRepo(db).listByIds([...ids]).catch(() => new Map<string, CanonicalPlayer>());
-  if (players.size === 0) return new Map();
-
-  /*
-   * The same game key the lineup's own concentration count uses.
-   *
-   * Both teams, sorted, joined — see `lineup.ts`'s `gameKey`. Two spellings of
-   * one game would make the exposure map and the lineup silently disagree
-   * about which fixture anybody is in, which is the kind of defect that looks
-   * like a weighting problem for a week.
-   */
-  const totals = new Map<string, number>();
-  const participants = [];
-  for (const id of ids) {
-    const player = players.get(id);
-    if (!player) continue;
-    const team = (player.team ?? '').toUpperCase();
-    const game = team ? opts.context.schedule.get(team) : undefined;
-    const gameId = team && game?.opponent ? [team, game.opponent.toUpperCase()].sort().join('@') : null;
-    if (gameId && game?.total != null) totals.set(gameId, game.total);
-    participants.push({ playerId: id, name: player.fullName, gameId });
-  }
-
-  return opponentExposure(participants, totals);
-}
 
 
 /**

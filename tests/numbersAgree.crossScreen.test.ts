@@ -9,7 +9,8 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DOUBTFUL, HEALTHY, NUDGED, QUESTIONABLE, SLEEPER_ONLY, SOURCES_SPLIT, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
+import { weekPointsOf } from '../src/core/startsit/weekPoints.ts';
+import { DOUBTFUL, DOUBTFUL_STAR, HEALTHY, NUDGED, QUESTIONABLE, SLEEPER_ONLY, SOURCES_SPLIT, readEveryScreen, type CrossScreen } from './helpers/crossScreen.ts';
 
 let screens: CrossScreen;
 beforeAll(async () => {
@@ -34,8 +35,19 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
     expect(card.statusFlag).toBe('Q');
   });
 
-  it('a Doubtful player is his number less six, never below zero, everywhere', () => {
+  it('a Doubtful bench player reads zero everywhere', () => {
     expectAgree(DOUBTFUL, 0);
+  });
+
+  it('a Doubtful starter on a 24-point market counts as Out: zero on every screen, and Team benches him (5 November 2026)', () => {
+    expectAgree(DOUBTFUL_STAR, 0);
+    expect(screens.lineup.starters.map((e: { playerId: string }) => e.playerId)).not.toContain(DOUBTFUL_STAR);
+    /* Benched and replaced: Best move starts somebody over him, never a toss-up. */
+    const moved = [...(screens.lineup.swaps ?? []), ...(screens.lineup.fills ?? [])].map((s: { outPlayerId?: string }) => s.outPlayerId);
+    expect(moved).toContain(DOUBTFUL_STAR);
+    expect((screens.lineup.tossUps ?? []).map((t: { outPlayerId: string }) => t.outPlayerId)).not.toContain(DOUBTFUL_STAR);
+    const team = [...screens.lineup.starters, ...screens.lineup.bench].find((e: { playerId: string }) => e.playerId === DOUBTFUL_STAR);
+    expect(team.statusFlag).toMatch(/^Doubtful/);
   });
 
   it('a nudged player shows the adjusted number everywhere, Matchup card included', () => {
@@ -53,6 +65,19 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
     expectAgree(SOURCES_SPLIT, 0);
     const starters = screens.lineup.starters.map((e: { playerId: string }) => e.playerId);
     expect(starters).not.toContain(SOURCES_SPLIT);
+  });
+});
+
+describe('every mode shows the same number (5 November 2026)', () => {
+  it('Compare in Floor and Ceiling prints each player\'s Team number', async () => {
+    const ids = [HEALTHY, QUESTIONABLE, NUDGED, SLEEPER_ONLY];
+    for (const mode of ['balanced', 'floor', 'ceiling']) {
+      const c = await screens.compareOf(ids, mode);
+      for (const id of ids) {
+        const e = c.evaluations.find((x: { playerId: string }) => x.playerId === id);
+        expect(weekPointsOf(e).points, `${id} in ${mode}`).toBe(screens.numbers(id).team);
+      }
+    }
   });
 });
 

@@ -138,15 +138,24 @@ could travel through, so the loop cannot be written by accident. Below 60% of
 starting slots priced on either side, the answer is Balanced with the reason
 stated.
 
-## Opponent exploitation — `core/startsit/correlation.ts`
+## Floor and Ceiling decide toss-ups — `core/startsit/tossup.ts`, `core/startsit/spread.ts`
 
-Two of the opponent's likely starters in one game is exposure. Ceiling pays a
-little for being in that game; Floor pays a little for being out of it; Balanced
-takes no view, because the value of correlation depends entirely on whether you
-are raising or lowering the variance of the margin.
+Since 5 November 2026 (Alex's decision, review S3) the mode changes no number:
+every screen shows the same Balanced number. Inside a toss-up (a gap under two
+points, never against a real hole) Floor leans to the player with the better
+bad week (number less his swing), Ceiling to the better good week (number plus
+his swing), Balanced to the higher number. The label is one phrase: "Toss-up:
+lean X (safer)" or "(more upside)". Outside a toss-up the higher number decides
+in every mode.
 
-Bounded at 0.35 points, offered only inside a 0.6-point gap, and silent when the
-better player would have won anyway.
+A player's swing (`readSpread`) is his weekly points this season in league
+scoring, shrunk toward his position's usual bounce by four games' worth, and
+averaged with what his betting lines say (few long catches or a touchdown-heavy
+week swing more). It reads only data already stored: the season row
+`sleeper.seasonPoints.<season>`, read in Floor and Ceiling weeks only.
+
+The opponent-correlation pass (`core/startsit/correlation.ts`, stacks in
+Ceiling and spread games in Floor, within 0.6 points) is gone with it.
 
 ## Role-specific schedule — `core/schedule/roleStrength.ts`
 

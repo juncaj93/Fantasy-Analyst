@@ -146,9 +146,9 @@ describe('priority', () => {
       [{ projection: 12, position: 'WR' }],
     );
     const decision = forecast(players, BEFORE).decision;
-    expect(decision.best).not.toBeNull();
-    expect(decision.best!.outPlayerId).toBe('mine-4');
-    expect(decision.best!.inPlayerId).toBe('bench-0');
+    expect(decision.fills).toHaveLength(1);
+    expect(decision.fills[0]!.outPlayerId).toBe('mine-4');
+    expect(decision.fills[0]!.inPlayerId).toBe('bench-0');
   });
 
   it('says so plainly when there is nobody to replace him with', () => {

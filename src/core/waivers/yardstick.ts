@@ -90,7 +90,7 @@ export interface YardstickReading {
   market: number | null;
   /** Sleeper's published projection, when there is one. */
   sleeper: number | null;
-  /** Zero or negative, Team's rule: Questionable 0, Doubtful −6. */
+  /** Zero or negative, Team's rule: Questionable 0. Doubtful and Out are ruled out by the evaluation, not charged here. */
   availability: number;
   /** `Questionable, did not practise`, or null. */
   availabilityNote: string | null;

@@ -7,14 +7,14 @@
  * have to be written, and at the model, where one would have to be produced
  * as an insight. `e2e/matchup.spec.ts` checks the rendered page.
  *
- * The matchup model still computes its lineup decision: it feeds the win
- * probability's calibration ledger. It is simply never drawn.
+ * The matchup model's own win-chance swap search is gone (5 November 2026):
+ * it only names who takes a real hole, for one Live insights line.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assessLineupDecision, MIN_WIN_PROBABILITY_GAIN } from '../src/core/matchup/decision.ts';
+import { assessLineupDecision } from '../src/core/matchup/decision.ts';
 
 const SCREEN = 'src/web/screens/MatchupScreen.tsx';
 const COMPONENTS = 'src/web/components/matchup.tsx';
@@ -57,11 +57,7 @@ describe('the Matchup screen recommends nothing', () => {
   });
 });
 
-describe('the model underneath did not move', () => {
-  it('keeps its materiality threshold at two points of win probability', () => {
-    expect(MIN_WIN_PROBABILITY_GAIN).toBe(0.02);
-  });
-
+describe('the model underneath only fills real holes (5 November 2026)', () => {
   it('is still called from exactly one place', () => {
     expect(assessLineupDecision).toBeTypeOf('function');
     const callers = sourceFiles('src').filter((file) => {

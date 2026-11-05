@@ -169,33 +169,41 @@ describe('a defence on the generic scan', () => {
  * make.
  */
 /*
- * The number on the card is the projection gap, with no penalty in it.
+ * The number on the card is the projection gap.
  *
- * A bench player who is doubtful grades well below his projection, and
- * the grade gap is still what decides the call. The card prints the market's
- * two numbers subtracted, so `+6.7 pts` means what a reader thinks it means.
+ * Until 5 November 2026 a Doubtful drop carried a six-point charge, so the
+ * decision's gain and the card's gap differed. Doubtful now counts as Out
+ * (`weekAvailability.ts`), Questionable costs nothing, and the card prints the
+ * market's two numbers subtracted, so `+6.0 pts` means what a reader thinks.
  */
 describe('the points a value add shows', () => {
-  it('are his projection minus the other man\'s, even when the other man carries a penalty', () => {
-    const advice = recommendWaiverUpgrades({
-      roster: [...roster().filter((c) => c.player.id !== 'rb3'), candidate('rb3', 'Weak Back', 'RB', 1, { status: 'Doubtful' })],
+  const advise = (status?: string) =>
+    recommendWaiverUpgrades({
+      roster: [...roster().filter((c) => c.player.id !== 'rb3'), candidate('rb3', 'Weak Back', 'RB', 1, status ? { status } : {})],
       candidates: [candidate('fa-rb1', 'Wire Back', 'RB', 7)],
       shape: SHAPE,
       profile: HALF_PPR,
       rosteredPlayerIds: ROSTER_IDS,
       calendar: { week: 3, playoffWeeks: [15, 16, 17] },
     });
-    const add = advice.valueAdds[0]!;
-    expect(add.basis.projectionGap).toBeCloseTo(6, 5);
-    // The decision sees Team's availability charge: six points off a Doubtful drop.
-    expect(add.gain).toBeCloseTo(12, 5);
 
-    const row = buildWaiverBoard({ upgrades: [], valueAdds: advice.valueAdds }).rows[0]!;
-    // Both projections, as priced, on the one yardstick the row names.
+  it('are his projection minus the other man\'s, Questionable included', () => {
+    const add = advise('Questionable').valueAdds[0]!;
+    expect(add.basis.projectionGap).toBeCloseTo(6, 5);
+    expect(add.gain).toBeCloseTo(6, 5);
+
+    const row = buildWaiverBoard({ upgrades: [], valueAdds: advise('Questionable').valueAdds }).rows[0]!;
     expect(row.shortTerm.label).toBe('7.0 vs 1.0');
     expect(row.yardstick?.label).toBe('Vegas lines for both');
     expect(row.shortTerm.gain).toBe(add.gain);
-    expect(caseLines('Wire Back', row).join(' ')).toMatch(/Injury status moves the call/);
+    expect(caseLines('Wire Back', row).join(' ')).not.toMatch(/Injury status moves the call/);
+  });
+
+  it('reads a Doubtful drop exactly as an Out one (5 November 2026)', () => {
+    const doubtful = advise('Doubtful');
+    const out = advise('Out');
+    expect(doubtful.valueAdds.map((a) => [a.playerId, a.gain])).toEqual(out.valueAdds.map((a) => [a.playerId, a.gain]));
+    expect(doubtful.upgrades.length).toBe(out.upgrades.length);
   });
 
   it('say so plainly when a side has no market line', () => {

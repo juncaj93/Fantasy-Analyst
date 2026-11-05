@@ -98,6 +98,22 @@ describe('the 10-point rule on Team, through the lineup route', () => {
   });
 });
 
+describe('the mode changes no number on Team (5 November 2026)', () => {
+  it('Alex\'s players read the same in a Floor, a Ceiling and a Balanced week', async () => {
+    const numbers = async (shift: number) => {
+      const lineup = await teamRead((_, points) => points + shift);
+      const rows = [...lineup.starters, ...lineup.bench] as { playerId: string; score: number; decision?: { points: number } }[];
+      return { mode: lineup.mode, rows: rows.map((e) => [e.playerId, e.score, e.decision?.points ?? null]).sort() };
+    };
+    const floor = await numbers(0);
+    const ceiling = await numbers(6);
+    const balanced = await numbers(3);
+    expect([floor.mode, ceiling.mode, balanced.mode]).toEqual(['floor', 'ceiling', 'balanced']);
+    expect(floor.rows).toEqual(balanced.rows);
+    expect(ceiling.rows).toEqual(balanced.rows);
+  });
+});
+
 describe('the opponent side as the rule reads it', () => {
   const SHAPE = buildRosterShape(POSITIONS);
   /* Nine slots each (no defence on either roster). */

@@ -176,9 +176,9 @@ describe('the forecast', () => {
     );
   };
 
-  it('recommends the resting back when nothing says he is resting (the control)', async () => {
+  it('projects the back when nothing says he is resting (the control)', async () => {
     const response = await buildMatchupResponse(sources(new Set()), 'l1');
-    expect(response.forecast?.decision?.best?.inPlayerId).toBe('rb7');
+    expect(everyone(response).find((p) => p.playerId === 'rb7')!.projectedFinal).toBeGreaterThan(0);
   });
 
   it('projects a resting player at zero, flags him, and never recommends him', async () => {
@@ -192,7 +192,7 @@ describe('the forecast', () => {
     expect(walker.projectionEstimated).toBeUndefined();
     expect(hubbard.onBye).toBe(true);
     expect(hubbard.projectedFinal).toBe(0);
-    expect(response.forecast?.decision?.best?.inPlayerId).not.toBe('rb7');
+    expect((response.forecast?.decision?.fills ?? []).map((f) => f.inPlayerId)).not.toContain('rb7');
     expect(asked.flat()).not.toContain('rb7');
     expect(asked.flat()).not.toContain('rb8');
   });

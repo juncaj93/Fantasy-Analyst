@@ -3,26 +3,20 @@
  *
  * Two properties are load-bearing and are asserted here rather than assumed:
  *
- *   - a mode **reweights** the argument, it does not replace it. The same
- *     components appear in all three, a clearly better player wins in all
- *     three, and the differences are meaningful but bounded.
+ *   - a mode changes **no number** (5 November 2026): it only picks a
+ *     toss-up's lean, which `startsit.tossupLean.test.ts` covers.
  *   - the lineup optimiser never starts the same player twice, never moves a
- *     locked player, and never spends more than a tie on the shape of a lineup.
+ *     locked player, and starts the same players in every mode.
  */
 
 import { describe, expect, it } from 'vitest';
-import { MODE_WEIGHTS, START_SIT_MODES, normalizeMode } from '../src/core/startsit/mode.ts';
+import { START_SIT_MODES, normalizeMode } from '../src/core/startsit/mode.ts';
 import { evaluatePlayer } from '../src/core/startsit/engine.ts';
-import { LINEUP_PREFERENCE_TOLERANCE, recommendLineup } from '../src/core/startsit/lineup.ts';
+import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import type { UsageWeek } from '../src/core/usage/role.ts';
 import { candidate } from './helpers/startsit.ts';
-/*
- * The mode machinery, measured on the components it used to weight. Since
- * October 2026 those components are text only (see `scoringRules.ts`), so the
- * mode barely moves a score under the live rules; the machinery is tested on
- * the old rules, where it still has something to scale.
- */
+/* The old rules still score the usage components, so a weight there would show. */
 import { LEGACY_RULES } from '../src/core/startsit/scoringRules.ts';
 
 const HALF_PPR = buildScoringProfile({ rec: 0.5, pass_td: 4 }, []);
@@ -60,60 +54,28 @@ const VOLATILE = [
   week({ week: 6, targets: 4, receptions: 1, recYards: 25, recTds: 0, receivingAirYards: 70 }),
 ];
 
-describe('the mode reweights one engine', () => {
-  it('produces the same components in every mode', () => {
-    const keys = START_SIT_MODES.map((mode) =>
-      evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES).components.map(
-        (c) => c.key,
-      ),
-    );
-    expect(keys[1]).toEqual(keys[0]);
-    expect(keys[2]).toEqual(keys[0]);
-  });
-
-  it('records what the mode did to each component', () => {
-    const floor = evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: SAFE, mode: 'floor' }, HALF_PPR, LEGACY_RULES);
-    const usage = floor.components.find((c) => c.key === 'usage_level')!;
-    expect(usage.modeWeight).toBe(MODE_WEIGHTS.floor['usage_level']);
-    /*
-     * The multiplier is applied, and then the opportunity pair cap may trim it.
-     * Both are true of the same number, so the assertion is the one that holds
-     * in either case: the mode can only ever scale a component, never flip it,
-     * and it can never make it larger than the multiplier says.
-     */
-    expect(Math.sign(usage.value)).toBe(Math.sign(usage.baseValue));
-    expect(Math.abs(usage.value)).toBeLessThanOrEqual(Math.abs(usage.baseValue * usage.modeWeight) + 1e-9);
-
-    const td = floor.components.find((c) => c.key === 'td_dependency')!;
-    expect(td.preBudgetValue ?? td.value).toBeCloseTo(td.baseValue * td.modeWeight, 2);
-  });
-
-  it('prefers the safe player in Floor and the volatile one in Ceiling', () => {
-    const score = (usageWeeks: UsageWeek[], mode: 'floor' | 'ceiling' | 'balanced') =>
-      evaluatePlayer({ ...candidate('x', 'X', 'WR', 11), usageWeeks, mode }, HALF_PPR, LEGACY_RULES).score!;
-
-    expect(score(SAFE, 'floor') - score(VOLATILE, 'floor')).toBeGreaterThan(
-      score(SAFE, 'ceiling') - score(VOLATILE, 'ceiling'),
-    );
-  });
-
-  it('keeps Balanced between the two', () => {
-    const gap = (mode: 'floor' | 'ceiling' | 'balanced') =>
-      evaluatePlayer({ ...candidate('a', 'A', 'WR', 11), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES).score! -
-      evaluatePlayer({ ...candidate('b', 'B', 'WR', 11), usageWeeks: VOLATILE, mode }, HALF_PPR, LEGACY_RULES).score!;
-    expect(gap('balanced')).toBeLessThan(gap('floor'));
-    expect(gap('balanced')).toBeGreaterThan(gap('ceiling'));
-  });
-
-  it('does not let a mode overturn a clearly better player', () => {
-    // Eight points of market expectation is not a tie, and no amount of
-    // reweighting may turn it into one.
-    for (const mode of START_SIT_MODES) {
-      const better = evaluatePlayer({ ...candidate('a', 'A', 'WR', 18), usageWeeks: VOLATILE, mode }, HALF_PPR, LEGACY_RULES);
-      const worse = evaluatePlayer({ ...candidate('b', 'B', 'WR', 10), usageWeeks: SAFE, mode }, HALF_PPR, LEGACY_RULES);
-      expect(better.score!).toBeGreaterThan(worse.score!);
-    }
-  });
+describe('the mode changes no number (5 November 2026)', () => {
+  /*
+   * Floor used to multiply the Vegas part by 0.9 and Ceiling by 1.2, and
+   * reweight the nudges, so Team's numbers differed from every other screen.
+   * Now the mode only picks a toss-up's lean (`tossup.ts`), and a player reads
+   * the same number in every mode. Each case below fails on the old weights.
+   */
+  for (const rules of [undefined, LEGACY_RULES]) {
+    const label = rules ? 'under the old scoring rules' : 'under the live rules';
+    it(`gives the same score and components in every mode, ${label}`, () => {
+      for (const weeks of [SAFE, VOLATILE]) {
+        const read = START_SIT_MODES.map((mode) =>
+          evaluatePlayer({ ...candidate('a', 'A', 'WR', 12), usageWeeks: weeks, mode }, HALF_PPR, rules),
+        );
+        expect(read[1]!.score).toBe(read[0]!.score);
+        expect(read[2]!.score).toBe(read[0]!.score);
+        expect(read[1]!.components).toEqual(read[0]!.components.map((c) => ({ ...c })));
+        expect(read[2]!.components.map((c) => [c.key, c.value])).toEqual(read[0]!.components.map((c) => [c.key, c.value]));
+        for (const r of read) for (const c of r.components) expect(c.modeWeight).toBe(1);
+      }
+    });
+  }
 
   it('reads anything unrecognised as Balanced', () => {
     expect(normalizeMode('nonsense')).toBe('balanced');
@@ -201,18 +163,12 @@ describe('the lineup optimiser', () => {
     expect(slot?.position).toBe('QB');
   });
 
-  it('spends no more than a tie on the shape of the lineup', () => {
+  it('starts the same players in every mode: the mode moves no starter outside a toss-up', () => {
     const balanced = recommendLineup(roster(), SHAPE, HALF_PPR, { now: NOW, mode: 'balanced' });
     for (const mode of ['floor', 'ceiling'] as const) {
       const shaped = recommendLineup(roster(), SHAPE, HALF_PPR, { now: NOW, mode });
-      // Scores differ between modes, so the comparison is of *how many* starters
-      // changed rather than of the totals: at most one swap per slot, each
-      // inside the tolerance.
-      const changed = shaped.slots.filter(
-        (s, i) => s.playerId !== balanced.slots[i]?.playerId,
-      ).length;
-      expect(changed).toBeLessThanOrEqual(shaped.slots.length);
-      expect(LINEUP_PREFERENCE_TOLERANCE).toBeLessThan(1);
+      expect(shaped.slots.map((s) => s.playerId)).toEqual(balanced.slots.map((s) => s.playerId));
+      expect(shaped.slots.map((s) => s.score)).toEqual(balanced.slots.map((s) => s.score));
     }
   });
 

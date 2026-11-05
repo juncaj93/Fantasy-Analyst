@@ -16,12 +16,6 @@ import {
   suggestMode,
   type SidePlayer,
 } from '../src/core/startsit/modeSuggest.ts';
-import {
-  CORRELATION,
-  assessCorrelation,
-  breakTieOnCorrelation,
-  opponentExposure,
-} from '../src/core/startsit/correlation.ts';
 import type { RosterShape } from '../src/core/sleeper/scoring.ts';
 
 const SHAPE: RosterShape = {
@@ -117,95 +111,6 @@ describe('the suggestion', () => {
     // the only number on a side player is his market expectation.
     const player: SidePlayer = { playerId: 'x', position: 'WR', marketPoints: 12 };
     expect(Object.keys(player).sort()).toEqual(['marketPoints', 'playerId', 'position']);
-  });
-});
-
-describe('opponent exposure', () => {
-  const opponentStarters = [
-    { playerId: 'o1', name: 'Their QB', gameId: 'BUF@MIA' },
-    { playerId: 'o2', name: 'Their WR', gameId: 'BUF@MIA' },
-    { playerId: 'o3', name: 'Their TE', gameId: 'NE@NYJ' },
-  ];
-
-  it('counts a stack and ignores a lone player', () => {
-    const exposure = opponentExposure(opponentStarters, new Map([['BUF@MIA', 51]]));
-    expect(exposure.get('BUF@MIA')!.starters).toBe(2);
-    expect(exposure.has('NE@NYJ')).toBe(false);
-  });
-
-  it('pays for exposure in Ceiling and charges for it in Floor', () => {
-    const exposure = opponentExposure(opponentStarters, new Map([['BUF@MIA', 51]]));
-    const mine = { playerId: 'm1', name: 'My WR', gameId: 'BUF@MIA' };
-    const ceiling = assessCorrelation(mine, exposure, 'ceiling');
-    const floor = assessCorrelation(mine, exposure, 'floor');
-    expect(ceiling.points).toBeGreaterThan(0);
-    expect(floor.points).toBeLessThan(0);
-    expect(Math.abs(ceiling.points)).toBeLessThanOrEqual(CORRELATION.maxPoints);
-    expect(Math.abs(floor.points)).toBeLessThanOrEqual(CORRELATION.maxPoints);
-  });
-
-  it('takes no view at all in Balanced', () => {
-    const exposure = opponentExposure(opponentStarters);
-    const read = assessCorrelation({ playerId: 'm1', name: 'My WR', gameId: 'BUF@MIA' }, exposure, 'balanced');
-    expect(read.points).toBe(0);
-    expect(read.verdict).toBe('neutral');
-  });
-
-  it('says unknown rather than neutral when there is no opponent lineup', () => {
-    const read = assessCorrelation({ playerId: 'm1', name: 'My WR', gameId: 'BUF@MIA' }, new Map(), 'ceiling');
-    expect(read.verdict).toBe('unknown');
-    expect(read.points).toBe(0);
-  });
-});
-
-describe('the tiebreak, and its bound', () => {
-  const exposure = opponentExposure(
-    [
-      { playerId: 'o1', name: 'Their QB', gameId: 'BUF@MIA' },
-      { playerId: 'o2', name: 'Their WR', gameId: 'BUF@MIA' },
-    ],
-    new Map([['BUF@MIA', 52]]),
-  );
-
-  it('breaks a genuine coin flip', () => {
-    const result = breakTieOnCorrelation(
-      { playerId: 'a', name: 'In The Shootout', score: 11.9, gameId: 'BUF@MIA' },
-      { playerId: 'b', name: 'Elsewhere', score: 12, gameId: 'CHI@GB' },
-      exposure,
-      'ceiling',
-    );
-    expect(result!.preferredPlayerId).toBe('a');
-    expect(result!.edge).toBeLessThanOrEqual(CORRELATION.maxPoints * 2);
-  });
-
-  it('refuses when the players are not actually close', () => {
-    const result = breakTieOnCorrelation(
-      { playerId: 'a', name: 'In The Shootout', score: 10, gameId: 'BUF@MIA' },
-      { playerId: 'b', name: 'Clearly Better', score: 14, gameId: 'CHI@GB' },
-      exposure,
-      'ceiling',
-    );
-    expect(result).toBeNull();
-  });
-
-  it('stays quiet when the better player would have won anyway', () => {
-    const result = breakTieOnCorrelation(
-      { playerId: 'a', name: 'In The Shootout', score: 12.2, gameId: 'BUF@MIA' },
-      { playerId: 'b', name: 'Elsewhere', score: 12, gameId: 'CHI@GB' },
-      exposure,
-      'ceiling',
-    );
-    expect(result).toBeNull();
-  });
-
-  it('never speaks in Balanced', () => {
-    const result = breakTieOnCorrelation(
-      { playerId: 'a', name: 'In The Shootout', score: 11.9, gameId: 'BUF@MIA' },
-      { playerId: 'b', name: 'Elsewhere', score: 12, gameId: 'CHI@GB' },
-      exposure,
-      'balanced',
-    );
-    expect(result).toBeNull();
   });
 });
 
