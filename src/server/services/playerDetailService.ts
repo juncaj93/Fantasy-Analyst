@@ -59,6 +59,7 @@ import { UsageService } from './usageService.ts';
 import { EvidenceRepo } from '../repos/evidence.ts';
 import { PlayerDetailRepo } from '../repos/playerDetail.ts';
 import { PlayerRepo } from '../repos/players.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
 
@@ -88,6 +89,14 @@ export function outlookSeason(now = new Date()): string {
  * a board opened repeatedly costs one request per player per week.
  */
 const OUTLOOK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** When the nightly cron last started last season's statistics: `{ season, at }`. */
+export const SEASON_STATS_ATTEMPT_KEY = 'stats.season.dailyAttempt';
+/**
+ * How long one nightly attempt stands. Under a day, so tomorrow's 09:00 runs
+ * even if today's ran a little late; far over any retry of the same run.
+ */
+export const SEASON_STATS_ATTEMPT_MS = 20 * 60 * 60 * 1000;
 /**
  * A miss is re-checked less often than a hit is refreshed. Nobody writes a
  * season outlook for a third-string guard, and asking every week for four
@@ -770,6 +779,50 @@ export class PlayerDetailService {
       }
       await this.repo.saveOutlook(fetched, at);
     });
+  }
+
+  /**
+   * The nightly cron's way in: at most one attempt per season per
+   * {@link SEASON_STATS_ATTEMPT_MS}.
+   *
+   * On 5 November 2026 the full position list behind this refresh was read 234
+   * times, for a job the 09:00 cron runs once. A scheduled run that dies part
+   * way (killed for time or memory) is run again by Cloudflare, and nothing
+   * here wrote down that the work had already been started. Now the attempt is
+   * recorded first, in one settings row, and a second invocation inside the
+   * window skips straight past it. A finished season does not change, so the
+   * stats on file are the same ones a second run would store. The Setup
+   * button and the first-deploy load call {@link refreshSeasonStats} directly
+   * and are never held back.
+   */
+  async refreshSeasonStatsDaily(
+    season = lastCompletedSeason(this.now()),
+  ): Promise<{ ran: false; note: string } | ({ ran: true } & Awaited<ReturnType<PlayerDetailService['refreshSeasonStats']>>)> {
+    const claim = await this.claimNightlySeasonStats(season);
+    if (!claim.claimed) return { ran: false, note: claim.note };
+    return { ran: true, ...(await this.refreshSeasonStats(season)) };
+  }
+
+  /**
+   * Record that tonight's attempt has started, unless one already has.
+   *
+   * The 09:00 tick calls this and then {@link refreshSeasonStats}; see
+   * {@link refreshSeasonStatsDaily}. One settings row read, one written.
+   */
+  async claimNightlySeasonStats(
+    season = lastCompletedSeason(this.now()),
+  ): Promise<{ claimed: true } | { claimed: false; note: string }> {
+    const settings = new SettingsRepo(this.db);
+    const nowMs = this.now().getTime();
+    const last = await settings
+      .get<{ season?: string; at?: string } | null>(SEASON_STATS_ATTEMPT_KEY, null)
+      .catch(() => null);
+    const lastAt = last?.at ? Date.parse(last.at) : NaN;
+    if (last?.season === season && Number.isFinite(lastAt) && nowMs - lastAt >= 0 && nowMs - lastAt < SEASON_STATS_ATTEMPT_MS) {
+      return { claimed: false, note: `already tried for ${season} at ${last.at}` };
+    }
+    await settings.set(SEASON_STATS_ATTEMPT_KEY, { season, at: new Date(nowMs).toISOString() });
+    return { claimed: true };
   }
 
   /**

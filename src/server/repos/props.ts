@@ -11,6 +11,15 @@ import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
 import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
 import { storedCount } from './storedCounts.ts';
+import {
+  PROPS_FRESHNESS_KEY,
+  cachedPropsFreshness,
+  forgetPropsFreshness,
+  refreshStoredPropsFreshness,
+  stampPropsChange,
+  type PropsFreshness,
+  type StoredFreshnessOutcome,
+} from './propsFreshness.ts';
 import type { SlateWindow } from '../../core/nfl/slateWindow.ts';
 
 export class PropsRepo implements SnapshotStore {
@@ -73,6 +82,8 @@ export class PropsRepo implements SnapshotStore {
       )
       .bind(snapshot.provider, snapshot.eventId, snapshot.gameStart, snapshot.fetchedAt, toJson({ ...kept, raw: null }))
       .run();
+    // After the row, never before: a reader that sees the new stamp must count the new row.
+    await markPropsChanged(this.db);
   }
 
   async snapshotId(provider: string, eventId: string, fetchedAt: string): Promise<number | null> {
@@ -391,7 +402,24 @@ export class PropsRepo implements SnapshotStore {
     return out;
   }
 
-  async freshness(): Promise<{ fetchedAt: string | null; provider: string | null; events: number }> {
+  /**
+   * The weekly odds freshness line, counted at most once per odds refresh.
+   *
+   * The count below walks every weekly snapshot (about 750 rows) and screens ask
+   * it about six times a load. It is now kept with the stamp `put` writes, and
+   * re-counted only when that stamp moves. Same answer; see `propsFreshness.ts`.
+   */
+  async freshness(): Promise<PropsFreshness> {
+    return cachedPropsFreshness(this.db, () => this.freshnessLive());
+  }
+
+  /** Store the freshness answer for the current odds stamp. The five-minute tick calls this. */
+  async refreshStoredFreshness(now: number = Date.now()): Promise<StoredFreshnessOutcome> {
+    return refreshStoredPropsFreshness(this.db, () => this.freshnessLive(), now);
+  }
+
+  /** The live count {@link freshness} stands in for, unchanged. */
+  async freshnessLive(): Promise<PropsFreshness> {
     const row = await this.db
       .prepare(
         "SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events " +
@@ -489,4 +517,26 @@ function toProp(playerId: string, r: Record<string, unknown>): PlayerProp {
           },
         }),
   };
+}
+
+/**
+ * Stamp the weekly odds as changed, and never let a failed stamp leave a stale count.
+ *
+ * If the stamp cannot be written, the stored count is deleted instead, so the
+ * next reader counts live. Both failing at once (the database refusing writes
+ * just after accepting one) is covered by the one-hour backstop in
+ * `propsFreshness.ts`. Never throws: the odds are already stored, and the
+ * refresh that stored them must carry on exactly as before.
+ */
+async function markPropsChanged(db: Database): Promise<void> {
+  try {
+    await stampPropsChange(db);
+  } catch {
+    forgetPropsFreshness(db);
+    await db
+      .prepare('DELETE FROM settings WHERE key = ?')
+      .bind(PROPS_FRESHNESS_KEY)
+      .run()
+      .catch(() => undefined);
+  }
 }
