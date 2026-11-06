@@ -88,7 +88,13 @@ export async function readHealth(baseUrl, fetchImpl = fetch) {
   } catch (err) {
     return { ok: false, detail: `could not reach ${url}: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const text = await res.text();
+  let text;
+  try {
+    text = await res.text();
+  } catch (err) {
+    // The connection dropped while the answer was arriving: a network error, retried like one.
+    return { ok: false, detail: `${url} stopped answering part way: ${err instanceof Error ? err.message : String(err)}` };
+  }
   if (res.status !== 200) {
     return { ok: false, detail: `${url} answered HTTP ${res.status}: ${text.slice(0, 200)}` };
   }

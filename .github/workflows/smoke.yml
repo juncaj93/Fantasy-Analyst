@@ -380,7 +380,11 @@ jobs:
             # runner. Around eight executions rather than 150, and every one of
             # them a question only a deployment can answer -- the revision that
             # is live, a cold boot, the API's JSON boundary, a roster read, and
-            # a stranger's write being refused.
+            # a stranger's write being refused. Round 10 moved three that each
+            # opened the whole app for a layout or out-of-season question (the
+            # waiver card layout, the Draft poll, the Team refresh control) to
+            # the daily sweep; the refresh's stranger refusal is still asked here,
+            # by the JSON boundary check, without a page load.
             npx playwright test --config playwright.production.config.ts \
               --project=webkit-iphone-390 --grep @critical
           fi

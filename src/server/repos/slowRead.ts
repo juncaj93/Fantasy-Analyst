@@ -94,7 +94,7 @@ export const SLOW_READ_TTL_MS = 5 * 60 * 1_000;
  */
 export const MEMO_KEY: unique symbol = Symbol('memoKey');
 
-function memoKeyOf(db: Database): Database {
+export function memoKeyOf(db: Database): Database {
   return (db as unknown as { [MEMO_KEY]?: Database })[MEMO_KEY] ?? db;
 }
 

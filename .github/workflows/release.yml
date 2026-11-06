@@ -133,6 +133,7 @@ jobs:
               cat /tmp/created.txt; exit 1;
             }
             id=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/created.txt | head -1)
+            echo "created=yes" >> "$GITHUB_OUTPUT"
           fi
           if [ -z "$id" ]; then
             echo "::error::Could not determine the database id."
@@ -254,6 +255,13 @@ jobs:
           fi
           node scripts/check-release-sha.mjs "$url" "$RELEASE_SHA" --attempts 8 --delay 10
 
+      # One small request per question, in a script rather than a row of curl
+      # calls under `set -e`: on 5 November 2026 one dropped connection (curl
+      # error 56, on the lineup route) failed a release that was fine. A
+      # network error is now retried; a real answer that is wrong still fails.
+      # `/api/overview` is no longer read here, because it walked several
+      # tables to prove the database answers and the lineup route proves that
+      # with one row. See scripts/check-deployed-site.mjs.
       - name: Check the deployed site actually works
         id: verify
         run: |
@@ -263,53 +271,7 @@ jobs:
             echo "::warning::Could not read the site address from the deploy output; skipping checks."
             exit 0
           fi
-          echo "Checking $url"
-
-          # A fresh deployment takes a few seconds to become reachable, and the
-          # passphrase secret propagates as its own version right after.
-          for attempt in 1 2 3 4 5 6; do
-            code=$(curl -s -o /tmp/health.json -w '%{http_code}' "$url/api/health" || true)
-            [ "$code" = "200" ] && break
-            echo "  waiting for the site to come up (attempt $attempt, got $code)"
-            sleep 10
-          done
-
-          fail=0
-          echo "health: $code $(cat /tmp/health.json 2>/dev/null)"
-          [ "$code" = "200" ] || fail=1
-
-          code=$(curl -s -o /tmp/overview.json -w '%{http_code}' "$url/api/overview")
-          echo "overview (database read): $code"
-          [ "$code" = "200" ] || fail=1
-
-          code=$(curl -s -o /dev/null -w '%{http_code}' "$url/")
-          echo "home page: $code"
-          [ "$code" = "200" ] || fail=1
-
-          # Prove the lineup route is actually registered. An unknown league
-          # must be refused by the handler ("league not found"), not by the
-          # router ("not found") — the latter would mean the route is missing
-          # and the Team screen would silently show nothing.
-          body=$(curl -s "$url/api/leagues/does-not-exist/lineup")
-          echo "lineup route: $body"
-          case "$body" in
-            *"league not found"*) ;;
-            *) echo "::error::The lineup route did not respond as expected."; fail=1 ;;
-          esac
-
-          # A write with no session must be refused, or the site would be
-          # editable by anyone who found the address. 503 means the passphrase
-          # has not propagated yet, which is still closed, so retry briefly.
-          for attempt in 1 2 3 4 5 6; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/sleeper/sync-players")
-            [ "$code" = "401" ] && break
-            echo "  waiting for the passphrase to take effect (attempt $attempt, got $code)"
-            sleep 10
-          done
-          echo "unauthenticated write: $code (expected 401 = refused)"
-          [ "$code" = "401" ] || fail=1
-
-          exit $fail
+          node scripts/check-deployed-site.mjs "$url"
 
       # Whether the deployed site can be added to an iPhone Home Screen as a
       # standalone app. iOS decides this silently — a missing icon or a manifest
@@ -326,6 +288,10 @@ jobs:
           node scripts/probe-pwa.mjs "$url"
 
       - name: Load the NFL player list on first run
+        # Only on the deploy that created the database. Every later deploy
+        # finds all of this already loaded and kept current by the crons, and
+        # asking anyway read thousands of rows per release (Round 10).
+        if: ${{ steps.d1.outputs.created == 'yes' }}
         id: bootstrap
         continue-on-error: true
         run: |
@@ -380,6 +346,10 @@ jobs:
       # Skipped the moment there is any coverage, so ordinary deployments do no
       # work here, and never fatal — the cron is still the real path.
       - name: Load last season's statistics if they are missing
+        # Only on the deploy that created the database. Every later deploy
+        # finds all of this already loaded and kept current by the crons, and
+        # asking anyway read thousands of rows per release (Round 10).
+        if: ${{ steps.d1.outputs.created == 'yes' }}
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -429,6 +399,10 @@ jobs:
       # a success: there is no injury report in August because the NFL has not
       # filed one. Only a real failure is worth a warning.
       - name: Read the injury report on first run
+        # Only on the deploy that created the database. Every later deploy
+        # finds all of this already loaded and kept current by the crons, and
+        # asking anyway read thousands of rows per release (Round 10).
+        if: ${{ steps.d1.outputs.created == 'yes' }}
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -469,6 +443,10 @@ jobs:
       # a success rather than a fault: there are no weekly statistics in August
       # because no games have been played. Only a real failure earns a warning.
       - name: Read the weekly usage file on first run
+        # Only on the deploy that created the database. Every later deploy
+        # finds all of this already loaded and kept current by the crons, and
+        # asking anyway read thousands of rows per release (Round 10).
+        if: ${{ steps.d1.outputs.created == 'yes' }}
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -516,6 +494,10 @@ jobs:
       # `continue-on-error` and a warning rather than a failure, because a feed
       # no recommendation reads must never be the reason a deploy is marked bad.
       - name: Read the nflverse feeds on first run
+        # Only on the deploy that created the database. Every later deploy
+        # finds all of this already loaded and kept current by the crons, and
+        # asking anyway read thousands of rows per release (Round 10).
+        if: ${{ steps.d1.outputs.created == 'yes' }}
         continue-on-error: true
         run: |
           set -uo pipefail

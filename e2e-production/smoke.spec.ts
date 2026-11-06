@@ -1552,7 +1552,7 @@ test.describe('the deployed app', () => {
    * The probe's absence is the assertion: it is installed by the controller and
    * removed with it, so "no probe" is exactly "no loop running".
    */
-  test('does not poll Sleeper for a reader with no session @critical', async ({ page }) => {
+  test('does not poll Sleeper for a reader with no session', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('draft'), 'Draft is out of season on this deployment');
@@ -2017,7 +2017,7 @@ test.describe('the season features', () => {
    * card, the pill and logo before the name, one chip line, and the "Do this"
    * summary only when one claim depends on another.
    */
-  test('the waiver cards draw the live tiers with no photo and one line of pills @critical', async ({ page }) => {
+  test('the waiver cards draw the live tiers with no photo and one line of pills', async ({ page }) => {
     await page.goto('/');
     const tabs = await expectedTabs(page);
     test.skip(!tabs.includes('waivers'), 'the season has not started, so there is no waiver board');
@@ -2334,7 +2334,7 @@ test.describe('the decision intelligence', () => {
    * closed to somebody with no session. Whether the gesture *arms* at 68px is
    * settled in `tests/pullToRefresh.test.ts` and does not need a live site.
    */
-  test('the refresh is reachable, and refuses a stranger @critical', async ({ page, request }) => {
+  test('the refresh is reachable, and refuses a stranger', async ({ page, request }) => {
     await page.goto('/');
     await open(page, 'team');
     await expect(page.getByTestId('team-pull')).toBeVisible();
@@ -2867,6 +2867,9 @@ test.describe('the API boundary', () => {
       { what: 'unknown route', res: await request.get('/api/no-such-route', { failOnStatusCode: false }) },
       // A write with no session: refused, and the refusal is JSON too.
       { what: 'unauthorized write', res: await request.post('/api/sleeper/sync-players', { failOnStatusCode: false }) },
+      // The Start/Sit refresh spends provider quota, so a stranger is refused there too.
+      // Asked here, without opening the app, since its own test left the deploy gate (Round 10).
+      { what: 'unauthorized refresh', res: await request.post('/api/startsit/refresh', { failOnStatusCode: false }) },
     ];
 
     for (const { what, res } of cases) {
@@ -2883,6 +2886,7 @@ test.describe('the API boundary', () => {
     // And the ones that are refusals are refusals, not pages pretending.
     expect(cases[2]!.res.status()).toBe(404);
     expect([401, 503]).toContain(cases[3]!.res.status());
+    expect([401, 429, 503]).toContain(cases[4]!.res.status());
   });
 
   test('never shows a reader a parser error on a first, cold load @critical', async ({ page }) => {

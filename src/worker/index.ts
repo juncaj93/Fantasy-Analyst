@@ -52,6 +52,7 @@ import { CronRunRecorder } from '../server/repos/cronRuns.ts';
 import { stepOutcomeFrom, type StepOutcome } from '../core/health/model.ts';
 import { CRON_LABELS } from '../core/health/policy.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
+import { PlayerRepo } from '../server/repos/players.ts';
 import { ManagerIntelService } from '../server/services/managerIntelService.ts';
 import { ensureDraftRounds } from '../server/services/waiverRound2.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
@@ -508,6 +509,23 @@ export default {
           await refreshManagerTendencies(env, intelWindow);
         } catch (err) {
           console.error('manager tendencies refresh failed', err);
+        }
+      }
+
+      /*
+       * The stored copy of the player list, rebuilt once after each download.
+       *
+       * A cold Worker reads the list from that copy in a few rows instead of
+       * walking all 3,310 players. On nearly every tick this is one small read
+       * that finds the copy current. Not on a tick that parses a feed or reads
+       * the league; last and separately caught. See `playerListCache.ts`.
+       */
+      if (!feed && !waiverReadDue(event.scheduledTime) && !intelWindow) {
+        try {
+          const stored = await new PlayerRepo(env.DB).refreshStoredList(event.scheduledTime ?? Date.now());
+          if (stored.outcome === 'written') console.log(`player list copy stored: ${stored.rows} players`);
+        } catch (err) {
+          console.error('player list copy failed', err);
         }
       }
       return;
