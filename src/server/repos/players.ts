@@ -4,7 +4,14 @@ import { EXCLUDED_POSITIONS } from '../../core/sleeper/transform.ts';
 import { PlayerIndex } from '../../core/identity/index.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
-import { SlowRead } from './slowRead.ts';
+import { SlowRead, memoKeyOf } from './slowRead.ts';
+import {
+  forgetPlayerListVersion,
+  playerListVersion,
+  readPlayerListSnapshot,
+  refreshPlayerListSnapshot,
+  type SnapshotOutcome,
+} from './playerListCache.ts';
 /* The one player matcher, and the recall rule that keeps SQL in step with it. */
 import { hasWiderRecall, rankByNormalized, recallTerms } from '../../core/search/players.ts';
 
@@ -63,7 +70,7 @@ const EXCLUDED_PLACEHOLDERS = EXCLUDED_LIST.map(() => '?').join(',');
  * it is filling: a column added to the interface and forgotten here is a
  * compile error, and one removed from the interface and left here is too.
  */
-const PLAYER_COLUMNS: string = Object.keys({
+const PLAYER_COLUMN_LIST: readonly string[] = Object.keys({
   id: true,
   sleeper_player_id: true,
   full_name: true,
@@ -82,7 +89,8 @@ const PLAYER_COLUMNS: string = Object.keys({
   weight_pounds: true,
   age: true,
   years_exp: true,
-} satisfies Record<keyof PlayerRow, true>).join(', ');
+} satisfies Record<keyof PlayerRow, true>);
+const PLAYER_COLUMNS: string = PLAYER_COLUMN_LIST.join(', ');
 
 /**
  * The dictionary holds its answer for an hour, like the two counts beside it.
@@ -121,6 +129,8 @@ export const DICTIONARY_TTL_MS = 60 * 60 * 1_000;
 const DICTIONARY = new SlowRead<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }>(
   DICTIONARY_TTL_MS,
 );
+/** Which download stamp each Worker's memory of the list was filled for ('' = none recorded). */
+const DICTIONARY_SLOT = new WeakMap<Database, string>();
 
 /**
  * The two counts hold their answer for an hour, not five minutes.
@@ -224,6 +234,7 @@ async function storeCounts(db: Database, counts: StoredCounts): Promise<void> {
 /** Drop every memo for this database. Exported for tests. */
 export function forgetPlayerReads(db: Database): void {
   DICTIONARY.forget(db);
+  forgetPlayerListVersion(db);
   TOTAL.forget(db);
   RANKED.forget(db);
 }
@@ -319,19 +330,7 @@ export class PlayerRepo {
      * built from this list and the Draft screen re-asks for the board every
      * five seconds. The dictionary it re-reads was last written at 09:00.
      */
-    const { players, aliases } = await DICTIONARY.get(this.db, 'active', async () => {
-      const [rows, aliasRows] = await Promise.all([
-        this.db
-          .prepare(
-            `SELECT ${PLAYER_COLUMNS} FROM players
-              WHERE active = 1 AND position NOT IN (${EXCLUDED_PLACEHOLDERS})`,
-          )
-          .bind(...EXCLUDED_LIST)
-          .all<PlayerRow>(),
-        this.db.prepare('SELECT player_id, alias FROM player_aliases').all<{ player_id: string; alias: string }>(),
-      ]);
-      return { players: rows.results, aliases: aliasRows.results };
-    });
+    const { players, aliases } = await this.dictionary();
 
     const aliasesByPlayer = new Map<string, string[]>();
     for (const a of aliases) {
@@ -344,6 +343,68 @@ export class PlayerRepo {
 
   async buildIndex(): Promise<PlayerIndex> {
     return new PlayerIndex(await this.listAll());
+  }
+
+  /**
+   * The list's rows and the taught nicknames, from memory, the stored copy, or
+   * the full read, in that order.
+   *
+   * Memory is used only while it was filled for the current download stamp,
+   * which this Worker re-reads at most every few seconds (one row). On a miss
+   * the stored copy for that stamp is a few rows; only when there is none (no
+   * download recorded, or the copy is not built yet) is the whole table read.
+   * See `playerListCache.ts`.
+   */
+  private async dictionary(): Promise<{ players: PlayerRow[]; aliases: { player_id: string; alias: string }[] }> {
+    const key = memoKeyOf(this.db);
+    let slot: string;
+    try {
+      slot = (await playerListVersion(this.db)) ?? '';
+    } catch {
+      // Cannot read the stamp: keep whatever this Worker already holds rather than fail on it.
+      slot = DICTIONARY_SLOT.get(key) ?? '';
+    }
+    // A new download: drop the old list from memory now, not at the end of its hour.
+    if (DICTIONARY_SLOT.has(key) && DICTIONARY_SLOT.get(key) !== slot) DICTIONARY.forget(this.db);
+    DICTIONARY_SLOT.set(key, slot);
+
+    return DICTIONARY.get(this.db, `active:${slot}`, async () => {
+      const aliasesRead = this.db
+        .prepare('SELECT player_id, alias FROM player_aliases')
+        .all<{ player_id: string; alias: string }>();
+      if (slot === '') {
+        const [rows, aliasRows] = await Promise.all([this.readLiveRows(), aliasesRead]);
+        return { players: rows, aliases: aliasRows.results };
+      }
+      const [stored, aliasRows] = await Promise.all([readPlayerListSnapshot<PlayerRow>(this.db, slot), aliasesRead]);
+      return { players: stored ?? (await this.readLiveRows()), aliases: aliasRows.results };
+    });
+  }
+
+  /** The full read the stored copy stands in for: every active player the app carries. */
+  private async readLiveRows(): Promise<PlayerRow[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT ${PLAYER_COLUMNS} FROM players
+          WHERE active = 1 AND position NOT IN (${EXCLUDED_PLACEHOLDERS})`,
+      )
+      .bind(...EXCLUDED_LIST)
+      .all<PlayerRow>();
+    return rows.results;
+  }
+
+  /**
+   * Rebuild the stored copy of the list when a new download has landed.
+   *
+   * The five-minute tick calls this. Nearly always it is one small read that
+   * finds the copy current. See `refreshPlayerListSnapshot`.
+   */
+  async refreshStoredList(now: number = Date.now()): Promise<SnapshotOutcome> {
+    return refreshPlayerListSnapshot(
+      this.db,
+      async () => ({ columns: PLAYER_COLUMN_LIST, rows: (await this.readLiveRows()) as unknown as Record<string, unknown>[] }),
+      now,
+    );
   }
 
   /**

@@ -1,6 +1,7 @@
 /** Key/value settings + sync log. */
 
 import { nowIso, parseJson, toJson, type Database } from '../db.ts';
+import { forgetPlayerListVersion } from './playerListCache.ts';
 
 export class SettingsRepo {
   constructor(private readonly db: Database) {}
@@ -98,6 +99,8 @@ export class SettingsRepo {
   async markPlayersSynced(at: string): Promise<void> {
     await this.set(SETTING_KEYS.playersLastSuccess, at);
     playersStampCache.delete(this.db);
+    // The player list in this Worker's memory now belongs to the previous download.
+    forgetPlayerListVersion(this.db);
   }
 }
 

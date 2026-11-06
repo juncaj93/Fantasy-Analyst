@@ -13,6 +13,8 @@
  * Run by the deploy workflow after every release. Exits non-zero on failure.
  */
 
+import { fetchWithRetry } from './lib/retryFetch.mjs';
+
 const base = (process.argv[2] ?? '').replace(/\/$/, '');
 if (!base) {
   console.error('usage: node scripts/probe-pwa.mjs <site url>');
@@ -27,8 +29,15 @@ function check(ok, label, detail = '') {
   return ok;
 }
 
+/*
+ * Part of the deploy check, so a dropped connection is retried rather than
+ * failing the release (see `lib/retryFetch.mjs`). The answer is buffered and
+ * handed back as a Response, so every check below reads it as before.
+ */
 async function get(path) {
-  const res = await fetch(`${base}${path}`, { redirect: 'follow' });
+  const got = await fetchWithRetry(`${base}${path}`, {}, { binary: true, onRetry: (line) => console.log(line) });
+  if (!got.ok) throw new Error(`could not reach ${base}${path}: ${got.error}`);
+  const res = new Response(got.status === 204 || got.status === 304 ? null : got.buffer, { status: got.status, headers: got.headers });
   return { res, type: res.headers.get('content-type') ?? '' };
 }
 
