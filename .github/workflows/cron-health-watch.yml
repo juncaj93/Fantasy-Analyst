@@ -15,7 +15,10 @@ name: Worker cron watch
 # with a comment -- the part that notifies -- and the row goes again on the
 # first healthy hour. See scripts/cron-health-watch.mjs for the rules.
 #
-# Read-only: a metrics API. No new secret, no cost (this repository is public,
+# When Cloudflare's run table comes back empty (it has since early November
+# 2026), the same record is read from the Worker's own logs instead.
+#
+# Read-only: a metrics API and a log search. No new secret, no cost (this repository is public,
 # so its Actions minutes are free).
 
 on:

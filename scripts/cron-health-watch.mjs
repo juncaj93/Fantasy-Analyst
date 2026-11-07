@@ -20,7 +20,14 @@
  * failing cron as its own row on the issue, comments on the first failure, and
  * takes the row away again on the first healthy check.
  *
- * Read-only: a metrics API. Depends on nothing, like the alert beside it.
+ * Since early November 2026 that dataset answers an empty list for this
+ * account (any script, any window), so the watch said "no invocation on
+ * record" every hour while every cron ran fine. When it is empty the same
+ * record is read from the Worker's own logs (Workers Observability), which
+ * keep one event per scheduled run with its cron and how it ended.
+ *
+ * Read-only: a metrics API and a log search. Depends on nothing, like the
+ * alert beside it.
  */
 
 import { pathToFileURL } from 'node:url';
