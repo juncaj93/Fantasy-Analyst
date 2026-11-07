@@ -20,7 +20,14 @@
  * failing cron as its own row on the issue, comments on the first failure, and
  * takes the row away again on the first healthy check.
  *
- * Read-only: a metrics API. Depends on nothing, like the alert beside it.
+ * Since early November 2026 that dataset answers an empty list for this
+ * account (any script, any window), so the watch said "no invocation on
+ * record" every hour while every cron ran fine. When it is empty the same
+ * record is read from the Worker's own logs (Workers Observability), which
+ * keep one event per scheduled run with its cron and how it ended.
+ *
+ * Read-only: a metrics API and a log search. Depends on nothing, like the
+ * alert beside it.
  */
 
 import { pathToFileURL } from 'node:url';
@@ -33,7 +40,8 @@ import { pathToFileURL } from 'node:url';
  * and for Cloudflare's analytics landing a few minutes behind.
  */
 export const CRONS = [
-  { cron: '*/5 * * * *', name: 'Worker: five-minute injury check', expectEveryMinutes: 45 },
+  // logsHours: how much of the Worker's logs to read for it (see `fetchFromLogs`).
+  { cron: '*/5 * * * *', name: 'Worker: five-minute injury check', expectEveryMinutes: 45, logsHours: 3 },
   { cron: '0 9 * * *', name: 'Worker: 09:00 daily refresh', expectEveryMinutes: 26 * 60 },
   { cron: '0 23 * * SAT', name: 'Worker: Saturday evening Vegas refresh', expectEveryMinutes: 8 * 24 * 60 },
   { cron: '0 15 * * SUN', name: 'Worker: Sunday pregame Vegas refresh', expectEveryMinutes: 8 * 24 * 60 },
@@ -68,7 +76,7 @@ const ok = (status) => status === 'success';
  *
  * `runs` are `{ datetime, status }`, any order.
  */
-export function judgeCron(spec, runs, now) {
+export function judgeCron(spec, runs, now, lookbackHours = LOOKBACK_HOURS) {
   const sorted = [...runs].sort((a, b) => Date.parse(a.datetime) - Date.parse(b.datetime));
   const last = sorted.at(-1);
   const verdict = (healthy, message) => ({ name: spec.name, cron: spec.cron, result: healthy ? 'success' : 'failure', message });
@@ -76,10 +84,10 @@ export function judgeCron(spec, runs, now) {
   if (!last) {
     // A weekly cron's last run can sit just outside the week this can see, so
     // an empty window only counts as silence for a cron due more often than that.
-    if (spec.expectEveryMinutes >= LOOKBACK_HOURS * 60) {
-      return verdict(true, `${spec.cron} has not run within the ${LOOKBACK_HOURS} hours this can see; nothing to judge.`);
+    if (spec.expectEveryMinutes >= lookbackHours * 60) {
+      return verdict(true, `${spec.cron} has not run within the ${Math.round(lookbackHours)} hours this can see; nothing to judge.`);
     }
-    return verdict(false, `${spec.cron} has no invocation on record in the last ${LOOKBACK_HOURS} hours.`);
+    return verdict(false, `${spec.cron} has no invocation on record in the last ${Math.round(lookbackHours)} hours.`);
   }
   const silentMinutes = (now.getTime() - Date.parse(last.datetime)) / 60_000;
   if (silentMinutes > spec.expectEveryMinutes) {
@@ -124,14 +132,48 @@ function describe(runs) {
   return statuses.join('/');
 }
 
-/** Every cron's verdict, from every invocation in the window. */
-export function judgeAll(rows, now, crons = CRONS) {
-  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now));
+/**
+ * Every cron's verdict, from every invocation in the window. `lookbackHours`
+ * is one number for every cron, or one per cron when they were read over
+ * different windows.
+ */
+export function judgeAll(rows, now, crons = CRONS, lookbackHours = LOOKBACK_HOURS) {
+  const hoursFor = (cron) => (typeof lookbackHours === 'number' ? lookbackHours : (lookbackHours?.[cron] ?? LOOKBACK_HOURS));
+  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now, hoursFor(spec.cron)));
 }
 
 /* ------------------------------------------------------------ the network */
 
 const GQL = 'https://api.cloudflare.com/client/v4/graphql';
+
+/**
+ * How far back the Worker's own logs reach.
+ *
+ * Workers Logs keep three days on this plan. A weekly cron's last run is
+ * usually older than that, and `judgeCron` already treats an empty window as
+ * "nothing to judge" for a cron due less often than the window.
+ */
+export const LOGS_LOOKBACK_HOURS = 72;
+
+/**
+ * Events asked for per log query. The API hands back at most 100 however many
+ * are asked for (measured 7 November: 1,000 asked, 100 answered), so a slice
+ * that comes back full is split in half and asked again.
+ */
+export const LOGS_LIMIT = 100;
+
+/**
+ * A moment, whichever way it was written.
+ *
+ * Round 11's probe handed this file `'2026-11-05T00:00:00Z'` and died on
+ * `from.toISOString is not a function`, so its count of 09:00 runs never
+ * printed. A string, a number or a Date all mean the same instant here.
+ */
+export function toDate(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) throw new Error(`not a date: ${JSON.stringify(value)}`);
+  return d;
+}
 
 async function resolveAccount(token, fetchImpl) {
   const res = await fetchImpl('https://api.cloudflare.com/client/v4/accounts', {
@@ -142,9 +184,8 @@ async function resolveAccount(token, fetchImpl) {
   return id;
 }
 
-/** Every scheduled invocation of the Worker since `from`, oldest first. */
-export async function fetchInvocations({ token, account, script = 'fantasy-analyst', from, to, fetchImpl = fetch }) {
-  const acct = account || (await resolveAccount(token, fetchImpl));
+/** Cloudflare's analytics record of scheduled invocations. */
+async function fetchFromAnalytics({ token, account, script, from, to, fetchImpl }) {
   const rows = [];
   let cursor = from.toISOString();
   for (let page = 0; page < 10; page += 1) {
@@ -158,7 +199,7 @@ export async function fetchInvocations({ token, account, script = 'fantasy-analy
               filter: { datetime_geq: $from, datetime_leq: $to, scriptName: $s }) { cron status datetime }
           } }
         }`,
-        variables: { a: acct, from: cursor, to: to.toISOString(), s: script },
+        variables: { a: account, from: cursor, to: to.toISOString(), s: script },
       }),
     });
     const body = await res.json().catch(() => null);
@@ -174,6 +215,105 @@ export async function fetchInvocations({ token, account, script = 'fantasy-analy
   return rows;
 }
 
+/**
+ * The same record from the Worker's own logs (Workers Observability).
+ *
+ * Since early November the analytics dataset above answers an empty list for
+ * this account, for any script and any window, while the logs still hold one
+ * event per scheduled run with its cron and how it ended (`ok`, `exceededCpu`,
+ * ...). Asked one cron at a time, so a busy afternoon of page loads cannot
+ * crowd the scheduled runs out of a page, and the five-minute tick over only
+ * its last few hours (`logsHours`): its rules look back two hours, and three
+ * days of it would be a few dozen pages an hour.
+ */
+export async function fetchFromLogs({ token, account, script = 'fantasy-analyst', from, to, crons = CRONS, fetchImpl = fetch }) {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/observability/telemetry/query`;
+  const ask = async (cron, fromMs, toMs, depth) => {
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        queryId: `cron-watch-${fromMs}-${toMs}`,
+        timeframe: { from: fromMs, to: toMs },
+        view: 'events',
+        limit: LOGS_LIMIT,
+        parameters: {
+          datasets: ['cloudflare-workers'],
+          filters: [
+            { key: '$metadata.service', operation: 'eq', type: 'string', value: script },
+            { key: '$workers.event.cron', operation: 'eq', type: 'string', value: cron },
+          ],
+          filterCombination: 'and',
+        },
+      }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!body?.success) {
+      throw new Error(`Cloudflare logs: HTTP ${res.status} ${JSON.stringify(body?.errors ?? body).slice(0, 400)}`);
+    }
+    const events = body.result?.events?.events;
+    if (!Array.isArray(events)) throw new Error('Cloudflare logs returned no event list');
+    if (events.length >= LOGS_LIMIT && depth < 10 && toMs - fromMs > 10 * 60_000) {
+      const mid = Math.floor((fromMs + toMs) / 2);
+      return [...(await ask(cron, fromMs, mid, depth + 1)), ...(await ask(cron, mid, toMs, depth + 1))];
+    }
+    return events;
+  };
+
+  const runs = new Map();
+  for (const { cron, logsHours } of crons) {
+    const fromMs = logsHours ? Math.max(from.getTime(), to.getTime() - logsHours * 3_600_000) : from.getTime();
+    for (const e of await ask(cron, fromMs, to.getTime(), 0)) {
+      const w = e.$workers ?? {};
+      const id = e.$metadata?.requestId ?? w.requestId ?? `${cron}@${e.timestamp}`;
+      const run = runs.get(id) ?? { cron: w.event?.cron ?? cron, status: null, at: Infinity };
+      if (w.outcome && !run.status) run.status = w.outcome === 'ok' ? 'success' : String(w.outcome);
+      const scheduled = Number(w.event?.scheduledTime);
+      // scheduledTime arrives in seconds on some events and milliseconds on others.
+      const at = Number.isFinite(scheduled) && scheduled > 0 ? (scheduled < 1e12 ? scheduled * 1000 : scheduled) : Number(e.timestamp);
+      if (Number.isFinite(at)) run.at = Math.min(run.at, at);
+      runs.set(id, run);
+    }
+  }
+  return [...runs.values()]
+    // A run still going has no outcome yet; the next hourly check will see it.
+    .filter((r) => r.status && Number.isFinite(r.at))
+    .map((r) => ({ cron: r.cron, status: r.status, datetime: new Date(r.at).toISOString() }))
+    .sort((a, b) => Date.parse(a.datetime) - Date.parse(b.datetime));
+}
+
+/**
+ * Every scheduled invocation of the Worker since `from`, oldest first, and
+ * where the list came from. The analytics record first; the logs when it is
+ * empty or cannot be read; an error only when neither can be read.
+ */
+export async function readInvocations({ token, account, script = 'fantasy-analyst', from, to, fetchImpl = fetch }) {
+  const acct = account || (await resolveAccount(token, fetchImpl));
+  const fromDate = toDate(from);
+  const toDateValue = toDate(to);
+  let analyticsError = null;
+  try {
+    const rows = await fetchFromAnalytics({ token, account: acct, script, from: fromDate, to: toDateValue, fetchImpl });
+    if (rows.length > 0) return { rows, source: 'analytics', lookbackHours: (toDateValue - fromDate) / 3_600_000 };
+  } catch (err) {
+    analyticsError = err;
+  }
+  const logsFrom = new Date(Math.max(fromDate.getTime(), toDateValue.getTime() - LOGS_LOOKBACK_HOURS * 3_600_000));
+  try {
+    const rows = await fetchFromLogs({ token, account: acct, script, from: logsFrom, to: toDateValue, fetchImpl });
+    const hours = (toDateValue - logsFrom) / 3_600_000;
+    const lookbackHours = Object.fromEntries(CRONS.map((c) => [c.cron, c.logsHours ? Math.min(c.logsHours, hours) : hours]));
+    return { rows, source: 'logs', lookbackHours };
+  } catch (err) {
+    throw new Error([analyticsError?.message, err.message].filter(Boolean).join(' / '));
+  }
+}
+
+/** The invocations alone, for the probes that only want the list. */
+export async function fetchInvocations(args) {
+  return (await readInvocations(args)).rows;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
@@ -181,9 +321,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.exit(1);
   }
   const now = new Date();
-  let rows;
+  let read;
   try {
-    rows = await fetchInvocations({
+    read = await readInvocations({
       token,
       account: process.env.CLOUDFLARE_ACCOUNT_ID,
       from: new Date(now.getTime() - LOOKBACK_HOURS * 3_600_000),
@@ -195,7 +335,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(`::error::${err.message}`);
     process.exit(1);
   }
-  const verdicts = judgeAll(rows, now);
+  const hours = typeof read.lookbackHours === 'number' ? read.lookbackHours : Math.max(...Object.values(read.lookbackHours));
+  console.log(`source: ${read.source === 'logs' ? "the Worker's logs" : "Cloudflare's analytics"}, ${read.rows.length} scheduled runs over ${Math.round(hours)} hours`);
+  const verdicts = judgeAll(read.rows, now, CRONS, read.lookbackHours);
   for (const v of verdicts) console.log(`${v.result === 'success' ? 'ok  ' : 'FAIL'}  ${v.name}: ${v.message}`);
   // The machine-readable line the workflow picks up.
   console.log(`VERDICTS=${JSON.stringify(verdicts.map(({ name, result }) => ({ name, result })))}`);
