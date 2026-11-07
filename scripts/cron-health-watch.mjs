@@ -33,7 +33,8 @@ import { pathToFileURL } from 'node:url';
  * and for Cloudflare's analytics landing a few minutes behind.
  */
 export const CRONS = [
-  { cron: '*/5 * * * *', name: 'Worker: five-minute injury check', expectEveryMinutes: 45 },
+  // logsHours: how much of the Worker's logs to read for it (see `fetchFromLogs`).
+  { cron: '*/5 * * * *', name: 'Worker: five-minute injury check', expectEveryMinutes: 45, logsHours: 3 },
   { cron: '0 9 * * *', name: 'Worker: 09:00 daily refresh', expectEveryMinutes: 26 * 60 },
   { cron: '0 23 * * SAT', name: 'Worker: Saturday evening Vegas refresh', expectEveryMinutes: 8 * 24 * 60 },
   { cron: '0 15 * * SUN', name: 'Worker: Sunday pregame Vegas refresh', expectEveryMinutes: 8 * 24 * 60 },
@@ -124,9 +125,14 @@ function describe(runs) {
   return statuses.join('/');
 }
 
-/** Every cron's verdict, from every invocation in the window. */
+/**
+ * Every cron's verdict, from every invocation in the window. `lookbackHours`
+ * is one number for every cron, or one per cron when they were read over
+ * different windows.
+ */
 export function judgeAll(rows, now, crons = CRONS, lookbackHours = LOOKBACK_HOURS) {
-  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now, lookbackHours));
+  const hoursFor = (cron) => (typeof lookbackHours === 'number' ? lookbackHours : (lookbackHours?.[cron] ?? LOOKBACK_HOURS));
+  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now, hoursFor(spec.cron)));
 }
 
 /* ------------------------------------------------------------ the network */
@@ -142,8 +148,12 @@ const GQL = 'https://api.cloudflare.com/client/v4/graphql';
  */
 export const LOGS_LOOKBACK_HOURS = 72;
 
-/** Events asked for per log query; a slice that fills it is split in half. */
-const LOGS_LIMIT = 1000;
+/**
+ * Events asked for per log query. The API hands back at most 100 however many
+ * are asked for (measured 7 November: 1,000 asked, 100 answered), so a slice
+ * that comes back full is split in half and asked again.
+ */
+export const LOGS_LIMIT = 100;
 
 /**
  * A moment, whichever way it was written.
@@ -205,7 +215,9 @@ async function fetchFromAnalytics({ token, account, script, from, to, fetchImpl 
  * this account, for any script and any window, while the logs still hold one
  * event per scheduled run with its cron and how it ended (`ok`, `exceededCpu`,
  * ...). Asked one cron at a time, so a busy afternoon of page loads cannot
- * crowd the scheduled runs out of a page.
+ * crowd the scheduled runs out of a page, and the five-minute tick over only
+ * its last few hours (`logsHours`): its rules look back two hours, and three
+ * days of it would be a few dozen pages an hour.
  */
 export async function fetchFromLogs({ token, account, script = 'fantasy-analyst', from, to, crons = CRONS, fetchImpl = fetch }) {
   const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/observability/telemetry/query`;
@@ -234,7 +246,7 @@ export async function fetchFromLogs({ token, account, script = 'fantasy-analyst'
     }
     const events = body.result?.events?.events;
     if (!Array.isArray(events)) throw new Error('Cloudflare logs returned no event list');
-    if (events.length >= LOGS_LIMIT && depth < 8 && toMs - fromMs > 10 * 60_000) {
+    if (events.length >= LOGS_LIMIT && depth < 10 && toMs - fromMs > 10 * 60_000) {
       const mid = Math.floor((fromMs + toMs) / 2);
       return [...(await ask(cron, fromMs, mid, depth + 1)), ...(await ask(cron, mid, toMs, depth + 1))];
     }
@@ -242,8 +254,9 @@ export async function fetchFromLogs({ token, account, script = 'fantasy-analyst'
   };
 
   const runs = new Map();
-  for (const { cron } of crons) {
-    for (const e of await ask(cron, from.getTime(), to.getTime(), 0)) {
+  for (const { cron, logsHours } of crons) {
+    const fromMs = logsHours ? Math.max(from.getTime(), to.getTime() - logsHours * 3_600_000) : from.getTime();
+    for (const e of await ask(cron, fromMs, to.getTime(), 0)) {
       const w = e.$workers ?? {};
       const id = e.$metadata?.requestId ?? w.requestId ?? `${cron}@${e.timestamp}`;
       const run = runs.get(id) ?? { cron: w.event?.cron ?? cron, status: null, at: Infinity };
@@ -281,7 +294,9 @@ export async function readInvocations({ token, account, script = 'fantasy-analys
   const logsFrom = new Date(Math.max(fromDate.getTime(), toDateValue.getTime() - LOGS_LOOKBACK_HOURS * 3_600_000));
   try {
     const rows = await fetchFromLogs({ token, account: acct, script, from: logsFrom, to: toDateValue, fetchImpl });
-    return { rows, source: 'logs', lookbackHours: (toDateValue - logsFrom) / 3_600_000 };
+    const hours = (toDateValue - logsFrom) / 3_600_000;
+    const lookbackHours = Object.fromEntries(CRONS.map((c) => [c.cron, c.logsHours ? Math.min(c.logsHours, hours) : hours]));
+    return { rows, source: 'logs', lookbackHours };
   } catch (err) {
     throw new Error([analyticsError?.message, err.message].filter(Boolean).join(' / '));
   }
@@ -313,7 +328,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(`::error::${err.message}`);
     process.exit(1);
   }
-  console.log(`source: ${read.source === 'logs' ? "the Worker's logs" : "Cloudflare's analytics"}, ${read.rows.length} scheduled runs over ${Math.round(read.lookbackHours)} hours`);
+  const hours = typeof read.lookbackHours === 'number' ? read.lookbackHours : Math.max(...Object.values(read.lookbackHours));
+  console.log(`source: ${read.source === 'logs' ? "the Worker's logs" : "Cloudflare's analytics"}, ${read.rows.length} scheduled runs over ${Math.round(hours)} hours`);
   const verdicts = judgeAll(read.rows, now, CRONS, read.lookbackHours);
   for (const v of verdicts) console.log(`${v.result === 'success' ? 'ok  ' : 'FAIL'}  ${v.name}: ${v.message}`);
   // The machine-readable line the workflow picks up.

@@ -308,7 +308,7 @@ for (const [label, from] of days) {
 
 heading("5. The position list's count: sampled or real?");
 async function fieldsOf(name) {
-  const d = await graphql(`query F($n: String!) { __type(name: $n) { fields { name type { name kind ofType { name kind } } } } }`, { n: name });
+  const d = await graphql(`query F($n: String!) { __type(name: $n) { fields { name type { name kind ofType { name kind ofType { name kind ofType { name kind } } } } } } }`, { n: name });
   return d?.__type?.fields ?? [];
 }
 try {
@@ -379,7 +379,9 @@ try {
     from: new Date(now.getTime() - LOOKBACK_HOURS * 3_600_000).toISOString(),
     to: now.toISOString(),
   });
-  console.log(`source: ${read.source}, ${read.rows.length} scheduled runs over ${Math.round(read.lookbackHours)} hours`);
+  console.log(`source: ${read.source}, ${read.rows.length} scheduled runs, windows ${JSON.stringify(read.lookbackHours)}`);
+  const fiveRuns = read.rows.filter((x) => x.cron === '*/5 * * * *');
+  if (fiveRuns.length) console.log(`   five-minute runs: ${fiveRuns.length}, first ${eastern(fiveRuns[0].datetime)} ET, last ${eastern(fiveRuns.at(-1).datetime)} ET`);
   const by = new Map();
   for (const r of read.rows) by.set(`${r.cron} ${r.status}`, (by.get(`${r.cron} ${r.status}`) ?? 0) + 1);
   for (const [k, n] of [...by].sort()) console.log(`   ${String(n).padStart(5)}  ${k}`);
