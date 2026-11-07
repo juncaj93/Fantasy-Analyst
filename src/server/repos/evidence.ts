@@ -695,10 +695,22 @@ export class EvidenceRepo {
           .prepare(`SELECT * FROM player_signal_cache WHERE player_id IN (${placeholders})`)
           .bind(...batch)
           .all<Record<string, unknown>>(),
+        /*
+         * `+review_status`: the same rows, read through the player index.
+         *
+         * Without the `+`, SQLite picks `idx_evidence_review` for the status
+         * list and walks every approved row in the ledger, then drops the ones
+         * for other players: about 750-800 rows a call whether 4 players were
+         * asked for or 60 (268,096 rows on 5 November 2026). The unary `+`
+         * leaves the value as it is and takes that term off the index, so the
+         * lookup seeks each asked-for player on `idx_evidence_player`. The
+         * windows built from these rows add whole-number deltas, so the order
+         * they arrive in cannot change a total.
+         */
         this.db
           .prepare(
             `SELECT * FROM evidence_items WHERE player_id IN (${placeholders})
-               AND review_status IN ('auto_applied','accepted','corrected')`,
+               AND +review_status IN ('auto_applied','accepted','corrected')`,
           )
           .bind(...batch)
           .all<EvidenceRow>(),

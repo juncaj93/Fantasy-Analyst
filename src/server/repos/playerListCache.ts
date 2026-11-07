@@ -228,3 +228,67 @@ export async function refreshPlayerListSnapshot(
   await writePlayerListSnapshot(db, version, live.columns, live.rows, at);
   return { outcome: 'written', rows: live.rows.length };
 }
+
+/* ------------------------------------------- every player's position */
+
+/**
+ * Every player's position (active or not), stored for one download stamp.
+ *
+ * Last season's statistics are matched against `SELECT id, position FROM
+ * players`, the whole table including retired players, which the stored list
+ * above leaves out on purpose. That read was 3,310 rows a call and the biggest
+ * single reader on 5 November 2026 (774,540 rows in 234 calls). Positions only
+ * change with a download, so the pairs are kept in one settings row under the
+ * same stamp as the list, and used only while that stamp is current.
+ */
+export const POSITIONS_KEY = 'players.positions';
+
+interface PositionsCopy {
+  version: string;
+  rows: [string, string][];
+}
+
+/** The stored pairs for this stamp, in table order, or null when there is none that matches. */
+export async function readPositionsSnapshot(db: Database, version: string): Promise<Map<string, string> | null> {
+  let row: { players_positions: string } | null;
+  try {
+    row = await db
+      // Its own column name, so Cloudflare's per-query numbers name this read.
+      .prepare('SELECT value_json AS players_positions FROM settings WHERE key = ?')
+      .bind(POSITIONS_KEY)
+      .first<{ players_positions: string }>();
+  } catch {
+    return null;
+  }
+  const copy = parseJson<PositionsCopy | null>(row?.players_positions, null);
+  if (!copy || copy.version !== version || !Array.isArray(copy.rows) || copy.rows.length === 0) return null;
+  const out = new Map<string, string>();
+  for (const pair of copy.rows) {
+    if (!Array.isArray(pair) || typeof pair[0] !== 'string') return null;
+    out.set(pair[0], pair[1]);
+  }
+  return out;
+}
+
+/**
+ * Store the pairs a full read just returned, under the stamp read before it.
+ *
+ * The stamp is read first, so pairs stored under it are never older than the
+ * download it names: a download writes its rows before its stamp.
+ */
+export async function writePositionsSnapshot(
+  db: Database,
+  version: string,
+  rows: readonly { id: string; position: string }[],
+  at: string = nowIso(),
+): Promise<void> {
+  if (rows.length === 0) return;
+  const copy: PositionsCopy = { version, rows: rows.map((r) => [r.id, r.position]) };
+  await db
+    .prepare(
+      `INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+    )
+    .bind(POSITIONS_KEY, toJson(copy), at)
+    .run();
+}

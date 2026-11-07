@@ -53,6 +53,7 @@ import { stepOutcomeFrom, type StepOutcome } from '../core/health/model.ts';
 import { CRON_LABELS } from '../core/health/policy.ts';
 import { SETTING_KEYS, SettingsRepo } from '../server/repos/settings.ts';
 import { PlayerRepo } from '../server/repos/players.ts';
+import { PropsRepo } from '../server/repos/props.ts';
 import { ManagerIntelService } from '../server/services/managerIntelService.ts';
 import { ensureDraftRounds } from '../server/services/waiverRound2.ts';
 import { LeagueStrategyService } from '../server/services/leagueStrategyService.ts';
@@ -528,6 +529,21 @@ export default {
           console.error('player list copy failed', err);
         }
       }
+
+      /*
+       * The odds freshness count, stored once after each odds refresh.
+       *
+       * Screens ask it about six times a load; with this they read two settings
+       * rows instead of walking every weekly snapshot. Nearly every tick it is
+       * one two-row read that finds it current. Separately caught, last. See
+       * `propsFreshness.ts`.
+       */
+      try {
+        const odds = await new PropsRepo(env.DB).refreshStoredFreshness(event.scheduledTime ?? Date.now());
+        if (odds.outcome === 'written') console.log(`odds freshness stored: ${odds.events} games`);
+      } catch (err) {
+        console.error('odds freshness store failed', err);
+      }
       return;
     }
 
@@ -666,7 +682,11 @@ export default {
        * nothing, which is what they said before this existed.
        */
       await run.step('season-stats', "Last season's statistics", async () => {
-        await new PlayerDetailService(env.DB, { sleeper: cronEnv.sleeper }).refreshSeasonStats();
+        const detail = new PlayerDetailService(env.DB, { sleeper: cronEnv.sleeper });
+        // Once per day: a re-run of this tick must not fetch and match last season again.
+        const claim = await detail.claimNightlySeasonStats();
+        if (!claim.claimed) return { outcome: 'skipped' as const, note: claim.note };
+        await detail.refreshSeasonStats();
         return { outcome: 'succeeded' };
       });
       /*

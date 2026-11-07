@@ -9,7 +9,9 @@ import {
   forgetPlayerListVersion,
   playerListVersion,
   readPlayerListSnapshot,
+  readPositionsSnapshot,
   refreshPlayerListSnapshot,
+  writePositionsSnapshot,
   type SnapshotOutcome,
 } from './playerListCache.ts';
 /* The one player matcher, and the recall rule that keeps SQL in step with it. */
@@ -421,7 +423,23 @@ export class PlayerRepo {
    * needs to rank a stat line.
    */
   async positionsById(): Promise<Map<string, string>> {
+    /*
+     * From the stored pairs when they were kept for the current download
+     * stamp: one row instead of 3,310. The stamp is read first, so pairs kept
+     * under it are never older than that download. See `readPositionsSnapshot`.
+     */
+    let version: string | null = null;
+    try {
+      version = await playerListVersion(this.db);
+    } catch {
+      version = null;
+    }
+    if (version != null) {
+      const stored = await readPositionsSnapshot(this.db, version);
+      if (stored) return stored;
+    }
     const rows = await this.db.prepare('SELECT id, position FROM players').all<{ id: string; position: string }>();
+    if (version != null) await writePositionsSnapshot(this.db, version, rows.results).catch(() => undefined);
     return new Map(rows.results.map((r) => [r.id, r.position]));
   }
 
