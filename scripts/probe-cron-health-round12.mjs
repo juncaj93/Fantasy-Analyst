@@ -20,6 +20,8 @@
  * Times printed in Eastern and UTC.
  */
 
+import { CRONS, judgeAll, readInvocations, LOOKBACK_HOURS } from './cron-health-watch.mjs';
+
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 let ACCOUNT = process.env.ACCOUNT_ID || null;
 const SCRIPT = process.env.SCRIPT_NAME ?? 'fantasy-analyst';
@@ -300,6 +302,91 @@ for (const [label, from] of days) {
   }
   for (const [k, n] of [...counts].sort()) console.log(`   scheduled ${k}: ${n}`);
   if (!shown) console.log('   no 0 9 * * * invocation in this window (logs kept 3 days on this plan)');
+}
+
+/* ---------------------------------- 5. is the per-query count sampled? */
+
+heading("5. The position list's count: sampled or real?");
+async function fieldsOf(name) {
+  const d = await graphql(`query F($n: String!) { __type(name: $n) { fields { name type { name kind ofType { name kind } } } } }`, { n: name });
+  return d?.__type?.fields ?? [];
+}
+try {
+  const unwrap = (t) => {
+    while (t && !t.name) t = t.ofType;
+    return t?.name ?? null;
+  };
+  const viewerType = unwrap((await fieldsOf('Query')).find((f) => f.name === 'viewer')?.type);
+  const accountType = unwrap((await fieldsOf(viewerType)).find((f) => f.name === 'accounts')?.type);
+  const acct = await fieldsOf(accountType);
+  const groupType = (acct.find((f) => f.name === 'd1QueriesAdaptiveGroups')?.type);
+  let t = groupType;
+  while (t && !t.name) t = t.ofType;
+  const groupFields = await fieldsOf(t?.name);
+  console.log(`d1QueriesAdaptiveGroups parts: ${groupFields.map((f) => f.name).join(', ')}`);
+  const avgType = groupFields.find((f) => f.name === 'avg')?.type;
+  let at = avgType;
+  while (at && !at.name) at = at.ofType;
+  const avgFields = at?.name ? (await fieldsOf(at.name)).map((f) => f.name) : [];
+  console.log(`avg fields: ${avgFields.join(', ') || 'none'}`);
+  if (avgFields.includes('sampleInterval')) {
+    for (const [label, from] of days) {
+      const f = from.replace('08:59', '09:00');
+      const d = await graphql(
+        `query Q($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+           d1QueriesAdaptiveGroups(limit: 50, filter: { datetime_geq: $from, datetime_lt: $to }, orderBy: [count_DESC]) {
+             dimensions { query databaseId } count sum { rowsRead } avg { sampleInterval }
+           } } } }`,
+        { a: ACCOUNT, from: f, to: new Date(Date.parse(f) + 3 * 60_000).toISOString() },
+      );
+      console.log(`\n${label}, 09:00 to 09:03 UTC: query, reported calls, average sample interval`);
+      for (const r of d?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups ?? []) {
+        if (DB_ID && r.dimensions.databaseId !== DB_ID) continue;
+        const q = String(r.dimensions.query).replace(/\s+/g, ' ').slice(0, 70);
+        console.log(`   ${String(r.count).padStart(5)} calls, sample interval ${Number(r.avg?.sampleInterval ?? NaN).toFixed(1).padStart(6)}  ${q}`);
+      }
+    }
+  }
+  // The database-level count for the same minutes, which is what the allowance is charged on.
+  const dbGroup = acct.find((f) => f.name === 'd1AnalyticsAdaptiveGroups');
+  if (dbGroup) {
+    for (const [label, from] of days) {
+      const f = from.replace('08:59', '09:00');
+      const d = await graphql(
+        `query Q($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+           d1AnalyticsAdaptiveGroups(limit: 50, filter: { datetimeMinute_geq: $from, datetimeMinute_lt: $to }) {
+             dimensions { databaseId datetimeMinute } sum { rowsRead readQueries writeQueries }
+           } } } }`,
+        { a: ACCOUNT, from: f, to: new Date(Date.parse(f) + 3 * 60_000).toISOString() },
+      );
+      for (const r of (d?.viewer?.accounts?.[0]?.d1AnalyticsAdaptiveGroups ?? []).sort((a, b) => String(a.dimensions.datetimeMinute).localeCompare(String(b.dimensions.datetimeMinute)))) {
+        if (DB_ID && r.dimensions.databaseId !== DB_ID) continue;
+        console.log(`   ${label} ${String(r.dimensions.datetimeMinute).slice(11, 16)} UTC database total: ${Number(r.sum.rowsRead).toLocaleString('en-US')} rows read, ${r.sum.readQueries} reads, ${r.sum.writeQueries} writes`);
+      }
+    }
+  }
+} catch (err) {
+  console.log(`sampling check failed: ${err.message}`);
+}
+
+/* ------------------------------------------- 6. the fixed watch, for real */
+
+heading('6. The cron watch as fixed in this round, run against Cloudflare');
+try {
+  const read = await readInvocations({
+    token: TOKEN,
+    account: ACCOUNT,
+    from: new Date(now.getTime() - LOOKBACK_HOURS * 3_600_000).toISOString(),
+    to: now.toISOString(),
+  });
+  console.log(`source: ${read.source}, ${read.rows.length} scheduled runs over ${Math.round(read.lookbackHours)} hours`);
+  const by = new Map();
+  for (const r of read.rows) by.set(`${r.cron} ${r.status}`, (by.get(`${r.cron} ${r.status}`) ?? 0) + 1);
+  for (const [k, n] of [...by].sort()) console.log(`   ${String(n).padStart(5)}  ${k}`);
+  for (const r of read.rows.filter((x) => x.cron === '0 9 * * *')) console.log(`   09:00 run: ${eastern(r.datetime)} ET  ${r.status}`);
+  for (const v of judgeAll(read.rows, now, CRONS, read.lookbackHours)) console.log(`${v.result === 'success' ? 'ok  ' : 'FAIL'}  ${v.name}: ${v.message}`);
+} catch (err) {
+  console.log(`watch failed: ${err.message}`);
 }
 
 console.log(`\nFinished ${eastern(Date.now())} ET`);

@@ -68,7 +68,7 @@ const ok = (status) => status === 'success';
  *
  * `runs` are `{ datetime, status }`, any order.
  */
-export function judgeCron(spec, runs, now) {
+export function judgeCron(spec, runs, now, lookbackHours = LOOKBACK_HOURS) {
   const sorted = [...runs].sort((a, b) => Date.parse(a.datetime) - Date.parse(b.datetime));
   const last = sorted.at(-1);
   const verdict = (healthy, message) => ({ name: spec.name, cron: spec.cron, result: healthy ? 'success' : 'failure', message });
@@ -76,10 +76,10 @@ export function judgeCron(spec, runs, now) {
   if (!last) {
     // A weekly cron's last run can sit just outside the week this can see, so
     // an empty window only counts as silence for a cron due more often than that.
-    if (spec.expectEveryMinutes >= LOOKBACK_HOURS * 60) {
-      return verdict(true, `${spec.cron} has not run within the ${LOOKBACK_HOURS} hours this can see; nothing to judge.`);
+    if (spec.expectEveryMinutes >= lookbackHours * 60) {
+      return verdict(true, `${spec.cron} has not run within the ${Math.round(lookbackHours)} hours this can see; nothing to judge.`);
     }
-    return verdict(false, `${spec.cron} has no invocation on record in the last ${LOOKBACK_HOURS} hours.`);
+    return verdict(false, `${spec.cron} has no invocation on record in the last ${Math.round(lookbackHours)} hours.`);
   }
   const silentMinutes = (now.getTime() - Date.parse(last.datetime)) / 60_000;
   if (silentMinutes > spec.expectEveryMinutes) {
@@ -125,13 +125,38 @@ function describe(runs) {
 }
 
 /** Every cron's verdict, from every invocation in the window. */
-export function judgeAll(rows, now, crons = CRONS) {
-  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now));
+export function judgeAll(rows, now, crons = CRONS, lookbackHours = LOOKBACK_HOURS) {
+  return crons.map((spec) => judgeCron(spec, rows.filter((r) => r.cron === spec.cron), now, lookbackHours));
 }
 
 /* ------------------------------------------------------------ the network */
 
 const GQL = 'https://api.cloudflare.com/client/v4/graphql';
+
+/**
+ * How far back the Worker's own logs reach.
+ *
+ * Workers Logs keep three days on this plan. A weekly cron's last run is
+ * usually older than that, and `judgeCron` already treats an empty window as
+ * "nothing to judge" for a cron due less often than the window.
+ */
+export const LOGS_LOOKBACK_HOURS = 72;
+
+/** Events asked for per log query; a slice that fills it is split in half. */
+const LOGS_LIMIT = 1000;
+
+/**
+ * A moment, whichever way it was written.
+ *
+ * Round 11's probe handed this file `'2026-11-05T00:00:00Z'` and died on
+ * `from.toISOString is not a function`, so its count of 09:00 runs never
+ * printed. A string, a number or a Date all mean the same instant here.
+ */
+export function toDate(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) throw new Error(`not a date: ${JSON.stringify(value)}`);
+  return d;
+}
 
 async function resolveAccount(token, fetchImpl) {
   const res = await fetchImpl('https://api.cloudflare.com/client/v4/accounts', {
@@ -142,9 +167,8 @@ async function resolveAccount(token, fetchImpl) {
   return id;
 }
 
-/** Every scheduled invocation of the Worker since `from`, oldest first. */
-export async function fetchInvocations({ token, account, script = 'fantasy-analyst', from, to, fetchImpl = fetch }) {
-  const acct = account || (await resolveAccount(token, fetchImpl));
+/** Cloudflare's analytics record of scheduled invocations. */
+async function fetchFromAnalytics({ token, account, script, from, to, fetchImpl }) {
   const rows = [];
   let cursor = from.toISOString();
   for (let page = 0; page < 10; page += 1) {
@@ -158,7 +182,7 @@ export async function fetchInvocations({ token, account, script = 'fantasy-analy
               filter: { datetime_geq: $from, datetime_leq: $to, scriptName: $s }) { cron status datetime }
           } }
         }`,
-        variables: { a: acct, from: cursor, to: to.toISOString(), s: script },
+        variables: { a: account, from: cursor, to: to.toISOString(), s: script },
       }),
     });
     const body = await res.json().catch(() => null);
@@ -174,6 +198,100 @@ export async function fetchInvocations({ token, account, script = 'fantasy-analy
   return rows;
 }
 
+/**
+ * The same record from the Worker's own logs (Workers Observability).
+ *
+ * Since early November the analytics dataset above answers an empty list for
+ * this account, for any script and any window, while the logs still hold one
+ * event per scheduled run with its cron and how it ended (`ok`, `exceededCpu`,
+ * ...). Asked one cron at a time, so a busy afternoon of page loads cannot
+ * crowd the scheduled runs out of a page.
+ */
+export async function fetchFromLogs({ token, account, script = 'fantasy-analyst', from, to, crons = CRONS, fetchImpl = fetch }) {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/observability/telemetry/query`;
+  const ask = async (cron, fromMs, toMs, depth) => {
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        queryId: `cron-watch-${fromMs}-${toMs}`,
+        timeframe: { from: fromMs, to: toMs },
+        view: 'events',
+        limit: LOGS_LIMIT,
+        parameters: {
+          datasets: ['cloudflare-workers'],
+          filters: [
+            { key: '$metadata.service', operation: 'eq', type: 'string', value: script },
+            { key: '$workers.event.cron', operation: 'eq', type: 'string', value: cron },
+          ],
+          filterCombination: 'and',
+        },
+      }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!body?.success) {
+      throw new Error(`Cloudflare logs: HTTP ${res.status} ${JSON.stringify(body?.errors ?? body).slice(0, 400)}`);
+    }
+    const events = body.result?.events?.events;
+    if (!Array.isArray(events)) throw new Error('Cloudflare logs returned no event list');
+    if (events.length >= LOGS_LIMIT && depth < 8 && toMs - fromMs > 10 * 60_000) {
+      const mid = Math.floor((fromMs + toMs) / 2);
+      return [...(await ask(cron, fromMs, mid, depth + 1)), ...(await ask(cron, mid, toMs, depth + 1))];
+    }
+    return events;
+  };
+
+  const runs = new Map();
+  for (const { cron } of crons) {
+    for (const e of await ask(cron, from.getTime(), to.getTime(), 0)) {
+      const w = e.$workers ?? {};
+      const id = e.$metadata?.requestId ?? w.requestId ?? `${cron}@${e.timestamp}`;
+      const run = runs.get(id) ?? { cron: w.event?.cron ?? cron, status: null, at: Infinity };
+      if (w.outcome && !run.status) run.status = w.outcome === 'ok' ? 'success' : String(w.outcome);
+      const scheduled = Number(w.event?.scheduledTime);
+      // scheduledTime arrives in seconds on some events and milliseconds on others.
+      const at = Number.isFinite(scheduled) && scheduled > 0 ? (scheduled < 1e12 ? scheduled * 1000 : scheduled) : Number(e.timestamp);
+      if (Number.isFinite(at)) run.at = Math.min(run.at, at);
+      runs.set(id, run);
+    }
+  }
+  return [...runs.values()]
+    // A run still going has no outcome yet; the next hourly check will see it.
+    .filter((r) => r.status && Number.isFinite(r.at))
+    .map((r) => ({ cron: r.cron, status: r.status, datetime: new Date(r.at).toISOString() }))
+    .sort((a, b) => Date.parse(a.datetime) - Date.parse(b.datetime));
+}
+
+/**
+ * Every scheduled invocation of the Worker since `from`, oldest first, and
+ * where the list came from. The analytics record first; the logs when it is
+ * empty or cannot be read; an error only when neither can be read.
+ */
+export async function readInvocations({ token, account, script = 'fantasy-analyst', from, to, fetchImpl = fetch }) {
+  const acct = account || (await resolveAccount(token, fetchImpl));
+  const fromDate = toDate(from);
+  const toDateValue = toDate(to);
+  let analyticsError = null;
+  try {
+    const rows = await fetchFromAnalytics({ token, account: acct, script, from: fromDate, to: toDateValue, fetchImpl });
+    if (rows.length > 0) return { rows, source: 'analytics', lookbackHours: (toDateValue - fromDate) / 3_600_000 };
+  } catch (err) {
+    analyticsError = err;
+  }
+  const logsFrom = new Date(Math.max(fromDate.getTime(), toDateValue.getTime() - LOGS_LOOKBACK_HOURS * 3_600_000));
+  try {
+    const rows = await fetchFromLogs({ token, account: acct, script, from: logsFrom, to: toDateValue, fetchImpl });
+    return { rows, source: 'logs', lookbackHours: (toDateValue - logsFrom) / 3_600_000 };
+  } catch (err) {
+    throw new Error([analyticsError?.message, err.message].filter(Boolean).join(' / '));
+  }
+}
+
+/** The invocations alone, for the probes that only want the list. */
+export async function fetchInvocations(args) {
+  return (await readInvocations(args)).rows;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) {
@@ -181,9 +299,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.exit(1);
   }
   const now = new Date();
-  let rows;
+  let read;
   try {
-    rows = await fetchInvocations({
+    read = await readInvocations({
       token,
       account: process.env.CLOUDFLARE_ACCOUNT_ID,
       from: new Date(now.getTime() - LOOKBACK_HOURS * 3_600_000),
@@ -195,7 +313,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.log(`::error::${err.message}`);
     process.exit(1);
   }
-  const verdicts = judgeAll(rows, now);
+  console.log(`source: ${read.source === 'logs' ? "the Worker's logs" : "Cloudflare's analytics"}, ${read.rows.length} scheduled runs over ${Math.round(read.lookbackHours)} hours`);
+  const verdicts = judgeAll(read.rows, now, CRONS, read.lookbackHours);
   for (const v of verdicts) console.log(`${v.result === 'success' ? 'ok  ' : 'FAIL'}  ${v.name}: ${v.message}`);
   // The machine-readable line the workflow picks up.
   console.log(`VERDICTS=${JSON.stringify(verdicts.map(({ name, result }) => ({ name, result })))}`);
