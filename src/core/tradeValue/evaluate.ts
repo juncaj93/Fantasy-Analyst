@@ -109,12 +109,13 @@ export type ReplacementLevels = Map<string, ReplacementLevel>;
  * The mean of the best few rather than the single best, because the best free
  * agent by one week's number is partly one good matchup, and a value measured
  * against a lucky waiver wire is too low for everyone. Free agents who are out
- * or on a bye this week are not used: they are not what a manager claims now.
+ * this week (Doubtful counts as Out, Alex's rule of 5 November 2026) are not
+ * used: they are not what a manager claims now.
  */
 export function replacementLevels(freeAgents: readonly PlayerRate[]): ReplacementLevels {
   const byPosition = new Map<string, PlayerRate[]>();
   for (const fa of freeAgents) {
-    if (fa.rate == null || isOutNow(fa.designation)) continue;
+    if (fa.rate == null || isOutNow(fa.designation) || fa.designation === 'doubtful') continue;
     const list = byPosition.get(fa.position);
     if (list) list.push(fa);
     else byPosition.set(fa.position, [fa]);

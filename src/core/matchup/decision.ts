@@ -94,14 +94,23 @@ export function assessLineupDecision(opts: {
 
   const used = new Set<string>();
   const fills: HoleFill[] = [];
+  /*
+   * The lineup as the fills so far leave it. A bench player can take a hole
+   * directly or with the other starters moving between slots that take them
+   * (round 13): an Out back in RB is filled by a bench receiver when the FLEX
+   * back slides to RB, which is the move Team names. A starter whose game has
+   * kicked off keeps his slot.
+   */
+  const lineup = mine.filter((p) => p.starting);
   for (const starter of holes) {
     const slot = opts.slots.find((s) => s.key === starter.slot);
     if (!slot) continue;
     const best = bench
-      .filter((c) => !used.has(c.playerId) && slot.accepts.includes(c.position))
+      .filter((c) => !used.has(c.playerId) && canTakeHole(lineup, starter, c, opts.slots, notKickedOff))
       .sort((a, b) => rankedPoints(b) - rankedPoints(a) || a.name.localeCompare(b.name))[0];
     if (!best) continue;
     used.add(best.playerId);
+    lineup.splice(lineup.indexOf(starter), 1, best);
     const winAfter = winProbabilityWithSwap(opts.result, starter.playerId, best.playerId);
     fills.push({
       slot: slot.slot,
@@ -126,6 +135,42 @@ export function assessLineupDecision(opts: {
           ? 'Every starter still to play has a game this week.'
           : 'Nobody on your bench could legally take the slot.',
   };
+}
+
+/**
+ * Whether `candidate` can replace `hole` with every other starter still
+ * seated: kicked-off starters in their own slots, the rest anywhere their
+ * position is accepted (augmenting paths, as `lineup.ts` seats a lineup).
+ */
+function canTakeHole(
+  lineup: readonly MatchupPlayerInput[],
+  hole: MatchupPlayerInput,
+  candidate: MatchupPlayerInput,
+  slots: readonly SlotSpec[],
+  notKickedOff: (playerId: string) => boolean,
+): boolean {
+  const after = [...lineup.filter((p) => p.playerId !== hole.playerId), candidate];
+  const fixed = new Set<string>();
+  const movable: MatchupPlayerInput[] = [];
+  for (const p of after) {
+    if (p !== candidate && p.slot != null && !notKickedOff(p.playerId) && slots.some((s) => s.key === p.slot)) fixed.add(p.slot);
+    else movable.push(p);
+  }
+  const open = slots.filter((s) => !fixed.has(s.key));
+  const bySlot = new Map<number, MatchupPlayerInput>();
+  const place = (p: MatchupPlayerInput, seen: Set<number>): boolean => {
+    for (let i = 0; i < open.length; i++) {
+      if (seen.has(i) || !open[i]!.accepts.includes(p.position)) continue;
+      seen.add(i);
+      const holder = bySlot.get(i);
+      if (!holder || place(holder, seen)) {
+        bySlot.set(i, p);
+        return true;
+      }
+    }
+    return false;
+  };
+  return movable.every((p) => place(p, new Set<number>()));
 }
 
 /** The shared ranking rule (`rankingNumber`), the one `lineup.ts` ranks with. */

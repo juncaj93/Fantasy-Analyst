@@ -36,4 +36,9 @@ import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
  * only names who takes a real hole, by Team's ranking rule (`decision.ts`).
  * A Doubtful player is simulated at zero, as Out.
  */
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@5', STARTSIT_ENGINE_VERSION);
+/**
+ * `matchup@6`, 8 November 2026 (round 13): a hole is filled the way Team
+ * fills it, with the other starters moving between slots that take them, so
+ * Live insights names the same player Best move does.
+ */
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@6', STARTSIT_ENGINE_VERSION);

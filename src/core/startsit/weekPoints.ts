@@ -63,7 +63,7 @@ export function weekPointsFrom(decision: DecisionPoints | null | undefined, rule
   if (decision == null || decision.basis === 'unpriced' || decision.basis === 'partial') {
     return { points: null, basis: 'none', lowerConfidence: true, out: false };
   }
-  /* Never below zero: a Doubtful 5 is 0 here, as on Team's row (`rowFigure`). */
+  /* Never below zero, as on Team's row (`rowFigure`). */
   return { points: Math.max(0, decision.points), basis: decision.basis, lowerConfidence: decision.basis !== 'market', out: false };
 }
 
@@ -73,9 +73,9 @@ export function weekPointsOf(evaluation: { decision?: DecisionPoints | null; rul
 }
 
 /**
- * The figure a Team row starts from: the week number before the availability
- * charge, so `rowFigure` can show a Doubtful player's discount and an Out
- * player's "if he played" figure from the same arithmetic Compare uses.
+ * The figure a Team row starts from: the week number before availability, so
+ * `rowFigure` can show an Out or Doubtful player's "if he played" figure from
+ * the same arithmetic Compare uses.
  */
 export function weekPointsBeforeStatus(
   evaluation: {

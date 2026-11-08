@@ -7,7 +7,7 @@
  * move when the player it tells you to start carries one. The reader decides.
  *
  * Out and Doubtful still get a chip, in the stronger tone, so the card says
- * why its number is gone or low.
+ * why its number is gone.
  */
 
 export type AvailabilityTone = 'warn' | 'out';

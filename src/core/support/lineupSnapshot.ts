@@ -32,6 +32,7 @@
  */
 
 import { assembleLineup } from '../startsit/assemble.ts';
+import { currentSlotsOf } from '../startsit/sleeperLineup.ts';
 import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
 import type { StartSitInput } from '../startsit/engine.ts';
 import type { StartSitMode } from '../startsit/mode.ts';
@@ -113,6 +114,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
     shape: input.shape,
     profile: input.profile,
     currentStarterIds: input.mine.starterIds,
+    currentSlotOf: currentSlotsOf(input.league.rosterPositions, input.mine.starterSlotIds),
     mode: input.mode,
     published: input.published,
     unknownPlayers: input.mine.playerIds.length - input.inputs.length,
@@ -177,6 +179,7 @@ export function captureLineupSnapshot(input: LineupCaptureInput): SupportSnapsho
         now: capturedAt,
         rules: captureLeagueRules(input.league),
         currentStarterIds: input.mine.starterIds,
+        currentSlots: Object.fromEntries(currentSlotsOf(input.league.rosterPositions, input.mine.starterSlotIds)),
         mode: input.mode,
         ...(input.posture ? { posture: input.posture } : {}),
         startSit,
@@ -207,6 +210,7 @@ export function replayLineupSnapshot(snapshot: SupportSnapshot<LineupPayload>): 
     shape,
     profile,
     currentStarterIds: inputs.currentStarterIds,
+    ...(inputs.currentSlots ? { currentSlotOf: new Map(Object.entries(inputs.currentSlots)) } : {}),
     mode: inputs.mode,
     published: new Map(Object.entries(inputs.published)),
     unknownPlayers: inputs.unknownPlayers,

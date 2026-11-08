@@ -141,4 +141,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * Doubtful starter counts as Out in the competition read; last week's top
  * free-agent scorers and the backs behind hurt top backs are scanned.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@20', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@21`, 8 November 2026 (round 13): the season value and the 1.5
+ * playoff weight stay on in the playoffs (week 15, or week 14 once its games
+ * start), and the window stops at week 17; a Doubtful free agent is not part
+ * of the replacement level; Pick up and start measures its gain on the
+ * ranking numbers, as Team's swap does.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@21', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

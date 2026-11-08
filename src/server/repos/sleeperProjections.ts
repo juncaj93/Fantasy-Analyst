@@ -14,7 +14,6 @@
  */
 
 import {
-  SLEEPER_PROJECTION_PUBLISHER,
   type PublishedDefenseLine,
   type SleeperScoringKey,
   type SleeperWeeklyProjection,
@@ -289,9 +288,6 @@ export class SleeperProjectionsRepo {
     };
   }
 }
-
-/** What the app expects the feed to call itself, for callers that want to check. */
-export const EXPECTED_PUBLISHER = SLEEPER_PROJECTION_PUBLISHER;
 
 function toStored(results: Record<string, unknown>[] | undefined): Map<string, StoredWeeklyProjection> {
   const out = new Map<string, StoredWeeklyProjection>();

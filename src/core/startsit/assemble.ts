@@ -86,6 +86,8 @@ export interface LineupAssemblyRequest {
    * that keeps Rotowire's numbers out of a recommendation.
    */
   publishedRefusal?: string | null;
+  /** Sleeper's slot for each current starter (`currentSlotsOf`), so a locked starter keeps it. */
+  currentSlotOf?: ReadonlyMap<string, string>;
   now?: string | Date;
 }
 
@@ -104,6 +106,7 @@ export function assembleLineup(request: LineupAssemblyRequest): LineupAssembly {
     currentStarterIds: request.currentStarterIds,
     mode: request.mode,
     published,
+    ...(request.currentSlotOf ? { currentSlotOf: request.currentSlotOf } : {}),
     ...(request.now === undefined ? {} : { now: request.now }),
   });
 

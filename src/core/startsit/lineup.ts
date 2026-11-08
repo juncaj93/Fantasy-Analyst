@@ -350,6 +350,14 @@ export function recommendLineup(
      * that holds that claim; see `sleeperProjectionFallback.test.ts`.
      */
     published?: ReadonlyMap<string, number>;
+    /**
+     * Sleeper's slot label for each current starter (`starterSlotIds` against
+     * the league's starting slots). A starter whose game has kicked off keeps
+     * that exact slot (round 13, review S4): a back locked in Sleeper's FLEX
+     * stays in FLEX, so no swap asks for a receiver in an RB slot Sleeper
+     * cannot give him. Absent: the narrowest slot that takes him, as before.
+     */
+    currentSlotOf?: ReadonlyMap<string, string>;
   } = {},
 ): LineupRecommendation {
   const mode = opts.mode ?? 'balanced';
@@ -447,7 +455,7 @@ export function recommendLineup(
 
   // Locked starters hold their slot first; the optimiser then fills what is
   // left from the players who can still be moved.
-  const reserved = reserveLockedSlots(lockedStarters, slots);
+  const reserved = reserveLockedSlots(lockedStarters, slots, opts.currentSlotOf);
   const openSlots = slots.map((s, index) => ({ spec: s, index })).filter(({ index }) => !reserved.has(index));
   /*
    * Where the market runs out, the incumbent holds the slot.
@@ -532,10 +540,12 @@ export function recommendLineup(
    */
   for (const evaluation of evaluations) evaluation.decision = decisionPoints(evaluation, opts.published);
 
-  const built = buildSwaps(filled, slots, currentStarters, evaluations, opts.published);
+  /* The slots a locked starter holds are not anybody else's to take (review S4). */
+  const pinned = { ids: new Set([...reserved.values()].map((e) => e.playerId)), open: openSlots.map((o) => o.spec) };
+  const built = buildSwaps(filled, slots, currentStarters, evaluations, opts.published, pinned);
   const { swaps, fills } = built;
   /* Inside a toss-up the week's mode picks the lean (5 November 2026, `tossUpLean`). */
-  const tossUps = leanTossUps(built, { mode, slots, filled, currentStarters, evaluations, lockedIds, published: opts.published });
+  const tossUps = leanTossUps(built, { mode, slots, filled, currentStarters, evaluations, lockedIds, published: opts.published, pinned });
 
   /*
    * Why the card above is quiet, said once rather than on nine rows.
@@ -864,10 +874,23 @@ function kickoffMs(player: StartSitEvaluation): number | null {
 function reserveLockedSlots(
   lockedStarters: StartSitEvaluation[],
   slots: SlotSpec[],
+  currentSlotOf?: ReadonlyMap<string, string>,
 ): Map<number, StartSitEvaluation> {
   const reserved = new Map<number, StartSitEvaluation>();
   const order = [...lockedStarters].sort((a, b) => a.name.localeCompare(b.name));
+  /* First his own Sleeper slot, when it is known: a locked player cannot be moved between slots either. */
+  const placed = new Set<string>();
   for (const player of order) {
+    const label = currentSlotOf?.get(player.playerId)?.toUpperCase();
+    if (!label) continue;
+    const own = slots.findIndex((spec, index) => !reserved.has(index) && spec.slot.toUpperCase() === label && spec.accepts.includes(player.position));
+    if (own >= 0) {
+      reserved.set(own, player);
+      placed.add(player.playerId);
+    }
+  }
+  for (const player of order) {
+    if (placed.has(player.playerId)) continue;
     const candidates = slots
       .map((spec, index) => ({ spec, index }))
       .filter(({ spec, index }) => !reserved.has(index) && spec.accepts.includes(player.position))
@@ -1166,6 +1189,7 @@ function buildSwaps(
   currentStarters: Set<string>,
   evaluations: StartSitEvaluation[],
   published?: ReadonlyMap<string, number>,
+  pinned?: Pinned,
 ): { swaps: LineupSwap[]; fills: LineupFill[]; tossUps: LineupSwap[] } {
   const byId = new Map(evaluations.map((e) => [e.playerId, e]));
   const recommendedIds = new Set(filled.map((s) => s.playerId).filter((id): id is string => id != null));
@@ -1192,7 +1216,7 @@ function buildSwaps(
    * label, which is the whole of the fix — see the docblock above.
    */
   const lineup = new Set(currentStarters);
-  const seated = (ids: Iterable<string>): number => seatable([...ids].map(positionOf), slots);
+  const seated = (ids: Iterable<string>): number => seatableAround([...ids], positionOf, slots, pinned);
 
   for (const slot of filled) {
     if (slot.playerId == null || slot.alreadyStarting) continue;
@@ -1258,7 +1282,18 @@ function buildSwaps(
      */
     const outgoingBasis = rankingPoints(outgoing, published);
     const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
-    if (!(gain > 0)) continue;
+    /*
+     * Gated on the ranking numbers (round 13, review S6): a Sleeper-only
+     * number ranks two points lower here as everywhere, so a priced 14 over a
+     * Sleeper-only 14.5 (12.5 ranked) is a toss-up, as Compare says, not
+     * nothing. A swap still prints the honest difference (`gain`); a toss-up
+     * carries the ranked gap, which is what orders them.
+     */
+    const ranked = round2(
+      rankingNumber(incomingBasis.points, incomingBasis.borrowed) -
+        (outgoingBasis == null ? 0 : rankingNumber(outgoingBasis.points, outgoingBasis.borrowed)),
+    );
+    if (!(ranked > 0)) continue;
     /*
      * The toss-up bar (`tossup.ts`): under two points on the ranking numbers,
      * the lineup keeps Sleeper's man and Best move says "Toss-up". Never when
@@ -1280,7 +1315,7 @@ function buildSwaps(
         inName: incoming.name,
         outPlayerId: outgoing.playerId,
         outName: outgoing.name,
-        gain,
+        gain: ranked,
         reason: 'Toss-up',
       });
       continue;
@@ -1336,6 +1371,7 @@ function leanTossUps(
     evaluations: StartSitEvaluation[];
     lockedIds: Set<string>;
     published?: ReadonlyMap<string, number>;
+    pinned?: Pinned;
   },
 ): LineupSwap[] {
   const byId = new Map(ctx.evaluations.map((e) => [e.playerId, e]));
@@ -1386,7 +1422,7 @@ function leanTossUps(
       ...out.flatMap((t) => [t.inPlayerId, t.outPlayerId]),
     ]);
     const positionOf = (id: string) => byId.get(id)?.position ?? '';
-    const seated = (ids: Iterable<string>) => seatable([...ids].map(positionOf), ctx.slots);
+    const seated = (ids: Iterable<string>) => seatableAround([...ids], positionOf, ctx.slots, ctx.pinned);
     const before = seated(lineup);
     const movable = (e: StartSitEvaluation) =>
       !ctx.lockedIds.has(e.playerId) && !e.ruledOut && !e.onReserve && !named.has(e.playerId);
@@ -1454,6 +1490,23 @@ function seatable(positions: string[], slots: SlotSpec[]): number {
   return positions.filter((position) => tryAssign({ position }, slots, bySlot, new Set<number>())).length;
 }
 
+/** Locked starters and the slots they hold, which nobody else can be seated in. */
+interface Pinned {
+  ids: ReadonlySet<string>;
+  /** Every slot not held by a locked starter. */
+  open: SlotSpec[];
+}
+
+/**
+ * How many of these players can be seated, with each locked starter kept in
+ * the slot he holds: he counts as seated, and the rest share the open slots.
+ */
+function seatableAround(ids: string[], positionOf: (id: string) => string, slots: SlotSpec[], pinned?: Pinned): number {
+  if (!pinned || pinned.ids.size === 0) return seatable(ids.map(positionOf), slots);
+  const held = ids.filter((id) => pinned.ids.has(id)).length;
+  return held + seatable(ids.filter((id) => !pinned.ids.has(id)).map(positionOf), pinned.open);
+}
+
 /** One player as {@link solveLineup} reads him: a position and a decision number. */
 export interface SolvablePlayer {
   playerId: string;
@@ -1470,6 +1523,12 @@ export interface SolvablePlayer {
 export interface SolvedLineup {
   /** The decision numbers of the chosen players, summed. Never rounded. */
   total: number;
+  /**
+   * The same on ranking numbers: a Sleeper-only number two points lower. What
+   * a gain is measured on (round 13), so a free agent over a Sleeper-only
+   * starter gains what Team's swap would.
+   */
+  rankedTotal: number;
   /** Who starts, by slot label, in the league's slot order. */
   slots: { slot: string; playerId: string }[];
   starterIds: Set<string>;
@@ -1498,6 +1557,7 @@ export function solveLineup(players: readonly SolvablePlayer[], shape: RosterSha
   const seated = [...bySlot.entries()].sort((a, b) => a[0] - b[0]);
   return {
     total: seated.reduce((sum, [, p]) => sum + p.points, 0),
+    rankedTotal: seated.reduce((sum, [, p]) => sum + rankingNumber(p.points, p.borrowed), 0),
     slots: seated.map(([index, p]) => ({ slot: slots[index]!.slot, playerId: p.playerId })),
     starterIds: new Set(seated.map(([, p]) => p.playerId)),
   };
@@ -1613,7 +1673,13 @@ function rankingKey(
   evaluation: StartSitEvaluation,
   published: ReadonlyMap<string, number> | undefined,
 ): number | null {
-  const basis = rankingPoints(evaluation, published, { rosterRisk: true });
+  /*
+   * No roster-risk charge (round 13, review S7): Questionable is full value on
+   * every screen (Alex's rule), so Team ranks on Compare's number. The
+   * late-swap risk is still worked out and named (`lateSwapRisks`), never
+   * charged.
+   */
+  const basis = rankingPoints(evaluation, published);
   if (basis == null) return null;
   return rankingNumber(basis.points, basis.borrowed);
 }

@@ -435,13 +435,6 @@ export function lognormalParameters(mean: number, cv: number): { mu: number; sig
   return { mu: Math.log(Math.max(mean, 1e-6)) - (sigma * sigma) / 2, sigma };
 }
 
-/** Draw from that lognormal given a standard-normal deviate. */
-export function lognormalDraw(mean: number, cv: number, z: number): number {
-  if (mean <= 0) return 0;
-  const { mu, sigma } = lognormalParameters(mean, cv);
-  return Math.exp(mu + sigma * z);
-}
-
 /**
  * The unconditional expectation of what is still to come.
  *

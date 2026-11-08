@@ -5,7 +5,7 @@
  * easiest to get wrong. §5 of the brief states the rule this module is built
  * around: behaviour may rank and tiebreak plausible offers, and it may never
  * cause the app to call an objectively lopsided trade fair. Both truths are
- * preserved rather than blended — "objective value: slight edge to you" and
+ * preserved rather than blended — "objective value: about even" and
  * "manager fit: above normal" are two sentences, not one score.
  *
  * Four properties are enforced here rather than left to the caller:

@@ -138,7 +138,6 @@ export const SETTING_KEYS = {
    * whoever forgot would be silently ranking on the default.
    */
   draftSignalBalance: 'draft.signalBalance',
-  vegasProvider: 'vegas.provider',
   lastVegasRefresh: 'vegas.lastRefresh',
   /**
    * When the week's schedule was last bought from the provider.

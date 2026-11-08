@@ -1213,7 +1213,7 @@ export interface StartSitEvaluation {
     label: string;
     display: string;
     value: number;
-    /** The value before the Floor/Ceiling multiplier, on newer deployments. */
+    /** Same as `value` since Floor/Ceiling stopped scaling numbers (startsit@7); kept for older payloads. */
     baseValue?: number;
     modeWeight?: number;
     /** What to print when it differs from `value`: a row held to the published week's budget. */

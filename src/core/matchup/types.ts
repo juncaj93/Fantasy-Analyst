@@ -87,7 +87,7 @@ export interface MatchupPlayerInput {
    * included, the same figure Team, Compare and Waivers print.
    *
    * **Availability is in this number, by Team's rule** (23 October 2026):
-   * Questionable at full value, Doubtful six points off, never below zero.
+   * Questionable at full value, Doubtful as Out (zero).
    * One function owns that, `core/injury/weekAvailability.ts`, and there is no
    * second charge in the simulation: every player is drawn at full value.
    *

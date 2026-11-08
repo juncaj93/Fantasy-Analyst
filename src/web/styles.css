@@ -3865,6 +3865,20 @@ body,
   gap: var(--sp-1);
 }
 
+/*
+ * A fold's summary is drawn at 32px and reached at 44 (round 13): a
+ * transparent ::before, as on `.btn-sm` (its ::after is the chevron).
+ */
+.disclosure > summary {
+  position: relative;
+}
+
+.disclosure > summary::before {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+
 .disclosure > summary::-webkit-details-marker {
   display: none;
 }
@@ -10343,6 +10357,7 @@ div.matchup-result {
 }
 
 .tb-toggle {
+  position: relative;
   flex: 0 0 auto;
   margin-left: auto;
   white-space: nowrap;
@@ -10351,6 +10366,13 @@ div.matchup-result {
   font: inherit;
   font-size: 0.74rem;
   font-weight: 650;
+}
+
+/* Drawn at 36px, reached at 44 (round 13), the same transparent extension `.btn` uses. */
+.tb-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
 }
 
 /* Find trades stays in reach, just above the tab bar. */

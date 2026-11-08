@@ -308,7 +308,8 @@ describe('Start/Sit compares like with like', () => {
     const thin = candidate('thin', 'Thinly Covered', [{ market: 'receiving_yards', line: 92 }]);
 
     const comparison = compareStartSit([covered, thin], HALF_PPR);
-    expect(comparison.recommendedPlayerId).toBe('covered');
+    /* A partial market under 2 points is a toss-up in Compare as on Team since round 13: the lean is the pick. */
+    expect(comparison.recommendedPlayerId ?? comparison.tossUp?.leanPlayerId).toBe('covered');
     expect(comparison.comparability.comparable).toBe(false);
     expect(comparison.confidence).toBe('low');
     expect(comparison.warnings.join(' ')).toContain('Market coverage differs');

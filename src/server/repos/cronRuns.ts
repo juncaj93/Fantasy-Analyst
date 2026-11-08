@@ -16,7 +16,6 @@ import { parseJson, toJson, type Database } from '../db.ts';
 import {
   boundedNote,
   runOutcome,
-  type RunHealth,
   type RunOutcome,
   type RunStep,
   type StepOutcome,
@@ -250,18 +249,3 @@ export function errorCategory(err: unknown): string {
   return 'the step did not complete';
 }
 
-/** Turn a stored record into the health-model shape the API and UI read. */
-export function toRunHealth(record: CronRunRecord, describe: (r: CronRunRecord) => string): RunHealth {
-  return {
-    cron: record.cron,
-    label: record.label,
-    trigger: record.trigger,
-    startedAt: record.startedAt,
-    finishedAt: record.finishedAt,
-    outcome: record.outcome,
-    summary: describe(record),
-    budget: record.budget,
-    steps: record.steps,
-    releaseSha: record.releaseSha,
-  };
-}

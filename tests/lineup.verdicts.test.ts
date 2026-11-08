@@ -167,7 +167,7 @@ describe('a difference the optimiser would not suggest', () => {
    * The screen must not propose a change the app itself declined to make.
    *
    * `recommendLineup` computes the best lineup and, separately, the swaps worth
-   * suggesting — a gain under `MIN_SWAP_GAIN` is left alone, and an incumbent is
+   * suggesting — a gain under `TOSSUP_POINTS` is left alone, and an incumbent is
    * protected from an unpriced challenger. A verdict list reading only the first
    * of those would put `Start X instead` on a row while the card above it said
    * hold, which is one screen answering to two rules and is the defect

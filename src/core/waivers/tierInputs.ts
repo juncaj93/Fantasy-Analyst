@@ -126,11 +126,28 @@ export interface TierInputs {
 /** The window's week weights, as the request below sets them. */
 const windowWeights = (open: boolean): readonly number[] => (open ? TIER_RULES.openWeights : TIER_RULES.weights);
 
+/**
+ * The window, cut at the league's last fantasy week (round 13). NFL week 18
+ * has no fantasy game, so from week 16 the three-week window would count it.
+ * Without a horizon, or when the cut would leave nothing (the season is
+ * over), the window as before.
+ */
+export function windowWithinSeason(window: TierWindow, lastWeek: number | null | undefined): TierWindow {
+  if (lastWeek == null || !Number.isFinite(lastWeek)) return window;
+  const weeks = window.weeks.filter((w) => w <= lastWeek);
+  if (weeks.length === 0) return window;
+  return { ...window, weeks, span: window.span.filter((w) => w <= lastWeek) };
+}
+
 export function buildTierInputs(input: TierInputRequest): TierInputs {
-  const window = tierWindow(
-    input.week,
-    [...input.rosterInputs, ...input.candidateInputs].map((i) => i.kickoff ?? null),
-    input.now,
+  const horizonWeeks = [...(input.season?.weeks ?? [])];
+  const window = windowWithinSeason(
+    tierWindow(
+      input.week,
+      [...input.rosterInputs, ...input.candidateInputs].map((i) => i.kickoff ?? null),
+      input.now,
+    ),
+    horizonWeeks[horizonWeeks.length - 1],
   );
   const offset = window.thisWeekOpen ? 0 : 1;
   const range = { from: input.week, to: window.span[window.span.length - 1] ?? input.week };
@@ -142,11 +159,19 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
    * The season: every week from the window's first to the end of the
    * playoffs. Only when the window sits at its start; otherwise (the season is
    * over, a horizon from another week) the window alone, as before.
+   *
+   * On also when the season is no longer than the window (round 13): from
+   * week 15, or week 14 once its games start, the season is the window, and
+   * its weeks are still playoff weeks at 1.5 judged on season value. Until
+   * then a playoff pickup fell back to this week's number and could cut a
+   * season starter (Darnold for Love in week 15).
    */
-  const horizonWeeks = [...(input.season?.weeks ?? [])];
   const seasonWeeks = horizonWeeks.filter((w) => w >= (window.weeks[0] ?? Infinity));
   const seasonOn =
-    seasonWeeks.length > window.weeks.length && window.weeks.every((w, k) => seasonWeeks[k] === w) && horizonWeeks[0] === input.week;
+    seasonWeeks.length > 0 &&
+    seasonWeeks.length >= window.weeks.length &&
+    window.weeks.every((w, k) => seasonWeeks[k] === w) &&
+    horizonWeeks[0] === input.week;
   const seasonRange = { from: input.week, to: horizonWeeks[horizonWeeks.length - 1] ?? input.week };
   const seasonRates = new Map<string, PlayerRate>();
   const aheadFor = (id: string): Map<number, number> => {

@@ -23,12 +23,6 @@ export type StartSitMode = 'balanced' | 'floor' | 'ceiling';
 
 export const START_SIT_MODES: StartSitMode[] = ['balanced', 'floor', 'ceiling'];
 
-export const MODE_LABEL: Record<StartSitMode, string> = {
-  balanced: 'Balanced',
-  floor: 'Floor',
-  ceiling: 'Ceiling',
-};
-
 /** Parse whatever arrived on the wire. Anything unrecognised is Balanced. */
 export function normalizeMode(raw: string | null | undefined): StartSitMode {
   const value = (raw ?? '').trim().toLowerCase();

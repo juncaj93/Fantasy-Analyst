@@ -19,8 +19,8 @@
  *
  * ## Availability is Team's rule
  *
- * A Questionable player counts at full value and a Doubtful one six points
- * down, from `core/injury/weekAvailability.ts`, the same function Team,
+ * A Questionable player counts at full value and a Doubtful one as Out
+ * (zero), from `core/injury/weekAvailability.ts`, the same function Team,
  * Waivers, Trades and Compare read (23 October 2026). There is no second
  * charge in the simulation.
  *

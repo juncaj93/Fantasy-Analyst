@@ -240,8 +240,9 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     const withHim = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c)], request.shape);
     const forced = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c, true)], request.shape);
     if (withHim && forced) {
-      row.gain = withHim.total - baseline.total;
-      row.margin = forced.total - baseline.total;
+      /* On ranking numbers, as Team's swap (round 13): a Sleeper-only starter he replaces ranks two lower. */
+      row.gain = withHim.rankedTotal - baseline.rankedTotal;
+      row.margin = forced.rankedTotal - baseline.rankedTotal;
     }
     if (!withHim || !forced || c.basis !== 'market') {
       audit.push({ ...row, status: 'not_priced' });

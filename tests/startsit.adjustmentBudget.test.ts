@@ -146,7 +146,8 @@ describe('inside the engine', () => {
       ],
       HALF_PPR,
     );
-    expect(result.recommendedPlayerId).toBe('a');
+    /* A partial market under 2 points is a toss-up in Compare as on Team since round 13: the lean is the pick. */
+    expect(result.recommendedPlayerId ?? result.tossUp?.leanPlayerId).toBe('a');
   });
 
   it('cannot flip a clear gap', () => {
@@ -157,7 +158,8 @@ describe('inside the engine', () => {
       ],
       HALF_PPR,
     );
-    expect(result.recommendedPlayerId).toBe('b');
+    /* A partial market under 2 points is a toss-up in Compare as on Team since round 13: the lean is the pick. */
+    expect(result.recommendedPlayerId ?? result.tossUp?.leanPlayerId).toBe('b');
   });
 
   it('leaves availability as the gate it was', () => {
