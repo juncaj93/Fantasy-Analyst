@@ -176,3 +176,12 @@ describe('Round 14: Deploy wiring', () => {
     expect(smoke).toContain('--project=webkit-iphone-390 --grep @critical');
   });
 });
+
+describe('Round 14: ADP refresh only in draft season', () => {
+  it('is scheduled for July and August only, and can still be run by hand', () => {
+    const { yaml, text } = readWorkflow('refresh-adp.yml');
+    const crons = [...text.matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1]);
+    expect(crons).toEqual(['0 11 * 7,8 *']);
+    expect(Object.keys(asMap(yaml['on']))).toContain('workflow_dispatch');
+  });
+});
