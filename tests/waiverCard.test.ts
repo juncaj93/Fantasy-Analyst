@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { captureDemoWaivers, decisionDigest, tierRows, type CapturedWaivers } from './helpers/waiverDecision.ts';
+import { captureDemoWaivers, decisionDigest, DEMO_WAIVER_CLOCK, tierRows, type CapturedWaivers } from './helpers/waiverDecision.ts';
 import { readSnapshot, replaySnapshot } from '../src/core/support/dispatch.ts';
 import { byGain, CARD_CHIPS_MAX, CARD_REASON_MAX, currentWeekOf, sheetDrops, sheetPartner, sheetPeriod, shortReason, tierCard, tierSheet, waiverChip } from '../src/web/waiverCard.ts';
 import { WaiverCard } from '../src/web/components/waiverCard.tsx';
@@ -79,7 +79,19 @@ describe('the waiver card round changes nothing that is recommended', () => {
   });
 
   it('replays from the snapshot file alone to the same answer', async () => {
-    const report = await replaySnapshot(readSnapshot(JSON.parse(JSON.stringify(captured.snapshot))));
+    // Replayed on the clock it was captured on. The demo seed puts every
+    // kickoff three days after that clock (Sunday 8 November 2026, 10 AM ET),
+    // and part of the replay still reads the real clock, so from that kickoff
+    // on a real-clock replay saw one demo game as started and skipped one more
+    // player: red on every run from 8 November (Round 14 found it).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(DEMO_WAIVER_CLOCK));
+    let report: Awaited<ReturnType<typeof replaySnapshot>>;
+    try {
+      report = await replaySnapshot(readSnapshot(JSON.parse(JSON.stringify(captured.snapshot))));
+    } finally {
+      vi.useRealTimers();
+    }
     expect(report.outcome, report.summary).toBe('reproduced');
     expect(report.differences).toEqual([]);
   });
