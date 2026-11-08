@@ -33,10 +33,18 @@ async function withControllableVisibility(page: Page) {
   });
 }
 
+/** Let a read that just landed finish on the page before the clock moves again. */
+const settle = (page: Page) => page.waitForTimeout(250);
+
 const setHidden = (page: Page, hidden: boolean) =>
   page.evaluate((v) => (window as unknown as { __setHidden: (h: boolean) => void }).__setHidden(v), hidden);
 
-/** Serve the real matchup with its phase set to live, and count every read. */
+/**
+ * Serve the real matchup with its phase set to live, and count every read once
+ * its answer has been handed back. Counting on arrival let the test move the
+ * clock while a read was still in flight, and the screen rightly skips a tick
+ * while one is (WebKit, CI, 8 November 2026).
+ */
 async function liveMatchup(page: Page): Promise<{ reads: () => number }> {
   let reads = 0;
   await page.route('**/api/overview', async (route) => {
@@ -45,11 +53,11 @@ async function liveMatchup(page: Page): Promise<{ reads: () => number }> {
     await route.fulfill({ json: { ...body, lifecycle: { ...(body.lifecycle ?? {}), matchupVisible: true } } });
   });
   await page.route('**/api/leagues/*/matchup*', async (route) => {
-    reads += 1;
     const response = await route.fetch();
     const body = await response.json();
     if (body?.forecast) body.forecast.phase = 'live';
     await route.fulfill({ response, json: body });
+    reads += 1;
   });
   return { reads: () => reads };
 }
@@ -64,11 +72,13 @@ test.describe('Matchup live refresh and the background', () => {
     await page.getByTestId('tab-matchup').click();
     await expect(page.getByTestId('matchup-state')).toContainText('LIVE');
     await expect.poll(matchup.reads).toBeGreaterThanOrEqual(1);
+    await settle(page);
     const arrived = matchup.reads();
 
     // Visible and live: one more read every thirty seconds.
     await page.clock.runFor(31_000);
     await expect.poll(matchup.reads).toBe(arrived + 1);
+    await settle(page);
 
     // In the background: five minutes pass and nothing is read.
     await setHidden(page, true);
@@ -80,6 +90,7 @@ test.describe('Matchup live refresh and the background', () => {
     // Back in front: current at once, without waiting for a tick.
     await setHidden(page, false);
     await expect.poll(matchup.reads).toBe(hiddenAt + 1);
+    await settle(page);
 
     // And back on the thirty-second clock after that.
     await page.clock.runFor(31_000);
