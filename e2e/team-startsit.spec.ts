@@ -709,6 +709,7 @@ test.describe('the weekly card', () => {
     await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
     const summary = page.getByTestId('weekly-more').locator('summary');
     await expect(summary).toBeVisible();
+    await summary.scrollIntoViewIfNeeded();
     const box = (await summary.boundingBox())!;
     const handle = await summary.elementHandle();
     const hits = await page.evaluate(
