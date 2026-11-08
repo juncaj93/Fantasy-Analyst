@@ -49,11 +49,12 @@ export class SleeperSyncService {
     try {
       const raw = await this.client.getAllPlayers();
       const canonical = toCanonicalPlayers(raw);
-      const { written } = await this.players.upsertMany(canonical);
+      const { written, changed } = await this.players.upsertMany(canonical);
       /* Depth order and injury notes for Waivers, from the same answer: one settings row, no request. */
       await this.settings.set(PLAYER_NOTES_KEY, playerNotesOf(raw, new Date())).catch(() => undefined);
       const total = await this.players.count();
       await this.settings.markPlayersSynced(nowIso());
+      console.log(`player list: ${written} sent, ${changed} changed`);
       await this.settings.logSync('players', 'ok', `${written} players written`, startedAt);
       return { written, total };
     } catch (err) {

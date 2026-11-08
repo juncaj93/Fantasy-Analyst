@@ -169,9 +169,15 @@ export class SourceStateRepo {
             SET consecutive_failures = 0,
                 failing_since = NULL,
                 caught_up_through = COALESCE(?, caught_up_through)
-          WHERE source = ? AND season = ?`,
+          WHERE source = ? AND season = ?
+            -- Round 14 (D1 budget): only when there is something to clear or
+            -- move. The five-minute injury check lands here on every 304, and
+            -- rewriting a zero with a zero was 288 row writes a day.
+            AND (consecutive_failures IS NOT 0
+                 OR failing_since IS NOT NULL
+                 OR (? IS NOT NULL AND caught_up_through IS NOT ?))`,
       )
-      .bind(caughtUpThrough, source, season)
+      .bind(caughtUpThrough, source, season, caughtUpThrough, caughtUpThrough)
       .run();
   }
 

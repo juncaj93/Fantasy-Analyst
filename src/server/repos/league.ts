@@ -93,6 +93,15 @@ export class LeagueRepo {
 
   async replaceRosters(leagueId: string, rosters: RosterRecord[]): Promise<void> {
     const now = nowIso();
+    /*
+     * Round 14 (D1 budget): the league is re-read every three hours and the
+     * rosters are usually exactly what is stored. Deleting and re-inserting
+     * ten identical rows cost about forty row writes (rows plus indexes) each
+     * time. So compare first (ten rows read) and leave the table alone when
+     * nothing differs. Any difference at all, a pickup, a lineup move, a new
+     * win, replaces the lot exactly as before. `updated_at` is read nowhere.
+     */
+    if (await this.rostersUnchanged(leagueId, rosters)) return;
     await this.db.prepare('DELETE FROM rosters WHERE league_id = ?').bind(leagueId).run();
     for (const batch of chunk(rosters, 50)) {
       await this.db.batch(
@@ -118,6 +127,34 @@ export class LeagueRepo {
         ),
       );
     }
+  }
+
+  /** True when the stored rosters for this league are exactly `rosters` (Round 14). */
+  private async rostersUnchanged(leagueId: string, rosters: RosterRecord[]): Promise<boolean> {
+    if (rosters.length === 0) return false;
+    const { results } = await this.db
+      .prepare(
+        `SELECT roster_id, owner_id, owner_name, players_json, starters_json, starter_slots_json, reserve_json, is_mine, settings_json
+           FROM rosters WHERE league_id = ?`,
+      )
+      .bind(leagueId)
+      .all<Record<string, unknown>>();
+    if (results.length !== rosters.length) return false;
+    const stored = new Map(results.map((r) => [Number(r['roster_id']), r]));
+    return rosters.every((r) => {
+      const row = stored.get(r.rosterId);
+      return (
+        row != null &&
+        (row['owner_id'] ?? null) === (r.ownerId ?? null) &&
+        (row['owner_name'] ?? null) === (r.ownerName ?? null) &&
+        row['players_json'] === toJson(r.playerIds) &&
+        row['starters_json'] === toJson(r.starterIds) &&
+        row['starter_slots_json'] === toJson(r.starterSlotIds ?? []) &&
+        row['reserve_json'] === toJson(r.reserveIds) &&
+        Number(row['is_mine'] ?? 0) === (r.isMine ? 1 : 0) &&
+        row['settings_json'] === toJson(r.settings ?? {})
+      );
+    });
   }
 
   async listRosters(leagueId: string): Promise<RosterRecord[]> {

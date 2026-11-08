@@ -683,6 +683,9 @@ export default {
        */
       await run.step('season-stats', "Last season's statistics", async () => {
         const detail = new PlayerDetailService(env.DB, { sleeper: cronEnv.sleeper });
+        // Round 14: a finished season already on file is not rewritten every day (about 6,600 writes).
+        const loaded = await detail.seasonStatsAlreadyLoaded();
+        if (loaded.loaded) return { outcome: 'skipped' as const, note: loaded.note };
         // Once per day: a re-run of this tick must not fetch and match last season again.
         const claim = await detail.claimNightlySeasonStats();
         if (!claim.claimed) return { outcome: 'skipped' as const, note: claim.note };
