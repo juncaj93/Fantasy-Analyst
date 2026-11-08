@@ -204,9 +204,11 @@ describe('when the daily sweep is scheduled to start', () => {
     return match![1]!.split(' ');
   };
 
-  it('runs once a day, after the D1 reset and before anything else wakes', () => {
+  // Round 14 (the D1 budget): once a week, not once a day. Wednesday 00:47 UTC
+  // is Tuesday 7:47 PM Eastern, the quietest night of an NFL week.
+  it('runs once a week, after the D1 reset and before anything else wakes', () => {
     const [minute, hour, dom, month, dow] = cron();
-    expect([dom, month, dow]).toEqual(['*', '*', '*']);
+    expect([dom, month, dow]).toEqual(['*', '*', '3']);
     const startMinutes = Number(hour) * 60 + Number(minute);
     expect(startMinutes, 'later than the 00:00 UTC reset plus analytics lag').toBeGreaterThanOrEqual(15);
     expect(startMinutes, 'early enough to be well clear of the day’s use').toBeLessThanOrEqual(120);

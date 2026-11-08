@@ -1,6 +1,7 @@
 name: Daily production sweep
 
-# The depth the deploy gate no longer pays for, paid for once a day.
+# The depth the deploy gate no longer pays for, paid for once a week (the
+# workflow keeps its old name because the alert issue rows are keyed by it).
 #
 # #248 split production checking in two. A deploy runs the eight `@critical`
 # specs at one width, because the questions a *deployment* can fail are about
@@ -55,7 +56,17 @@ on:
     # gate. The day boundary is the only thing that matters, and it is UTC on
     # both sides: this file's `recent` check and the guard each ask about "today"
     # in UTC.
-    - cron: '47 0 * * *'
+    #
+    # Weekly since Round 14 (the D1 budget), Wednesday 00:47 UTC, which is
+    # Tuesday 7:47 PM Eastern. A full pass reads 0.64M to 2M rows, and a daily
+    # one was the single biggest reader in the account. Once a week keeps it as
+    # a safety net at about 0.15M a day averaged. Tuesday because it is the
+    # quietest night of an NFL week: no game, no waivers, nobody deploying, and
+    # even the latest start ever seen (8h44) lands at 4:31 AM Wednesday. A
+    # Sunday-morning slot was rejected for that same lateness: 5 AM plus 8h44
+    # is a Sunday-afternoon start, in the middle of the games, on the app's
+    # busiest day. The deploy gate still checks every code deploy.
+    - cron: '47 0 * * 3'
   workflow_dispatch:
     inputs:
       ceiling_percent:
