@@ -7,15 +7,13 @@
  *      Trades ideas, Build a trade's team list, Players, Data health, Setup),
  *      the same list `probe-screens-snapshot.mjs` reads.
  *   2. Build a trade for all teams (`team=all&unmarked=1`), once.
- *   3. Compare (the read-only POST) for each pair Team names: every Best
- *      move and toss-up, and each starter against his best bench player at
- *      the same position. At most six.
- *   4. The five in-season support snapshots (lineup, matchup, waiver-plan,
- *      dst-plan, trade-offer).
- *   5. `scripts/site-check-round13-report.ts` on the code live before this
+ *   3. The five in-season support snapshots (lineup, matchup, waiver-plan,
+ *      dst-plan, trade-offer). Compare is a POST that needs the passphrase,
+ *      so the report rebuilds it from the lineup snapshot instead.
+ *   4. `scripts/site-check-round13-report.ts` on the code live before this
  *      round (BEFORE_SHA, 97d1a39) and on this checkout, same inputs, and the
  *      lines that changed.
- *   6. Everything in 1 to 3, gzipped and base64 between two markers, so
+ *   5. Everything in 1 and 2, gzipped and base64 between two markers, so
  *      `scripts/replay-screens.mjs` can draw the screens locally at phone
  *      widths without asking production again.
  *
@@ -99,29 +97,7 @@ for (const path of [
 heading('2. Build a trade, all teams');
 await call('GET', `/api/leagues/${id}/trades/build?team=all&unmarked=1`);
 
-heading('3. Compare for the pairs Team names');
-const lineup = JSON.parse(out[`/api/leagues/${id}/lineup`]?.body || 'null');
-const pairs = [];
-const seen = new Set();
-const add = (a, b, slot) => {
-  if (!a || !b || a === b) return;
-  const k = [a, b].sort().join('|');
-  if (seen.has(k) || pairs.length >= 6) return;
-  seen.add(k);
-  pairs.push({ playerIds: [a, b], slot: slot ?? null });
-};
-for (const s of [...(lineup?.swaps ?? []), ...(lineup?.tossUps ?? [])]) add(s.inPlayerId, s.outPlayerId, s.slot);
-const bench = lineup?.bench ?? [];
-for (const s of lineup?.slots ?? []) {
-  if (!s.playerId) continue;
-  const alt = bench
-    .filter((b) => b.position === s.position && b.playerId)
-    .sort((x, y) => (y.score ?? -99) - (x.score ?? -99))[0];
-  if (alt) add(s.playerId, alt.playerId, s.slot);
-}
-for (const p of pairs) await call('POST', '/api/startsit/compare', { leagueId: decodeURIComponent(id), ...p });
-
-heading('4. Support snapshots');
+heading('3. Support snapshots');
 for (const context of ['lineup', 'matchup', 'waiver-plan', 'dst-plan', 'trade-offer']) {
   const path = `/api/leagues/${id}/support-snapshot?context=${context}`;
   await call('GET', path);
@@ -131,7 +107,7 @@ for (const context of ['lineup', 'matchup', 'waiver-plan', 'dst-plan', 'trade-of
 writeFileSync(join(dir, 'screens.json'), JSON.stringify(out));
 console.log(`finished reading ${eastern()}`);
 
-heading(`5. Report: before (${BEFORE_SHA.slice(0, 7)}) and this checkout, same inputs`);
+heading(`4. Report: before (${BEFORE_SHA.slice(0, 7)}) and this checkout, same inputs`);
 const run = (cwd) => {
   try {
     return execFileSync('node', ['--experimental-transform-types', '--no-warnings', REPORT, dir], {
@@ -172,7 +148,7 @@ for (const l of after.split('\n').filter((l) => !a.has(l))) {
 }
 if (changed === 0) console.log('(nothing: same output on both)');
 
-heading('6. Snapshot for local replay');
+heading('5. Snapshot for local replay');
 /* The screens' own reads only: the support snapshots were for the report above, and would triple the log. */
 const replay = Object.fromEntries(Object.entries(out).filter(([key]) => !key.includes('support-snapshot')));
 const blob = gzipSync(Buffer.from(JSON.stringify(replay))).toString('base64');

@@ -14,8 +14,9 @@
  * toss-ups, Compare on every starter against his best bench man, Matchup's
  * hole fills, the waiver tiers with their drops, and Pick up and start.
  *
- * Part B (production's own answers, same on both): each player's number on
- * Team, Matchup, Waivers and Compare; contradictions between screens (a drop
+ * Part B (production's own answers): each player's number on Team, Matchup
+ * and Waivers, beside Compare rebuilt here (its route needs the passphrase);
+ * contradictions between screens (a drop
  * one screen suggests that another builds a trade around, a Best move that
  * Compare calls a toss-up); and the north star scan of every string sent.
  */
@@ -51,6 +52,8 @@ async function guarded(title: string, run: () => Promise<void> | void): Promise<
   }
 }
 
+const decisionOf = (e: any): number | null =>
+  e?.ruledOut ? 0 : e?.decision?.basis === 'market' || e?.decision?.basis === 'published' ? Math.max(0, e.decision.points) : null;
 const screens: Record<string, { status: number | string; body: string }> = read('screens.json') ?? {};
 const body = (match: (path: string) => boolean): any => {
   const key = Object.keys(screens).find(match);
@@ -84,6 +87,8 @@ let lineupInputs: StartSitInput[] = [];
 let published = new Map<string, number>();
 let profile: any = null;
 let names = new Map<string, string>();
+/* Compare's number per player, rebuilt here: production's Compare is a POST behind the passphrase. */
+const compareNums = new Map<string, number | null>();
 
 await guarded('A1. TEAM rebuilt from the lineup snapshot', () => {
   if (!lineupRaw) return console.log('no lineup snapshot');
@@ -124,6 +129,7 @@ await guarded('A2. COMPARE: each starter against his best bench man at the same 
     const alts = bench.filter((b) => b.player.position === s.player.position);
     if (alts.length === 0) continue;
     const cmp: any = compareStartSit([s, ...alts].slice(0, 6), profile, { published, mode: lineupRaw.decision.inputs.mode });
+    for (const e of cmp.evaluations) compareNums.set(e.playerId, decisionOf(e));
     const top = cmp.evaluations.find((e: any) => e.playerId === cmp.recommendedPlayerId);
     const said = cmp.tossUp ? `toss-up, lean ${cmp.tossUp.leanName}` : top ? `start ${top.name}` : 'no pick';
     console.log(`  ${s.player.fullName} (${s.player.position}) vs ${alts.map((a) => a.player.fullName).join(', ')}: ${said}`);
@@ -163,7 +169,7 @@ await guarded('A4. WAIVERS rebuilt from the waiver-plan snapshot', async () => {
 
 /* ================================================================ PART B */
 
-section('B1. NUMBERS BY SCREEN, as production sent them (week number; - is none)');
+section('B1. NUMBERS BY SCREEN: Team, Matchup, Waivers as production sent them, Compare rebuilt (- is none)');
 type Row = { name: string; team?: number | null; matchup?: number | null; waivers?: number | null; compare?: number | null };
 const rows = new Map<string, Row>();
 const row = (id: string, name?: string) => {
@@ -171,7 +177,6 @@ const row = (id: string, name?: string) => {
   if (!r) rows.set(id, (r = { name: name ?? names.get(id) ?? id }));
   return r;
 };
-const decisionOf = (e: any) => (e?.ruledOut ? 0 : e?.decision?.basis === 'market' || e?.decision?.basis === 'published' ? Math.max(0, e.decision.points) : null);
 for (const e of [...(lineupResp?.starters ?? []), ...(lineupResp?.bench ?? [])]) row(e.playerId, e.name).team = decisionOf(e);
 const mineSlots = [...(matchupResp?.forecast?.slots ?? []).map((s: any) => s.mine), ...(matchupResp?.forecast?.bench?.mine ?? [])].filter(Boolean);
 for (const p of mineSlots) row(p.playerId, p.name).matchup = p.projectedFinal ?? null;
@@ -179,14 +184,7 @@ for (const [id, f] of Object.entries<any>(waiversResp?.tiers?.weekFigures ?? {})
   const w = f.weeks?.[0];
   if (rows.has(id)) row(id, f.name).waivers = w == null ? null : w.out ? 0 : w.points;
 }
-for (const [key, v] of Object.entries(screens)) {
-  if (!key.startsWith('POST /api/startsit/compare')) continue;
-  try {
-    for (const e of JSON.parse(v.body).evaluations ?? []) row(e.playerId, e.name).compare = decisionOf(e);
-  } catch {
-    /* a refused compare prints nothing */
-  }
-}
+for (const [id, v] of compareNums) row(id).compare = v;
 let disagree = 0;
 for (const [id, r] of [...rows.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name))) {
   const shown = [r.team, r.matchup, r.waivers, r.compare].filter((v): v is number => v != null);
@@ -223,9 +221,11 @@ section('B2. CONTRADICTIONS between screens');
   console.log(`  trade ideas shown: ${offers.length}; Build a trade packages: ${pkgs.length}`);
   const best = lineupResp?.swaps?.[0];
   if (best) {
-    const key = Object.keys(screens).find((k) => k.startsWith('POST /api/startsit/compare') && k.includes(best.inPlayerId) && k.includes(best.outPlayerId));
-    const cmp = key ? JSON.parse(screens[key]!.body) : null;
-    console.log(`  Best move ${best.inName} over ${best.outName} +${f2(best.gain)}; Compare says ${cmp ? (cmp.tossUp ? 'TOSS-UP (contradiction)' : `start ${cmp.evaluations?.find((e: any) => e.playerId === cmp.recommendedPlayerId)?.name ?? 'nobody'}`) : 'not read'}`);
+    const byId = new Map(lineupInputs.map((i) => [i.player.id, i] as const));
+    const a = byId.get(best.inPlayerId);
+    const b = byId.get(best.outPlayerId);
+    const cmp: any = a && b && profile ? compareStartSit([a, b], profile, { published }) : null;
+    console.log(`  Best move ${best.inName} over ${best.outName} +${f2(best.gain)}; Compare (rebuilt) says ${cmp ? (cmp.tossUp ? 'TOSS-UP (contradiction)' : `start ${cmp.evaluations?.find((e: any) => e.playerId === cmp.recommendedPlayerId)?.name ?? 'nobody'}`) : 'not rebuilt'}`);
   } else {
     console.log(`  no Best move swap; toss-ups: ${(lineupResp?.tossUps ?? []).map((t: any) => `${t.inName} over ${t.outName}`).join(', ') || 'none'}`);
   }
