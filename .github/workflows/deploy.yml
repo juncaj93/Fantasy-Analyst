@@ -148,6 +148,18 @@ jobs:
           echo "main is now:  $head"
 
           if [ "$CANDIDATE" = "$head" ]; then
+            # Round 14 (D1 budget): does this revision change anything the site
+            # runs? A commit that only touched docs, tests or workflows would
+            # re-publish the Worker already live and pay a live check (133k to
+            # 190k database rows) to learn nothing. The script compares the
+            # candidate with what /api/health says is live, and answers `yes`
+            # whenever it cannot be certain, so a code change always deploys.
+            needed="$(node .github/scripts/deploy-needed.mjs "$CANDIDATE" || echo yes)"
+            if [ "$needed" = "no" ]; then
+              echo "::notice::$CANDIDATE changes only docs, tests or workflows. Nothing the site runs changed, so nothing was deployed and no live check ran."
+              stand_down "Nothing the site runs changed since the revision production reports, so there was nothing to deploy and nothing new to check. CI still ran in full. The next commit that changes app code deploys, with its live checks, as normal."
+              exit 0
+            fi
             echo "proceed=yes" >> "$GITHUB_OUTPUT"
             echo "This is main's head — releasing it."
             exit 0

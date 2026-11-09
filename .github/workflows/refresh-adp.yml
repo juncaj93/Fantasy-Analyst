@@ -21,7 +21,12 @@ on:
   schedule:
     # Daily through the draft season, early morning US time. ADP moves on news,
     # and a board built on last week's ADP is a board built on last week's news.
-    - cron: '0 11 * * *'
+    #
+    # July and August only since Round 14 (the D1 budget). It ran every day all
+    # year, importing a snapshot nobody reads once the draft is done. The
+    # Underdog refresh already keeps to the same two months. Run by hand
+    # (workflow_dispatch above) any other time.
+    - cron: '0 11 * 7,8 *'
 
 jobs:
   refresh:
