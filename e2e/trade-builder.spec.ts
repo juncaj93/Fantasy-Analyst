@@ -536,3 +536,17 @@ test.describe('build a trade: states', () => {
     await expect(page.getByTestId('trade-builder-deadline-detail')).toBeVisible();
   });
 });
+
+/* Round 13: the 36px pill answers a thumb across the 44px floor (an invisible ::after). */
+test('the + unmarked pill reaches 44px', async ({ page }) => {
+  await openTrades(page);
+  await openFold(page);
+  const pill = page.getByTestId('trade-builder-unmarked');
+  const box = (await pill.boundingBox())!;
+  const handle = await pill.elementHandle();
+  const hits = await page.evaluate(
+    ({ el, x, y }) => [y - 21, y + 21].map((at) => el != null && el.contains(document.elementFromPoint(x, at))),
+    { el: handle, x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  expect(hits).toEqual([true, true]);
+});

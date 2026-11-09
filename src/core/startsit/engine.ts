@@ -46,6 +46,7 @@ import { SCORING_RULES, type ScoringRules } from './scoringRules.ts';
 import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
 import { readSpread, type SpreadReading } from './spread.ts';
+import { playedWeeksOf } from '../value/restOfSeason.ts';
 import { isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, type LeanTag } from './tossup.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
@@ -362,16 +363,6 @@ export interface StartSitComparison {
    */
   comparability: MarketComparability;
 }
-
-/** Status penalties in fantasy points. Editable policy, not a projection. */
-export const STATUS_PENALTY: Record<string, number> = {
-  OUT: -99,
-  IR: -99,
-  SUS: -99,
-  PUP: -99,
-  DOUBTFUL: -99,
-  QUESTIONABLE: -1.5,
-};
 
 /** Points added per net unit of recent news signal. Deliberately small. */
 export const NEWS_POINTS_PER_UNIT = 0.35;
@@ -717,7 +708,7 @@ export function evaluatePlayer(
     components,
     score,
     ...(pill ? { pill } : {}),
-    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, expectation }),
+    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, playedWeeks: playedWeeksOf(input.usageWeeks), expectation }),
     confidence,
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
@@ -891,7 +882,7 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     expectation,
     components,
     score,
-    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, expectation: null }),
+    spread: readSpread({ position: input.player.position, seasonPoints: input.seasonPoints ?? null, playedWeeks: playedWeeksOf(input.usageWeeks), expectation: null }),
     confidence,
     confidenceReasons,
     statusFlag: availability === AVAILABLE ? null : availability.display,
@@ -1178,11 +1169,13 @@ export function compareStartSit(
   /*
    * A toss-up, said as one (4 November 2026): under two points on the ranking
    * numbers is not a pick, the same bar Team's Best move uses (`tossup.ts`).
-   * Only between two real weeks, a full market or Sleeper's week, and never
-   * against a real hole (Out, IR, suspended, Doubtful).
+   * On every number Team ranks (a full market, Sleeper's week, or a partial
+   * market: round 13, so a 1.5 gap Team calls a toss-up is never a Start
+   * here), and never against a real hole (Out, IR, suspended, Doubtful).
    */
   const sideOf = (e: StartSitEvaluation) => {
-    const real = !e.ruledOut && (e.decision?.basis === 'market' || e.decision?.basis === 'published');
+    const basis = e.decision?.basis;
+    const real = !e.ruledOut && (basis === 'market' || basis === 'published' || basis === 'partial');
     return {
       points: real ? e.decision!.points : null,
       borrowed: e.decision?.basis === 'published',

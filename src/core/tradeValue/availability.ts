@@ -20,8 +20,8 @@
  * Each week is a fraction between 0 and 1. The fractions multiply his rate in
  * the lineup, which makes the lineup an expected-points lineup. **This week**
  * is Team's rule, from `core/injury/weekAvailability.ts` (23 October 2026):
- * a Questionable player is a whole game, a Doubtful one is his rate less six
- * points. The table below is only the assumption about the weeks after it.
+ * a Questionable player is a whole game, a Doubtful one misses it (Out). The
+ * table below is only the assumption about the weeks after it.
  *
  * Nothing here predicts a future injury. A healthy player is available every
  * week that is not his bye, and no durability opinion is attached to anybody.

@@ -142,6 +142,27 @@ export function startingSlotLabels(rosterPositions: readonly string[]): string[]
 }
 
 /**
+ * Sleeper's slot label for each current starter, from the stored slot order
+ * (`starterSlotIds`, aligned with the league's starting slots). Empty when the
+ * order was never stored or does not cover the lineup, so a caller falls back
+ * to eligibility. Read by the lineup to keep a locked starter where he is.
+ */
+export function currentSlotsOf(
+  rosterPositions: readonly string[] | null | undefined,
+  starterSlotIds: readonly (string | null)[] | null | undefined,
+): Map<string, string> {
+  const labels = startingSlotLabels(rosterPositions ?? []);
+  const stored = starterSlotIds ?? [];
+  const out = new Map<string, string>();
+  if (labels.length === 0 || stored.length < labels.length) return out;
+  labels.forEach((label, i) => {
+    const id = stored[i];
+    if (id) out.set(id, label);
+  });
+  return out;
+}
+
+/**
  * Pair each of Sleeper's slots with the app's recommendation for that slot.
  *
  * ## Why this is not "the Nth WR against the Nth WR"

@@ -438,7 +438,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    * replacement level, because one can be added that week for nothing (a
    * free QB covers one bye week). `bar` scales every weighted-points bar.
    */
-  const season = request.season && request.season.near < weeks.length ? request.season : null;
+  const season = request.season && request.season.near <= weeks.length ? request.season : null;
   const near = season ? season.near : weeks.length;
   const scale = season ? season.scale : 1;
   const bar = (points: number) => points * scale;

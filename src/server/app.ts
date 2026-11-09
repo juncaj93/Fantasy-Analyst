@@ -22,6 +22,7 @@ import { bestMove } from '../core/draft/bestMove.ts';
 import { compareStartSit } from '../core/startsit/engine.ts';
 import { recommendLineup } from '../core/startsit/lineup.ts';
 import { assembleComparison, assembleLineup } from '../core/startsit/assemble.ts';
+import { currentSlotsOf } from '../core/startsit/sleeperLineup.ts';
 import { assembleWaiverPlan } from '../core/waivers/assemble.ts';
 import { WeekPointsService } from './services/weekPointsService.ts';
 import { SnapshotLossyError } from '../core/support/lossless.ts';
@@ -917,6 +918,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       shape,
       profile,
       currentStarterIds: mine.starterIds,
+      currentSlotOf: currentSlotsOf(league.rosterPositions, mine.starterSlotIds),
       mode,
       published,
       publishedRefusal,

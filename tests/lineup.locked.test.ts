@@ -201,7 +201,8 @@ describe('late swap in a head-to-head comparison', () => {
     );
     // The projection still prefers the better player — the risk is named, not
     // silently applied.
-    expect(comparison.recommendedPlayerId).toBe('night');
+    /* A partial market under 2 points is a toss-up in Compare as on Team since round 13: the lean is the pick. */
+    expect(comparison.recommendedPlayerId ?? comparison.tossUp?.leanPlayerId).toBe('night');
     // 11.76 against 11.1. Was 0.64 while the single-book uncertainty charge
     // (3% of each market number) counted; text only since `startsit@6`.
     expect(comparison.margin).toBeCloseTo(0.66, 2);

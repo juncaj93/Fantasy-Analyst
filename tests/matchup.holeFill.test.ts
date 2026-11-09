@@ -53,8 +53,12 @@ describe('a real hole is filled by Team\'s ranking rule', () => {
     expect(decision.fills).toHaveLength(1);
     const fill = decision.fills[0]!;
     expect(fill.outPlayerId).toBe('mine-3');
-    /* The WR slot takes only receivers: the 20-point back cannot play it. */
-    expect(fill.inPlayerId).toBe('b-wr2');
+    /*
+     * The 20-point back takes the FLEX and the FLEX receiver slides to the
+     * empty WR slot: the move Team's lineup makes (round 13). Before, only a
+     * receiver could fill a WR hole, so Matchup named a different player.
+     */
+    expect(fill.inPlayerId).toBe('b-rb');
     expect(fill.winAfter).toBeGreaterThan(fill.winNow);
   });
 

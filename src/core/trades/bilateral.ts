@@ -101,9 +101,10 @@ export const FAIRNESS_BANDS = { even: 0.1, edge: 0.25, userEdge: FAIR_TO_BOTH.us
 /**
  * Starting-lineup points the user must gain before an offer is worth showing.
  *
- * Matched to `MIN_SWAP_GAIN` in the lineup module, which is the app's existing
- * answer to "how much is worth changing something for". A trade that moves the
- * weekly lineup less than a bench swap does is not a trade idea.
+ * A first cut on this week's lineup only. Since round 2 (T1) an idea is
+ * judged on the rest of the season (`fairToBoth.ts`: Alex's lineup gains at
+ * least 0.9 a weighted week left, the partner a third of a point), so this
+ * point a week only keeps the search from carrying deals that change nothing.
  */
 export const MIN_USER_GAIN = 1;
 
@@ -416,15 +417,6 @@ export type RosterRationale =
   | 'consolidates_depth'
   | 'spreads_depth'
   | 'no_worse_hole';
-
-export const RATIONALE_TEXT: Record<RosterRationale, string> = {
-  fills_hole: 'fills a starting slot they cannot currently cover',
-  upgrades_starter: 'upgrades a starting slot',
-  surplus_for_need: 'turns positional surplus into a need',
-  consolidates_depth: 'consolidates depth into one better starter',
-  spreads_depth: 'turns one player into two actual starters',
-  no_worse_hole: 'moves surplus without opening a worse hole',
-};
 
 export interface OfferEvaluation {
   /** Stable within one run: partner, give, get. Used for dedup and for keys. */

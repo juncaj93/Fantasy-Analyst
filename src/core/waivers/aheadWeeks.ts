@@ -47,14 +47,6 @@
 /** `season`: a week after the near window, valued at his rest-of-season rate (round 6). */
 export type WeekSource = 'this_week' | 'sleeper' | 'current' | 'bye' | 'season';
 
-export const WEEK_SOURCE_LABEL: Record<WeekSource, string> = {
-  this_week: 'this week’s number',
-  sleeper: 'Sleeper projection',
-  current: 'this week’s number (nothing posted for that week)',
-  bye: 'bye: no game',
-  season: 'season value',
-};
-
 /** Below this a later week's projection is a zero for a game he will not play. */
 const AHEAD_FLOOR = 1;
 

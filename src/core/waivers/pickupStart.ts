@@ -197,7 +197,7 @@ function healthy(p: PickupPlayer): boolean {
   return !p.ruledOut && HEALTHY.has((p.designation ?? '').toLowerCase());
 }
 
-function solvable(p: PickupPlayer, forced = false): SolvablePlayer {
+function solvable(p: PickupPlayer, forced = false, locked = false): SolvablePlayer {
   return {
     playerId: p.playerId,
     name: p.name,
@@ -205,6 +205,7 @@ function solvable(p: PickupPlayer, forced = false): SolvablePlayer {
     points: p.points ?? 0,
     borrowed: p.basis !== 'market',
     ...(forced ? { forced: true } : {}),
+    ...(locked ? { locked: true } : {}),
   };
 }
 
@@ -219,7 +220,13 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
       /* A kicked-off bench player cannot be moved in; a kicked-off starter keeps his slot. */
       (!p.locked || current.has(p.playerId)),
   );
-  const ownedSolvable = owned.map((p) => solvable(p, p.locked));
+  /*
+   * A kicked-off starter is locked into his slot (round 13): the free agent
+   * being tested can never take it. Live, 8 November: Baker Mayfield (Monday
+   * night) "tied" Jordan Love, whose Sunday game had started, and Team and
+   * Waivers both offered a pickup Sleeper would refuse.
+   */
+  const ownedSolvable = owned.map((p) => solvable(p, p.locked, p.locked && current.has(p.playerId)));
   const baseline = solveLineup(ownedSolvable, request.shape);
   const byId = new Map(request.roster.map((p) => [p.playerId, p] as const));
 
@@ -240,8 +247,9 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
     const withHim = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c)], request.shape);
     const forced = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c, true)], request.shape);
     if (withHim && forced) {
-      row.gain = withHim.total - baseline.total;
-      row.margin = forced.total - baseline.total;
+      /* On ranking numbers, as Team's swap (round 13): a Sleeper-only starter he replaces ranks two lower. */
+      row.gain = withHim.rankedTotal - baseline.rankedTotal;
+      row.margin = forced.rankedTotal - baseline.rankedTotal;
     }
     if (!withHim || !forced || c.basis !== 'market') {
       audit.push({ ...row, status: 'not_priced' });

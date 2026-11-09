@@ -198,7 +198,9 @@ describe('compareStartSit', () => {
     };
     const result = compareStartSit([a, b], HALF_PPR);
     expect(result.confidence).not.toBe('high');
-    expect(result.reasons.join(' ')).toContain('close call');
+    /* Since round 13 a partial market this close is a toss-up, said as one, not a "close call" pick. */
+    expect(result.tossUp).not.toBeNull();
+    expect(result.recommendedPlayerId).toBeNull();
   });
 
   it('warns clearly when a candidate has no Vegas data instead of scoring it zero', () => {

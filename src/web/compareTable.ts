@@ -22,8 +22,8 @@
  *
  * Uncertainty had a row until `startsit@6` took it out of the score.
  *
- * Doubtful (the one availability charge left in a score) and a weather nudge
- * get their own row only when they moved somebody, so the column still adds
+ * A weather nudge gets its own row only when it moved somebody (Doubtful is
+ * Out since 5 November 2026 and charges nothing), so the column still adds
  * up. Rounding goes to Base: each figure is shown to a tenth, and Base is the
  * Score less the tenths above it, so the column always sums on screen.
  */

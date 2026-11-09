@@ -139,6 +139,8 @@ export interface LineupInputs {
    */
   rules: SnapshotLeagueRules;
   currentStarterIds: string[];
+  /** Sleeper's slot label for each current starter. Absent on snapshots before round 13. */
+  currentSlots?: Record<string, string>;
   mode: StartSitMode;
   /**
    * Underdog or favourite in the week's matchup, for the pill tie-break.

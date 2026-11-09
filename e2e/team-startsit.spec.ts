@@ -704,6 +704,21 @@ test.describe('the weekly card', () => {
    * that Draft and Players also open — so a future screen that pastes its own
    * copy of the outlook instead of calling the shared one fails here.
    */
+  /* Round 13: the 32px "More on" fold answers a thumb across the 44px floor (an invisible ::before). */
+  test('"More on" reaches 44px', async ({ page }) => {
+    await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
+    const summary = page.getByTestId('weekly-more').locator('summary');
+    await expect(summary).toBeVisible();
+    await summary.scrollIntoViewIfNeeded();
+    const box = (await summary.boundingBox())!;
+    const handle = await summary.elementHandle();
+    const hits = await page.evaluate(
+      ({ el, x, y }) => [y - 21, y + 21].map((at) => el != null && el.contains(document.elementFromPoint(x, at))),
+      { el: handle, x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    );
+    expect(hits).toEqual([true, true]);
+  });
+
   test('reaches the shared player detail, one tap further in', async ({ page }) => {
     await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
     const more = page.getByTestId('weekly-more');

@@ -30,4 +30,8 @@ import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
  * and half his season average, and a playoff week counts 1.5 times. The trade
  * ideas find, gate and rank on it, not on this week's lineup.
  */
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@5',LINEUP_ENGINE_VERSION);
+/**
+ * `trade@6`, 8 November 2026 (round 13): a Doubtful free agent is not part
+ * of the replacement level (Doubtful is Out this week).
+ */
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@6',LINEUP_ENGINE_VERSION);

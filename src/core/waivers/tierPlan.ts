@@ -76,8 +76,8 @@ export interface BidTrace {
 export interface TierWeekFigure {
   week: number;
   /**
-   * Points for that game before availability, except a Doubtful player's
-   * current week, which is Team's charged number. Null when there is no number.
+   * Points for that game before availability (an Out or Doubtful week is
+   * marked `out`). Null when there is no number.
    */
   points: number | null;
   source: WeekSource;

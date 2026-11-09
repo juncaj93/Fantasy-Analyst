@@ -164,7 +164,7 @@ if (!plan) {
 } else {
   console.log(`\nbest lineup the roster can already make: ${plan.bestOwned.toFixed(2)} points`);
   console.log(`  ${plan.bestOwnedSlots.map((s) => `${s.slot} ${nameOf.get(s.playerId) ?? s.playerId}`).join(', ')}`);
-  console.log(`threshold ${plan.threshold} (PICKUP_START.gain), tie tolerance ${plan.tieTolerance}`);
+  console.log(`threshold ${plan.threshold} (TOSSUP_POINTS), tie tolerance ${plan.tieTolerance}`);
   console.log('\nevery scanned free agent at a starting position, by margin (gain = with him - without; margin = with him forced in - without):');
   console.log('  player                     pos  number  basis      gain     margin   status');
   for (const a of plan.audit.filter((x) => x.margin != null).slice(0, 25)) {

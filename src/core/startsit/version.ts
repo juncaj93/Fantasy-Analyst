@@ -62,7 +62,13 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * spread (`spread.ts`), read only by a toss-up's lean. Scores move for a
  * Doubtful player and in Floor and Ceiling weeks, hence the bump.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@7';
+/*
+ * `startsit@8`, 8 November 2026 (round 13): Compare calls a toss-up on a
+ * partial market too, the number Team ranks, so a 1.5 gap Team calls a
+ * toss-up is never a Start there. A played game worth zero counts in a
+ * player's bounce (`spread.ts`), read from the usage store.
+ */
+export const STARTSIT_ENGINE_VERSION = 'startsit@8';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
@@ -114,4 +120,11 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@7';
  * swapped starters within 0.6 points for stacks or spread games is gone, so
  * every mode starts the same players.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@10', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@11`, 8 November 2026 (round 13, review S4, S6, S7): a locked
+ * starter keeps his own Sleeper slot and no swap asks for a seat he holds; a
+ * swap or toss-up is gated on the ranking numbers (a Sleeper-only number two
+ * lower); no late-swap charge on a Questionable player in the ordering, so
+ * Team ranks on Compare's number.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@11', STARTSIT_ENGINE_VERSION);

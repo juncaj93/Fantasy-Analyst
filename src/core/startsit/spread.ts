@@ -57,12 +57,19 @@ export function positionShare(position: string): number {
  * The games he played this season, from the stored weekly row.
  *
  * The row has a zero for every week he did not score, which is a bye, a game
- * missed or (rarely) a played game worth exactly nothing. Only weeks with
- * points count; a true zero is left out with the byes, which can only make a
- * boom-or-bust player look a little steadier than he is.
+ * missed or (rarely) a played game worth exactly nothing. A week counts when
+ * he scored, or when the usage store has him on the field that week
+ * (`playedWeeks`, the same rule `productionGames` uses for trades and waivers),
+ * so a real zero stays in his bounce. Without usage (a kicker, a defense, a
+ * week not stored yet) a zero is left out with the byes.
  */
-export function gamesPlayed(weeks: readonly number[] | null | undefined): number[] {
-  return (weeks ?? []).filter((v) => Number.isFinite(v) && Math.abs(v) >= 0.05);
+export function gamesPlayed(
+  weeks: readonly number[] | null | undefined,
+  playedWeeks?: ReadonlySet<number> | null,
+): number[] {
+  return (weeks ?? []).filter(
+    (v, i) => Number.isFinite(v) && (Math.abs(v) >= 0.05 || (playedWeeks?.has(i + 1) ?? false)),
+  );
 }
 
 /** His season's swing as a share, shrunk toward his position's. Null with no games. */
@@ -161,9 +168,11 @@ export function readSpread(opts: {
   position: string;
   /** This season's points by week, week 1 first, zero where he did not score. */
   seasonPoints?: readonly number[] | null;
+  /** Weeks the usage store has him on the field (`playedWeeksOf`), so a played zero counts. */
+  playedWeeks?: ReadonlySet<number> | null;
   expectation?: Pick<VegasExpectation, 'points' | 'contributions'> | null;
 }): SpreadReading {
-  const games = gamesPlayed(opts.seasonPoints);
+  const games = gamesPlayed(opts.seasonPoints, opts.playedWeeks);
   const season = seasonShare(opts.position, games);
   const lines = linesShare(opts.expectation);
   const clamp = (v: number) => Math.round(Math.min(SPREAD.maxShare, Math.max(SPREAD.minShare, v)) * 1000) / 1000;

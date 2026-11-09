@@ -530,8 +530,8 @@ function marketSummary(board: TradeBoard): string {
  * end of the reason line in the quietest treatment that is still legible.
  *
  * The availability line survives, and it is deliberately the trade vocabulary
- * rather than the Start/Sit one: a designation costing a lineup six points is
- * not the same fact as a player whose season is in question. It replaces the
+ * rather than the Start/Sit one: a designation that sits him this week is not
+ * the same fact as a player whose season is in question. It replaces the
  * reason on the rows that have one, because a row may have exactly one sentence
  * and an injury outranks a trend.
  */
