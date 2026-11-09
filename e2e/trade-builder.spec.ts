@@ -400,7 +400,9 @@ test.describe('build a trade: card and sheet', () => {
     await expect(sheet).toBeVisible();
     await expect(sheet.getByTestId('builder-table').locator('tbody tr')).toHaveCount(3);
     await expect(sheet.getByTestId('builder-reasons').locator('li')).toHaveCount(2);
-    await expect(sheet.getByTestId('builder-basis')).toHaveText('Built mostly on Sleeper’s projection, not Vegas');
+    /* Round 15: no "Built mostly on Sleeper's projection" line, whatever the basis. */
+    await expect(sheet.getByTestId('builder-basis')).toHaveCount(0);
+    await expect(sheet).not.toContainText('Built mostly on Sleeper');
     await expect(sheet.getByTestId('builder-more-body')).toHaveCount(0);
     await expect(sheet).not.toContainText('Your habits');
     await expect(sheet).not.toContainText('A third reason');

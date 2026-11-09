@@ -60,6 +60,7 @@ import { LeagueStrategyService } from '../server/services/leagueStrategyService.
 import { SleeperProjectionService } from '../server/services/sleeperProjectionService.ts';
 import { MatchupService } from '../server/services/matchupService.ts';
 import { resolveWeek } from '../core/matchup/build.ts';
+import { trimEnabled, trimOldRows } from '../server/services/trimOldRows.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
 
 /**
@@ -108,6 +109,12 @@ export interface WorkerEnv {
    * deployment nobody has set this up on.
    */
   CLOUDFLARE_ACCOUNT_ID?: string;
+  /**
+   * The kill switch for the 4 AM trim of old rows (Round 15). `"off"` stops
+   * it; anything else, or nothing, leaves it on. A plain var in
+   * `wrangler.toml`, so turning it off is a one-line change and a deploy.
+   */
+  TRIM_OLD_ROWS?: string;
   /**
    * A read-only Cloudflare API token with **Account Analytics: Read** and
    * nothing else.
@@ -867,6 +874,22 @@ export default {
       await run.step('published-projections', 'Published projections', () =>
         refreshPublishedProjections(env, cronEnv),
       );
+
+      /*
+       * Old rows, trimmed slowly (Round 15): at most 2,000 a day, oldest first,
+       * never inside the cutoffs, never on a Saturday or Sunday, and recorded
+       * here with how many went. `TRIM_OLD_ROWS = "off"` stops it. See
+       * `services/trimOldRows.ts`. Last on the tick, so a slow delete can never
+       * hold up a feed.
+       */
+      await run.step('trim-old-rows', 'Trim old rows', async () => {
+        const trimmed = await trimOldRows(env.DB, {
+          now: new Date(event.scheduledTime ?? Date.now()),
+          enabled: trimEnabled(env.TRIM_OLD_ROWS),
+        });
+        console.log(`trim-old-rows ${trimmed.outcome}: ${trimmed.note}`);
+        return { outcome: trimmed.outcome, items: trimmed.deleted, note: trimmed.note };
+      });
 
       /*
        * The three nflverse feeds are no longer on this tick. Parsing them was

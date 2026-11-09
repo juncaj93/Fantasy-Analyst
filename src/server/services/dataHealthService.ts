@@ -599,7 +599,12 @@ export class DataHealthService {
     const health = await new NflverseService(this.db).health(season);
     const runs = Object.values(health.runs).filter((r): r is NonNullable<typeof r> => r != null);
     const attempted = newest(runs.map((r) => r.fetchedAt));
-    const stored = newest(runs.filter((r) => r.rowsWritten > 0).map((r) => r.fetchedAt));
+    /*
+     * Since Round 15 an `ok` run that found nothing changed writes no rows, so
+     * "last stored" counts every completed read: a feed read this morning and
+     * found unchanged is current, not two days stale.
+     */
+    const stored = newest(runs.filter((r) => r.outcome !== 'failed').map((r) => r.fetchedAt));
     const failing = runs.filter((r) => r.outcome === 'failed');
     return {
       id: 'nflverse',

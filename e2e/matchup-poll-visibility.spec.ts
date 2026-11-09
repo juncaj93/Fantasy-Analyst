@@ -1,15 +1,16 @@
 /**
  * Matchup's live refresh stops while the app is in the background (Round 14).
  *
- * During a live game the screen re-reads the matchup every 30 seconds. Every
+ * During a live game the screen re-reads the matchup every 60 seconds (30 until
+ * Round 15). Every
  * read costs database rows, so a phone left on Matchup in a pocket, or a tab
  * left open behind another, must not keep paying for a scoreboard nobody is
  * looking at. Coming back must bring the score current at once, not after the
- * next 30-second tick.
+ * next 60-second tick.
  *
  * The real endpoint on the seeded server answers, and only its phase is set to
  * `live`, so this is the app's own screen and its own timer. The clock is
- * Playwright's, so thirty seconds pass in no time.
+ * Playwright's, so a minute passes in no time.
  *
  * Visibility is simulated the same way `draft-autorefresh.spec.ts` does it:
  * Playwright cannot background a WebKit page and `document.visibilityState` is
@@ -75,8 +76,11 @@ test.describe('Matchup live refresh and the background', () => {
     await settle(page);
     const arrived = matchup.reads();
 
-    // Visible and live: one more read every thirty seconds.
+    // Visible and live: nothing at thirty seconds (the old rate), one more read at sixty.
     await page.clock.runFor(31_000);
+    await page.waitForTimeout(300);
+    expect(matchup.reads(), 'no read at thirty seconds: the refresh is once a minute').toBe(arrived);
+    await page.clock.runFor(30_000);
     await expect.poll(matchup.reads).toBe(arrived + 1);
     await settle(page);
 
@@ -92,8 +96,8 @@ test.describe('Matchup live refresh and the background', () => {
     await expect.poll(matchup.reads).toBe(hiddenAt + 1);
     await settle(page);
 
-    // And back on the thirty-second clock after that.
-    await page.clock.runFor(31_000);
+    // And back on the one-minute clock after that.
+    await page.clock.runFor(61_000);
     await expect.poll(matchup.reads).toBe(hiddenAt + 2);
   });
 });

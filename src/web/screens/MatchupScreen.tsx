@@ -41,11 +41,13 @@ import { unwindOne } from '../tabReset.ts';
  * thing polled. What it costs on the server is bounded by the forecast's own
  * fingerprint cache: a poll that finds the same scores recomputes nothing.
  *
- * Thirty seconds while something is actually live, and nothing at all
- * otherwise — a finished matchup and a Tuesday afternoon are both states in
- * which polling can only produce the same answer.
+ * Sixty seconds while something is actually live and the screen is in front
+ * (Alex, Round 15: it was thirty, and each read costs about 3,700 database
+ * rows), and nothing at all otherwise — a finished matchup, a Tuesday
+ * afternoon and a phone in a pocket are all states in which polling can only
+ * produce the same answer. Coming back to the screen reads at once.
  */
-export const LIVE_POLL_MS = 30_000;
+export const LIVE_POLL_MS = 60_000;
 
 export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;

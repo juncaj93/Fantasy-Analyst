@@ -57,11 +57,12 @@ const ROSTER = [
 const DEPTH_HEADER =
   'dt,team,player_name,espn_id,gsis_id,pos_grp_id,pos_grp,pos_id,pos_name,pos_abb,pos_slot,pos_rank';
 
-function depthFile(newest: string, older: string): string {
+/** `backRank`: the newest chart's rank for the back, so consecutive captures can differ (Round 15 skips a repeat). */
+function depthFile(newest: string, older: string, backRank = 1): string {
   return [
     DEPTH_HEADER,
     `${newest},ARI,Direct Receiver,111,00-0000001,21,3WR 1TE,1,Wide Receiver,WR,1,1`,
-    `${newest},ARI,Bridged Back,222,00-0000002,21,3WR 1TE,11,Running Back,RB,11,1`,
+    `${newest},ARI,Bridged Back,222,00-0000002,21,3WR 1TE,11,Running Back,RB,11,${backRank}`,
     `${older},ARI,Direct Receiver,111,00-0000001,21,3WR 1TE,1,Wide Receiver,WR,1,2`,
     `${older},ARI,Bridged Back,222,00-0000002,21,3WR 1TE,11,Running Back,RB,11,1`,
   ].join('\n');
@@ -136,16 +137,17 @@ describe('ingesting the three feeds', () => {
   it('stores one depth capture and keeps only the two newest', async () => {
     const db = await createTestDb();
     const depth = new DepthChartRepo(db);
-    const fetchOne = (newest: string, older: string) =>
-      new NflverseService(db, { fetch: fakeFetch({ depth_charts_: depthFile(newest, older) }), log: () => {} });
+    const fetchOne = (newest: string, older: string, backRank: number) =>
+      new NflverseService(db, { fetch: fakeFetch({ depth_charts_: depthFile(newest, older, backRank) }), log: () => {} });
 
-    expect((await fetchOne('2026-08-21T07:00:00Z', '2026-08-20T07:00:00Z').refreshDepthChart(SEASON)).outcome).toBe(
+    // Each chart moves the back, so each is a real new capture (an unchanged one is not stored since Round 15).
+    expect((await fetchOne('2026-08-21T07:00:00Z', '2026-08-20T07:00:00Z', 1).refreshDepthChart(SEASON)).outcome).toBe(
       'ok',
     );
-    expect((await fetchOne('2026-08-22T07:00:00Z', '2026-08-21T07:00:00Z').refreshDepthChart(SEASON)).outcome).toBe(
+    expect((await fetchOne('2026-08-22T07:00:00Z', '2026-08-21T07:00:00Z', 2).refreshDepthChart(SEASON)).outcome).toBe(
       'ok',
     );
-    expect((await fetchOne('2026-08-23T07:00:00Z', '2026-08-22T07:00:00Z').refreshDepthChart(SEASON)).outcome).toBe(
+    expect((await fetchOne('2026-08-23T07:00:00Z', '2026-08-22T07:00:00Z', 1).refreshDepthChart(SEASON)).outcome).toBe(
       'ok',
     );
 

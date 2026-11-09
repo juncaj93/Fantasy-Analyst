@@ -71,6 +71,10 @@ NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 #
 # Find it with `wrangler whoami`, or in the URL of any dashboard page.
 CLOUDFLARE_ACCOUNT_ID = ""
+# The 4 AM trim of old odds lines and injury-feed log rows (Round 15): at most
+# 2,000 rows a day, weekdays only, never newer than 3 weeks (odds) or 30 days
+# (injury log). Set to "off" and deploy to stop it.
+TRIM_OLD_ROWS = "on"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

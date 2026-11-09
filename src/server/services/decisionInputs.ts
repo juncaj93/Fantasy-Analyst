@@ -36,14 +36,10 @@ import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { LeagueStrategyService } from './leagueStrategyService.ts';
 import { ManagerIntelService } from './managerIntelService.ts';
 import { dstPlanSourcesFrom, playoffContextFor } from './dstPlanService.ts';
-import {
-  boundedFreeAgentIds,
-  FREE_AGENTS_PER_POSITION,
-  lastWeekScorerIds,
-  publishedFreeAgentIds,
-  trendingFreeAgentIds,
-} from '../../core/roster/freeAgents.ts';
-import { eliteBackRates, stashScanIds } from '../../core/waivers/upsideStash.ts';
+import { boundedFreeAgentIds, FREE_AGENTS_PER_POSITION } from '../../core/roster/freeAgents.ts';
+import { wirePool } from '../../core/roster/wirePool.ts';
+import { PLAYER_NOTES_KEY, readPlayerNotes, type StoredPlayerNotes } from '../../core/sleeper/playerNotes.ts';
+import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
 import { InjuryService } from './injuryService.ts';
 import type { Designation } from '../../core/injury/model.ts';
 import { AdpRepo, type AdpValue } from '../repos/adp.ts';
@@ -570,73 +566,36 @@ export async function gatherWaiverInputs(
   }).catch(() => null);
 
   /*
-   * The wire scan, plus anybody this league dropped inside the waiver window.
-   *
-   * The bounded scan orders by draft rank and takes the top of each position,
-   * which can miss a player a rival cut yesterday. He is the one claim that is
-   * actually contested this week, so he is always scanned.
-   */
-  const scanned = boundedFreeAgentIds(players, { rosteredIds, startable, ranks });
-  const inWindow = [...(strategy?.leagueDrops.keys() ?? [])].filter((id) => {
-    if (rosteredIds.has(id) || scanned.includes(id)) return false;
-    const p = players.find((x) => x.id === id);
-    return p != null && p.active && (startable.size === 0 || startable.has(p.position));
-  });
-  /*
-   * And the best few at each position by this week's published number (18
-   * October 2026): the free agent whose week just changed, a backup whose
-   * starter was ruled Out, sits nowhere near the top of a draft order. Read for
-   * "pick up and start" (`core/waivers/pickupStart.ts`), from the stored week
-   * already in hand, so it costs no read of its own.
+   * The wire scan: the one free-agent pool Waivers and Trades share (Round 15,
+   * `core/roster/wirePool.ts`). The draft-order slice, anybody this league
+   * dropped inside the waiver window (the one claim actually contested this
+   * week), the best few by this week's published number (a backup whose
+   * starter was ruled Out), Sleeper's most-added (W10), last week's top
+   * scorers (round 8) and the back behind every hurt top back. Every input is
+   * already in hand, so the pool costs no read of its own.
    */
   const wireIds = players
     .filter((p) => p.active && !rosteredIds.has(p.id) && (startable.size === 0 || startable.has(p.position)))
     .map((p) => p.id);
-  const byWeek = storedWeek
-    ? publishedFreeAgentIds(players, {
-        rosteredIds,
-        startable,
-        published: projections.scoredWithoutLines(storedWeek, profile, wireIds, (id) => positionOfId.get(id) ?? null),
-        exclude: new Set([...scanned, ...inWindow]),
-      })
-    : [];
-  /* Sleeper's most-added free agents too (W10): a role that just grew is rarely near the top of a draft order. */
-  const trendingIds = trendingFreeAgentIds(players, {
+  const { ids: candidateIds, seasonPool, lastWeekIds, stashIds } = wirePool({
+    players,
     rosteredIds,
     startable,
+    ranks,
+    leagueDrops: strategy?.leagueDrops.keys() ?? [],
+    published: storedWeek
+      ? projections.scoredWithoutLines(storedWeek, profile, wireIds, (id) => positionOfId.get(id) ?? null)
+      : null,
     trending: strategy?.trending ?? new Map(),
-    exclude: new Set([...scanned, ...inWindow, ...byWeek]),
+    season: round2
+      ? {
+          points: round2.seasonPoints,
+          through: round2.seasonPointsThrough,
+          depthOrder: round2.depthOrder,
+          injuryStatus: Object.fromEntries(Object.entries(round2.injuryNotes).map(([id, n]) => [id, n.status] as const)),
+        }
+      : null,
   });
-  /*
-   * Last week's top free-agent scorers too (W10, round 8): a breakout scores
-   * before his projection moves. From the stored season row, the last week it
-   * covers, so it costs no read.
-   */
-  const lastWeekIds = round2
-    ? lastWeekScorerIds(players, {
-        rosteredIds,
-        startable,
-        seasonPoints: round2.seasonPoints,
-        week: round2.seasonPointsThrough,
-        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds]),
-      })
-    : [];
-  /*
-   * And the back behind every hurt top back (round 8, the upside stash's
-   * "next man up"): rarely near the top of any other ordering. Sleeper's depth
-   * and injury notes, already in the same row.
-   */
-  const stashIds = round2
-    ? stashScanIds({
-        players,
-        rosteredIds,
-        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds]),
-        depthOrder: new Map(Object.entries(round2.depthOrder)),
-        injuryStatus: new Map(Object.entries(round2.injuryNotes).map(([id, n]) => [id, n.status] as const)),
-        elite: eliteBackRates(new Map(Object.entries(round2.seasonPoints)), (id) => positionOfId.get(id) === 'RB'),
-      })
-    : [];
-  const candidateIds = [...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds, ...stashIds];
 
   /*
    * Who Alex plays this week (round 8, the block line): the stored matchup
@@ -840,6 +799,8 @@ export async function gatherWaiverInputs(
         const horizon = tradeHorizon({ leagueSettings: league.leagueSettings, currentWeek: week });
         return { weeks: horizon.weeks, playoffWeeks: horizon.playoffWeeks };
       })(),
+      /* Round 15: the free agents the season replacement level averages, the same pool Trades reads. */
+      replacementPool: seasonPool,
       ...(Number.isFinite(reserveSlots) ? { reserveSlots } : {}),
       /*
        * The positions this league may not read a published total for, so a
@@ -941,6 +902,55 @@ export async function boundedFreeAgents(
  * Empty whenever nothing has been imported, which both callers treat as "no
  * ranking known" rather than as "everybody went late".
  */
+/**
+ * The shared free-agent pool, read from scratch (Round 15).
+ *
+ * For a caller that has not gathered the waiver inputs: Trades, whose
+ * replacement level is the best free agents' average, the same as Waivers'.
+ * The same reads the waiver gathering makes for its scan (the draft ranking,
+ * the league's recent drops and Sleeper's trending adds, the season's points
+ * and Sleeper's depth and injury notes), then the same pure function and its
+ * `seasonPool`, so the two screens cannot pick different free agents. Every
+ * read is stored data: nothing is fetched from Sleeper, and the whole stored
+ * week is not read (the season pool does not need it).
+ */
+export async function readWirePool(
+  db: Database,
+  sleeper: SleeperClient,
+  opts: {
+    league: LeagueRecord;
+    week: number;
+    players: CanonicalPlayer[];
+    rosteredIds: Set<string>;
+    startable: Set<string>;
+  },
+): Promise<string[]> {
+  const { league, week, players, rosteredIds, startable } = opts;
+  const [ranks, strategy, rows] = await Promise.all([
+    draftRanks(db).catch(() => new Map<string, AdpValue>()),
+    new LeagueStrategyService(db, { sleeper }).context(league.id, { week, season: league.season }).catch(() => null),
+    new SettingsRepo(db).getMany<unknown>([seasonPointsKey(league.season), PLAYER_NOTES_KEY]).catch(() => new Map<string, unknown>()),
+  ]);
+  const points = (rows.get(seasonPointsKey(league.season)) as StoredSeasonPoints | undefined) ?? null;
+  const notes = readPlayerNotes((rows.get(PLAYER_NOTES_KEY) as StoredPlayerNotes | undefined) ?? null);
+  return wirePool({
+    players,
+    rosteredIds,
+    startable,
+    ranks,
+    leagueDrops: strategy?.leagueDrops.keys() ?? [],
+    /* The season pool leaves this week's published slice out, so the stored week is not read. */
+    published: null,
+    trending: strategy?.trending ?? new Map(),
+    season: {
+      points: points?.points ?? {},
+      through: points?.through ?? 0,
+      depthOrder: notes.depth,
+      injuryStatus: Object.fromEntries(Object.entries(notes.injury).map(([id, n]) => [id, n.status] as const)),
+    },
+  }).seasonPool;
+}
+
 export async function draftRanks(db: Database): Promise<Map<string, AdpValue>> {
   const adpRepo = new AdpRepo(db);
   const snapshot = await adpRepo.latestPlatformSnapshot();

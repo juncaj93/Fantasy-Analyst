@@ -32,8 +32,8 @@
  *
  * - **Your Sleeper lineup.** A player in Alex's current starting lineup is
  *   not offered as a drop unless the add plays the same position and is
- *   clearly better ({@link DROP_RULES.clearlyBetter} points a game), injured
- *   or not.
+ *   better by the toss-up bar or more (`TOSSUP_POINTS` in `startsit/tossup.ts`, 2 points a game,
+ *   the one shared bar since Round 15; it was 3), injured or not.
  * - **Draft capital.** A player this league drafted in round
  *   {@link DROP_RULES.protectedRound} or earlier is never the automatic drop
  *   unless he is out for the season.
@@ -64,8 +64,6 @@ export const DROP_BONUS = {
 } as const;
 
 export const DROP_RULES = {
-  /** An add this many points a game better, at the same position, may displace a lineup player. */
-  clearlyBetter: 3,
   /** A drop whose move gains within this many points of the move's best drop is "as good" for the lineup. */
   gainSlack: 1,
   /** Drafted in this round or earlier: never the automatic drop. */

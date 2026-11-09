@@ -114,6 +114,11 @@ export interface TierInputRequest {
    * rate Trades uses. Absent: the three-week window, as before.
    */
   season?: { weeks: readonly number[]; playoffWeeks: readonly number[] } | null | undefined;
+  /**
+   * Round 15: who sets the season replacement level, the pool Trades shares.
+   * Absent: every scanned free agent, as before.
+   */
+  replacementPool?: ReadonlySet<string> | undefined;
 }
 
 export interface TierInputs {
@@ -303,10 +308,17 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
 
   const replacement = new Map<string, number>();
   for (const [position, level] of replacementLevels(candidateRates.map((c) => c.rate))) replacement.set(position, level.rate);
-  /* The season replacement level: Trades' own rule (the best three free agents' average) on season rates. */
+  /*
+   * The season replacement level: Trades' own rule (the best three free
+   * agents' average) on season rates, over the pool Trades reads too (Round 15).
+   */
   const seasonReplacement = new Map<string, number>();
   if (seasonOn) {
-    const free = candidateRates.map((c) => seasonRates.get(c.rate.playerId)).filter((r): r is PlayerRate => r != null);
+    const pool = input.replacementPool;
+    const free = candidateRates
+      .filter((c) => !pool || pool.has(c.rate.playerId))
+      .map((c) => seasonRates.get(c.rate.playerId))
+      .filter((r): r is PlayerRate => r != null);
     for (const [position, level] of replacementLevels(free)) seasonReplacement.set(position, level.rate);
   }
 

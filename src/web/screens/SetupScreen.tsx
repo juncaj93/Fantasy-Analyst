@@ -30,6 +30,7 @@ import {
   type SetupStep,
   type SignalBalance,
 } from '../api.ts';
+import { withCpuRetry } from '../supportRetry.ts';
 import { SIGNAL_BALANCE_ORDER } from '../../core/draft/signalBalance.ts';
 import { Badge, Empty, Loading, Notice, formatAge, formatDate } from '../components/common.tsx';
 import {
@@ -787,7 +788,10 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
         chosen === 'draft-board'
           ? `/api/drafts/${encodeURIComponent(draftId!)}/support-snapshot`
           : `/api/leagues/${encodeURIComponent(league!.id)}/support-snapshot?context=${chosen}`;
-      const snapshot = await api.get<{ capturedAt: string }>(path, { fresh: true, store: false });
+      /* A 503 is Cloudflare's CPU cut-off right after a heavy request: wait it out and ask again (`supportRetry.ts`). */
+      const snapshot = await withCpuRetry(() => api.get<{ capturedAt: string }>(path, { fresh: true, store: false }), {
+        onRetry: () => setDetail('The server was busy for a moment. Trying again…'),
+      });
       const text = JSON.stringify(snapshot, null, 2);
       const size = `${Math.round(text.length / 1024)} KB`;
 

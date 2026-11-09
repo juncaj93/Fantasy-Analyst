@@ -314,6 +314,7 @@ export async function captureWaiverSnapshot(
         ...(input.request.seasonHorizon == null
           ? {}
           : { seasonHorizon: { weeks: [...input.request.seasonHorizon.weeks], playoffWeeks: [...input.request.seasonHorizon.playoffWeeks] } }),
+        ...(input.request.replacementPool === undefined ? {} : { replacementPool: [...input.request.replacementPool] }),
         /* Already keyed by roster id and free of names: carried as it is. */
         ...(input.request.round2 === undefined ? {} : { round2: input.request.round2 }),
         /* Round 8: this week's opponent by roster id and his designations by player id. No names. */
@@ -483,6 +484,7 @@ export function waiverRequestFromSnapshot(snapshot: SupportSnapshot<WaiverPlanPa
     ...(inputs.reserveSlots === undefined ? {} : { reserveSlots: inputs.reserveSlots }),
     ...(inputs.ahead === undefined ? {} : { ahead: rehydrateAhead(inputs.ahead) }),
     ...(inputs.seasonHorizon == null ? {} : { seasonHorizon: inputs.seasonHorizon }),
+    ...(inputs.replacementPool === undefined ? {} : { replacementPool: inputs.replacementPool }),
     ...(inputs.round2 === undefined ? {} : { round2: inputs.round2 }),
     ...(inputs.opponent === undefined ? {} : { opponent: inputs.opponent }),
     rosters: inputs.rosters.map((roster) => ({
