@@ -475,9 +475,11 @@ export class PlayerRepo {
    * Deterministic aliases are refreshed; user-supplied aliases in
    * `player_aliases` are untouched.
    */
-  async upsertMany(players: CanonicalPlayer[]): Promise<{ written: number }> {
+  async upsertMany(players: CanonicalPlayer[]): Promise<{ written: number; changed: number }> {
     const now = nowIso();
     let written = 0;
+    /* Rows the database actually inserted or updated (Round 14): unchanged players are left alone. */
+    let changed = 0;
     for (const batch of chunk(players, 200)) {
       const statements = batch.map((p) =>
         this.db
@@ -509,7 +511,29 @@ export class PlayerRepo {
                weight_pounds     = COALESCE(excluded.weight_pounds, players.weight_pounds),
                age               = COALESCE(excluded.age, players.age),
                years_exp         = COALESCE(excluded.years_exp, players.years_exp),
-               updated_at        = excluded.updated_at`,
+               updated_at        = excluded.updated_at
+             -- Round 14 (D1 budget): only when something actually differs. The
+             -- daily download sends all ~3,300 players and almost none change,
+             -- and every unchanged row still cost a row write plus one per
+             -- index. IS NOT is SQLite's null-safe "differs". The COALESCE
+             -- columns count as changed only when the sync says something new.
+             WHERE players.sleeper_player_id IS NOT excluded.sleeper_player_id
+                OR players.full_name         IS NOT excluded.full_name
+                OR players.first_name        IS NOT excluded.first_name
+                OR players.last_name         IS NOT excluded.last_name
+                OR players.team              IS NOT excluded.team
+                OR players.position          IS NOT excluded.position
+                OR players.status            IS NOT excluded.status
+                OR players.active            IS NOT excluded.active
+                OR players.normalized_name   IS NOT excluded.normalized_name
+                OR players.aliases_json      IS NOT excluded.aliases_json
+                OR players.external_ids_json IS NOT excluded.external_ids_json
+                OR players.draft_rank        IS NOT excluded.draft_rank
+                OR players.jersey_number     IS NOT excluded.jersey_number
+                OR (excluded.height_inches IS NOT NULL AND excluded.height_inches IS NOT players.height_inches)
+                OR (excluded.weight_pounds IS NOT NULL AND excluded.weight_pounds IS NOT players.weight_pounds)
+                OR (excluded.age           IS NOT NULL AND excluded.age           IS NOT players.age)
+                OR (excluded.years_exp     IS NOT NULL AND excluded.years_exp     IS NOT players.years_exp)`,
           )
           .bind(
             p.id,
@@ -534,8 +558,9 @@ export class PlayerRepo {
             now,
           ),
       );
-      await this.db.batch(statements);
+      const results = await this.db.batch(statements);
       written += batch.length;
+      for (const result of results) changed += Number(result?.meta?.changes ?? 0);
     }
     /*
      * The dictionary and both counts are now whatever this just wrote, so the
@@ -554,7 +579,7 @@ export class PlayerRepo {
       const [total, ranked] = await Promise.all([this.countLive(), this.countRankedLive()]);
       await storeCounts(this.db, { total, ranked, at: now });
     }
-    return { written };
+    return { written, changed };
   }
 
   /** Add a user- or source-supplied alias. Idempotent. */

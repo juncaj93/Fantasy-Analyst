@@ -804,6 +804,27 @@ export class PlayerDetailService {
   }
 
   /**
+   * Is last season already on file? (Round 14, the D1 budget.)
+   *
+   * A finished season does not change, and the 09:00 tick rewrote all of it
+   * every day anyway: about 6,600 row writes for the same numbers. So the tick
+   * now stops once the latest stats run is for this same finished season and
+   * matched players. The first load of a newly finished season still runs (no
+   * run for it yet), and the Setup button calls {@link refreshSeasonStats}
+   * directly, so it can always force a reload. Costs one pass over the small
+   * runs log (one row per past run, a few hundred at most).
+   */
+  async seasonStatsAlreadyLoaded(
+    season = lastCompletedSeason(this.now()),
+  ): Promise<{ loaded: true; note: string } | { loaded: false }> {
+    const run = await this.repo.latestStatsRun().catch(() => null);
+    if (run && run.season === season && run.rowsMatched > 0) {
+      return { loaded: true, note: `${season} is finished and already loaded (${run.rowsMatched} players, ${run.fetchedAt})` };
+    }
+    return { loaded: false };
+  }
+
+  /**
    * Record that tonight's attempt has started, unless one already has.
    *
    * The 09:00 tick calls this and then {@link refreshSeasonStats}; see
