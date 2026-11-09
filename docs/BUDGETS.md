@@ -258,6 +258,24 @@ Both ceilings are far above any legitimate day and far below anything that
 would threaten the rest of the app. A pipeline that hits its ceiling stops
 writing for the rest of the UTC day rather than degrading anything else.
 
+### Round 15: writes that changed nothing, and old rows
+
+- **nflverse feeds** (about 5,500 writes a day before): the ID crosswalk and
+  snap weeks rewrite a row only when a real field differs, and a depth chart
+  identical to the newest stored one is not stored again (nor pruned). The
+  run's `rowsWritten` is what was actually written.
+- **Trimming** (`server/services/trimOldRows.ts`), last step of the 4 AM job,
+  recorded in its run record as `trim-old-rows`: odds lines and copies older
+  than 3 weeks (never a game's final copy, never season or preseason scope)
+  and injury-feed log rows older than 30 days (never the newest). At most
+  2,000 rows a day, oldest first, weekdays only. Cloudflare counts each index
+  a deleted row sits in, so an odds line costs about 5 writes and the cap is up
+  to about 10,000 writes; Saturday and Sunday already run 80,000 to 93,000.
+  **Kill switch:** `TRIM_OLD_ROWS = "off"` in `wrangler.toml`, then deploy.
+- **Matchup** refreshes once a minute while live and visible (was 30 s): each
+  read is about 3,700 rows, so an open tab costs about 222,000 rows an hour
+  instead of 445,000.
+
 ## Request frequency
 
 | clock | what runs |

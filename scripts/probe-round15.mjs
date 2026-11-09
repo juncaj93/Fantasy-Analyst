@@ -274,6 +274,16 @@ async function fetchStep() {
 
 // ---------------------------------------------------------------- replay ---
 
+let leagueIdForReplay = null;
+async function selectedLeague() {
+  try {
+    const res = await fetch(`${APP}/api/leagues`);
+    return ((await res.json()).leagues ?? []).find((l) => l.isSelected)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function replayStep() {
   heading(`Alex's real Team, Waivers and Trades: before (${BEFORE_SHA.slice(0, 7)}) and after (this checkout)`);
   if (!existsSync(REPORT)) {
@@ -281,13 +291,14 @@ function replayStep() {
     return;
   }
   const dir = mkdtempSync(join(tmpdir(), 'round15-'));
+  const env = { ...process.env, REPORT_NOW: new Date().toISOString(), LEAGUE_ID: process.env.LEAGUE_ID || leagueIdForReplay || '' };
   const run = (cwd, label) => {
     try {
       const out = execFileSync('node', ['--experimental-transform-types', '--no-warnings', REPORT], {
         cwd,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
-        env: process.env,
+        env,
       });
       writeFileSync(join(dir, `${label}.txt`), out);
       return out;
@@ -331,7 +342,10 @@ function replayStep() {
 if (steps.has('logs')) await logsStep();
 if (steps.has('d1')) await d1Step();
 if (steps.has('fetch')) await fetchStep();
-if (steps.has('replay')) replayStep();
+if (steps.has('replay')) {
+  leagueIdForReplay = await selectedLeague();
+  replayStep();
+}
 
 heading('This probe');
 console.log(`rows read by this probe's own SQL and the replays: ${probeRows.toLocaleString('en-US')} (the two downloads are counted by Cloudflare, not here)`);
