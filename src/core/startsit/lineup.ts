@@ -1518,6 +1518,12 @@ export interface SolvablePlayer {
   borrowed: boolean;
   /** Seated before anyone else: a locked starter, or a player being tested in the lineup. */
   forced?: boolean;
+  /**
+   * A starter whose game has kicked off: seated even before a forced test
+   * player (round 13), so a test never pushes him out of the slot Sleeper has
+   * locked him in.
+   */
+  locked?: boolean;
 }
 
 export interface SolvedLineup {
@@ -1550,7 +1556,7 @@ export interface SolvedLineup {
  */
 export function solveLineup(players: readonly SolvablePlayer[], shape: RosterShape): SolvedLineup {
   const slots = buildSlots(shape);
-  const key = (p: SolvablePlayer) => (p.forced ? 1e6 : 0) + rankingNumber(p.points, p.borrowed);
+  const key = (p: SolvablePlayer) => (p.locked ? 2e6 : p.forced ? 1e6 : 0) + rankingNumber(p.points, p.borrowed);
   const order = [...players].sort((a, b) => key(b) - key(a) || a.name.localeCompare(b.name) || a.playerId.localeCompare(b.playerId));
   const bySlot = new Map<number, SolvablePlayer>();
   for (const player of order) tryAssign(player, slots, bySlot, new Set<number>());

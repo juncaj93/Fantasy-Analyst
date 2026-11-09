@@ -314,3 +314,30 @@ describe('a played game worth zero counts in his bounce', () => {
     expect(withZero.share).toBeGreaterThan(without.share);
   });
 });
+
+/* ---------------------------------------------------------------- 10. A locked starter in Pick up and start (production, 8 November) */
+
+describe('Pick up and start never benches a starter whose game has kicked off', () => {
+  const shape = buildRosterShape(['QB', 'WR', 'BN', 'BN']);
+  const pp = (id: string, position: string, points: number, locked = false): PickupPlayer =>
+    ({ playerId: id, name: id, position, team: 'NE', points, basis: 'market', ruledOut: false, locked, designation: null }) as PickupPlayer;
+  const plan = (faPoints: number) =>
+    planPickupStart({
+      shape,
+      roster: [pp('Love', 'QB', 19.02, true), pp('WR1', 'WR', 12, true)],
+      candidates: [pp('Mayfield', 'QB', faPoints)],
+      currentStarterIds: ['Love', 'WR1'],
+      pickup: { Mayfield: { state: 'free', reason: null, until: null } } as never,
+      openSpots: 1,
+    });
+
+  it('a Monday-night QB who ties a locked QB is no call at all', () => {
+    const p = plan(19.45);
+    expect(p.start).toBeNull();
+    expect(p.consider).toEqual([]);
+  });
+
+  it('nor one who would clear the bar: the slot is locked', () => {
+    expect(plan(25).start).toBeNull();
+  });
+});

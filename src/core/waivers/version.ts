@@ -146,6 +146,7 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * playoff weight stay on in the playoffs (week 15, or week 14 once its games
  * start), and the window stops at week 17; a Doubtful free agent is not part
  * of the replacement level; Pick up and start measures its gain on the
- * ranking numbers, as Team's swap does.
+ * ranking numbers, as Team's swap does, and never tests a free agent in a
+ * slot a kicked-off starter holds.
  */
 export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@21', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
