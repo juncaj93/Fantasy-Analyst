@@ -175,11 +175,12 @@ export class NflverseService {
         return { outcome: 'failed', note: budgeted.note, written: 0, returned: parsed.rowsInFile, matched: links.length, unmatched: parsed.skipped };
       }
 
-      await this.identity.save(links, ctx.fetchedAt);
+      /* Only links that changed are written (Round 15); `written` is what was. */
+      const written = await this.identity.save(links, ctx.fetchedAt);
       return {
         outcome: 'ok',
-        note: null,
-        written: links.length,
+        note: written === 0 ? 'no link changed since the last read' : null,
+        written,
         returned: parsed.rowsInFile,
         matched: links.filter((l) => l.sleeperId).length,
         unmatched: links.filter((l) => !l.sleeperId).length,
@@ -240,18 +241,37 @@ export class NflverseService {
           });
         }
 
+        /*
+         * The same chart as the newest one stored is not stored again (Round
+         * 15): no rows written, and nothing for the prune to delete. The
+         * stored capture stays the current chart. A failed comparison writes,
+         * as before.
+         */
+        const same = await this.depth.sameAsNewest(season, rows).catch(() => null);
+        if (same != null) {
+          this.log(`nflverse-depth season=${season} captured=${capturedAt} unchanged since ${same}; nothing written`);
+          return {
+            outcome: 'ok',
+            note: `unchanged since the chart captured ${same}`,
+            written: 0,
+            returned: snapshot.rowsRead,
+            matched: rows.length,
+            unmatched: snapshot.entries.length - rows.length,
+          };
+        }
+
         const budgeted = await this.spendBudget(rows.length, ctx.fetchedAt);
         if (!budgeted.ok) {
           return { outcome: 'failed', note: budgeted.note, written: 0, returned: snapshot.rowsRead, matched: rows.length, unmatched: 0 };
         }
 
-        await this.depth.saveSnapshot(rows);
+        const written = await this.depth.saveSnapshot(rows);
         const pruned = await this.depth.prune(season, DEPTH_CAPTURES_KEPT).catch(() => 0);
-        this.log(`nflverse-depth season=${season} captured=${capturedAt} rows=${rows.length} pruned=${pruned}`);
+        this.log(`nflverse-depth season=${season} captured=${capturedAt} rows=${rows.length} written=${written} pruned=${pruned}`);
         return {
           outcome: 'ok',
           note: null,
-          written: rows.length,
+          written,
           returned: snapshot.rowsRead,
           matched: rows.length,
           unmatched: snapshot.entries.length - rows.length,
@@ -364,12 +384,12 @@ export class NflverseService {
         return { outcome: 'failed', note: budgeted.note, written: 0, returned: parsed.rowsInWeek, matched: rows.length, unmatched };
       }
 
-      await this.snaps.saveWeeks(rows);
+      const written = await this.snaps.saveWeeks(rows);
       this.log(
         `nflverse-snaps season=${season} week=${parsed.week} parsed=${parsed.rows.length} ` +
-          `written=${rows.length} unmatched=${unmatched}`,
+          `written=${written} unmatched=${unmatched}`,
       );
-      return { outcome: 'ok', note: null, written: rows.length, returned: parsed.rowsInWeek, matched: rows.length, unmatched, week: parsed.week };
+      return { outcome: 'ok', note: null, written, returned: parsed.rowsInWeek, matched: rows.length, unmatched, week: parsed.week };
     });
   }
 

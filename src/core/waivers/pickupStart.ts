@@ -163,7 +163,17 @@ export interface PickupStartMove {
   starterOut: { playerId: string; name: string } | null;
 }
 
-export type PickupAuditStatus = 'start' | 'consider' | 'below' | 'not_priced' | 'injured' | 'defence_planner' | 'not_now' | 'no_drop';
+export type PickupAuditStatus =
+  | 'start'
+  | 'consider'
+  | 'below'
+  | 'not_priced'
+  | 'injured'
+  | 'defence_planner'
+  | 'not_now'
+  | 'no_drop'
+  /** A tie this week that loses over the rest of the season (Round 15): not shown. */
+  | 'worse_over_season';
 
 export interface PickupStartPlan {
   threshold: number;
@@ -444,5 +454,39 @@ export function starterOutReader(opts: {
         STARTER_OUT.has((opts.injuryStatus.get(m.id) ?? '').toLowerCase()),
     );
     return hurt ? { playerId: hurt.id, name: hurt.fullName } : null;
+  };
+}
+
+/**
+ * A "ties this week" pickup that is worse over the season is not shown (Alex,
+ * Round 15).
+ *
+ * A tie is a coin flip this week, so the only thing that can make it worth a
+ * roster spot is what he is worth after this week. The waiver planner already
+ * values every free agent over the rest of the season (`tiers.ts`, the same
+ * rest-of-season rates Trades uses), and `seasonValue` is that number for his
+ * best move: the lineup points it adds over the season's weeks, with the
+ * insurance credit, and before Alex's labelled preferences. Below zero, the
+ * move loses over the season, and the tie is dropped from `consider`, so
+ * neither Team's Best move sheet nor the Waivers "Worth considering" row shows
+ * it. Zero or more, or no season reading at all (the planner failed, or the
+ * season is over), the tie stays exactly as before.
+ *
+ * The headline (`start`) is untouched: it clears the toss-up bar this week.
+ */
+export function hideSeasonLosingTies(plan: PickupStartPlan, seasonValue: (playerId: string) => number | null): PickupStartPlan {
+  const losing = new Set(
+    plan.consider
+      .filter((m) => {
+        const value = seasonValue(m.playerId);
+        return value != null && value < -1e-9;
+      })
+      .map((m) => m.playerId),
+  );
+  if (losing.size === 0) return plan;
+  return {
+    ...plan,
+    consider: plan.consider.filter((m) => !losing.has(m.playerId)),
+    audit: plan.audit.map((a) => (losing.has(a.playerId) ? { ...a, status: 'worse_over_season' as const } : a)),
   };
 }

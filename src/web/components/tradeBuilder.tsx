@@ -514,11 +514,7 @@ function PackageSheet({ pkg, meta, onClose }: { pkg: BuiltPackage; meta: Builder
             )}
           </div>
         ))}
-        {pkg.basis === 'sleeper' ? (
-          <div className="builder-sheet-line faint" data-testid="builder-basis">
-            Built mostly on Sleeper’s projection, not Vegas
-          </div>
-        ) : null}
+        {/* No basis line (Alex, Round 15): `pkg.basis` is still sent and still decides nothing here. */}
 
         <div className="field builder-sheet-actions">
           <button

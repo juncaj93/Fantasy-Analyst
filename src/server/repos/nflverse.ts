@@ -104,8 +104,8 @@ async function insertRows<T>(
   columns: number,
   sql: (values: string) => string,
   bind: (row: T) => (string | number | null)[],
-): Promise<void> {
-  if (rows.length === 0) return;
+): Promise<number> {
+  if (rows.length === 0) return 0;
   const perStatement = Math.max(1, Math.floor(MAX_BOUND_PARAMS / columns));
   const statements = chunk(rows, perStatement).map((batch) => {
     const values = batch.map(() => `(${new Array(columns).fill('?').join(', ')})`).join(', ');
@@ -113,9 +113,12 @@ async function insertRows<T>(
     for (const row of batch) binds.push(...bind(row));
     return db.prepare(sql(values)).bind(...binds);
   });
+  /* Rows the statements actually changed: an upsert whose WHERE refused a row changes nothing. */
+  let changed = 0;
   for (const group of chunk(statements, STATEMENTS_PER_BATCH)) {
-    await db.batch(group);
+    for (const result of await db.batch(group)) changed += Number(result?.meta?.changes ?? 0);
   }
+  return changed;
 }
 
 // ------------------------------------------------------------- identity ---
@@ -131,8 +134,15 @@ export class IdentityCrosswalkRepo {
    * mapping that lets his stored history be read. A retired player's identifier
    * tuple does not stop being true.
    */
-  async save(links: (IdentityLink & { fullName?: string | null; status?: string | null })[], fetchedAt: string): Promise<void> {
-    await insertRows(
+  /**
+   * Returns how many rows were written: a link identical to the stored one is
+   * left alone (Round 15). `as_of` and `fetched_at` alone do not count as a
+   * change, because the file is republished daily with the same people in it;
+   * an id, club, position, name, status or source that differs is written, as
+   * is every new player.
+   */
+  async save(links: (IdentityLink & { fullName?: string | null; status?: string | null })[], fetchedAt: string): Promise<number> {
+    return insertRows(
       this.db,
       links,
       IDENTITY_COLUMNS,
@@ -152,7 +162,16 @@ export class IdentityCrosswalkRepo {
            status = excluded.status,
            source = excluded.source,
            as_of = excluded.as_of,
-           fetched_at = excluded.fetched_at`,
+           fetched_at = excluded.fetched_at
+         WHERE nflverse_identity.sleeper_id IS NOT excluded.sleeper_id
+            OR nflverse_identity.pfr_id     IS NOT excluded.pfr_id
+            OR nflverse_identity.espn_id    IS NOT excluded.espn_id
+            OR nflverse_identity.yahoo_id   IS NOT excluded.yahoo_id
+            OR nflverse_identity.team       IS NOT excluded.team
+            OR nflverse_identity.position   IS NOT excluded.position
+            OR nflverse_identity.full_name  IS NOT excluded.full_name
+            OR nflverse_identity.status     IS NOT excluded.status
+            OR nflverse_identity.source     IS NOT excluded.source`,
       (link) => [
         link.gsisId,
         link.season,
@@ -223,8 +242,9 @@ export class IdentityCrosswalkRepo {
 export class SnapCountRepo {
   constructor(private readonly db: Database) {}
 
-  async saveWeeks(rows: StoredSnapWeek[]): Promise<void> {
-    await insertRows(
+  /** Returns how many rows were written: a week identical to the stored one is left alone (Round 15). */
+  async saveWeeks(rows: StoredSnapWeek[]): Promise<number> {
+    return insertRows(
       this.db,
       rows,
       SNAP_COLUMNS,
@@ -244,7 +264,16 @@ export class SnapCountRepo {
            gsis_id = excluded.gsis_id,
            source = excluded.source,
            published_at = excluded.published_at,
-           fetched_at = excluded.fetched_at`,
+           fetched_at = excluded.fetched_at
+         WHERE player_snap_weeks.game_type     IS NOT excluded.game_type
+            OR player_snap_weeks.team          IS NOT excluded.team
+            OR player_snap_weeks.opponent      IS NOT excluded.opponent
+            OR player_snap_weeks.position      IS NOT excluded.position
+            OR player_snap_weeks.offense_snaps IS NOT excluded.offense_snaps
+            OR player_snap_weeks.offense_share IS NOT excluded.offense_share
+            OR player_snap_weeks.pfr_id        IS NOT excluded.pfr_id
+            OR player_snap_weeks.gsis_id       IS NOT excluded.gsis_id
+            OR player_snap_weeks.source        IS NOT excluded.source`,
       (row) => [
         row.playerId,
         row.season,
@@ -311,8 +340,8 @@ export class SnapCountRepo {
 export class DepthChartRepo {
   constructor(private readonly db: Database) {}
 
-  async saveSnapshot(rows: StoredDepthEntry[]): Promise<void> {
-    await insertRows(
+  async saveSnapshot(rows: StoredDepthEntry[]): Promise<number> {
+    return insertRows(
       this.db,
       rows,
       DEPTH_COLUMNS,
@@ -329,7 +358,15 @@ export class DepthChartRepo {
            pos_slot = excluded.pos_slot,
            pos_rank = excluded.pos_rank,
            starter_slots = excluded.starter_slots,
-           schema_version = excluded.schema_version`,
+           schema_version = excluded.schema_version
+         WHERE depth_chart_entries.team           IS NOT excluded.team
+            OR depth_chart_entries.player_name    IS NOT excluded.player_name
+            OR depth_chart_entries.position       IS NOT excluded.position
+            OR depth_chart_entries.pos_group      IS NOT excluded.pos_group
+            OR depth_chart_entries.pos_slot       IS NOT excluded.pos_slot
+            OR depth_chart_entries.pos_rank       IS NOT excluded.pos_rank
+            OR depth_chart_entries.starter_slots  IS NOT excluded.starter_slots
+            OR depth_chart_entries.schema_version IS NOT excluded.schema_version`,
       (row) => [
         row.season,
         row.capturedAt,
@@ -346,6 +383,68 @@ export class DepthChartRepo {
         row.fetchedAt,
       ],
     );
+  }
+
+  /**
+   * Is this chart the same as the newest one stored? (Round 15.)
+   *
+   * nflverse republishes the depth file with a new timestamp when nothing on
+   * it moved, and every such capture was about 1,170 new rows plus the rows
+   * the prune then deleted. Same players at the same clubs, positions, slots
+   * and ranks is the same chart: it is not stored again, and the stored one
+   * stays the current chart. Any difference at all, one player added, gone or
+   * moved, is a new capture, written in full as before. One indexed read.
+   */
+  async sameAsNewest(season: string, rows: readonly StoredDepthEntry[]): Promise<string | null> {
+    const [latest] = await this.captures(season);
+    if (!latest) return null;
+    const { results } = await this.db
+      .prepare(
+        `SELECT gsis_id, team, player_name, position, pos_group, pos_slot, pos_rank, starter_slots, schema_version
+           FROM depth_chart_entries WHERE season = ? AND captured_at = ?`,
+      )
+      .bind(season, latest)
+      .all<Record<string, unknown>>();
+    const stored = results ?? [];
+    if (stored.length !== rows.length) return null;
+    const key = (r: {
+      gsisId: string;
+      team: unknown;
+      playerName: unknown;
+      position: unknown;
+      posGroup: unknown;
+      posSlot: unknown;
+      posRank: unknown;
+      starterSlots: unknown;
+      schemaVersion: unknown;
+    }) =>
+      JSON.stringify([
+        r.gsisId,
+        r.team ?? null,
+        r.playerName ?? null,
+        r.position ?? null,
+        r.posGroup ?? null,
+        r.posSlot == null ? null : Number(r.posSlot),
+        r.posRank == null ? null : Number(r.posRank),
+        r.starterSlots == null ? null : Number(r.starterSlots),
+        r.schemaVersion == null ? null : String(r.schemaVersion),
+      ]);
+    const have = new Set(
+      stored.map((r) =>
+        key({
+          gsisId: String(r['gsis_id']),
+          team: r['team'],
+          playerName: r['player_name'],
+          position: r['position'],
+          posGroup: r['pos_group'],
+          posSlot: r['pos_slot'],
+          posRank: r['pos_rank'],
+          starterSlots: r['starter_slots'],
+          schemaVersion: r['schema_version'],
+        }),
+      ),
+    );
+    return rows.every((r) => have.has(key(r))) ? latest : null;
   }
 
   /** The capture times held for a season, newest first. */

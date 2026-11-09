@@ -29,6 +29,7 @@
 import { currentWeekOf } from '../../core/tradeValue/weeks.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../../core/startsit/engine.ts';
 import { boundedFreeAgentIds } from '../../core/roster/freeAgents.ts';
+import { readWirePool } from './decisionInputs.ts';
 import { buildRosterShape, buildScoringProfile, startablePositions } from '../../core/sleeper/scoring.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
 import type { LeagueRecord, RosterRecord, SleeperTransaction } from '../../core/sleeper/types.ts';
@@ -70,8 +71,6 @@ import type { Database } from '../db.ts';
 import { buildStartSitContext, startSitInputsFor } from './startSitInputs.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
 
-/** Free agents read per position to set replacement level. */
-export const REPLACEMENT_POOL_PER_POSITION = 10;
 
 /** Most players on one side of a checked trade. */
 export const MAX_PLAYERS_PER_SIDE = 4;
@@ -677,12 +676,19 @@ export class TradeValueService {
     const positionById = new Map(players.map((p) => [p.id, p.position] as const));
     const wantDef = startable.has('DEF') && opts.movedIds.some((id) => positionById.get(id) === 'DEF');
     const positions = new Set([...startable].filter((p) => p !== 'DEF' || wantDef));
-    const freeAgentIds = boundedFreeAgentIds(players, {
-      rosteredIds,
-      startable: positions,
-      ranks: new Map(),
-      perPosition: REPLACEMENT_POOL_PER_POSITION,
-    });
+    /*
+     * The same free-agent pool as Waivers' season level (Round 15,
+     * `core/roster/wirePool.ts`): the draft-order slice, recent drops,
+     * trending adds, last week's scorers and a hurt back's backup. It used to
+     * be the top 10 by Sleeper's search rank, so the two screens averaged
+     * different free agents. A defence stays out unless one is in the trade,
+     * as before.
+     */
+    const freeAgentIds = (
+      await readWirePool(this.db, this.sleeper, { league, week, players, rosteredIds, startable }).catch(() =>
+        boundedFreeAgentIds(players, { rosteredIds, startable, ranks: new Map() }),
+      )
+    ).filter((id) => positions.has(positionById.get(id) ?? ''));
 
     const allIds = [...new Set([...opts.playerIds, ...freeAgentIds])];
     /*

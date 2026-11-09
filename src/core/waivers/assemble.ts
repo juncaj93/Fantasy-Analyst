@@ -69,7 +69,7 @@ import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import { buildTierInputs } from './tierInputs.ts';
 import type { AheadNumbers } from './aheadWeeks.ts';
 import { planWaiverTiers, type StartNowCall, type WaiverTierPlan } from './tiers.ts';
-import { planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
+import { hideSeasonLosingTies, planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
 import { evaluatePlayer } from '../startsit/engine.ts';
 import { decisionPoints } from '../startsit/decisionPoints.ts';
 import { buildTiersView, tierClaimPlan, type TierWeekFigure, type WaiverTiersView } from './tierPlan.ts';
@@ -253,6 +253,12 @@ export interface WaiverAssemblyRequest {
    * pickup and a drop on the whole season. Absent: the three-week window.
    */
   seasonHorizon?: { weeks: readonly number[]; playoffWeeks: readonly number[] } | null | undefined;
+  /**
+   * Round 15: the free agents the season replacement level averages
+   * (`core/roster/wirePool.ts`, `seasonPool`), the same pool Trades reads.
+   * Absent (an older snapshot): every scanned free agent, as before.
+   */
+  replacementPool?: readonly string[] | undefined;
   /**
    * Waivers round 2 (October 2026): the need-aware rivals, the drop score and
    * the stash rules. Plain records so a support snapshot carries them as they
@@ -740,7 +746,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         .sort((a, b) => Number(b.deadSpot === true) - Number(a.deadSpot === true) || a.score - b.score)
         .map((d) => ({ playerId: d.playerId, name: d.name, reason: d.reason || null }));
       const choices = scored.length > 0 ? scored : (plan?.dropReady ?? []).map((d) => ({ playerId: d.playerId, name: d.name, reason: d.reason }));
-      return planPickupStart({
+      const decided = planPickupStart({
         ...startNowInput,
         dropFor: (id) => {
           const move = moves.get(id);
@@ -748,6 +754,16 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           return { playerId: move.drop.playerId, name: move.drop.name, ...(move.drop.viaReserve ? { viaReserve: true } : {}) };
         },
         spotChoices: () => choices,
+      });
+      /*
+       * A tie this week that is worse over the season is not shown, on Team or
+       * on Waivers (Round 15). The season reading is the planner's own: his
+       * best move's rest-of-season lineup points and insurance.
+       */
+      if (!plan?.season) return decided;
+      return hideSeasonLosingTies(decided, (id) => {
+        const move = moves.get(id);
+        return move ? move.lineupGain + move.insurance : null;
       });
     } catch {
       return null;
@@ -804,6 +820,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         excludedPositions: new Set([DEFENCE_POSITION]),
         ahead: request.ahead ?? null,
         ...(request.seasonHorizon ? { season: request.seasonHorizon } : {}),
+        ...(request.replacementPool ? { replacementPool: new Set(request.replacementPool) } : {}),
         ...(round2
           ? {
               /* No season row yet (a fresh deploy): the drop and handcuff reads stay as before. */

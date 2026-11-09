@@ -549,8 +549,12 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   const lineupLocked = (p: TierPlayer, c: TierCandidate): boolean => {
     const sig = signals?.get(p.playerId);
     if (!sig || !sig.inLineup || isDeadSpot(sig)) return false;
-    /* An injured starter is still a starter: an injury never makes him cheaper to cut. */
-    return !(p.position === c.position && (seasonRateOf(c) ?? 0) >= (seasonRateOf(p) ?? 0) + DROP_RULES.clearlyBetter);
+    /*
+     * An injured starter is still a starter: an injury never makes him cheaper to cut.
+     * The add has to beat him by the toss-up bar (Alex, Round 15: one shared
+     * number, 2.0, where this was 3).
+     */
+    return !(p.position === c.position && clearsTossUp((seasonRateOf(c) ?? 0) - (seasonRateOf(p) ?? 0)));
   };
   /*
    * A season starter is never the drop (round 6): anybody who would still be
