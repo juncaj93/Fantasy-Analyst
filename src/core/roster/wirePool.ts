@@ -59,8 +59,8 @@ export interface WirePoolInputs {
 /**
  * The scan, and the season pool inside it.
  *
- * `ids` is everybody Waivers scans for a pickup. `seasonPool` is the same list
- * without slice 3 (this week's published number): that slice exists to catch
+ * `ids` is everybody Waivers scans for a pickup. `seasonPool` is the pool built
+ * as if slice 3 (this week's published number) did not exist: that slice exists to catch
  * a one-week jump, a backup starting while the starter is out, which is a
  * pickup for this week and not what a free agent is worth over a season. The
  * season pool is the one both screens average for "the best free agents"
@@ -91,37 +91,52 @@ export function wirePool(input: WirePoolInputs): {
         exclude: new Set([...scanned, ...inWindow]),
       })
     : [];
-  const trendingIds = trendingFreeAgentIds(players, {
-    rosteredIds,
-    startable,
-    trending: input.trending,
-    exclude: new Set([...scanned, ...inWindow, ...byWeek]),
-  });
+  /*
+   * Slices 4 to 6, each leaving out who an earlier slice already took. Run
+   * twice: once after this week's published slice (the scan, as before) and
+   * once without it (the season pool). Running them once and removing slice 3
+   * afterwards was the Round 15 probe's finding: a player in slice 3 then
+   * pushed somebody else out of the trending top 10 on Waivers but not on
+   * Trades (90 players against 93 on Alex's league, 9 November 2026). The
+   * season pool is always inside the scan: leaving fewer players out only moves
+   * a player up a slice, never off it.
+   */
   const season = input.season;
-  const lastWeekIds = season
-    ? lastWeekScorerIds(players, {
-        rosteredIds,
-        startable,
-        seasonPoints: season.points,
-        week: season.through,
-        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds]),
-      })
-    : [];
   const positionOf = new Map(players.map((p) => [p.id, p.position ?? null] as const));
-  const stashIds = season
-    ? stashScanIds({
-        players,
-        rosteredIds,
-        exclude: new Set([...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds]),
-        depthOrder: new Map(Object.entries(season.depthOrder)),
-        injuryStatus: new Map(Object.entries(season.injuryStatus)),
-        elite: eliteBackRates(new Map(Object.entries(season.points)), (id) => positionOf.get(id) === 'RB'),
-      })
-    : [];
+  const later = (taken: readonly string[]) => {
+    const trendingIds = trendingFreeAgentIds(players, {
+      rosteredIds,
+      startable,
+      trending: input.trending,
+      exclude: new Set(taken),
+    });
+    const lastWeekIds = season
+      ? lastWeekScorerIds(players, {
+          rosteredIds,
+          startable,
+          seasonPoints: season.points,
+          week: season.through,
+          exclude: new Set([...taken, ...trendingIds]),
+        })
+      : [];
+    const stashIds = season
+      ? stashScanIds({
+          players,
+          rosteredIds,
+          exclude: new Set([...taken, ...trendingIds, ...lastWeekIds]),
+          depthOrder: new Map(Object.entries(season.depthOrder)),
+          injuryStatus: new Map(Object.entries(season.injuryStatus)),
+          elite: eliteBackRates(new Map(Object.entries(season.points)), (id) => positionOf.get(id) === 'RB'),
+        })
+      : [];
+    return { trendingIds, lastWeekIds, stashIds };
+  };
+  const scan = later([...scanned, ...inWindow, ...byWeek]);
+  const pool = byWeek.length === 0 ? scan : later([...scanned, ...inWindow]);
   return {
-    ids: [...scanned, ...inWindow, ...byWeek, ...trendingIds, ...lastWeekIds, ...stashIds],
-    seasonPool: [...scanned, ...inWindow, ...trendingIds, ...lastWeekIds, ...stashIds],
-    lastWeekIds,
-    stashIds,
+    ids: [...scanned, ...inWindow, ...byWeek, ...scan.trendingIds, ...scan.lastWeekIds, ...scan.stashIds],
+    seasonPool: [...scanned, ...inWindow, ...pool.trendingIds, ...pool.lastWeekIds, ...pool.stashIds],
+    lastWeekIds: scan.lastWeekIds,
+    stashIds: scan.stashIds,
   };
 }

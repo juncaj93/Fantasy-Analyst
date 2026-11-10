@@ -329,6 +329,26 @@ describe('5. the nflverse feeds write nothing when nothing changed', () => {
     expect(await depth.captures('2026')).toEqual(['2026-11-10T07:00:00Z', '2026-11-08T07:00:00Z']);
   });
 
+  it('a chart that lists a player at two slots still matches the stored one (probe, 9 November: 5,184 depth writes)', async () => {
+    const db = await createTestDb();
+    const twice = (dt: string, older: string) =>
+      [
+        DEPTH_HEADER,
+        `${dt},ARI,Direct Receiver,111,00-0000001,21,3WR 1TE,1,Wide Receiver,WR,1,1`,
+        `${dt},ARI,Direct Receiver,111,00-0000001,21,3WR 1TE,3,Wide Receiver,WR,3,2`,
+        `${dt},ARI,Bridged Back,222,00-0000002,21,3WR 1TE,11,Running Back,RB,11,1`,
+        `${older},ARI,Direct Receiver,111,00-0000001,21,3WR 1TE,1,Wide Receiver,WR,1,2`,
+        `${older},ARI,Bridged Back,222,00-0000002,21,3WR 1TE,11,Running Back,RB,11,1`,
+      ].join('\n');
+    const run = (dt: string) =>
+      new NflverseService(db, { fetch: fakeFetch(twice(dt, '2026-11-07T07:00:00Z')), log: () => {} }).refreshDepthChart('2026');
+    expect((await run('2026-11-08T07:00:00Z')).outcome).toBe('ok');
+    const again = await run('2026-11-09T07:00:00Z');
+    expect(again.outcome).toBe('ok');
+    expect(again.rowsWritten).toBe(0);
+    expect(await new DepthChartRepo(db).captures('2026')).toEqual(['2026-11-08T07:00:00Z']);
+  });
+
   it('sameAsNewest: different length, or any field, is not the same', async () => {
     const db = await createTestDb();
     const depth = new DepthChartRepo(db);
@@ -541,6 +561,30 @@ describe('7. Trades and Waivers average the same free agents', () => {
     expect(wide.ids).toContain('jump');
     expect(wide.seasonPool).not.toContain('jump');
     expect(wide.seasonPool).toContain('hot');
+  });
+
+  it('the season pool is the same whether or not this week is stored (probe, 9 November: 90 against 93)', () => {
+    /* Twelve in the draft slice; eleven trending; the most-added one also jumped this week. */
+    const draft = Array.from({ length: 12 }, (_, i) => player({ id: `d${i}`, fullName: `D ${i}`, position: 'WR', team: 'ARI', searchRank: i + 1 }));
+    const trend = Array.from({ length: 11 }, (_, i) => player({ id: `t${i}`, fullName: `T ${i}`, position: 'WR', team: 'ARI', searchRank: 500 + i }));
+    const input = {
+      players: [...draft, ...trend],
+      rosteredIds: new Set<string>(),
+      startable: new Set(['WR']),
+      ranks: new Map(),
+      leagueDrops: [],
+      trending: new Map(trend.map((p, i) => [p.id, { rank: i + 1 }] as const)),
+      season: null,
+    };
+    const waivers = wirePool({ ...input, published: new Map([['t0', 20]]) });
+    const trades = wirePool({ ...input, published: null });
+    expect([...waivers.seasonPool].sort()).toEqual([...trades.seasonPool].sort());
+    expect(waivers.seasonPool).toContain('t0');
+    expect(waivers.seasonPool).not.toContain('t10');
+    /* The season pool is inside the scan, so Waivers has a number for every one of them. */
+    for (const id of waivers.seasonPool) expect(waivers.ids).toContain(id);
+    /* The scan itself is as before: t0 by this week, then the next ten trending. */
+    expect(waivers.ids).toContain('t10');
   });
 
   async function league() {
