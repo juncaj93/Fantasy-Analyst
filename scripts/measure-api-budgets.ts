@@ -228,7 +228,47 @@ export interface MeasureOptions {
   coldOutlook?: boolean;
 }
 
+/**
+ * The clock every measurement stands at (Round 15).
+ *
+ * The demo seed is written relative to the real clock, but some of what a
+ * screen shows is not (the NFL week, which games are over), so the same code
+ * measured a 6.0 kB Waivers board on 9 November and 6.5 kB on 10 November.
+ * A budget that moves with the calendar fails commits that changed nothing, so
+ * the whole measurement runs at one fixed moment, Sunday 8 November 2026,
+ * 10 AM Eastern, the clock the waiver snapshot tests already use. Restored
+ * afterwards, like `fetch`.
+ */
+export const MEASURE_AT = '2026-11-08T15:00:00.000Z';
+
+function pinClock(at: string): () => void {
+  const RealDate = Date;
+  const offset = RealDate.parse(at) - RealDate.now();
+  class PinnedDate extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length === 0) super(RealDate.now() + offset);
+      else super(...(args as [string | number | Date]));
+    }
+    static override now(): number {
+      return RealDate.now() + offset;
+    }
+  }
+  globalThis.Date = PinnedDate as DateConstructor;
+  return () => {
+    globalThis.Date = RealDate;
+  };
+}
+
 export async function measureEndpoints(opts: MeasureOptions = {}): Promise<EndpointMeasurement[]> {
+  const unpin = pinClock(MEASURE_AT);
+  try {
+    return await measureAt(opts);
+  } finally {
+    unpin();
+  }
+}
+
+async function measureAt(opts: MeasureOptions): Promise<EndpointMeasurement[]> {
   const latencyMs = opts.latencyMs ?? 0;
   const outlookLatencyMs = opts.outlookLatencyMs ?? 0;
   const runs = opts.runs ?? 5;
