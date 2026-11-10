@@ -406,7 +406,13 @@ export class DepthChartRepo {
       .bind(season, latest)
       .all<Record<string, unknown>>();
     const stored = results ?? [];
-    if (stored.length !== rows.length) return null;
+    /*
+     * One stored row per player: the chart lists a player at every slot he
+     * plays, and the upsert keeps the last (Round 15 probe: without this the
+     * file always had more rows than the store, so no chart ever matched).
+     */
+    const incoming = [...new Map(rows.map((r) => [r.gsisId, r] as const)).values()];
+    if (stored.length !== incoming.length) return null;
     const key = (r: {
       gsisId: string;
       team: unknown;
@@ -444,7 +450,7 @@ export class DepthChartRepo {
         }),
       ),
     );
-    return rows.every((r) => have.has(key(r))) ? latest : null;
+    return incoming.every((r) => have.has(key(r))) ? latest : null;
   }
 
   /** The capture times held for a season, newest first. */
