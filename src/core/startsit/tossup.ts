@@ -14,8 +14,9 @@
  *
  *  - The gap is measured on the ranking number, so a Sleeper-only player
  *    carries his minus 1 here as everywhere (`rankingNumber`).
- *  - Under {@link TOSSUP_POINTS}: a toss-up. The app still names its lean and
- *    shows both numbers, and says "Toss-up". It is never a Best move headline,
+ *  - Under {@link TOSSUP_POINTS}: a toss-up. When the higher number is
+ *    Sleeper-only (no Vegas line), under {@link UNPRICED_TOSSUP_POINTS}.
+ *    The app still names its lean and shows both numbers, and says "Toss-up". It is never a Best move headline,
  *    never a lineup change, never a "Pick up and start" card.
  *  - Never a toss-up when the player being replaced is a real hole: Out, IR,
  *    suspended, Doubtful, on a bye, or a slot nobody holds. The gap there is
@@ -37,6 +38,27 @@ import { spreadPoints, type SpreadReading } from './spread.ts';
 
 /** Points under which two options are a toss-up. */
 export const TOSSUP_POINTS = 2.0;
+
+/**
+ * The wider bar when the pick rests on a number with no Vegas line (Round 18,
+ * 11 November 2026). Under this gap, a lean whose own number is Sleeper-only
+ * is a toss-up, not a pick.
+ *
+ * Measured on the Round 16 backtest (`docs/backtest/round16-data.json`,
+ * weeks 1 to 9, `docs/backtest/ROUND18_UNPRICED.md`): after the minus 1 an
+ * unpriced lead of a healthy player wins as often as a priced lead of 2.0
+ * (same-confidence gap 1.96, noise up to 2.68). An unpriced lead of a
+ * Questionable player needs 2.87 even when he plays (noise up to 3.50), and
+ * far more when a no-show counts as zero. The bar sits at the top of that
+ * range. Only the lean's own number matters: a priced lead over an unpriced
+ * player keeps the 2.0 bar (it wins at least as often).
+ */
+export const UNPRICED_TOSSUP_POINTS = 3.5;
+
+/** The bar a lean must clear: wider when his own number has no Vegas line. */
+export function tossUpBar(lean: { borrowed?: boolean }): number {
+  return lean.borrowed ? UNPRICED_TOSSUP_POINTS : TOSSUP_POINTS;
+}
 
 /** One side of a start/sit call. */
 export interface TossUpSide {
@@ -74,7 +96,9 @@ export function tossUpGap(lean: TossUpSide, other: TossUpSide): number | null {
 export function isTossUp(lean: TossUpSide, other: TossUpSide): boolean {
   if (other.hole || other.points == null || lean.points == null) return false;
   const gap = tossUpGap(lean, other)!;
-  return gap < TOSSUP_POINTS - 1e-9;
+  /* The higher ranking number is the pick this call rests on; the bar follows its number. */
+  const pick = gap >= 0 ? lean : other;
+  return gap < tossUpBar(pick) - 1e-9;
 }
 
 /** Whether a whole-lineup gain clears the bar. The same bar, for gains already summed. */
