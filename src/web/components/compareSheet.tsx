@@ -38,6 +38,7 @@ import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
 import { compareTable } from '../compareTable.ts';
 import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
+import { NO_LINE_YET, noLineYet } from '../rowFigure.ts';
 
 /** Up to four fit a 360px phone side by side. Matched by the server. */
 export const MAX_COMPARE = 4;
@@ -525,13 +526,19 @@ export function Verdict({
                   </span>
                 ) : lean != null && e.playerId === lean ? (
                   <span className="cmp2-tie" data-testid="compare-tossup">
-                    <span className="cmp2-tossup-label">Toss-up</span>
+                    <span className="cmp2-tossup-label" data-waiting-on-line={comparison.tossUp?.waitingOnLine ? 'true' : undefined}>
+                      {comparison.tossUp?.waitingOnLine ? NO_LINE_YET : 'Toss-up'}
+                    </span>
                     <span className="cmp2-lean" data-testid="compare-lean">
                       Lean{comparison.tossUp?.leanTag ? ` (${comparison.tossUp.leanTag})` : ''}
                     </span>
                   </span>
                 ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />
+                ) : noLineYet(e) ? (
+                  <span className="cmp2-lean" data-testid="compare-no-line">
+                    {NO_LINE_YET}
+                  </span>
                 ) : null}
                 {isSecond ? <span className="sr-only">second choice, Sleeper projection only</span> : null}
               </span>

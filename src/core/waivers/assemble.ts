@@ -85,7 +85,7 @@ import type { RivalContext } from './bidModel.ts';
 import type { InjuryNote } from './stash.ts';
 import { lastCompletedWeek } from '../sleeper/weekPoints.ts';
 import type { ClaimRecord } from './bidModel.ts';
-import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
+import { byeReader, type ScheduleTeamWeek } from '../nfl/schedule.ts';
 import type { DstPlan } from '../dst/planner.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
 import type { BidObservation, PriceSummary } from '../faab/bids.ts';
@@ -1021,13 +1021,8 @@ function rivalReader(
   weeks: readonly number[],
 ): (position: string) => ReadonlyMap<number, RivalContext> {
   const byId = new Map(request.players.map((p) => [p.id, p] as const));
-  const playing = new Map<number, Set<string>>();
-  for (const f of fixtures) if (f.opponent) (playing.get(f.week) ?? playing.set(f.week, new Set()).get(f.week)!).add(f.team.toUpperCase());
-  const onBye = (team: string, week: number): boolean | null => {
-    const set = playing.get(week);
-    if (!set || set.size === 0 || !team) return null;
-    return !set.has(team.toUpperCase());
-  };
+  /* Round 18: the shared bye rule (`byeReader`): from the fixture list only, unknown on a gap. */
+  const onBye = byeReader(fixtures);
   const starters = request.shape.starters;
   const remainingOf = new Map((request.budgets?.rosters ?? []).map((r) => [r.rosterId, r.remaining] as const));
   const tendencies = new Map(
@@ -1141,8 +1136,9 @@ function stashAndBlock(
   let block = null;
   if (opponent && inputs.window.thisWeekOpen) {
     const byId = new Map(request.players.map((p) => [p.id, p] as const));
-    const playing = new Set(fixtures.filter((f) => f.week === request.week && f.opponent).map((f) => f.team.toUpperCase()));
-    const onBye = (team: string) => playing.size > 0 && team.length > 0 && !playing.has(team.toUpperCase());
+    /* Round 18: the shared bye rule, so a gap in the list or an old team code never reads as a bye. */
+    const byeOf = byeReader(fixtures);
+    const onBye = (team: string) => byeOf(team, request.week) === true;
     const reserved = new Set(opponent.reserveIds ?? []);
     const theirs: BlockPlayer[] = opponent.playerIds
       .map((id) => byId.get(id))

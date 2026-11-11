@@ -1,0 +1,135 @@
+rows (number 3+, not Out/Doubtful): 1760; priced 1125, unpriced 635
+
+== played only ==
+  priced                   n  1084  bias(actual-number) +0.66  spread(sd) 6.88  miss 5.25
+  unpriced                 n   587  bias(actual-number) +0.78  spread(sd) 6.02  miss 4.44
+  priced, Questionable     n    24  bias(actual-number) +0.12  spread(sd) 5.95  miss 4.58
+  unpriced, Questionable   n    26  bias(actual-number) -0.63  spread(sd) 3.94  miss 3.21
+  priced, healthy          n  1060  bias(actual-number) +0.67  spread(sd) 6.91  miss 5.26
+  unpriced, healthy        n   561  bias(actual-number) +0.84  spread(sd) 6.10  miss 4.50
+  by number band (sd of actual-number): priced | unpriced
+    3- 7: 5.18 (n 415, bias +0.98) | 4.82 (n 251, bias +0.79)
+    7-10: 6.06 (n 261, bias +0.37) | 6.02 (n 99, bias +0.35)
+   10-13: 8.05 (n 146, bias +0.95) | 7.39 (n 58, bias +0.75)
+   13-17: 7.44 (n 96, bias +0.77) | 8.40 (n 60, bias +0.32)
+   17-up: 9.81 (n 166, bias +0.00) | 8.66 (n 34, bias +1.04)
+  priced: average number 9.77, spread per point of number 0.705
+  unpriced: average number 7.65, spread per point of number 0.787
+
+== all, a no-show scores 0 ==
+  priced                   n  1125  bias(actual-number) +0.38  spread(sd) 6.94  miss 5.31
+  unpriced                 n   635  bias(actual-number) +0.30  spread(sd) 6.09  miss 4.53
+  priced, Questionable     n    33  bias(actual-number) -2.56  spread(sd) 7.11  miss 5.98
+  unpriced, Questionable   n    36  bias(actual-number) -2.58  spread(sd) 5.02  miss 4.45
+  priced, healthy          n  1092  bias(actual-number) +0.47  spread(sd) 6.92  miss 5.29
+  unpriced, healthy        n   599  bias(actual-number) +0.47  spread(sd) 6.11  miss 4.53
+  by number band (sd of actual-number): priced | unpriced
+    3- 7: 5.18 (n 434, bias +0.76) | 4.85 (n 272, bias +0.37)
+    7-10: 6.27 (n 280, bias -0.24) | 6.33 (n 109, bias -0.50)
+   10-13: 8.13 (n 148, bias +0.78) | 7.65 (n 61, bias +0.17)
+   13-17: 7.44 (n 96, bias +0.77) | 8.57 (n 61, bias +0.06)
+   17-up: 9.91 (n 167, bias -0.12) | 8.66 (n 34, bias +1.04)
+  priced: average number 9.66, spread per point of number 0.718
+  unpriced: average number 7.49, spread per point of number 0.813
+
+######## played only
+
+priced vs priced (16571 pairs)
+   gap 0-1: higher wins 51% of 3457, margin +0.21
+   gap 1-2: higher wins 54% of 3060, margin +0.73
+   gap 2-3: higher wins 61% of 2467, margin +2.41
+   gap 3-4: higher wins 64% of 2172, margin +3.03
+   gap 4-5: higher wins 67% of 1749, margin +3.94
+   gap 5-8: higher wins 74% of 3664, margin +6.21
+
+UNPRICED number leads a priced one (7148 pairs)
+   gap 0-1: higher wins 54% of 1486, margin +0.79
+   gap 1-2: higher wins 56% of 1270, margin +1.32
+   gap 2-3: higher wins 62% of 1128, margin +2.25
+   gap 3-4: higher wins 64% of 959, margin +3.09
+   gap 4-5: higher wins 71% of 753, margin +4.72
+   gap 5-8: higher wins 75% of 1551, margin +6.53
+
+priced number leads an unpriced one (10702 pairs)
+   gap 0-1: higher wins 52% of 1736, margin +0.54
+   gap 1-2: higher wins 57% of 1868, margin +1.14
+   gap 2-3: higher wins 63% of 1658, margin +2.30
+   gap 3-4: higher wins 68% of 1367, margin +3.22
+   gap 4-5: higher wins 72% of 1363, margin +4.50
+   gap 5-8: higher wins 77% of 2704, margin +5.98
+
+UNPRICED + Questionable leads a priced one (423 pairs)
+   gap 0-1: higher wins 40% of 58, margin -0.32
+   gap 1-2: higher wins 46% of 59, margin -0.65
+   gap 2-3: higher wins 65% of 71, margin +1.24
+   gap 3-4: higher wins 65% of 57, margin +2.43
+   gap 4-5: higher wins 65% of 65, margin +2.64
+   gap 5-8: higher wins 70% of 113, margin +4.41
+
+  priced vs priced, gap 2 to 3.5: 61.0% (what clearing the 2.0 bar buys)
+   unpriced leads by 2 to 3.5: 62.6% (n 1630)   +Questionable: 64.6% (n 99)
+   unpriced leads by 2.5 to 4.0: 64.0% (n 1520)   +Questionable: 65.3% (n 95)
+   unpriced leads by 3 to 4.5: 66.1% (n 1380)   +Questionable: 62.9% (n 97)
+   unpriced leads by 3.5 to 5.0: 69.0% (n 1210)   +Questionable: 64.9% (n 94)
+   unpriced leads by 4 to 5.5: 70.8% (n 1112)   +Questionable: 67.1% (n 85)
+   unpriced leads by 4.5 to 6.0: 72.4% (n 979)   +Questionable: 72.2% (n 72)
+   unpriced leads by 5 to 6.5: 72.5% (n 914)   +Questionable: 70.3% (n 74)
+  gap where an unpriced lead first wins as often as a priced lead just over 2.0: median 2.0, 90% range 2.0 to 2.75
+
+######## all, a no-show scores 0
+
+priced vs priced (18206 pairs)
+   gap 0-1: higher wins 51% of 3778, margin +0.23
+   gap 1-2: higher wins 54% of 3354, margin +0.78
+   gap 2-3: higher wins 60% of 2728, margin +2.39
+   gap 3-4: higher wins 62% of 2409, margin +2.98
+   gap 4-5: higher wins 64% of 1978, margin +3.64
+   gap 5-8: higher wins 73% of 3957, margin +6.24
+
+UNPRICED number leads a priced one (8117 pairs)
+   gap 0-1: higher wins 52% of 1689, margin +0.51
+   gap 1-2: higher wins 53% of 1457, margin +0.96
+   gap 2-3: higher wins 60% of 1286, margin +2.01
+   gap 3-4: higher wins 62% of 1090, margin +2.80
+   gap 4-5: higher wins 67% of 848, margin +4.19
+   gap 5-8: higher wins 72% of 1746, margin +6.14
+
+priced number leads an unpriced one (12226 pairs)
+   gap 0-1: higher wins 51% of 1998, margin +0.67
+   gap 1-2: higher wins 57% of 2125, margin +1.44
+   gap 2-3: higher wins 63% of 1890, margin +2.43
+   gap 3-4: higher wins 67% of 1549, margin +3.20
+   gap 4-5: higher wins 71% of 1554, margin +4.54
+   gap 5-8: higher wins 75% of 3104, margin +6.08
+
+UNPRICED + Questionable leads a priced one (627 pairs)
+   gap 0-1: higher wins 29% of 86, margin -1.82
+   gap 1-2: higher wins 29% of 103, margin -3.13
+   gap 2-3: higher wins 47% of 104, margin -1.55
+   gap 3-4: higher wins 47% of 86, margin +0.25
+   gap 4-5: higher wins 53% of 83, margin +0.88
+   gap 5-8: higher wins 53% of 165, margin +1.52
+
+  priced vs priced, gap 2 to 3.5: 59.9% (what clearing the 2.0 bar buys)
+   unpriced leads by 2 to 3.5: 60.2% (n 1863)   +Questionable: 46.6% (n 146)
+   unpriced leads by 2.5 to 4.0: 61.8% (n 1726)   +Questionable: 47.8% (n 138)
+   unpriced leads by 3 to 4.5: 63.0% (n 1560)   +Questionable: 49.2% (n 132)
+   unpriced leads by 3.5 to 5.0: 65.5% (n 1361)   +Questionable: 51.2% (n 127)
+   unpriced leads by 4 to 5.5: 67.1% (n 1260)   +Questionable: 51.3% (n 117)
+   unpriced leads by 4.5 to 6.0: 68.4% (n 1122)   +Questionable: 51.8% (n 110)
+   unpriced leads by 5 to 6.5: 69.1% (n 1047)   +Questionable: 52.3% (n 109)
+  gap where an unpriced lead first wins as often as a priced lead just over 2.0: median 2.0, 90% range 2.0 to 3.5
+
+== logistic same-confidence bar, played only
+  priced vs priced at 2.0 wins 57.3%; an unpriced lead reaches that at 1.46 (90% range 0.65 to 2.13)
+  unpriced AND Questionable lead reaches it at 2.87 (90% range 1.89 to 3.50), n 423
+  priced AND Questionable lead reaches it at 2.75 (90% range 1.55 to 3.64), n 434
+
+== logistic same-confidence bar, real outcome, no-show = 0
+  priced vs priced at 2.0 wins 56.6%; an unpriced lead reaches that at 1.96 (90% range 1.13 to 2.68)
+  unpriced AND Questionable lead reaches it at 6.13 (90% range 4.44 to 10.26), n 627
+  priced AND Questionable lead reaches it at 4.93 (90% range 2.94 to 6.60), n 611
+no-show rate priced Q: 27% of 33
+no-show rate unpriced Q: 28% of 36
+no-show rate priced healthy: 3% of 1092
+no-show rate unpriced healthy: 6% of 599

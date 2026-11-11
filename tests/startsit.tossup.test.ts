@@ -29,8 +29,12 @@ describe('the rule', () => {
     expect(isTossUp({ points: 12 }, { points: 10 })).toBe(false);
     /* A Sleeper-only 12.5 ranks 11.5: 1.5 over a priced 10, a toss-up. */
     expect(isTossUp({ points: 12.5, borrowed: true }, { points: 10 })).toBe(true);
-    /* A Sleeper-only 13 ranks 12: exactly the bar over a priced 10, not a toss-up. */
-    expect(isTossUp({ points: 13, borrowed: true }, { points: 10 })).toBe(false);
+    /* Round 18: a Sleeper-only lead needs 3.5. A Sleeper-only 13 ranks 12, 2.0 over a priced 10: a toss-up now. */
+    expect(isTossUp({ points: 13, borrowed: true }, { points: 10 })).toBe(true);
+    /* A Sleeper-only 14.5 ranks 13.5: exactly the wider bar over a priced 10, not a toss-up. */
+    expect(isTossUp({ points: 14.5, borrowed: true }, { points: 10 })).toBe(false);
+    /* A priced lead over a Sleeper-only player keeps the 2.0 bar. */
+    expect(isTossUp({ points: 12 }, { points: 11, borrowed: true })).toBe(false);
   });
 
   it('never calls a real hole a toss-up', () => {

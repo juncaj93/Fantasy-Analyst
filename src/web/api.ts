@@ -1342,6 +1342,8 @@ export interface StartSitComparison {
     otherName: string;
     /** "safer" under Floor, "more upside" under Ceiling (5 November 2026). Absent under Balanced and from older workers. */
     leanTag?: 'safer' | 'more upside';
+    /** Round 18: a toss-up only because the pick's number has no Vegas line yet. */
+    waitingOnLine?: true;
   };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
@@ -1484,6 +1486,8 @@ export interface LineupSwap {
   reason: string;
   /** A toss-up only: "safer" under Floor, "more upside" under Ceiling. `in` is the lean (5 November 2026). */
   leanTag?: 'safer' | 'more upside';
+  /** A toss-up only, Round 18: the pick has no Vegas line yet, the one reason it is not firm. */
+  waitingOnLine?: true;
 }
 
 /** An empty Sleeper slot this lineup fills. Names nobody to bench. */

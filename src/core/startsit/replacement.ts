@@ -25,6 +25,10 @@
 
 import { lockState } from './decisions.ts';
 import type { AvailabilityConfidence } from './availabilityConfidence.ts';
+import { splitName } from '../matchup/names.ts';
+
+/** `Kenneth Walker III` -> `Walker`: short enough for a one-line note. */
+const lastName = (name: string): string => splitName(name).last || name;
 
 export const REPLACEMENT = {
   /** Hours of kickoff separation before "later" is a different decision. */
@@ -112,7 +116,7 @@ export function assessReplacement(input: ReplacementInput): ReplacementAssessmen
       points: round2(-REPLACEMENT.maxPenaltyPoints * severity),
       fallbackName: null,
       dropoff: null,
-      display: 'nobody eligible left to cover him',
+      display: 'Nobody on your bench can cover him if he sits',
       driver: 'Risky · no cover on the bench if he sits',
     };
   }
@@ -139,7 +143,7 @@ export function assessReplacement(input: ReplacementInput): ReplacementAssessmen
       points: round2(-REPLACEMENT.maxPenaltyPoints * severity * 0.5),
       fallbackName: best.name,
       dropoff,
-      display: `kickoff times unknown · ${best.name} is the fallback`,
+      display: `Game times unknown; ${lastName(best.name)} is the backup`,
       driver: null,
     };
   }
@@ -152,7 +156,7 @@ export function assessReplacement(input: ReplacementInput): ReplacementAssessmen
       points: 0,
       fallbackName: cover.name,
       dropoff: gap,
-      display: `${cover.name} does not lock before him, so the swap stays available`,
+      display: `If he sits, you can still swap in ${lastName(cover.name)}`,
       driver: null,
     };
   }
@@ -170,8 +174,8 @@ export function assessReplacement(input: ReplacementInput): ReplacementAssessmen
     points: round2(-REPLACEMENT.maxPenaltyPoints * severity * (0.4 + 0.6 * scaled)),
     fallbackName: best.name,
     dropoff,
-    display: `${best.name} locks first, so his slot is committed before the status is known`,
-    driver: `Late-swap risk · ${best.name} is the only cover and locks first`,
+    display: `${lastName(best.name)} plays first. Decide before then; his news may come later.`,
+    driver: `Risky · ${lastName(best.name)} is his only cover and plays first`,
   };
 }
 

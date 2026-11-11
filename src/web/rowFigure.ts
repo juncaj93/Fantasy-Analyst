@@ -27,6 +27,58 @@ export interface RowFigureEvaluation {
   ruledOut?: boolean;
   statusFlag?: string | null;
   components?: readonly { key: string; value: number; unknown: boolean }[];
+  /** In an IR slot. */
+  onReserve?: boolean;
+  /** No game this week, from the fixture list only (never from a missing number). */
+  onBye?: boolean;
+  /** What his number was built on: `published` is Sleeper's week, with no complete Vegas line. */
+  decision?: { basis: string } | null;
+  /** His game's clock. */
+  lock?: { locked: boolean; kickoff: string | null };
+}
+
+/** The phrase for a number with no Vegas line behind it yet (Round 18). */
+export const NO_LINE_YET = 'No line yet';
+
+/**
+ * Whether his game has no Vegas line yet, before kickoff (Round 18).
+ *
+ * His number is Sleeper's week (`published`: no complete market), and his game
+ * has not started. The odds clock keeps asking until half an hour before
+ * kickoff, so before then a line can still come.
+ */
+export function noLineYet(evaluation: RowFigureEvaluation | null | undefined, now: number = Date.now()): boolean {
+  if (!evaluation || evaluation.ruledOut || evaluation.onBye) return false;
+  if (evaluation.decision?.basis !== 'published') return false;
+  if (evaluation.lock?.locked) return false;
+  const kickoff = evaluation.lock?.kickoff ? Date.parse(evaluation.lock.kickoff) : Number.NaN;
+  return !Number.isFinite(kickoff) || kickoff > now;
+}
+
+/**
+ * The short reason beside a row's figure, or null (Round 18).
+ *
+ * A dash never stands alone: `Bye` (the fixture list says no game), `On IR`
+ * (his slot), or `No projection` (nothing priced him and Sleeper has no week).
+ * A Sleeper-only number before kickoff says `No line yet`.
+ */
+export function rowNote(
+  figure: RowFigure,
+  evaluation: RowFigureEvaluation | null | undefined,
+  now: number = Date.now(),
+  /** The roster's own status word (`IR`, `Out`, `Sus`), for a row with no evaluation. */
+  status?: string | null,
+): string | null {
+  if (figure.kind === 'none') {
+    const word = (status ?? '').trim().toLowerCase();
+    if (evaluation?.onReserve || word === 'ir' || word.includes('injured reserve')) return 'On IR';
+    if (word === 'out') return 'Out';
+    if (word.startsWith('sus')) return 'Suspended';
+    if (evaluation?.onBye) return 'Bye';
+    return 'No projection';
+  }
+  if (figure.kind === 'plain' && noLineYet(evaluation, now)) return NO_LINE_YET;
+  return null;
 }
 
 export type RowFigure =

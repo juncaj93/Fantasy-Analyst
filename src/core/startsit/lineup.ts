@@ -68,7 +68,7 @@ import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
-import { isRealHole, isTossUp, tossUpLean, type LeanTag } from './tossup.ts';
+import { isRealHole, isTossUp, tossUpLean, waitsOnLine, type LeanTag } from './tossup.ts';
 import { spreadPoints } from './spread.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -260,6 +260,11 @@ export interface LineupSwap {
    * the other man, whichever of them Sleeper starts.
    */
   leanTag?: LeanTag;
+  /**
+   * A toss-up only, Round 18: the pick rests on a number with no Vegas line,
+   * and that is the one reason it is not a firm call (`waitsOnLine`).
+   */
+  waitingOnLine?: true;
 }
 
 /** A slot Sleeper has left empty, and the player this lineup puts in it. */
@@ -1304,10 +1309,9 @@ function buildSwaps(
       onReserve: outgoing.onReserve ?? false,
       designation: outgoing.injury?.designation ?? null,
     });
-    const tossUp = isTossUp(
-      { points: incomingBasis.points, borrowed: incomingBasis.borrowed },
-      { points: outgoingBasis?.points ?? null, borrowed: outgoingBasis?.borrowed ?? false, hole },
-    );
+    const inSide = { points: incomingBasis.points, borrowed: incomingBasis.borrowed };
+    const outSide = { points: outgoingBasis?.points ?? null, borrowed: outgoingBasis?.borrowed ?? false, hole };
+    const tossUp = isTossUp(inSide, outSide);
     if (tossUp) {
       tossUps.push({
         slot: slot.slot,
@@ -1317,6 +1321,7 @@ function buildSwaps(
         outName: outgoing.name,
         gain: ranked,
         reason: 'Toss-up',
+        ...(waitsOnLine(inSide, outSide) ? { waitingOnLine: true as const } : {}),
       });
       continue;
     }
@@ -1434,7 +1439,7 @@ function leanTossUps(
       const s = sideOf(starter);
       if (!s) continue;
       if (isRealHole({ ruledOut: starter.ruledOut, onReserve: starter.onReserve ?? false, designation: starter.injury?.designation ?? null })) continue;
-      let pick: { bench: StartSitEvaluation; edge: number; tag: LeanTag | null; gap: number } | null = null;
+      let pick: { bench: StartSitEvaluation; edge: number; tag: LeanTag | null; gap: number; waiting: boolean } | null = null;
       for (const candidate of bench) {
         if (named.has(candidate.playerId)) continue;
         const c = sideOf(candidate);
@@ -1451,7 +1456,8 @@ function leanTossUps(
         const sign = ctx.mode === 'floor' ? -1 : 1;
         const swing = (x: typeof c) => spreadPoints(x.spread, x.points, x.position);
         const edge = rankingNumber(c.points, c.borrowed) + sign * swing(c) - (rankingNumber(s.points, s.borrowed) + sign * swing(s));
-        if (!pick || edge > pick.edge) pick = { bench: candidate, edge, tag, gap };
+        const waiting = waitsOnLine({ points: s.points, borrowed: s.borrowed }, { points: c.points, borrowed: c.borrowed, hole: false });
+        if (!pick || edge > pick.edge) pick = { bench: candidate, edge, tag, gap, waiting };
       }
       if (!pick) continue;
       named.add(pick.bench.playerId);
@@ -1465,6 +1471,7 @@ function leanTossUps(
         gain: round2(-pick.gap),
         reason: 'Toss-up',
         ...(pick.tag ? { leanTag: pick.tag } : {}),
+        ...(pick.waiting ? { waitingOnLine: true as const } : {}),
       });
     }
   }

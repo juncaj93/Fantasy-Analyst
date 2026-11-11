@@ -207,7 +207,7 @@ describe('late swap in a head-to-head comparison', () => {
     // (3% of each market number) counted; text only since `startsit@6`.
     expect(comparison.margin).toBeCloseTo(0.66, 2);
     expect(comparison.lateSwap.verdict).toBe('consider_early_option');
-    expect(comparison.warnings.join(' ')).toContain('Consider starting Early WR');
+    expect(comparison.warnings.join(' ')).toContain('Start WR unless he is cleared');
   });
 
   it('says a much better late player is worth waiting for', () => {
@@ -219,7 +219,7 @@ describe('late swap in a head-to-head comparison', () => {
       HALF_PPR,
     );
     expect(comparison.lateSwap.verdict).toBe('worth_waiting');
-    expect(comparison.reasons.join(' ')).toContain('justify the availability risk');
+    expect(comparison.reasons.join(' ')).toContain('worth the wait');
   });
 
   it('says nothing about timing when nobody is carrying a designation', () => {
@@ -231,7 +231,7 @@ describe('late swap in a head-to-head comparison', () => {
       HALF_PPR,
     );
     expect(comparison.lateSwap.verdict).toBe('no_risk');
-    expect(comparison.warnings.join(' ')).not.toContain('Consider starting');
+    expect(comparison.warnings.join(' ')).not.toContain('unless he is cleared');
   });
 
   it('says plainly when a candidate has already kicked off', () => {

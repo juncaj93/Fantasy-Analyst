@@ -68,7 +68,7 @@ import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../c
 import { noMoveSummary, type NoMoveSummary } from '../../core/waivers/noMove.ts';
 import { unwindOne } from '../tabReset.ts';
 import { benchSummary } from '../benchSummary.ts';
-import { rowFigure, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
+import { rowFigure, rowNote, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
@@ -831,12 +831,17 @@ function rowWeek(evaluation: StartSitEvaluation | null | undefined): { points: n
 }
 
 function projectionTitle(projection: number | null | undefined, source: RowProjectionSource): string {
-  if (projection == null) return 'No projection yet — no betting market has priced him';
+  if (projection == null) return 'No projection: no betting line and no Sleeper number';
   if (source === 'sleeper') return "Projected points · Rotowire's published figure, via Sleeper";
   if (source === 'preseason') {
     return 'Projected points · a rough estimate — his preseason season total over a full season of games';
   }
   return 'Projected points · from betting markets';
+}
+
+/** The row note, for the row's spoken label. `No projection` is already said as "projection unavailable". */
+function spokenNote(note: string | null): string {
+  return note && note !== 'No projection' ? `, ${note.toLowerCase()}` : '';
 }
 
 function spokenProjection(projection: number | null | undefined, source: RowProjectionSource): string {
@@ -1094,7 +1099,8 @@ function VerdictCard({
           ? `, ${blocked?.reason ?? 'cannot be scored this week'}`
           : '') +
         spokenRowFigure(figure, (points) => spokenProjection(points, shown.source)) +
-        (row.locked ? ', locked' : '') +
+        spokenNote(rowNote(figure, subjectEvaluation, undefined, subject.status)) +
+        (row.locked ? ', game started' : '') +
         (subject.status ? `, ${subject.status}` : '')
       }
       onClick={onOpen}
@@ -1129,7 +1135,7 @@ function VerdictCard({
         <span className="row-tags">
           {row.locked ? (
             <span className="tag tag-calm tag-mini" data-testid="locked-tag">
-              Locked
+              Started
             </span>
           ) : null}
           {/*
@@ -1148,7 +1154,7 @@ function VerdictCard({
             where it reads as part of the proposal rather than as a correction
             to the figure above it.
           */}
-          <RowFigureValue figure={figure} source={shown.source} testId="starter-proj" />
+          <RowFigureValue figure={figure} source={shown.source} testId="starter-proj" note={rowNote(figure, subjectEvaluation, undefined, subject.status)} />
         </span>
       </div>
       {/*
@@ -1235,6 +1241,30 @@ function riskTitle(figure: Extract<RowFigure, { kind: 'risk' }>): string {
  * from; everybody else is the plain projection with its source, as before.
  */
 function RowFigureValue({
+  figure,
+  source,
+  testId,
+  note = null,
+}: {
+  figure: RowFigure;
+  source: RowProjectionSource;
+  testId: string;
+  /** Round 18: the short reason under the figure (`rowNote`): Bye, On IR, No projection, No line yet. */
+  note?: string | null;
+}) {
+  const inner = <RowFigureInner figure={figure} source={source} testId={testId} />;
+  if (!note) return inner;
+  return (
+    <span className="proj-stack" data-figure-note={note}>
+      {inner}
+      <span className="proj-was" data-testid={`${testId}-note`}>
+        {note}
+      </span>
+    </span>
+  );
+}
+
+function RowFigureInner({
   figure,
   source,
   testId,
@@ -1370,6 +1400,7 @@ function BenchCard({
       aria-label={
         `${player.name}${position ? `, ${position}` : ''}, on your bench` +
         spokenRowFigure(figure, (points) => spokenProjection(points, projectionSource)) +
+        spokenNote(rowNote(figure, evaluation, undefined, player.status)) +
         `${player.status ? `, ${player.status}` : ''}`
       }
       onClick={onOpen}
@@ -1412,7 +1443,7 @@ function BenchCard({
 
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
-          <RowFigureValue figure={figure} source={projectionSource} testId="bench-proj" />
+          <RowFigureValue figure={figure} source={projectionSource} testId="bench-proj" note={rowNote(figure, evaluation, undefined, player.status)} />
         </span>
       </div>
     </button>
@@ -1931,14 +1962,15 @@ function LineupCard({
           className="matchup-best-move best-move-row"
           data-testid="lineup-tossup"
           data-seed={`${tossUp.outPlayerId},${tossUp.inPlayerId}`}
-          aria-label={`Best move: toss-up, lean ${tossUp.inName} over ${tossUp.outName}${tossUp.leanTag ? `, ${tossUp.leanTag}` : ''}, at ${tossUp.slot}, ${spoken(tossUp.inPlayerId)} against ${spoken(tossUp.outPlayerId)} projected. No change. Compare them.`}
+          data-waiting-on-line={tossUp.waitingOnLine ? 'true' : undefined}
+          aria-label={`Best move: ${tossUp.waitingOnLine ? 'no line yet' : 'toss-up'}, lean ${tossUp.inName} over ${tossUp.outName}${tossUp.leanTag ? `, ${tossUp.leanTag}` : ''}, at ${tossUp.slot}, ${spoken(tossUp.inPlayerId)} against ${spoken(tossUp.outPlayerId)} projected. No change. Compare them.`}
           onClick={() => onOpen(tossUp.slot, [tossUp.outPlayerId, tossUp.inPlayerId], ties.length > 0 ? { note: ties } : undefined)}
         >
           <span className="matchup-best-move-body">
             {head}
             <span className="matchup-best-move-swap">
               <span className="matchup-best-move-names">
-                Toss-up: lean {tossUp.inName} over {tossUp.outName}
+                {tossUp.waitingOnLine ? 'No line yet' : 'Toss-up'}: lean {tossUp.inName} over {tossUp.outName}
                 {tossUp.leanTag ? <span data-testid="tossup-lean-tag"> ({tossUp.leanTag})</span> : null}
               </span>
               <span className="matchup-best-move-slot">{tossUp.slot}</span>
@@ -1954,7 +1986,7 @@ function LineupCard({
           <span className="matchup-best-move-body">
             {head}
             <span className="matchup-best-move-names">
-              {lineup.currentPoints == null ? 'No change to suggest yet' : 'No swap clears the bar'}
+              {lineup.currentPoints == null ? 'No change to suggest yet' : 'Keep your lineup as is'}
             </span>
           </span>
         </div>

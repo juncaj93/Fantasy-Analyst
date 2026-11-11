@@ -11,10 +11,12 @@
  * checked.
  */
 export function benchSummary(
-  lineup: { found?: boolean; swaps: readonly unknown[]; fills?: readonly unknown[] | null; tossUps?: readonly unknown[] | null } | null | undefined,
+  lineup: { found?: boolean; swaps: readonly unknown[]; fills?: readonly unknown[] | null; tossUps?: readonly { waitingOnLine?: true }[] | null } | null | undefined,
 ): string | null {
   if (!lineup?.found) return null;
   const count = lineup.swaps.length + (lineup.fills?.length ?? 0);
   if (count > 0) return `${count} strong alternative${count === 1 ? '' : 's'}`;
-  return (lineup.tossUps?.length ?? 0) > 0 ? 'Toss-up' : 'No better option';
+  /* Round 18: a toss-up held back only by a missing line says so, as Best move does. */
+  if ((lineup.tossUps?.length ?? 0) > 0) return lineup.tossUps![0]!.waitingOnLine ? 'No line yet' : 'Toss-up';
+  return 'No better option';
 }

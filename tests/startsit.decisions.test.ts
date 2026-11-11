@@ -75,8 +75,9 @@ describe('late-swap safety', () => {
       BEFORE_KICKOFF,
     );
     expect(result.verdict).toBe('consider_early_option');
-    expect(result.detail).toContain('Consider starting Early WR');
-    expect(result.detail).toContain('unless the status improves');
+    /* Round 18: plain English, 12 words or fewer, last names only. */
+    expect(result.detail).toBe('WR is Questionable and plays late. Start WR unless he is cleared.');
+    expect(result.detail.split(/\s+/).length).toBeLessThanOrEqual(12);
     expect(result.advantage).toBe(0.7);
   });
 
@@ -89,7 +90,7 @@ describe('late-swap safety', () => {
       BEFORE_KICKOFF,
     );
     expect(result.verdict).toBe('worth_waiting');
-    expect(result.detail).toContain('justify the availability risk');
+    expect(result.detail).toContain('worth the wait');
   });
 
   it('treats Doubtful far harder than Questionable', () => {

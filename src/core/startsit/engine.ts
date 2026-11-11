@@ -47,7 +47,7 @@ import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
 import { readSpread, type SpreadReading } from './spread.ts';
 import { playedWeeksOf } from '../value/restOfSeason.ts';
-import { isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, type LeanTag } from './tossup.ts';
+import { isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, waitsOnLine, type LeanTag } from './tossup.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
 export interface StartSitInput {
@@ -243,6 +243,8 @@ export interface StartSitEvaluation {
    * instead of repeating a designation that does not rule anybody out.
    */
   onReserve?: true;
+  /** Present, and true, when the fixture list says his club has no game this week (`isOnBye`). Never from a missing number. */
+  onBye?: true;
   /** Whether this player's game has already kicked off. */
   lock: LockState;
   /** The defence he faces, when the schedule is known. */
@@ -349,6 +351,8 @@ export interface StartSitComparison {
     otherName: string;
     /** "safer" under Floor, "more upside" under Ceiling (`tossUpLean`). Absent under Balanced. */
     leanTag?: LeanTag;
+    /** Round 18: a toss-up only because the pick's number has no Vegas line yet (`waitsOnLine`). */
+    waitingOnLine?: true;
   };
   /**
    * The best Sleeper-only player who shows a higher number than the pick and
@@ -715,6 +719,8 @@ export function evaluatePlayer(
     injury,
     ruledOut: availability.gate || input.onReserve === true,
     ...(input.onReserve === true ? { onReserve: true as const } : {}),
+    /* Round 18: from the fixture list only (`isOnBye`), so Team can say "Bye" rather than a bare dash. */
+    ...(input.onBye === true ? { onBye: true as const } : {}),
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
     home: input.home ?? null,
@@ -889,6 +895,8 @@ function evaluateDefence(input: StartSitInput, profile: ScoringProfile): StartSi
     injury,
     ruledOut: availability.gate || input.onReserve === true,
     ...(input.onReserve === true ? { onReserve: true as const } : {}),
+    /* Round 18: from the fixture list only (`isOnBye`), so Team can say "Bye" rather than a bare dash. */
+    ...(input.onBye === true ? { onBye: true as const } : {}),
     lock: lockState(input.kickoff, input.now ?? new Date()),
     opponent: input.opponent ?? null,
     home: input.home ?? null,
@@ -1142,7 +1150,7 @@ export function compareStartSit(
       warnings: ['no usable data for any candidate — recommendation withheld'],
       lateSwap: {
         verdict: 'unknown',
-        label: 'Late-swap risk unknown',
+        label: 'Timing risk unclear',
         detail: 'There is no usable projection for any candidate, so kickoff timing changes nothing.',
         gapHours: null,
         advantage: null,
@@ -1203,6 +1211,7 @@ export function compareStartSit(
       otherPlayerId: other.playerId,
       otherName: other.name,
       ...(tag ? { leanTag: tag } : {}),
+      ...(waitsOnLine(sideOf(best), sideOf(runnerUp)) ? { waitingOnLine: true as const } : {}),
     };
   }
   if (sleeperOnly) {
@@ -1326,7 +1335,7 @@ export function compareStartSit(
   const locked = evaluations.filter((e) => e.lock.locked);
   if (locked.length > 0) {
     warnings.push(
-      `${locked.map((e) => e.name).join(', ')} ${locked.length === 1 ? 'has' : 'have'} already kicked off — that lineup spot is fixed.`,
+      `${locked.map((e) => e.name).join(', ')} ${locked.length === 1 ? 'has' : 'have'} already kicked off and cannot be moved.`,
     );
   }
 

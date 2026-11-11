@@ -68,7 +68,13 @@ import { composeEngineVersion } from '../engineVersion.ts';
  * toss-up is never a Start there. A played game worth zero counts in a
  * player's bounce (`spread.ts`), read from the usage store.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@8';
+/*
+ * `startsit@9`, 11 November 2026 (round 18): a pick whose own number has no
+ * Vegas line needs a 3.5-point lead (`UNPRICED_TOSSUP_POINTS`), and a toss-up
+ * held back only by the missing line is marked `waitingOnLine`. Evaluations
+ * carry the schedule's bye. The late-game notes are rewritten in plain words.
+ */
+export const STARTSIT_ENGINE_VERSION = 'startsit@9';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
@@ -134,4 +140,8 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@8';
  * function, `rankingNumber`. The toss-up bar (2.0), the bye cover and the
  * scores are unchanged.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@12', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@13`, 11 November 2026 (round 18): the same wider bar for an
+ * unpriced lead on Team's swaps and Best move.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@13', STARTSIT_ENGINE_VERSION);
