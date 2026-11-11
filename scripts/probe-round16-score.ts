@@ -132,9 +132,9 @@ function production(id: string, W: number): number[] {
 }
 
 /** What he scored per game played from week W to the last finished week. */
-function outcome(id: string, W: number): { ppg: number; games: number; total: number } | null {
+function outcome(id: string, W: number, from = W): { ppg: number; games: number; total: number } | null {
   const games: number[] = [];
-  for (let w = W; w <= LAST; w++) if (didPlay(id, w)) games.push(pts(id, w));
+  for (let w = from; w <= LAST; w++) if (didPlay(id, w)) games.push(pts(id, w));
   if (games.length === 0) return null;
   const total = games.reduce((a, b) => a + b, 0);
   return { ppg: total / games.length, games: games.length, total };
@@ -245,7 +245,8 @@ for (let W = 3; W <= 8; W++) {
   weeksTested.push(W);
 }
 
-function rowsFor(mode: Mode): Row[] {
+/** `skipOwnWeek`: the outcome starts the week after W, so week W's own game (priced close to kickoff) is left out. */
+function rowsFor(mode: Mode, skipOwnWeek = false): Row[] {
   const out: Row[] = [];
   for (const W of weeksTested) {
     const ids = new Set<string>([
@@ -256,7 +257,7 @@ function rowsFor(mode: Mode): Row[] {
     const candidates: Row[] = [];
     for (const id of ids) {
       if (!isSkill(id)) continue;
-      const o = outcome(id, W);
+      const o = outcome(id, W, skipOwnWeek ? W + 1 : W);
       if (!o) continue;
       const v = value(id, W, mode);
       const values = {} as Record<RuleKey, number>;
@@ -431,6 +432,78 @@ for (const mode of ['stored', 'thisWeek'] as Mode[]) {
   summary[mode] = { rows: rows.length, players, table, byPos, grid, perWeek };
 }
 
+/* ------------------------------------- 1b. without week W's own game */
+heading('1b. Robustness: the outcome from week W+1 on (week W\u2019s own game left out)');
+{
+  const out: Record<string, unknown> = {};
+  for (const mode of ['stored', 'thisWeek'] as Mode[]) {
+    const rows = rowsFor(mode, true);
+    const line = RULE_KEYS.map((k) => {
+      const m = mae(rows, k);
+      if (k === 'current') return `${RULE_LABEL[k]} ${f2(m)}`;
+      const ci = bootstrap(rows, (x) => mae(x, k) - mae(x, 'current'), 40 + RULE_KEYS.indexOf(k));
+      return `${RULE_LABEL[k]} ${f2(m)} (${sgn(m - mae(rows, 'current'))}, ${sgn(ci.lo)} to ${sgn(ci.hi)})`;
+    });
+    console.log(`${mode === 'stored' ? 'stored later weeks' : 'this week only'}, ${rows.length} player-weeks: ${line.join(' | ')}`);
+    out[mode] = Object.fromEntries(RULE_KEYS.map((k) => [k, { mae: mae(rows, k), ci: k === 'current' ? null : bootstrap(rows, (x) => mae(x, k) - mae(x, 'current'), 40 + RULE_KEYS.indexOf(k)) }]));
+  }
+  summary.skipOwnWeek = out;
+}
+
+/* ------------------------------------------ 1c. as a decision: pairs */
+heading('1c. As a decision: two players at one position, which one will score more per game from here?');
+{
+  const out: Record<string, unknown> = {};
+  for (const [label, mode, skip] of [
+    ['stored later weeks', 'stored', false],
+    ['this week only', 'thisWeek', false],
+    ['this week only, week W left out', 'thisWeek', true],
+  ] as const) {
+    const rows = mode === 'stored' && !skip ? results.stored : mode === 'thisWeek' && !skip ? results.thisWeek : rowsFor(mode, skip);
+    /* Close calls only: the two within 4 points a game on the current blend, the calls a trade or a pickup turns on. */
+    const groups = new Map<string, Row[]>();
+    for (const r of rows) (groups.get(`${r.W}:${r.position}`) ?? groups.set(`${r.W}:${r.position}`, []).get(`${r.W}:${r.position}`)!).push(r);
+    const score = (gs: Row[][], k: RuleKey) => {
+      let n = 0;
+      let right = 0;
+      let gained = 0;
+      for (const g of gs) {
+        for (let i = 0; i < g.length; i++) {
+          for (let j = i + 1; j < g.length; j++) {
+            const a = g[i]!;
+            const b = g[j]!;
+            if (Math.abs(a.values.current - b.values.current) > 4) continue;
+            const pickA = a.values[k] >= b.values[k];
+            const chosen = pickA ? a : b;
+            const other = pickA ? b : a;
+            n++;
+            if (chosen.actual > other.actual) right++;
+            gained += chosen.actual - other.actual;
+          }
+        }
+      }
+      return { n, right: right / n, gained: gained / n };
+    };
+    const all = [...groups.values()];
+    const res = Object.fromEntries(RULE_KEYS.map((k) => [k, score(all, k)])) as Record<RuleKey, { n: number; right: number; gained: number }>;
+    /* Noise: resample whole week-position groups. */
+    const draw = rng(77);
+    const diffs: number[] = [];
+    for (let i = 0; i < DRAWS; i++) {
+      const sample = all.map(() => all[Math.floor(draw() * all.length)]!);
+      diffs.push(score(sample, 'projection').gained - score(sample, 'current').gained);
+    }
+    diffs.sort((a, b) => a - b);
+    const lo = diffs[Math.floor(DRAWS * 0.05)]!;
+    const hi = diffs[Math.floor(DRAWS * 0.95)]!;
+    console.log(
+      `${label} (${res.current.n} close calls): ${RULE_KEYS.map((k) => `${RULE_LABEL[k]} right ${pct(res[k].right)}, ${sgn(res[k].gained)}/game`).join(' | ')}; projection only vs current ${sgn(res.projection.gained - res.current.gained)}/game (${sgn(lo)} to ${sgn(hi)})`,
+    );
+    out[label] = { res, projectionVsCurrent: { diff: res.projection.gained - res.current.gained, lo, hi } };
+  }
+  summary.pairs = out;
+}
+
 /* ------------------------------------------------------ 4a. minus 2 */
 heading('4a. The minus-2 for a Sleeper-only number (weekly numbers, weeks 1 to last)');
 {
@@ -530,7 +603,34 @@ heading('4a. The minus-2 for a Sleeper-only number (weekly numbers, weeks 1 to l
     console.log(`  discount ${disc}: right ${pct(p.right)}, average points gained per call ${sgn(p.gained)}`);
     discOut.push({ disc, ...p });
   }
-  summary.minus2 = { vegas: vegas.length, sleeperOnly: sleeperOnly.length, bands: bandOut, fit: d, fitCi: dci, pairs: pairs.length, discounts: discOut };
+  /* Noise on the head to head: resample weeks and positions. */
+  const groupsOf = new Map<string, { a: WRow; b: WRow }[]>();
+  for (const pr of pairs) (groupsOf.get(`${pr.a.W}:${pr.a.position}`) ?? groupsOf.set(`${pr.a.W}:${pr.a.position}`, []).get(`${pr.a.W}:${pr.a.position}`)!).push(pr);
+  const pg = [...groupsOf.values()];
+  const gainOf = (gs: { a: WRow; b: WRow }[][], disc: number) => {
+    let n = 0;
+    let g = 0;
+    for (const list of gs) for (const { a, b } of list) {
+      const takeVegas = a.n >= b.n - disc;
+      g += (takeVegas ? a.actual - b.actual : b.actual - a.actual);
+      n++;
+    }
+    return g / n;
+  };
+  const draw2 = rng(21);
+  const dd: number[] = [];
+  for (let i = 0; i < DRAWS; i++) {
+    const sample = pg.map(() => pg[Math.floor(draw2() * pg.length)]!);
+    dd.push(gainOf(sample, 1) - gainOf(sample, 2));
+  }
+  dd.sort((a, b) => a - b);
+  const h2h = { diff: gainOf(pg, 1) - gainOf(pg, 2), lo: dd[Math.floor(DRAWS * 0.05)]!, hi: dd[Math.floor(DRAWS * 0.95)]! };
+  /* How often the two discounts disagree at all, which is how often the choice matters. */
+  const disagree = pairs.filter(({ a, b }) => (a.n >= b.n - 1) !== (a.n >= b.n - 2)).length;
+  console.log(`discount 1 against 2: ${sgn(h2h.diff)} points per call (90% range ${sgn(h2h.lo)} to ${sgn(h2h.hi)}); they pick differently in ${disagree} of ${pairs.length} pairs (${pct(disagree / pairs.length)})`);
+  summary.minus2 = {
+    h2h,
+    disagree, vegas: vegas.length, sleeperOnly: sleeperOnly.length, bands: bandOut, fit: d, fitCi: dci, pairs: pairs.length, discounts: discOut };
 }
 
 /* --------------------------------------------------- 4b. toss-up bar */
