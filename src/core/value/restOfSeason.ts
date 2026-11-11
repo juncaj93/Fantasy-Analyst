@@ -12,18 +12,20 @@
  *
  * ## The rate, in plain English
  *
- * Half of it is what he is projected to score: this week's number (the betting
- * line, or Sleeper's week) averaged with Sleeper's projections for the next
- * three weeks, skipping his bye. The other half is what he has actually scored
- * per game this season in this league's scoring, counting only games he
- * played. With fewer than {@link REST_OF_SEASON.fullAt} games played, his
- * projection counts for more, so two games cannot outweigh a role.
+ * Three quarters of it is what he is projected to score: this week's number
+ * (the betting line, or Sleeper's week) averaged with Sleeper's projections for
+ * the next three weeks, skipping his bye. The other quarter is what he has
+ * actually scored per game this season in this league's scoring, counting only
+ * games he played. With fewer than {@link REST_OF_SEASON.fullAt} games played,
+ * his projection counts for more, so two games cannot outweigh a role.
  *
- * Why half and half: in October the season average and this week's number
- * predicted later weeks equally well (error 4.18 against 4.18 on weeks 3 and
- * 4; `docs/AUDIT_2026-10.md`, T2). Two forecasts that are equally good and do
- * not make the same mistakes are better averaged than either alone, and the
- * projection half still moves with a real role change.
+ * Why 75/25: it was 50/50 until Round 17. In October the season average and
+ * this week's number predicted later weeks equally well (error 4.18 against
+ * 4.18 on weeks 3 and 4; `docs/AUDIT_2026-10.md`, T2). The Round 16 backtest
+ * (weeks 3 to 8 against what players then scored, `docs/backtest/`) found more
+ * projection weight misses less in every version it ran: 0.11 to 0.26 points a
+ * game less per player at 75/25 than at 50/50, beyond the noise. Season
+ * average alone was clearly worse. Alex chose 75/25 on 11 November 2026.
  *
  * ## The weeks
  *
@@ -38,8 +40,12 @@
 import type { TradeHorizon } from '../tradeValue/weeks.ts';
 
 export const REST_OF_SEASON = {
-  /** Share of the rate from what he has actually scored, once he has played {@link fullAt} games. */
-  productionShare: 0.5,
+  /**
+   * Share of the rate from what he has actually scored (his season average),
+   * once he has played {@link fullAt} games. The rest, 75 percent, is his
+   * projection. The one setting for the blend; nothing else restates it.
+   */
+  productionShare: 0.25,
   /** Games played before his season average carries its full share. */
   fullAt: 4,
   /** Fewest games played for a season average to stand on its own, with no projection at all. */
@@ -79,7 +85,7 @@ export interface BlendedRate {
 }
 
 /**
- * Half projection, half production, as the header says.
+ * Three quarters projection, one quarter production, as the header says.
  *
  * `projections` are his healthy weekly projections (this week and the weeks
  * ahead), already cleared of byes and of zeros published for games he will

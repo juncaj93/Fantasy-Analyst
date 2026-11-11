@@ -295,12 +295,15 @@ unpriced player gets a sentence and not a number.
 
 ## Known limitations
 
-- **A rate is half projection, half season average** (November 2026, review
-  T9; `core/tradeValue/restOfSeason.ts`). The projection half is this week's
-  number averaged with Sleeper's next three weeks (`sleeper.aheadPoints`,
-  skipping his bye); the other half is his points per game played this season
-  in this league's scoring (`sleeper.seasonPoints`). Under four games played
-  the projection counts more. Until then a rate was one week's number carried
+- **A rate is 75 percent projection, 25 percent season average** (November
+  2026, review T9; `core/value/restOfSeason.ts`; it was 50/50 until Round 17,
+  11 November 2026, when the Round 16 backtest in `docs/backtest/` found more
+  projection weight misses 0.11 to 0.26 points a game less per player). The
+  projection part is this week's number averaged with Sleeper's next three
+  weeks (`sleeper.aheadPoints`, skipping his bye); the other part is his
+  points per game played this season in this league's scoring
+  (`sleeper.seasonPoints`). Under four games played the projection counts
+  more. The one setting is `REST_OF_SEASON.productionShare` (0.25). Until then a rate was one week's number carried
   forward, and one matchup set nine weeks. Weeks 13 to 17 have no projection
   of their own.
 - **No return dates.** Injury weeks are assumptions, not forecasts.

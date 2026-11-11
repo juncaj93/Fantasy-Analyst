@@ -246,7 +246,7 @@ export function buildTierInputs(input: TierInputRequest): TierInputs {
       byeWeek: rate.byeWeek,
       rateWeek,
     });
-    /* Sleeper's number, not a full Vegas week: the minus-2 rule ranks it lower (`rankingNumber`). */
+    /* Sleeper's number, not a full Vegas week: the Sleeper-only discount ranks it lower (`rankingNumber`). */
     const rateBorrowed = rate.basis === 'published' || rate.basis === 'recent_week';
     const long = seasonRates.get(rate.playerId);
     if (seasonOn && long) {

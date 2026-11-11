@@ -127,4 +127,11 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@8';
  * lower); no late-swap charge on a Questionable player in the ordering, so
  * Team ranks on Compare's number.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@11', STARTSIT_ENGINE_VERSION);
+/*
+ * `lineup@12`, 11 November 2026 (round 17, Alex's decision after the Round 16
+ * backtest): the Sleeper-only discount is one point, not two, on every
+ * screen. Still the one constant, `BORROWED_RANKING_DISCOUNT`, read by the one
+ * function, `rankingNumber`. The toss-up bar (2.0), the bye cover and the
+ * scores are unchanged.
+ */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@12', STARTSIT_ENGINE_VERSION);

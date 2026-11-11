@@ -122,10 +122,10 @@ this week's lineup, so early-week numbers failed nearly every deal (47 value
 gaps, 25 gains under a point) and none reached the season check.
 
 **A player's value** is his rest-of-season rate (`core/tradeValue/restOfSeason.ts`,
-the one definition Check a trade and Build a trade read too): half his
-projections (this week's number averaged with Sleeper's next three weeks,
-skipping his bye) and half what he has scored per game this season in this
-league's scoring, counting only games he played. With fewer than four games
+the one definition Check a trade and Build a trade read too): three quarters
+his projections (this week's number averaged with Sleeper's next three weeks,
+skipping his bye; half until Round 17, 11 November 2026) and a quarter what he
+has scored per game this season in this league's scoring, counting only games he played. With fewer than four games
 the projection counts more. A player on a bye or out this week is valued on
 the weeks he plays and can be traded.
 

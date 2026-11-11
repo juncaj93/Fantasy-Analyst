@@ -1,10 +1,10 @@
 /**
  * The order Compare picks from, on the shared ranking rule (23 October 2026).
  *
- * Every player ranks on `rankingNumber`: his decision number, two points lower
+ * Every player ranks on `rankingNumber`: his decision number, one point lower
  * when it is Sleeper's week rather than a full set of Vegas lines. The same
  * rule as Team's lineup, Best move and Matchup (Alex's decision), so a
- * Sleeper-only player can be the pick when his number minus 2 is higher.
+ * Sleeper-only player can be the pick when his number minus 1 is higher.
  *
  * It replaced "complete first" (16 October 2026), under which only a fully
  * priced player could be the pick. One thing from it stays: when a

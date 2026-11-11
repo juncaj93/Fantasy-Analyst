@@ -149,4 +149,9 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * ranking numbers, as Team's swap does, and never tests a free agent in a
  * slot a kicked-off starter holds.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@21', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@22`, 11 November 2026 (round 17): the rest-of-season rate is 75
+ * percent projection and 25 percent season average (was 50/50), and a
+ * Sleeper-only week ranks one point lower in the tiers (was two).
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@22', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

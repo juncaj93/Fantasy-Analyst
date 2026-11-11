@@ -91,9 +91,9 @@ describe('Love against Young: one week no longer sets nine (review T9)', () => {
 
   it('values Love clearly ahead of Young over the rest of the season', () => {
     expect(love.rate!).toBeGreaterThan(young.rate! + 3);
-    // Half his projections (this week and the next three), half his season average.
-    expect(love.blend).toMatchObject({ projectionWeeks: 4, games: 8, productionShare: 0.5 });
-    expect(love.rate).toBeCloseTo(0.5 * ((17.5 + 21 + 22 + 20) / 4) + 0.5 * 23.575, 1);
+    // Three quarters his projections (this week and the next three), a quarter his season average.
+    expect(love.blend).toMatchObject({ projectionWeeks: 4, games: 8, productionShare: 0.25 });
+    expect(love.rate).toBeCloseTo(0.75 * ((17.5 + 21 + 22 + 20) / 4) + 0.25 * 23.575, 1);
     // This week alone is still known, and still has Young ahead: it just no longer decides.
     expect(young.weekRate!).toBeGreaterThan(love.weekRate!);
   });
@@ -115,9 +115,9 @@ describe('Love against Young: one week no longer sets nine (review T9)', () => {
 
   it('leans on the projection when the season average is short', () => {
     const two = blendRate({ projections: [10], production: [20, 20] });
-    // Two games: a quarter from the average, three quarters from the projection.
-    expect(two.productionShare).toBe(0.25);
-    expect(two.rate).toBe(12.5);
+    // Two games of four: half of the quarter, an eighth from the average, seven eighths from the projection.
+    expect(two.productionShare).toBe(0.13);
+    expect(two.rate).toBe(11.25);
     expect(blendRate({ projections: [10], production: [] }).rate).toBe(10);
   });
 });

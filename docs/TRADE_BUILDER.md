@@ -45,7 +45,7 @@ rest-of-season numbers (`tests/trades.builderService.test.ts` asserts it).
 ### Alex's gain
 
 The weekly lineup change (depth and bye cover included), on each player's
-rest-of-season rate (half projection, half season average;
+rest-of-season rate (75 percent projection, 25 percent season average;
 `core/tradeValue/restOfSeason.ts`), weighted:
 
 | week | weight |

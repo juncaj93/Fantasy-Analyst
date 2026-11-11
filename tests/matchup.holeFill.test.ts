@@ -62,13 +62,28 @@ describe('a real hole is filled by Team\'s ranking rule', () => {
     expect(fill.winAfter).toBeGreaterThan(fill.winNow);
   });
 
-  it('ranks a Sleeper-only bench player two points lower, as Team does', () => {
+  it('ranks a Sleeper-only bench player one point lower, as Team does', () => {
     const players = lineups().map((p) => (p.playerId === 'mine-3' ? { ...p, ruledOut: true } : p));
     players.push(
       bench({ playerId: 'priced', position: 'WR', projection: 11 }),
-      bench({ playerId: 'borrowed', position: 'WR', projection: 12.5, projectionBorrowed: true }),
+      bench({ playerId: 'borrowed', position: 'WR', projection: 11.5, projectionBorrowed: true }),
     );
     expect(decide(players).fills[0]!.inPlayerId).toBe('priced');
+  });
+
+  it('takes exactly one point off a Sleeper-only bench player (Round 17): 12.5 beats a priced 11, 11.5 does not', () => {
+    const run = (borrowedProjection: number) => {
+      const players = lineups().map((p) => (p.playerId === 'mine-3' ? { ...p, ruledOut: true } : p));
+      players.push(
+        bench({ playerId: 'priced', position: 'WR', projection: 11 }),
+        bench({ playerId: 'borrowed', position: 'WR', projection: borrowedProjection, projectionBorrowed: true }),
+      );
+      return decide(players).fills[0]!.inPlayerId;
+    };
+    /* Minus 1: 12.5 ranks 11.5, ahead of 11. Minus 2 ranked it 10.5, behind. */
+    expect(run(12.5)).toBe('borrowed');
+    /* 11.5 ranks 10.5, behind 11. With no discount it would win. */
+    expect(run(11.5)).toBe('priced');
   });
 
   it('fills a starter on a bye', () => {

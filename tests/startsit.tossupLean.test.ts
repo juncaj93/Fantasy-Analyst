@@ -112,9 +112,9 @@ describe('the one lean function', () => {
     expect(tossUpLean(boom, steady, 'ceiling')).toEqual({ lean: 'a', tag: 'more upside' });
   });
 
-  it('ranks a Sleeper-only number two points lower here too', () => {
-    /* 12.5 on Sleeper's week ranks 10.5, behind a priced 11 in Balanced. */
-    expect(tossUpLean({ ...boom, points: 12.5, borrowed: true }, steady, 'balanced').lean).toBe('b');
+  it('ranks a Sleeper-only number one point lower here too', () => {
+    /* 11.5 on Sleeper's week ranks 10.5, behind a priced 11 in Balanced. */
+    expect(tossUpLean({ ...boom, points: 11.5, borrowed: true }, steady, 'balanced').lean).toBe('b');
   });
 });
 

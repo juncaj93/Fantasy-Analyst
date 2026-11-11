@@ -197,8 +197,8 @@ describe('Team and Compare agree', () => {
     expect(compareStartSit([inP, outP], PROFILE, { published }).tossUp?.leanPlayerId).toBe('in');
   });
 
-  it('S6: equal raw numbers, priced against Sleeper-only, clear the bar on ranking numbers', () => {
-    const published = new Map([['out', 14.5]]);
+  it('S6: a priced number 1 above a Sleeper-only one clears the bar on ranking numbers (1 raw, 2 ranked)', () => {
+    const published = new Map([['out', 13.5]]);
     const r = recommendLineup([pricedCandidate('in', 'Priced Bench', 'WR', 14.5), candidate('out', 'Sleeper Starter', 'WR', 3)], ONE_WR, PROFILE, {
       currentStarterIds: ['out'],
       published,
@@ -260,9 +260,9 @@ describe('Pick up and start', () => {
       pickup: { FA: { state: 'free', reason: null, until: null } } as never,
       openSpots: 1,
     });
-    /* 12.5 against a Sleeper-only 11 (9 ranked): +3.5, a start. */
+    /* 12.5 against a Sleeper-only 11 (10 ranked): +2.5, a start. */
     expect(plan.start?.name).toBe('FA');
-    expect(plan.start?.gain).toBeCloseTo(3.5, 2);
+    expect(plan.start?.gain).toBeCloseTo(2.5, 2);
   });
 });
 

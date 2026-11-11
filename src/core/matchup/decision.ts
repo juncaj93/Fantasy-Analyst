@@ -15,7 +15,7 @@
  * What is left is the fact the Live insights sheet needs when a starter is
  * Out, Doubtful, on IR or on a bye and still in the lineup: who takes the
  * slot, chosen by the shared ranking rule Team uses (`rankingNumber`, a
- * Sleeper-only number two points lower), and what that is worth to the win
+ * Sleeper-only number one point lower), and what that is worth to the win
  * chance. A real hole is never a toss-up, so no bar applies. Advisory only:
  * nothing here sets a lineup.
  */

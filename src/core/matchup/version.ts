@@ -41,4 +41,8 @@ import { STARTSIT_ENGINE_VERSION } from '../startsit/version.ts';
  * fills it, with the other starters moving between slots that take them, so
  * Live insights names the same player Best move does.
  */
-export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@6', STARTSIT_ENGINE_VERSION);
+/**
+ * `matchup@7`, 11 November 2026 (round 17): a hole is filled on the ranking
+ * numbers with the Sleeper-only discount at one point, not two.
+ */
+export const MATCHUP_ENGINE_VERSION = composeEngineVersion('matchup@7', STARTSIT_ENGINE_VERSION);

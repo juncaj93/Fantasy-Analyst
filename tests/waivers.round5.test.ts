@@ -2,7 +2,7 @@
  * Round 5, waiver bugs (review register `docs/REVIEW_2026-11.md`, 4 November
  * 2026). Each test fails on the code before this round:
  *
- *  - W2: the tiers rank on the minus-2 rule (`rankingNumber`).
+ *  - W2: the tiers rank on the Sleeper-only discount (`rankingNumber`; minus 2, minus 1 since Round 17).
  *  - W1: a bye week is 0 with the source `bye`, and an earlier week's number
  *    says which week it is from.
  *  - W8: the drop score's recent form and season average skip a bye.
@@ -85,20 +85,31 @@ function request(over: Partial<TierRequest> = {}): TierRequest {
 
 const loveBye11: Partial<TierPlayer> = { byeWeek: 11, weekly: [1, 1, 0] };
 
-describe('W2: the tiers rank a Sleeper-only number two points lower', () => {
-  it('a Sleeper-only 12.0 over a priced 9.0 is +1.0 a week, not +3.0 and "Do this"', () => {
+describe('W2: the tiers rank a Sleeper-only number one point lower (two until Round 17)', () => {
+  it('a Sleeper-only 12.0 over a priced 9.0 is +2.0 a week (not +3.0), which clears the bar', () => {
     const plan = planWaiverTiers(
       request({ openSpots: 1, candidates: [fa('Borrowed', 'WR', 12, { weekBorrowed: [true, true, true], rateBorrowed: true })] }),
     );
     const move = plan.all.find((m) => m.playerId === 'Borrowed')!;
-    expect(move.byWeek.map((w) => w.change)).toEqual([1, 1, 1]);
-    /* 1.0 × (1 + 1 + 0.5). Before: 3.0 × 2.5 = 7.5, a big upgrade. */
-    expect(move.lineupGain).toBeCloseTo(2.5, 2);
-    expect(move.reason).toBe('Starts over WR4, +1.0 pts in week 9');
-    expect(plan.doThese.map((m) => m.playerId)).not.toContain('Borrowed');
-    expect(plan.consider.map((m) => m.playerId)).toContain('Borrowed');
+    expect(move.byWeek.map((w) => w.change)).toEqual([2, 2, 2]);
+    /* 2.0 × (1 + 1 + 0.5). Undocked it would be 3.0 × 2.5 = 7.5. */
+    expect(move.lineupGain).toBeCloseTo(5, 2);
+    expect(move.reason).toBe('Starts over WR4, +2.0 pts in week 9');
+    /* Round 17: at minus 2 this was +1.0 and "Worth considering"; at minus 1 it is "Do this". */
+    expect(plan.doThese.map((m) => m.playerId)).toContain('Borrowed');
     /* The sheet still shows his own number. */
     expect(move.weekNumbers[0]?.points).toBe(12);
+  });
+
+  it('a Sleeper-only 11.0 over a priced 9.0 is +1.0 a week and stays "Worth considering"', () => {
+    const plan = planWaiverTiers(
+      request({ openSpots: 1, candidates: [fa('Borrowed', 'WR', 11, { weekBorrowed: [true, true, true], rateBorrowed: true })] }),
+    );
+    const move = plan.all.find((m) => m.playerId === 'Borrowed')!;
+    expect(move.byWeek.map((w) => w.change)).toEqual([1, 1, 1]);
+    expect(move.lineupGain).toBeCloseTo(2.5, 2);
+    expect(plan.doThese.map((m) => m.playerId)).not.toContain('Borrowed');
+    expect(plan.consider.map((m) => m.playerId)).toContain('Borrowed');
   });
 
   it('the same player on a full Vegas week keeps the whole gain', () => {

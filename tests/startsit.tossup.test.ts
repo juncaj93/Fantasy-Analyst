@@ -27,8 +27,10 @@ describe('the rule', () => {
     expect(TOSSUP_POINTS).toBe(2);
     expect(isTossUp({ points: 11.9 }, { points: 10 })).toBe(true);
     expect(isTossUp({ points: 12 }, { points: 10 })).toBe(false);
-    /* A Sleeper-only 13 ranks 11: one point over a priced 10. */
-    expect(isTossUp({ points: 13, borrowed: true }, { points: 10 })).toBe(true);
+    /* A Sleeper-only 12.5 ranks 11.5: 1.5 over a priced 10, a toss-up. */
+    expect(isTossUp({ points: 12.5, borrowed: true }, { points: 10 })).toBe(true);
+    /* A Sleeper-only 13 ranks 12: exactly the bar over a priced 10, not a toss-up. */
+    expect(isTossUp({ points: 13, borrowed: true }, { points: 10 })).toBe(false);
   });
 
   it('never calls a real hole a toss-up', () => {
@@ -116,10 +118,10 @@ describe('Team: swaps and Best move', () => {
     expect(r.fills?.map((f) => f.inPlayerId)).toEqual(['in']);
   });
 
-  it('S6: a Sleeper-only bench player 3 ahead on his number but 1 ahead after the minus 2 is a toss-up', () => {
+  it('S6: a Sleeper-only bench player 2.5 ahead on his number but 1.5 ahead after the minus 1 is a toss-up', () => {
     const priced = pricedCandidate('p', 'Priced Receiver', 'WR', 10);
     const decided = recommendLineup([priced], ONE_WR, PROFILE, { currentStarterIds: ['p'] });
-    const published = new Map([['s', pts(decided, 'p') + 3]]);
+    const published = new Map([['s', pts(decided, 'p') + 2.5]]);
     const r = recommendLineup([priced, candidate('s', 'Sleeper Receiver', 'WR', 3)], ONE_WR, PROFILE, { currentStarterIds: ['p'], published });
     expect(r.swaps).toEqual([]);
     expect(r.tossUps?.map((t) => t.inPlayerId)).toEqual(['s']);

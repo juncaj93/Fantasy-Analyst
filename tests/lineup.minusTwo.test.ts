@@ -1,8 +1,10 @@
 /**
- * The minus-2 rule on every screen that picks a starter (Alex's decision, 23 October 2026).
+ * The Sleeper-only discount on every screen that picks a starter (Alex's
+ * decision, 23 October 2026; the size went from 2 to 1 points in Round 17,
+ * 11 November 2026, after the Round 16 backtest fit 0.94).
  *
  * A Sleeper-only player (one line posted, ranked on Sleeper's published week)
- * ranks at his number less 2 points, `BORROWED_RANKING_DISCOUNT`, on Team,
+ * ranks at his number less 1 point, `BORROWED_RANKING_DISCOUNT`, on Team,
  * Compare, Best move's pick-up test and Matchup. It reverses `lineup@5` ("Vegas
  * first", 16 October 2026), under which he could never be started over a
  * priced player. The number shown is the undocked one; the discount only ranks.
@@ -25,9 +27,9 @@ const FLEX_ONLY = buildRosterShape(['FLEX', 'BN', 'BN']);
 const starter = (r: ReturnType<typeof recommendLineup>, slot: string) => r.slots.find((s) => s.slot === slot)?.playerId ?? null;
 
 describe('the rule', () => {
-  it('is two points off a Sleeper-only number and nothing off a priced one', () => {
-    expect(BORROWED_RANKING_DISCOUNT).toBe(2);
-    expect(rankingNumber(7.74, true)).toBeCloseTo(5.74, 10);
+  it('is one point off a Sleeper-only number and nothing off a priced one', () => {
+    expect(BORROWED_RANKING_DISCOUNT).toBe(1);
+    expect(rankingNumber(7.74, true)).toBeCloseTo(6.74, 10);
     expect(rankingNumber(5.19, false)).toBe(5.19);
   });
 });
@@ -36,7 +38,7 @@ describe('Team (assembleLineup)', () => {
   const priced = pricedCandidate('p', 'Priced Receiver', 'WR', 10);
   const sleeper = candidate('s', 'Sleeper Receiver', 'WR', 3);
 
-  it('starts a Sleeper-only player more than 2 points ahead of a priced one', () => {
+  it('starts a Sleeper-only player more than 1 point ahead of a priced one', () => {
     const published = new Map([['s', 15]]);
     const r = assembleLineup({ inputs: [priced, sleeper], shape: ONE_WR, profile: PROFILE, currentStarterIds: ['p'], mode: 'balanced', published });
     expect(r.slots.find((s) => s.slot === 'WR')?.playerId).toBe('s');
@@ -49,11 +51,11 @@ describe('Team (assembleLineup)', () => {
     expect(r.swaps[0]!.reason).not.toMatch(/market expectation/);
   });
 
-  it('keeps the priced player when the Sleeper-only one is ahead by less than 2', () => {
+  it('keeps the priced player when the Sleeper-only one is ahead by less than 1', () => {
     const p = pricedCandidate('p', 'Priced Receiver', 'WR', 10);
     const decided = assembleLineup({ inputs: [p], shape: ONE_WR, profile: PROFILE, currentStarterIds: ['p'], mode: 'balanced', published: new Map() });
     const pricedPoints = decided.starters[0]!.decision!.points;
-    const published = new Map([['s', pricedPoints + 1]]);
+    const published = new Map([['s', pricedPoints + 0.5]]);
     const r = assembleLineup({ inputs: [p, sleeper], shape: ONE_WR, profile: PROFILE, currentStarterIds: ['p'], mode: 'balanced', published });
     expect(r.slots.find((s) => s.slot === 'WR')?.playerId).toBe('p');
     expect(r.swaps).toEqual([]);
@@ -64,8 +66,8 @@ describe('Team (assembleLineup)', () => {
     const concepcion = candidate('kc', 'KC Concepcion Jr.', 'WR', 1, { status: 'Questionable' });
     const decided = assembleLineup({ inputs: [robinson], shape: FLEX_ONLY, profile: PROFILE, currentStarterIds: ['br'], mode: 'balanced', published: new Map() });
     const robinsonPoints = decided.starters[0]!.decision!.points;
-    // Concepcion's Sleeper week is 2.55 above Robinson's number: 0.55 clear after the discount.
-    const published = new Map([['kc', robinsonPoints + 2.55]]);
+    // Concepcion's Sleeper week is 1.55 above Robinson's number: 0.55 clear after the discount.
+    const published = new Map([['kc', robinsonPoints + 1.55]]);
     const r = assembleLineup({ inputs: [robinson, concepcion], shape: FLEX_ONLY, profile: PROFILE, currentStarterIds: ['br'], mode: 'balanced', published });
     expect(r.slots.find((s) => s.slot === 'FLEX')?.playerId).toBe('kc');
     // Questionable is full value (D1) and keeps his chip.
@@ -92,12 +94,12 @@ describe('Team (assembleLineup)', () => {
 });
 
 describe('Best move (solveLineup)', () => {
-  it('seats a Sleeper-only number more than 2 ahead, and not one less than 2 ahead', () => {
+  it('seats a Sleeper-only number more than 1 ahead, and not one less than 1 ahead', () => {
     const shape = buildRosterShape(['WR', 'BN']);
     const ahead = solveLineup(
       [
         { playerId: 'p', name: 'P', position: 'WR', points: 10, borrowed: false },
-        { playerId: 's', name: 'S', position: 'WR', points: 12.5, borrowed: true },
+        { playerId: 's', name: 'S', position: 'WR', points: 11.5, borrowed: true },
       ],
       shape,
     );
@@ -105,7 +107,7 @@ describe('Best move (solveLineup)', () => {
     const close = solveLineup(
       [
         { playerId: 'p', name: 'P', position: 'WR', points: 10, borrowed: false },
-        { playerId: 's', name: 'S', position: 'WR', points: 11.5, borrowed: true },
+        { playerId: 's', name: 'S', position: 'WR', points: 10.5, borrowed: true },
       ],
       shape,
     );
@@ -118,21 +120,21 @@ describe('Compare', () => {
     compareStartSit(inputs, PROFILE, { published: new Map(Object.entries(published)) });
   const points = (c: ReturnType<typeof compare>, id: string) => c.evaluations.find((e) => e.playerId === id)!.decision!.points;
 
-  it('picks a Sleeper-only player more than 2 ahead', () => {
+  it('picks a Sleeper-only player more than 1 ahead', () => {
     const c = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 6), candidate('m', 'Ladd McConkey', 'WR', 3)], { m: 25 });
     expect(c.recommendedPlayerId).toBe('m');
     expect(c.sleeperOnly).toBeUndefined();
     expect(c.margin).toBeCloseTo(points(c, 'm') - points(c, 'w'), 2);
   });
 
-  it('keeps the priced lean when the Sleeper-only player is ahead by less than 2, and names him second', () => {
+  it('keeps the priced lean when the Sleeper-only player is ahead by less than 1, and names him second', () => {
     const base = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 12)], {});
-    const c = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 12), candidate('m', 'Ladd McConkey', 'WR', 3)], { m: points(base, 'w') + 1 });
-    /* One point behind after the discount: a toss-up that leans to the priced player (4 November 2026). */
+    const c = compare([pricedCandidate('w', 'Garrett Wilson', 'WR', 12), candidate('m', 'Ladd McConkey', 'WR', 3)], { m: points(base, 'w') + 0.5 });
+    /* Half a point behind after the discount: a toss-up that leans to the priced player (4 November 2026). */
     expect(c.recommendedPlayerId).toBeNull();
     expect(c.tossUp?.leanPlayerId).toBe('w');
     expect(c.sleeperOnly).toMatchObject({ playerId: 'm' });
-    expect(c.sleeperOnly!.aheadBy).toBeCloseTo(1, 1);
+    expect(c.sleeperOnly!.aheadBy).toBeCloseTo(0.5, 1);
   });
 
   it('two Sleeper-only players and a priced one: each on its own docked number', () => {

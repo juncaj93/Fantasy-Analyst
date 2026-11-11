@@ -23,7 +23,7 @@
  * Both sides are read on one basis: Sleeper's published number for this week,
  * which the waiver screen already holds for every rostered player and the
  * scanned wire, with the shared availability rule on top (Doubtful and Out are
- * zero, `weekAvailability.ts`). The minus-2 rule would take the same two points
+ * zero, `weekAvailability.ts`). The Sleeper-only discount would take the same points
  * off both sides here, so it changes nothing and is not applied.
  *
  * Pure. Nothing here transacts: the line is advice to act on in Sleeper.
