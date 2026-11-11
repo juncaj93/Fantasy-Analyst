@@ -125,7 +125,9 @@ describe('replacement quality and late-swap exposure', () => {
     });
     expect(result.verdict).toBe('late_swap_exposed');
     expect(result.points).toBeLessThan(0);
-    expect(result.driver).toMatch(/late-swap/i);
+    /* Round 18: plain English, no "locks" or "committed". */
+    expect(result.driver).toBe('Risky · Backup is his only cover and plays first');
+    expect(result.display).toBe('Backup plays first. Decide before then; his news may come later.');
   });
 
   it('charges more when the drop to the fallback is larger', () => {

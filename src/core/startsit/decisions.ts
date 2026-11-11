@@ -17,6 +17,10 @@
  */
 
 import type { MarketKey } from '../vegas/types.ts';
+import { splitName } from '../matchup/names.ts';
+
+/** `Kenneth Walker III` -> `Walker`: short enough for a one-line note. */
+const lastName = (name: string): string => splitName(name).last || name;
 
 // --------------------------------------------------------------- thresholds
 
@@ -127,10 +131,10 @@ export interface LateSwapInput {
 }
 
 const LATE_SWAP_LABEL: Record<LateSwapVerdict, string> = {
-  no_risk: 'No late-swap risk',
+  no_risk: 'No timing risk',
   worth_waiting: 'Worth waiting',
-  consider_early_option: 'Late-swap risk',
-  unknown: 'Late-swap risk unknown',
+  consider_early_option: 'Plays late and might sit',
+  unknown: 'Timing risk unclear',
 };
 
 /**
@@ -154,7 +158,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     return {
       verdict: 'no_risk',
       label: LATE_SWAP_LABEL.no_risk,
-      detail: `${preferred.name} carries no injury designation.`,
+      detail: `${lastName(preferred.name)} has no injury tag.`,
       gapHours: null,
       advantage: null,
     };
@@ -165,8 +169,8 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
       verdict: 'unknown',
       label: LATE_SWAP_LABEL.unknown,
       detail: !alternative
-        ? `${preferred.name} is ${titleCase(status)}, and there is no eligible alternative to fall back on.`
-        : 'Kickoff times are unknown, so late-swap risk cannot be judged.',
+        ? `${lastName(preferred.name)} is ${titleCase(status)}, with no eligible alternative to fall back on.`
+        : 'Game times unknown, so the timing risk is unclear.',
       gapHours: null,
       advantage: null,
     };
@@ -182,7 +186,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     return {
       verdict: 'no_risk',
       label: LATE_SWAP_LABEL.no_risk,
-      detail: `${alternative.name} does not lock meaningfully earlier, so there is nothing to decide before kickoff.`,
+      detail: `${lastName(alternative.name)} does not play earlier, so you can wait for news.`,
       gapHours,
       advantage: null,
     };
@@ -193,7 +197,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     return {
       verdict: 'unknown',
       label: LATE_SWAP_LABEL.unknown,
-      detail: `${alternative.name} has already kicked off, so the swap is no longer available.`,
+      detail: `${lastName(alternative.name)} has already kicked off, so you cannot swap him in.`,
       gapHours,
       advantage: null,
     };
@@ -206,7 +210,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     return {
       verdict: 'unknown',
       label: LATE_SWAP_LABEL.unknown,
-      detail: `${preferred.name} is ${titleCase(status)} and plays ${gapHours} hours later, but there is not enough projection data to say whether waiting is worth it.`,
+      detail: `${lastName(preferred.name)} is ${titleCase(status)} and plays later; not enough projection data to judge.`,
       gapHours,
       advantage: null,
     };
@@ -218,7 +222,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     return {
       verdict: 'worth_waiting',
       label: LATE_SWAP_LABEL.worth_waiting,
-      detail: `${preferred.name} is ${titleCase(status)} and plays ${gapHours} hours later, but projects ${advantage} points higher — enough to justify the availability risk.`,
+      detail: `${lastName(preferred.name)} is ${titleCase(status)} but ${advantage} points better: worth the wait.`,
       gapHours,
       advantage,
     };
@@ -228,8 +232,7 @@ export function assessLateSwap(input: LateSwapInput, now: string | Date = new Da
     verdict: 'consider_early_option',
     label: LATE_SWAP_LABEL.consider_early_option,
     detail:
-      `${preferred.name} is ${titleCase(status)} and plays ${gapHours} hours after ${alternative.name}, ` +
-      `who trails by only ${Math.abs(advantage)} points. Consider starting ${alternative.name} unless the status improves before kickoff.`,
+      `${lastName(preferred.name)} is ${titleCase(status)} and plays late. Start ${lastName(alternative.name)} unless he is cleared.`,
     gapHours,
     advantage,
   };

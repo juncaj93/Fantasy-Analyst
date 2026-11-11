@@ -42,9 +42,15 @@ function board(): StartSitInput[] {
   ];
 }
 
+/*
+ * Harvey at 11.03, not production's 9.53 (Round 18): a lead resting on an
+ * unpriced number needs 3.5 now, and 9.53 over 7.22 (2.31 ahead) is a lean on
+ * both screens, which the last test here holds. 11.03 keeps this a real
+ * suggestion so the two can still be held to one answer.
+ */
 const PUBLISHED = new Map([
   ['andrews', 7.22],
-  ['harvey', 9.53],
+  ['harvey', 11.03],
 ]);
 const STARTING = ['burrow', 'bijan', 'walker', 'wilson', 'egbuka', 'mcconkey', 'laporta', 'andrews', 'stevenson'];
 
@@ -77,7 +83,7 @@ describe('the Andrews and Harvey board', () => {
     const sheet = compare(['andrews', 'harvey']);
     const harvey = sheet.evaluations.find((e) => e.playerId === 'harvey')!;
     expect(harvey.decision?.basis).toBe('published');
-    expect(harvey.decision?.base).toBe(9.53);
+    expect(harvey.decision?.base).toBe(11.03);
     /* Questionable is a tag beside the number, not a charge in it (13 October 2026). */
     const status = harvey.components.find((c) => c.key === 'status')!;
     expect(status.value).toBe(0);
@@ -155,5 +161,20 @@ describe('decisionPoints', () => {
     });
     expect(decisionPoints(risky)?.points).toBe(4);
     expect(decisionPoints(risky, undefined, { rosterRisk: true })?.points).toBe(3);
+  });
+});
+
+describe('production’s 2.31 gap, after Round 18', () => {
+  it('is a toss-up on Team and on the sheet alike: both unpriced and Questionable', () => {
+    const published = new Map([
+      ['andrews', 7.22],
+      ['harvey', 9.53],
+    ]);
+    const result = recommendLineup(board(), SHAPE, HALF_PPR, { currentStarterIds: STARTING, published, now: NOW });
+    expect(result.swaps.find((s) => s.outPlayerId === 'andrews')).toBeUndefined();
+    expect(result.tossUps?.find((t) => t.outPlayerId === 'andrews')?.inPlayerId).toBe('harvey');
+    const sheet = compare(['andrews', 'harvey'], published);
+    expect(sheet.recommendedPlayerId).toBeNull();
+    expect(sheet.tossUp?.leanPlayerId).toBe('harvey');
   });
 });

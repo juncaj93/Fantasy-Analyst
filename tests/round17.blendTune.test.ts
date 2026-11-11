@@ -93,13 +93,13 @@ describe('a Sleeper-only number takes exactly minus 1 on every screen that picks
     expect(run(10.8)).toEqual(['p']);
   });
 
-  it('Compare: 3.05 ahead raw is a clear Start (2.05 ranked); 2.95 ahead is a toss-up that leans to the priced player', () => {
+  it('Compare: 4.55 ahead raw is a clear Start (3.55 ranked, Round 18 bar); 2.95 ahead is a toss-up that leans to the priced player', () => {
     const compare = (published: Record<string, number>, inputs: Parameters<typeof compareStartSit>[0]) =>
       compareStartSit(inputs, PROFILE, { published: new Map(Object.entries(published)) });
     const w = pricedCandidate('w', 'Garrett Wilson', 'WR', 12);
     const base = compare({}, [w]).evaluations.find((e) => e.playerId === 'w')!.decision!.points;
     const m = candidate('m', 'Ladd McConkey', 'WR', 3);
-    const clear = compare({ m: base + 3.05 }, [w, m]);
+    const clear = compare({ m: base + 4.55 }, [w, m]);
     expect(clear.recommendedPlayerId).toBe('m');
     const close = compare({ m: base + 2.95 }, [w, m]);
     expect(close.recommendedPlayerId).toBeNull();

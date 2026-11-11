@@ -530,7 +530,8 @@ function PlayerHalf({
           data-testid="matchup-player-proj"
           data-projection-source={player.projectedFinal == null ? 'none' : 'market'}
         >
-          {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
+          {/* Round 18: a missing number says so, and is never drawn as a bye (that is `onBye`, from the fixture list). */}
+          {player.projectedFinal == null ? 'No projection' : player.projectedFinal.toFixed(1)}
         </span>
       )}
     </span>

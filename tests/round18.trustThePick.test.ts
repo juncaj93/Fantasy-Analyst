@@ -86,3 +86,169 @@ describe('Compare agrees with Team', () => {
     expect(c.tossUp ?? null).toBeNull();
   });
 });
+
+/* ------------------------------------------------------- waiting on lines */
+
+import { waitsOnLine } from '../src/core/startsit/tossup.ts';
+import { NO_LINE_YET, noLineYet, rowNote, rowFigure } from '../src/web/rowFigure.ts';
+
+describe('waiting on lines', () => {
+  it('the McConkey toss-up is waiting on a line: the gap clears 2.0, only the missing line holds it back', () => {
+    expect(waitsOnLine({ points: 11.3, borrowed: true }, { points: 7.3 })).toBe(true);
+    /* A plain 1.5 toss-up between priced players is not waiting on anything. */
+    expect(waitsOnLine({ points: 11.5 }, { points: 10 })).toBe(false);
+    /* An unpriced 1.5 lead is a toss-up anyway: the line is not the only reason. */
+    expect(waitsOnLine({ points: 12.5, borrowed: true }, { points: 10 })).toBe(false);
+  });
+
+  it('Team and Compare both mark Alex’s FLEX call as waiting on a line', () => {
+    const { cooper, ladd, published } = mcconkeyVsCooper(3.0);
+    const r = recommendLineup([cooper, ladd], FLEX, PROFILE, { currentStarterIds: ['cooper'], published });
+    expect(r.tossUps?.[0]?.waitingOnLine).toBe(true);
+    const c = compareStartSit([ladd, cooper], PROFILE, { published });
+    expect(c.tossUp?.waitingOnLine).toBe(true);
+  });
+
+  it('a row on Sleeper’s week says "No line yet" before kickoff, and nothing once his game starts', () => {
+    const before = { decision: { basis: 'published' }, lock: { locked: false, kickoff: '2026-11-15T21:25:00Z' } };
+    const now = Date.parse('2026-11-12T15:00:00Z');
+    expect(NO_LINE_YET).toBe('No line yet');
+    expect(noLineYet(before, now)).toBe(true);
+    expect(rowNote(rowFigure(10.3, before), before, now)).toBe('No line yet');
+    expect(noLineYet({ ...before, lock: { locked: true, kickoff: before.lock.kickoff } }, now)).toBe(false);
+    /* A priced number says nothing. */
+    expect(rowNote(rowFigure(7.3, { decision: { basis: 'market' } }), { decision: { basis: 'market' } }, now)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------ dash cells */
+
+describe('a dash always says why', () => {
+  it('Bye only from the fixture list; a missing number is "No projection"', () => {
+    expect(rowNote(rowFigure(null, { onBye: true }), { onBye: true })).toBe('Bye');
+    expect(rowNote(rowFigure(null, { onReserve: true }), { onReserve: true })).toBe('On IR');
+    expect(rowNote(rowFigure(null, { decision: { basis: 'unpriced' } }), { decision: { basis: 'unpriced' } })).toBe('No projection');
+    expect(rowNote(rowFigure(null, null), null)).toBe('No projection');
+  });
+
+  it('the evaluation carries the schedule’s bye, and only the schedule’s', async () => {
+    const { evaluatePlayer } = await import('../src/core/startsit/engine.ts');
+    const resting = { ...candidate('kw', 'Kenneth Walker III', 'RB', null), onBye: true };
+    expect(evaluatePlayer(resting, PROFILE).onBye).toBe(true);
+    /* No number at all, but his club plays: not a bye. */
+    expect(evaluatePlayer(candidate('jc', 'Jonah Coleman', 'RB', null), PROFILE).onBye).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------- bye rule */
+
+import { byeReader } from '../src/core/nfl/schedule.ts';
+import { readFileSync } from 'node:fs';
+
+describe('bye comes from the real schedule only', () => {
+  const row = (team: string, week: number, opponent: string | null) =>
+    ({ season: '2026', week, team, opponent, home: true, kickoff: null, roof: null }) as never;
+
+  it('a club with games in other weeks and none this week is on a bye', () => {
+    const bye = byeReader([row('KC', 10, 'DEN'), row('KC', 12, 'LV'), row('DEN', 11, 'LV')]);
+    expect(bye('KC', 11)).toBe(true);
+    expect(bye('KC', 10)).toBe(false);
+  });
+
+  it('a club the list never mentions is unknown, never a bye (Waivers reads only some clubs)', () => {
+    const bye = byeReader([row('DEN', 11, 'LV'), row('LV', 11, 'DEN')]);
+    expect(bye('LAC', 11)).toBeNull();
+  });
+
+  it('a week nobody has a row in is unknown, never a bye', () => {
+    const bye = byeReader([row('KC', 10, 'DEN')]);
+    expect(bye('KC', 11)).toBeNull();
+  });
+
+  it('the Rams are one club under LA and LAR', () => {
+    const bye = byeReader([row('LA', 11, 'SEA'), row('LA', 10, 'SF')]);
+    expect(bye('LAR', 11)).toBe(false);
+  });
+
+  it('Waivers no longer decides a bye from a bare team set (the old code did, twice)', () => {
+    const src = readFileSync(new URL('../src/core/waivers/assemble.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/!playing\.has\(/);
+    expect(src).not.toMatch(/!set\.has\(team/);
+    expect(src).toMatch(/byeReader\(fixtures\)/);
+    const dst = readFileSync(new URL('../src/core/dst/assemble.ts', import.meta.url), 'utf8');
+    expect(dst).not.toMatch(/thisWeekFixtures\.length > 0/);
+  });
+});
+
+/* -------------------------------------------------------- plain English */
+
+import { assessReplacement } from '../src/core/startsit/replacement.ts';
+import { assessLateSwap } from '../src/core/startsit/decisions.ts';
+
+const JARGON = /\b(lock|locks|locked|committed|slot logic|resolver|cascade|status is known|late-swap)\b/i;
+const words = (s: string) => s.trim().split(/\s+/).length;
+
+describe('plain English on Team, Matchup and Compare', () => {
+  const SUN_1 = '2026-11-15T18:00:00Z';
+  const SUN_4 = '2026-11-15T21:25:00Z';
+  const NOW = '2026-11-12T15:00:00Z';
+
+  it('McConkey’s note says what to do and what to watch, in 12 words or fewer', () => {
+    const r = assessReplacement({
+      player: { name: 'Ladd McConkey', kickoff: SUN_4, score: 10.3, availability: 'uncertain' },
+      alternatives: [{ playerId: 'kw', name: 'Kenneth Walker III', kickoff: SUN_1, score: 9 }],
+      now: NOW,
+    });
+    expect(r.display).toBe('Walker plays first. Decide before then; his news may come later.');
+    expect(r.driver).toBe('Risky · Walker is his only cover and plays first');
+    for (const s of [r.display, r.driver!]) {
+      expect(s).not.toMatch(JARGON);
+      expect(words(s)).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('every note the cover check and the timing check can print is plain and short', () => {
+    const outputs: string[] = [];
+    for (const availability of ['uncertain', 'doubtful_like'] as never[]) {
+      for (const alternatives of [
+        [],
+        [{ playerId: 'a', name: 'Kenneth Walker III', kickoff: SUN_4, score: 9 }],
+        [{ playerId: 'a', name: 'Kenneth Walker III', kickoff: SUN_1, score: 9 }],
+        [{ playerId: 'a', name: 'Kenneth Walker III', kickoff: null, score: 9 }],
+      ]) {
+        const r = assessReplacement({ player: { name: 'Ladd McConkey', kickoff: SUN_4, score: 10.3, availability }, alternatives, now: NOW });
+        if (r.display) outputs.push(r.display);
+        if (r.driver) outputs.push(r.driver);
+      }
+    }
+    for (const [pScore, aScore, aKick, now] of [
+      [11.8, 11.1, SUN_1, NOW],
+      [18, 11.1, SUN_1, NOW],
+      [12, 11, SUN_4, NOW],
+      [11.8, 11.1, SUN_1, '2026-11-15T19:00:00Z'],
+      [null, null, SUN_1, NOW],
+    ] as const) {
+      const r = assessLateSwap(
+        {
+          preferred: { name: 'Ladd McConkey', kickoff: SUN_4, status: 'Questionable', score: pScore },
+          alternative: { name: 'Kenneth Walker III', kickoff: aKick, status: null, score: aScore },
+        },
+        now,
+      );
+      outputs.push(r.detail, r.label);
+    }
+    expect(outputs.length).toBeGreaterThan(8);
+    for (const s of outputs) {
+      expect(s, s).not.toMatch(JARGON);
+      expect(s, s).not.toMatch(/—/);
+      expect(words(s), s).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('the Team row tag and the no-change line are plain', () => {
+    const team = readFileSync(new URL('../src/web/screens/TeamScreen.tsx', import.meta.url), 'utf8');
+    expect(team).toContain("'Keep your lineup as is'");
+    expect(team).not.toContain('No swap clears the bar');
+    expect(team).not.toMatch(/>\s*Locked\s*</);
+  });
+});

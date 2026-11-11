@@ -101,6 +101,22 @@ export function isTossUp(lean: TossUpSide, other: TossUpSide): boolean {
   return gap < tossUpBar(pick) - 1e-9;
 }
 
+/**
+ * A toss-up only because the pick's number has no Vegas line yet (Round 18).
+ *
+ * True when the call is a toss-up, the higher number is Sleeper-only, and the
+ * gap would clear the ordinary 2.0 bar: the missing line is the one reason the
+ * pick is shaky, and the screens say "No line yet" instead of a firm headline.
+ */
+export function waitsOnLine(lean: TossUpSide, other: TossUpSide): boolean {
+  if (!isTossUp(lean, other)) return false;
+  const gap = tossUpGap(lean, other);
+  if (gap == null) return false;
+  const pick = gap >= 0 ? lean : other;
+  const unpriced = pick.borrowed === true;
+  return unpriced && Math.abs(gap) + 1e-9 >= TOSSUP_POINTS;
+}
+
 /** Whether a whole-lineup gain clears the bar. The same bar, for gains already summed. */
 export function clearsTossUp(gain: number): boolean {
   return gain >= TOSSUP_POINTS - 1e-9;

@@ -125,7 +125,7 @@ export function assessOptionality(
   const lateness = latenessOf(input.kickoff, window);
   score += lateness * OPTIONALITY.weights.kickoff;
   if (lateness >= 0.75) reasons.push('plays late, so he can still be swapped in after the early games');
-  else if (lateness <= 0.1 && input.kickoff) reasons.push('locks with the first games');
+  else if (lateness <= 0.1 && input.kickoff) reasons.push('plays in the first games');
 
   // A role that moves is a role that might not be there when it is needed.
   const stability = stabilityOf(input.role ?? null);

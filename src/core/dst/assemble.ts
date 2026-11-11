@@ -29,7 +29,7 @@ import { planDst, DST_PLAN, type DstOption, type DstPlan } from './planner.ts';
 import { dstOutlook, forwardWeeks, type DstOutlook, type TeamForm } from './outlook.ts';
 import type { LineupRecommendation } from '../startsit/lineup.ts';
 import type { RosterShape, ScoringProfile } from '../sleeper/scoring.ts';
-import type { ScheduleTeamWeek } from '../nfl/schedule.ts';
+import { playingTeams, type ScheduleTeamWeek } from '../nfl/schedule.ts';
 
 /**
  * How close a stored betting event has to be to a fixture to be that fixture.
@@ -197,7 +197,8 @@ export async function assembleDstPlan(
         input,
         scheduleByTeam.get(team) ?? [],
         request.week,
-        thisWeekFixtures.length > 0,
+        /* Round 18: a whole slate (`playingTeams`, 20 clubs or more), so a partial list never invents a bye. */
+        playingTeams(thisWeekFixtures) != null,
       ),
       locked: evaluation.lock.locked,
       opponent: evaluation.opponent,

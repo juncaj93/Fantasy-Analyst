@@ -146,7 +146,11 @@ describe('Compare', () => {
   });
 
   it('all Sleeper-only: the best Sleeper number wins', () => {
-    const c = compare([candidate('m', 'Ladd McConkey', 'WR', 3), candidate('p', 'George Pickens', 'WR', 3)], { m: 13, p: 16 });
+    /* Round 18: a lead resting on an unpriced number needs 3.5, so 16 over 13 is a lean and 17 over 13 a Start. */
+    const lean = compare([candidate('m', 'Ladd McConkey', 'WR', 3), candidate('p', 'George Pickens', 'WR', 3)], { m: 13, p: 16 });
+    expect(lean.recommendedPlayerId).toBeNull();
+    expect(lean.tossUp?.leanPlayerId).toBe('p');
+    const c = compare([candidate('m', 'Ladd McConkey', 'WR', 3), candidate('p', 'George Pickens', 'WR', 3)], { m: 13, p: 17 });
     expect(c.recommendedPlayerId).toBe('p');
     expect(c.sleeperOnly).toBeUndefined();
   });

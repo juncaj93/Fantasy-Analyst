@@ -318,9 +318,11 @@ describe('the planner’s inputs, assembled from what is stored', () => {
   });
 
   it('calls a week with no row a bye when the slate and his other weeks are on record', async () => {
-    /* How the stored schedule holds a bye (`byeWeeks`): Pittsburgh's week 9, 3 November 2026. */
+    /* How the stored schedule holds a bye (`byeWeeks`): Pittsburgh's week 9, 3 November 2026. A whole slate (Round 18: 20 clubs or more). */
+    const clubs = ['CAR', 'TEN', 'ATL', 'NO', 'TB', 'DAL', 'NYG', 'PHI', 'WAS', 'CHI', 'DET', 'GB', 'MIN', 'ARI', 'LAR', 'SF', 'SEA', 'BUF', 'MIA', 'NE', 'NYJ', 'BAL'];
+    const wholeWeek = clubs.flatMap((team, i) => fixtures(team, [{ week: 3, opponent: clubs[i % 2 === 0 ? i + 1 : i - 1]! }]));
     await new NflScheduleRepo(db).save(
-      [...fixtures('JAX', [{ week: 2, opponent: 'CAR' }, { week: 4, opponent: 'TEN' }]), ...fixtures('CAR', [{ week: 3, opponent: 'TEN' }])],
+      [...fixtures('JAX', [{ week: 2, opponent: 'CAR' }, { week: 4, opponent: 'TEN' }]), ...wholeWeek],
       '2026-09-01T00:00:00.000Z',
     );
     const bye = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
@@ -340,6 +342,29 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     });
 
     expect(plan!.current?.unavailableReason).toBe('is on bye');
+  });
+
+  it('Round 18: does not call a missing row a bye when the week holds only part of the slate', async () => {
+    await new NflScheduleRepo(db).save(
+      [...fixtures('JAX', [{ week: 2, opponent: 'CAR' }, { week: 4, opponent: 'TEN' }]), ...fixtures('CAR', [{ week: 3, opponent: 'TEN' }])],
+      '2026-09-01T00:00:00.000Z',
+    );
+    const def = defence('def_jax', 'Jacksonville', null, { team: 'JAX' });
+    const plan = await buildDstPlan(db, {
+      season: '2026',
+      week: 3,
+      shape: SHAPE,
+      profile: PROFILE,
+      bestBall: false,
+      draftComplete: true,
+      rosterInputs: [def],
+      candidateInputs: [],
+      lineup: recommendLineup([def], SHAPE, PROFILE, {}),
+      reserveIds: [],
+      playoff: { weeks: [15, 16, 17], emphasis: 0 },
+      now: new Date('2026-09-08T12:00:00.000Z'),
+    });
+    expect(plan!.current?.unavailableReason).not.toBe('is on bye');
   });
 
   it('does not call an unread fixture a bye', async () => {

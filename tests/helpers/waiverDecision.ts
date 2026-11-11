@@ -38,9 +38,36 @@ export async function captureDemoWaivers(at: string = DEMO_WAIVER_CLOCK): Promis
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(at));
   try {
-    return await captureAtFrozenClock();
+    return await withGamesOnFrozenClock(captureAtFrozenClock);
   } finally {
     vi.useRealTimers();
+  }
+}
+
+/**
+ * The demo games, moved onto the frozen clock for one capture.
+ *
+ * `MOCK_GAMES` takes its kickoffs from the real clock when the seed module
+ * loads (real now plus three days), before this file freezes `Date`, and both
+ * the seed and the mock provider read them. So the gap between the frozen
+ * Thursday and those kickoffs grew by a day every day, and on 11 November
+ * 2026 at 3 PM UTC it passed the slate window: the games fell out of the week,
+ * every demo player lost his number, and the capture came back empty. Each
+ * game keeps its offset from the first; the first sits three days after the
+ * frozen now, as the seed intends. Put back afterwards.
+ */
+async function withGamesOnFrozenClock<T>(run: () => Promise<T>): Promise<T> {
+  const saved = MOCK_GAMES.map((g) => g.startTime);
+  const first = Date.parse(saved[0]!);
+  MOCK_GAMES.forEach((g, i) => {
+    g.startTime = new Date(Date.now() + 3 * 86_400_000 + (Date.parse(saved[i]!) - first)).toISOString();
+  });
+  try {
+    return await run();
+  } finally {
+    MOCK_GAMES.forEach((g, i) => {
+      g.startTime = saved[i]!;
+    });
   }
 }
 

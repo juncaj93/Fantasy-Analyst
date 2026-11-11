@@ -89,10 +89,12 @@ describe('the minus-1 rule decides the same way on every screen that picks', () 
     expect(screens.lineup.bench.map((e: { playerId: string }) => e.playerId)).toContain('m_wr5');
   });
 
-  it('Compare starts him over the priced 12.5 (2.5 clear), and leans to the priced 15 over him (a toss-up since 4 November 2026)', async () => {
-    /* 15 against 12.5 clears the two-point bar, a Start. 15 against the nudged 15 does not: a lean. */
+  it('Compare leans to him over the priced 12.5 (2.5 ahead, unpriced: Round 18), and leans to the priced 15 over him (a toss-up since 4 November 2026)', async () => {
+    /* 15 against 12.5 clears 2.0 but rests on an unpriced number, which needs 3.5 (Round 18): a lean, waiting on a line. */
     const wider = await screens.compareOf([SLEEPER_ONLY, 'm_wr5']);
-    expect(wider.recommendedPlayerId).toBe(SLEEPER_ONLY);
+    expect(wider.recommendedPlayerId).toBeNull();
+    expect(wider.tossUp?.leanPlayerId).toBe(SLEEPER_ONLY);
+    expect(wider.tossUp?.waitingOnLine).toBe(true);
     const closer = await screens.compareOf([SLEEPER_ONLY, 'm_wr2']);
     expect(closer.recommendedPlayerId).toBeNull();
     expect(closer.tossUp?.leanPlayerId).toBe('m_wr2');

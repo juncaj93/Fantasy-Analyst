@@ -303,6 +303,38 @@ export function isOnBye(team: string | null | undefined, playing: ReadonlySet<st
   return !playing.has(club);
 }
 
+/**
+ * A bye reader over a fixture list that may hold only some clubs (Round 18).
+ *
+ * For readers that ask the schedule about the clubs they need rather than the
+ * whole slate (Waivers). A club is on a bye in a week only when the list has
+ * that week on record (some club has a row in it) and the club has rows in
+ * other weeks but none with an opponent in this one. No rows for the club, or
+ * a week nobody has a row in, is unknown (null), never a bye: a gap in this
+ * app's data must not read as a week off. Team codes fold through
+ * `normalizeTeam`, so the Rams' `LA` and `LAR` are one club.
+ */
+export function byeReader(fixtures: readonly ScheduleTeamWeek[]): (team: string | null | undefined, week: number) => boolean | null {
+  const byTeam = new Map<string, Map<number, boolean>>();
+  const weeksOnRecord = new Set<number>();
+  for (const row of fixtures) {
+    const team = normalizeTeam(row.team);
+    if (!team) continue;
+    weeksOnRecord.add(row.week);
+    const weeks = byTeam.get(team) ?? byTeam.set(team, new Map()).get(team)!;
+    weeks.set(row.week, (weeks.get(row.week) ?? false) || !!row.opponent);
+  }
+  return (team, week) => {
+    const club = normalizeTeam(team);
+    const weeks = club ? byTeam.get(club) : undefined;
+    if (!weeks || !weeksOnRecord.has(week)) return null;
+    const playing = weeks.get(week);
+    if (playing === true) return false;
+    if (playing === false) return true;
+    return [...weeks.keys()].some((w) => w !== week) ? true : null;
+  };
+}
+
 export function homeByTeam(fixtures: readonly ScheduleTeamWeek[]): Map<string, boolean> {
   const out = new Map<string, boolean>();
   for (const row of fixtures) {
