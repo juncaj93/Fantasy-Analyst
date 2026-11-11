@@ -1284,8 +1284,8 @@ function buildSwaps(
     const gain = round2(incomingBasis.points - (outgoingBasis?.points ?? 0));
     /*
      * Gated on the ranking numbers (round 13, review S6): a Sleeper-only
-     * number ranks two points lower here as everywhere, so a priced 14 over a
-     * Sleeper-only 14.5 (12.5 ranked) is a toss-up, as Compare says, not
+     * number ranks one point lower here as everywhere, so a priced 14 over a
+     * Sleeper-only 14.5 (13.5 ranked) is a toss-up, as Compare says, not
      * nothing. A swap still prints the honest difference (`gain`); a toss-up
      * carries the ranked gap, which is what orders them.
      */
@@ -1514,7 +1514,7 @@ export interface SolvablePlayer {
   position: string;
   /** The decision number (`decisionPoints`). */
   points: number;
-  /** A Sleeper-only number: it ranks two points lower ({@link rankingNumber}). */
+  /** A Sleeper-only number: it ranks one point lower ({@link rankingNumber}). */
   borrowed: boolean;
   /** Seated before anyone else: a locked starter, or a player being tested in the lineup. */
   forced?: boolean;
@@ -1530,7 +1530,7 @@ export interface SolvedLineup {
   /** The decision numbers of the chosen players, summed. Never rounded. */
   total: number;
   /**
-   * The same on ranking numbers: a Sleeper-only number two points lower. What
+   * The same on ranking numbers: a Sleeper-only number one point lower. What
    * a gain is measured on (round 13), so a free agent over a Sleeper-only
    * starter gains what Team's swap would.
    */
@@ -1545,7 +1545,7 @@ export interface SolvedLineup {
  *
  * The same assignment {@link recommendLineup} makes, without the passes that
  * only explain a lineup to a reader: players are taken in order (forced first,
- * then by {@link rankingNumber}: a Sleeper-only number two points lower) and
+ * then by {@link rankingNumber}: a Sleeper-only number one point lower) and
  * each is seated with {@link tryAssign}, which moves the players already seated
  * between the slots that accept them. Sets of players a league can seat form a
  * matroid, so that greedy order gives the best lineup there is, with every
@@ -1580,7 +1580,7 @@ function swapReason(incoming: StartSitEvaluation, outgoing: StartSitEvaluation):
     return `${incoming.name} has a positive recent signal (${inNews.display})`;
   }
   /*
-   * Only between two full markets. Since the minus-2 rule (23 October 2026) a
+   * Only between two full markets. Since the Sleeper-only discount (23 October 2026) a
    * Sleeper-only player can win a slot, and his one posted line read here as
    * "the higher market expectation (1.8 vs 12.5 pts)".
    */

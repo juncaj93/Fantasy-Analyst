@@ -168,13 +168,13 @@ export interface TierPlayer {
   weekSources?: WeekSource[];
   /**
    * Per window week: the number is Sleeper's (Rotowire's) rather than a full
-   * set of Vegas lines, so it ranks two points lower (`rankingNumber`, the
-   * minus-2 rule every screen uses). Absent: every week is a Vegas number.
+   * set of Vegas lines, so it ranks one point lower (`rankingNumber`, the
+   * minus-1 rule every screen uses). Absent: every week is a Vegas number.
    */
   weekBorrowed?: boolean[];
   /** Per window week: the earlier week a stand-in number was projected for. */
   weekFrom?: (number | null)[];
-  /** His `rate` is Sleeper's rather than a full Vegas week: ranks two points lower. */
+  /** His `rate` is Sleeper's rather than a full Vegas week: ranks one point lower. */
   rateBorrowed?: boolean;
   /**
    * His rest-of-season rate, the one Trades values him on
@@ -1324,15 +1324,15 @@ function pointsIn(p: TierPlayer, k: number): number {
 }
 
 /**
- * What he is ranked on in window week `k`: his number for that week, two
- * points lower when it is Sleeper's rather than a full Vegas week, times
+ * What he is ranked on in window week `k`: his number for that week, one
+ * point lower when it is Sleeper's rather than a full Vegas week, times
  * whether he plays (review finding W2, 4 November 2026).
  *
- * The minus-2 rule is the one `rankingNumber` every other screen ranks on
+ * The Sleeper-only discount is the one `rankingNumber` every other screen ranks on
  * (Team, Best move, Compare, Matchup since #412). The tiers solved their own
  * lineups on raw numbers, so a Sleeper-only free agent at 12.5 "started over"
- * a priced receiver at 9.0 by 3.5 and was a "Do this"; ranked, he is 10.5 and
- * +1.5. Ranking only: every number a sheet shows is the undocked one. Never
+ * a priced receiver at 9.0 by 3.5 and was a "Do this"; ranked (minus 1 since
+ * Round 17, minus 2 before), he is 11.5 and +2.5. Ranking only: every number a sheet shows is the undocked one. Never
  * below zero, so a zero still means "does not start".
  */
 function rankedIn(p: TierPlayer, k: number): number {
@@ -1409,7 +1409,7 @@ function valueRoster(
     const signature = tail ? players.map((p) => `${p.weekly[k] ?? 1}:${pointsIn(p, k)}`).join(',') : null;
     let solve = signature != null ? tailSolves.get(signature) : undefined;
     if (!solve) {
-      /* Ranked on the minus-2 rule (`rankedIn`); the depth credit below is on his own number. */
+      /* Ranked on the Sleeper-only discount (`rankedIn`); the depth credit below is on his own number. */
       const pool: LineupCandidate[] = players.map((p) => ({ id: p.playerId, position: p.position, value: rankedIn(p, k) }));
       const raw = new Map(players.map((p) => [p.playerId, pointsIn(p, k) * (p.weekly[k] ?? 1)] as const));
       const level = tail && season?.tailReplacement ? season.tailReplacement : replacement;

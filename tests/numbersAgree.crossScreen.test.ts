@@ -81,19 +81,18 @@ describe('every mode shows the same number (5 November 2026)', () => {
   });
 });
 
-describe('the minus-2 rule decides the same way on every screen that picks', () => {
-  /* M_SL: 16 on Sleeper's week, 14 after the discount. M_WR5: 12.5 on a full market. */
+describe('the minus-1 rule decides the same way on every screen that picks', () => {
+  /* M_SL: 16 on Sleeper's week, 15 after the discount. M_WR5: 12.5 on a full market. */
   it('Team starts the Sleeper-only receiver at FLEX over the priced 12.5', () => {
     const flex = screens.lineup.slots.filter((s: { slot: string }) => s.slot === 'FLEX').map((s: { playerId: string }) => s.playerId);
     expect(flex).toContain(SLEEPER_ONLY);
     expect(screens.lineup.bench.map((e: { playerId: string }) => e.playerId)).toContain('m_wr5');
   });
 
-  it('Compare leans to him over the priced 12.5, and to the priced 15 over him (both toss-ups since 4 November 2026)', async () => {
-    /* 14 against 12.5 and 15 against 14: both under the two-point bar, so a lean, not a Start. */
+  it('Compare starts him over the priced 12.5 (2.5 clear), and leans to the priced 15 over him (a toss-up since 4 November 2026)', async () => {
+    /* 15 against 12.5 clears the two-point bar, a Start. 15 against the nudged 15 does not: a lean. */
     const wider = await screens.compareOf([SLEEPER_ONLY, 'm_wr5']);
-    expect(wider.recommendedPlayerId).toBeNull();
-    expect(wider.tossUp?.leanPlayerId).toBe(SLEEPER_ONLY);
+    expect(wider.recommendedPlayerId).toBe(SLEEPER_ONLY);
     const closer = await screens.compareOf([SLEEPER_ONLY, 'm_wr2']);
     expect(closer.recommendedPlayerId).toBeNull();
     expect(closer.tossUp?.leanPlayerId).toBe('m_wr2');

@@ -443,8 +443,9 @@ fails if two of them disagree.
   check and no green. All complete or all Sleeper-only: unchanged. Scores are
   unchanged, so the engine stays `startsit@6`.
 - **The Team lineup does not use this rule.** It ranks a Sleeper-only player
-  at his number less `BORROWED_RANKING_DISCOUNT` (2 points, `lineup.ts`), so a
-  Sleeper-only player more than 2 points ahead can still take a slot and lead
+  at his number less `BORROWED_RANKING_DISCOUNT` (1 point since Round 17, 11
+  November 2026; it was 2, `decisionPoints.ts`), so a
+  Sleeper-only player more than 1 point ahead can still take a slot and lead
   Best move, while Compare on the same pair would now start the Vegas player.
 - **Sheet:** Compare's header is one row: title and week, the list's action
   (+ Add, Hide list, Compare) and an X (`Sheet close="x"`, 44px, "Close").
@@ -474,5 +475,5 @@ fails if two of them disagree.
   suggested over a healthy, fully priced player and takes a slot only when no
   priced player can. When a Sleeper-only player is starting and a priced one is
   on the bench, Best move names the swap even when the priced number is lower,
-  with that reason. The 2-point `BORROWED_RANKING_DISCOUNT` no longer applies on
+  with that reason. The `BORROWED_RANKING_DISCOUNT` (then 2 points, now 1) no longer applied on
   Team; the waiver planner, the trade engine and Matchup's decision still use it.

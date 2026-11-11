@@ -59,7 +59,8 @@ Findings W3, W4, W9 and W10 of `docs/REVIEW_2026-11.md`.
   playoff week 1.5 times, Trades' weights. The near three weeks keep their own
   weekly numbers; every later week is the player's rest-of-season rate, the
   one Trades uses (`core/value/restOfSeason.ts`: half his projections for this
-  week and the next three skipping his bye, half his points per game played).
+  week and the next three skipping his bye, 75 percent, and his points per game
+  played, 25 percent; it was 50/50 before Round 17).
   In a later week an empty slot is a free agent at replacement level, so a bye
   in week 13 costs a starter one week over a free agent, not a whole week.
 - **The bars scale.** Do this, Worth considering, the Watch list, a dead spot,

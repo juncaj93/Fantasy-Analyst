@@ -13,7 +13,7 @@
  * and start":
  *
  *  - The gap is measured on the ranking number, so a Sleeper-only player
- *    carries his minus 2 here as everywhere (`rankingNumber`).
+ *    carries his minus 1 here as everywhere (`rankingNumber`).
  *  - Under {@link TOSSUP_POINTS}: a toss-up. The app still names its lean and
  *    shows both numbers, and says "Toss-up". It is never a Best move headline,
  *    never a lineup change, never a "Pick up and start" card.
@@ -42,7 +42,7 @@ export const TOSSUP_POINTS = 2.0;
 export interface TossUpSide {
   /** His decision number (`decisionPoints`), or null when there is nothing to measure (a bye). */
   points: number | null;
-  /** A Sleeper-only number: ranks two points lower. */
+  /** A Sleeper-only number: ranks one point lower. */
   borrowed?: boolean;
   /** Out, IR, suspended, Doubtful, on a bye, or an empty slot. See {@link isRealHole}. */
   hole?: boolean;

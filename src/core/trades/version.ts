@@ -34,4 +34,9 @@ import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
  * `trade@6`, 8 November 2026 (round 13): a Doubtful free agent is not part
  * of the replacement level (Doubtful is Out this week).
  */
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@6',LINEUP_ENGINE_VERSION);
+/**
+ * `trade@7`, 11 November 2026 (round 17): the rest-of-season rate is 75
+ * percent projection and 25 percent season average (was 50/50). Trades has no
+ * Sleeper-only discount of its own.
+ */
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@7',LINEUP_ENGINE_VERSION);
