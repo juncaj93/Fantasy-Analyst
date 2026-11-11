@@ -39,4 +39,9 @@ import { LINEUP_ENGINE_VERSION } from '../startsit/version.ts';
  * percent projection and 25 percent season average (was 50/50). Trades has no
  * Sleeper-only discount of its own.
  */
-export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@7',LINEUP_ENGINE_VERSION);
+/**
+ * `trade@8`, 11 November 2026 (round 19): the trade ideas come from the trade
+ * finder (`finder.ts`): every small deal screened, the best put through Check
+ * a trade, at most three shown, fair to both sides or the closest labelled.
+ */
+export const TRADE_ENGINE_VERSION = composeEngineVersion('trade@8',LINEUP_ENGINE_VERSION);

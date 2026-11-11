@@ -37,37 +37,26 @@ export const DEMO_WAIVER_CLOCK = '2026-11-05T15:00:00.000Z';
 export async function captureDemoWaivers(at: string = DEMO_WAIVER_CLOCK): Promise<CapturedWaivers> {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(at));
-  try {
-    return await withGamesOnFrozenClock(captureAtFrozenClock);
-  } finally {
-    vi.useRealTimers();
-  }
-}
-
-/**
- * The demo games, moved onto the frozen clock for one capture.
- *
- * `MOCK_GAMES` takes its kickoffs from the real clock when the seed module
- * loads (real now plus three days), before this file freezes `Date`, and both
- * the seed and the mock provider read them. So the gap between the frozen
- * Thursday and those kickoffs grew by a day every day, and on 11 November
- * 2026 at 3 PM UTC it passed the slate window: the games fell out of the week,
- * every demo player lost his number, and the capture came back empty. Each
- * game keeps its offset from the first; the first sits three days after the
- * frozen now, as the seed intends. Put back afterwards.
- */
-async function withGamesOnFrozenClock<T>(run: () => Promise<T>): Promise<T> {
-  const saved = MOCK_GAMES.map((g) => g.startTime);
-  const first = Date.parse(saved[0]!);
+  /*
+   * The demo games' kickoffs come from the real clock when the seed module
+   * loads, so against the frozen Thursday they drifted a day further out for
+   * every real day. From about 7 AM ET on 11 November 2026 the seeded league
+   * had no priced player at all and four waiver tests failed on main with no
+   * code change. The same games, the same spacing, three days after the
+   * frozen clock; put back afterwards.
+   */
+  const real = MOCK_GAMES.map((g) => g.startTime);
+  const anchor = Date.parse(real[0]!);
   MOCK_GAMES.forEach((g, i) => {
-    g.startTime = new Date(Date.now() + 3 * 86_400_000 + (Date.parse(saved[i]!) - first)).toISOString();
+    g.startTime = new Date(Date.now() + 3 * 86_400_000 + (Date.parse(real[i]!) - anchor)).toISOString();
   });
   try {
-    return await run();
+    return await captureAtFrozenClock();
   } finally {
     MOCK_GAMES.forEach((g, i) => {
-      g.startTime = saved[i]!;
+      g.startTime = real[i]!;
     });
+    vi.useRealTimers();
   }
 }
 

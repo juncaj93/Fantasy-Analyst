@@ -778,3 +778,43 @@ test.describe('value arbitrage, told apart from a lineup upgrade', () => {
     await expect(page.getByTestId('smart-trade-arbitrage')).toHaveCount(0);
   });
 });
+
+/*
+ * Round 19: the trade finder labels every idea, and when nothing is fully fair
+ * it shows the closest few, said to be closest, each with its exact edge.
+ * Fails on the code before it: there was no label and no closest line.
+ */
+test.describe('the trade finder’s labels', () => {
+  const PICKS = [
+    { kind: 'close', label: 'Close: you give a bit more than you get', verdict: 'fair', edgePercent: -31, thisWeek: 0.9, restOfSeason: 12.4, them: 6.1, reason: 'Two of yours for one better starter, Bijan Robinson.', tags: ['consolidation'] },
+    { kind: 'close', label: 'Close: small gain for you', verdict: 'fair', edgePercent: 4, thisWeek: -0.3, restOfSeason: 5.2, them: 4.8, reason: 'Fills your weak RB spot with Kenneth Walker III.', tags: ['fills_weak_spot'] },
+  ];
+  const CLOSE_BOARD = {
+    ...BOARD,
+    status: 'close',
+    notes: ['No trade is fully fair to both sides right now. These come closest.'],
+    offers: BOARD.offers.slice(0, 2).map((o, i) => ({ ...o, pick: PICKS[i] })),
+  };
+
+  test('says the ideas are the closest, and labels each with its edge, without scrolling sideways', async ({ page }) => {
+    await openTrades(page, CLOSE_BOARD);
+    await expect(page.getByTestId('smart-trades-close')).toContainText('come closest');
+    const picks = page.getByTestId('smart-trade-pick');
+    await expect(picks).toHaveCount(2);
+    await expect(picks.first()).toContainText('Close: you give a bit more than you get');
+    await expect(picks.first()).toContainText('31%');
+    await expect(picks.nth(1)).toContainText('+4%');
+    expect(await horizontalOverflow(page)).toBe(0);
+    for (const i of [0, 1]) {
+      const chip = (await picks.nth(i).boundingBox())!;
+      const row = (await page.getByTestId('smart-trade-row').nth(i).boundingBox())!;
+      expect(chip.x + chip.width).toBeLessThanOrEqual(row.x + row.width + 1);
+    }
+  });
+
+  test('labels a fair idea Fair and says nothing about closest', async ({ page }) => {
+    await openTrades(page, { ...CLOSE_BOARD, status: 'fair', notes: [], offers: [{ ...BOARD.offers[0], pick: { ...PICKS[0], kind: 'fair', label: 'Fair', edgePercent: 3 } }] });
+    await expect(page.getByTestId('smart-trade-pick')).toContainText('Fair');
+    await expect(page.getByTestId('smart-trades-close')).toHaveCount(0);
+  });
+});

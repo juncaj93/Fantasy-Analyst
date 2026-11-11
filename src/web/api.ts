@@ -1887,12 +1887,15 @@ export type { TradeCapability } from '../core/trades/capability.ts';
 
 import type { OfferEvaluation, PricingCoverage } from '../core/trades/bilateral.ts';
 import type { TradeCapability } from '../core/trades/capability.ts';
+import type { OfferPick } from '../core/trades/finderBoard.ts';
 
 export interface SmartTradeBoard {
   league: { id: string; name: string } | null;
   /** True when at least one offer cleared every gate. */
   found: boolean;
-  offers: OfferEvaluation[];
+  offers: (OfferEvaluation & { pick?: OfferPick })[];
+  /** Round 19: `fair`, `close` (the nearest, labelled), `none` or `closed`. Optional: older bodies lack it. */
+  status?: 'fair' | 'close' | 'none' | 'closed';
   /** What the search did. Developer-facing; no screen reads it. */
   search: {
     partners: number;

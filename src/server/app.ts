@@ -126,8 +126,8 @@ import { RepairService } from './services/repairService.ts';
 import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
-import { seasonChecksFor } from './services/tradeIdeaCheck.ts';
-import { applySeasonChecks, ideasToCheck } from '../core/trades/seasonCheck.ts';
+import { TradeFinderService } from './services/tradeFinderService.ts';
+import { finderBoard } from '../core/trades/finderBoard.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
 import { MAX_MARKS, TradeBuilderService } from './services/tradeBuilderService.ts';
 import { meterDatabase } from './meter.ts';
@@ -2844,26 +2844,50 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * for it and the board keeps the latency it had.
    *
    * **Zero Sleeper requests.** Every input is a stored row: the rosters, the
-   * player pool, and the trade tendencies the history subsystem's cron derived.
-   * `SmartTradeService` does not import a Sleeper client, which is what makes
-   * that a property rather than a promise.
+   * player pool and the league's completed trades (`TradeFinderService`).
    */
   router.get('/api/trades/smart', async (ctx) => {
-    const limit = Math.min(Number(ctx.url.searchParams.get('limit') ?? 5) || 5, 20);
-    const leagueId = ctx.url.searchParams.get('leagueId');
-    const { board, inputs, prepared } = await new SmartTradeService(ctx.env.db).buildWithInputs({
-      limit,
-      ...(leagueId ? { leagueId } : {}),
-    });
     /*
-     * Held to Check a trade's answer (finding T3, October 2026): an idea the
-     * rest-of-season check says favours the other team is left off, and every
-     * idea shown carries that verdict. See `core/trades/seasonCheck.ts`. The
-     * search priced the league on the season already (review T1), so the
-     * checks reuse that preparation and read nothing more.
+     * Round 19 (November 2026): the trade finder (`core/trades/finder.ts`)
+     * replaced the ideas search here. Every realistic small deal is screened,
+     * the best are put through Check a trade's own evaluation, and at most
+     * three are shown: fair to both sides by Alex's rule, or, when none is,
+     * the closest few, each labelled with its exact edge. The older search
+     * still answers `/api/diagnostics/smart-trades`, for the probe.
      */
-    const checks = await seasonChecksFor(ctx.env.db, ctx.env.sleeper, board.league?.id, ideasToCheck(board), inputs, prepared);
-    return jsonResponse(applySeasonChecks(board, checks).board);
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    const run = await new TradeFinderService(ctx.env.db, ctx.env.sleeper).find(leagueId ? { leagueId } : {});
+    return jsonResponse(finderBoard(run));
+  });
+
+  /**
+   * The trade finder's own answer, for the new Trades screens (behind the
+   * feature switch until Alex approves them): at most three offers in plain
+   * numbers, and the line to show when there are none.
+   */
+  router.get('/api/trades/offers', async (ctx) => {
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    const run = await new TradeFinderService(ctx.env.db, ctx.env.sleeper).find(leagueId ? { leagueId } : {});
+    const { funnel: _funnel, checkedDeals: _checked, ...result } = run.result;
+    return jsonResponse({ league: run.league, horizon: run.prepared ? { currentWeek: run.prepared.horizon.currentWeek, deadlineWeek: run.prepared.horizon.deadlineWeek, weeksToDeadline: run.prepared.horizon.weeksToDeadline } : null, ...result });
+  });
+
+  /**
+   * The trade finder with what each step removed, and the checked deals
+   * nearest to fair, for the Round 19 probe. `cost=1` meters the rows read.
+   */
+  router.get('/api/diagnostics/trade-finder', async (ctx) => {
+    const leagueId = ctx.url.searchParams.get('leagueId');
+    const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+    const started = Date.now();
+    const run = await new TradeFinderService(metered?.db ?? ctx.env.db, ctx.env.sleeper).find(leagueId ? { leagueId } : {});
+    return jsonResponse({
+      league: run.league,
+      week: run.prepared?.horizon.currentWeek ?? null,
+      ms: Date.now() - started,
+      ...run.result,
+      ...(metered ? { cost: metered.cost() } : {}),
+    });
   });
 
   /**

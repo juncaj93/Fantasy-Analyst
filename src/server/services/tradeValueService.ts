@@ -26,6 +26,7 @@
  * and the model then ranks them by its own number.
  */
 
+import { checkSummary } from '../../core/trades/verdict.ts';
 import { currentWeekOf } from '../../core/tradeValue/weeks.ts';
 import { evaluatePlayer, type StartSitEvaluation, type StartSitInput } from '../../core/startsit/engine.ts';
 import { boundedFreeAgentIds } from '../../core/roster/freeAgents.ts';
@@ -274,6 +275,7 @@ export class TradeValueService {
         b: { rosterId: b.rosterId, label: labelOf(b), isMine: b.isMine },
       },
       evaluation,
+      summary: checkSummary(evaluation),
       notes: leagueNotes(league),
       advisory: TRADE_CHECK_ADVISORY,
     };
