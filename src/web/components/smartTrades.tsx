@@ -20,6 +20,7 @@
 
 import { CATEGORY_LABELS, type OfferCategory } from '../../core/trades/category.ts';
 import type { OfferEvaluation } from '../api.ts';
+import type { OfferPick } from '../../core/trades/finderBoard.ts';
 import { seasonCheckLabel } from '../../core/trades/seasonCheck.ts';
 import { DetailLabel } from './common.tsx';
 import { ReasonList, withoutRepeats } from './decisions.tsx';
@@ -34,7 +35,7 @@ import { TradeLadderFold } from './tradeLadder.tsx';
  * points on both sides, which is the one number that means the same thing here
  * as it does on the Team screen.
  */
-export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpen: () => void }) {
+export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation & { pick?: OfferPick }; onOpen: () => void }) {
   const cue = managerCue(offer);
   const category = categoryOf(offer);
   const season = seasonCheckLabel(offer.seasonCheck);
@@ -56,6 +57,17 @@ export function SmartTradeRow({ offer, onOpen }: { offer: OfferEvaluation; onOpe
           {CATEGORY_LABELS[category]}
         </span>
       )}
+      {/*
+        The trade finder's label (Round 19): Fair, Good for you, or the
+        nearest "Close: ..." when nothing is fully fair, always with the exact
+        value edge, so a close deal never reads as a fair one.
+      */}
+      {offer.pick ? (
+        <span className="smart-trade-kind" data-testid="smart-trade-pick" data-category={offer.pick.kind}>
+          {offer.pick.label} · edge {offer.pick.edgePercent > 0 ? '+' : offer.pick.edgePercent < 0 ? '\u2212' : ''}
+          {Math.abs(offer.pick.edgePercent)}%
+        </span>
+      ) : null}
 
       <div className="smart-trade-line">
         <span className="smart-trade-side" data-testid="smart-trade-give">

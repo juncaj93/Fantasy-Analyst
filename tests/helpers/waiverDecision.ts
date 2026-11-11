@@ -37,9 +37,25 @@ export const DEMO_WAIVER_CLOCK = '2026-11-05T15:00:00.000Z';
 export async function captureDemoWaivers(at: string = DEMO_WAIVER_CLOCK): Promise<CapturedWaivers> {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(at));
+  /*
+   * The demo games' kickoffs come from the real clock when the seed module
+   * loads, so against the frozen Thursday they drifted a day further out for
+   * every real day. From about 7 AM ET on 11 November 2026 the seeded league
+   * had no priced player at all and four waiver tests failed on main with no
+   * code change. The same games, the same spacing, three days after the
+   * frozen clock; put back afterwards.
+   */
+  const real = MOCK_GAMES.map((g) => g.startTime);
+  const anchor = Date.parse(real[0]!);
+  MOCK_GAMES.forEach((g, i) => {
+    g.startTime = new Date(Date.now() + 3 * 86_400_000 + (Date.parse(real[i]!) - anchor)).toISOString();
+  });
   try {
     return await captureAtFrozenClock();
   } finally {
+    MOCK_GAMES.forEach((g, i) => {
+      g.startTime = real[i]!;
+    });
     vi.useRealTimers();
   }
 }

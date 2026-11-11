@@ -7,6 +7,7 @@
  * older worker produced.
  */
 
+import type { CheckSummary } from '../trades/verdict.ts';
 import type { TradeEvaluation } from './evaluate.ts';
 
 export interface TradeHorizonView {
@@ -54,6 +55,13 @@ export interface TradeCheckResponse {
   horizon?: TradeHorizonView;
   sides?: { a: { rosterId: number; label: string; isMine: boolean }; b: { rosterId: number; label: string; isMine: boolean } };
   evaluation?: TradeEvaluation;
+  /**
+   * The one line from side A's seat (Round 19): Good for you, Fair or Bad
+   * for you, both sides' this-week and rest-of-season change, the edge and
+   * who gets better where. The function the trade finder labels its offers
+   * with. Absent when there is no verdict, and on an older body.
+   */
+  summary?: CheckSummary | null;
   /** Facts about this league's trades that the number does not cover. */
   notes?: string[];
   advisory?: string;
