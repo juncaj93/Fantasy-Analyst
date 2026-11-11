@@ -27,4 +27,19 @@ const render = () =>
  * live mode. A dynamic import means none of the demo's fixtures are fetched for
  * the overwhelmingly common case of no demo being requested at all.
  */
-void restoreDemo().finally(render);
+/*
+ * The Trades preview (Round 19) is a separate build: the preview workflow sets
+ * VITE_PREVIEW=trades, and only then is the PIN-gated, Trades-only shell drawn.
+ * On the live build this branch is removed at build time, chunk and all.
+ */
+if (import.meta.env.VITE_PREVIEW === 'trades') {
+  void import('./preview/PreviewApp.tsx').then(({ PreviewApp }) =>
+    createRoot(container).render(
+      <StrictMode>
+        <PreviewApp />
+      </StrictMode>,
+    ),
+  );
+} else {
+  void restoreDemo().finally(render);
+}

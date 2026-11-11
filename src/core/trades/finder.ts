@@ -114,6 +114,12 @@ export interface FinderInput {
   rates: ReadonlyMap<string, PlayerRate>;
   rosters: readonly FinderRoster[];
   rosterLimit: number;
+  /**
+   * Build a trade's one question (Round 19): only deals that send this player
+   * of Alex's (`sell`) or bring this player of another team's (`get`). A
+   * manager Alex names this way is asked even if he seldom trades.
+   */
+  focus?: { sell?: string | null; get?: string | null } | null;
   /** Overrides, for tests. */
   bounds?: Partial<Pick<typeof FINDER, 'shown' | 'checked' | 'checkedPerPartner'>>;
 }
@@ -157,6 +163,8 @@ export interface FoundOffer {
   /** One short reason. */
   reason: string;
   shape: '1 for 1' | '2 for 1' | '1 for 2';
+  /** Weeks left in the season, the count `starts` is out of. */
+  weeks?: number;
   /** The internal order. Never printed. */
   score: number;
 }
@@ -262,9 +270,12 @@ export function findTrades(input: FinderInput): FinderResult {
   /* --------------------------------------------- 1. every deal, screened -- */
   const screened: Screened[] = [];
   const bars = gainBars(weights.reduce((a, b) => a + b, 0));
+  const focus = input.focus ?? null;
   for (const partner of input.rosters) {
     if (partner.isMine || partner.playerIds.length === 0) continue;
-    if (partner.activity && isRareTrader(partner.activity.class)) {
+    if (focus?.get && !partner.playerIds.includes(focus.get)) continue;
+    const named = focus?.get != null;
+    if (!named && partner.activity && isRareTrader(partner.activity.class)) {
       funnel.skippedPartners += 1;
       bump('rare_trader');
       continue;
@@ -291,6 +302,8 @@ export function findTrades(input: FinderInput): FinderResult {
     const userMax = FAIR_TO_BOTH.userEdgeMax + bounds.screenEdge.user;
     const partnerMax = FAIR_TO_BOTH.partnerEdgeMax + bounds.screenEdge.partner;
     const consider = (give: string[], get: string[], giveValue: number, getValue: number) => {
+      if (focus?.sell && !give.includes(focus.sell)) return;
+      if (focus?.get && !get.includes(focus.get)) return;
       const edge = valueEdge(giveValue, getValue);
       if (edge > userMax || -edge > partnerMax) {
         bump('value_far_apart');
@@ -424,7 +437,12 @@ export function findTrades(input: FinderInput): FinderResult {
   return {
     status: 'none',
     offers: [],
-    note: funnel.partners === 0 ? 'Nobody in this league trades often enough to suggest a deal.' : 'No trade helps both lineups right now.',
+    note:
+      funnel.partners === 0
+        ? 'Nobody in this league trades often enough to suggest a deal.'
+        : focus?.sell || focus?.get
+          ? 'No trade with this player helps both lineups right now.'
+          : 'No trade helps both lineups right now.',
     funnel,
     checkedDeals,
   };
@@ -602,6 +620,7 @@ function offerOf(args: {
     tags,
     reason: reasonOf({ tags, get, give, youBetter, partner: deal.partner.label, them: b.net, rates }),
     shape: deal.give.length === 2 ? '2 for 1' : deal.get.length === 2 ? '1 for 2' : '1 for 1',
+    weeks: horizon.weeks.length,
     score: Math.round(score * 100) / 100,
   };
 }

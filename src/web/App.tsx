@@ -25,7 +25,8 @@ import { useKeyboardOpen } from './viewport.ts';
 import { shouldDrawDraftScreen } from './draftGate.ts';
 import { MatchupScreen } from './screens/MatchupScreen.tsx';
 import { PlayersScreen } from './screens/PlayersScreen.tsx';
-import { TradesScreen } from './screens/TradesScreen.tsx';
+import { TradesTab } from './screens/TradesTab.tsx';
+import { setFeatures, type Features } from './features.ts';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 import { type TabSource as SeasonTabSource, fromOverview, recallSeasonTabs, rememberSeasonTabs, resolveSeasonTabs } from './seasonTabs.ts';
@@ -210,7 +211,8 @@ export function App() {
 
   const checkLock = useCallback(async () => {
     try {
-      const status = await api.get<{ unlocked: boolean; canUnlock: boolean }>('/api/auth/status');
+      const status = await api.get<{ unlocked: boolean; canUnlock: boolean; features?: Partial<Features> }>('/api/auth/status');
+      setFeatures(status.features);
       setUnlocked(status.unlocked);
       setCanUnlock(status.canUnlock);
     } catch {
@@ -420,7 +422,7 @@ export function App() {
         ) : null}
         {tab === 'matchup' ? <MatchupScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'waivers' ? <WaiversScreen leagues={leagues} resetNonce={resetNonce} /> : null}
-        {tab === 'trades' ? <TradesScreen resetNonce={resetNonce} /> : null}
+        {tab === 'trades' ? <TradesTab resetNonce={resetNonce} /> : null}
         {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} draftAhead={draftVisible} /> : null}
         {tab === 'setup' ? (
           <ScreenLoadBoundary what="Setup" onRetry={() => setSetupScreen(lazySetupScreen)}>

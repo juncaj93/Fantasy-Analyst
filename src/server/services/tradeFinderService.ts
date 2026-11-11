@@ -44,7 +44,7 @@ export class TradeFinderService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async find(opts: { leagueId?: string } = {}): Promise<FinderRun> {
+  async find(opts: { leagueId?: string; focus?: { sell?: string | null; get?: string | null } | null } = {}): Promise<FinderRun> {
     const leagues = new LeagueRepo(this.db);
     const league = opts.leagueId ? await leagues.getLeague(opts.leagueId) : await leagues.getSelectedLeague();
     const partners = new Map<number, { ownerId: string | null; activityClass: string; sample: number; earlier: number | null }>();
@@ -102,6 +102,7 @@ export class TradeFinderService {
       rates: prepared.rates,
       rosters: finderRosters,
       rosterLimit,
+      ...(opts.focus ? { focus: opts.focus } : {}),
     });
     return { league: named, capability, result, prepared, partners };
   }

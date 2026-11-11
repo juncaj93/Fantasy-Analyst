@@ -1,0 +1,247 @@
+/*
+  Trades, rebuilt (Round 19, behind TRADES_SCREENS). Loaded with the rebuilt
+  screens only, so it is never render-blocking and the main sheet does not
+  grow. The site's own surfaces, colours and type (the tokens in styles.css);
+  nothing new except the arrangement. Every control is at least --tap (44px).
+*/
+.t2-tabs .chip {
+  min-height: var(--tap);
+  flex: 1 1 0;
+}
+
+.t2-offer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 100%;
+  min-height: var(--tap);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.t2-offer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.t2-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--pos-tint);
+  color: var(--pos);
+}
+
+.t2-label[data-kind='close'] {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.t2-edge {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.t2-line {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.t2-side {
+  flex: 0 0 2.6em;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.t2-names {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.t2-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-3);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.t2-reason,
+.t2-verdict-reason {
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+
+.t2-note {
+  margin: var(--sp-2) var(--sp-1);
+  font-size: 0.86rem;
+  color: var(--text-faint);
+}
+
+.t2-empty {
+  margin: var(--sp-3) var(--sp-1);
+}
+
+.t2-question {
+  margin: var(--sp-3) var(--sp-1) var(--sp-2);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.t2-change,
+.t2-add {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.t2-sub {
+  display: block;
+  margin: var(--sp-3) var(--sp-1) var(--sp-1);
+  font-size: 0.74rem;
+  font-weight: 620;
+  color: var(--text-faint);
+}
+
+.t2-field {
+  display: block;
+}
+
+.t2-select {
+  min-height: var(--tap);
+}
+
+.t2-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--sp-2);
+}
+
+.t2-verdict-word {
+  font-size: 1.3rem;
+  font-weight: 760;
+  color: var(--pos);
+}
+
+.t2-verdict[data-kind='close'] .t2-verdict-word,
+.t2-verdict[data-verdict='fair'] .t2-verdict-word {
+  color: var(--text);
+}
+
+.t2-verdict[data-verdict='bad'] .t2-verdict-word {
+  color: var(--neg);
+}
+
+.t2-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.t2-compare th,
+.t2-compare td {
+  padding: var(--sp-1) 0;
+  text-align: right;
+  font-weight: 600;
+}
+
+.t2-compare th[scope='row'],
+.t2-compare thead th:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.t2-compare thead th {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.t2-facts {
+  margin: var(--sp-2) 0 0;
+}
+
+.t2-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-1) 0;
+  font-size: 0.86rem;
+}
+
+.t2-facts dt {
+  color: var(--text-faint);
+}
+
+.t2-facts dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+}
+
+.t2-players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.t2-players li {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1) 0;
+  font-size: 0.86rem;
+}
+
+.t2-player-name {
+  font-weight: 600;
+}
+
+.t2-preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+
+.t2-preview-bar .filter-row {
+  flex: 1 1 140px;
+  margin-bottom: 0;
+}
+
+.t2-preview-bar .chip {
+  min-height: var(--tap);
+  flex: 1 1 0;
+}
+
+.t2-pin {
+  max-width: 320px;
+  margin: 18vh auto 0;
+  padding: 0 var(--sp-3);
+  text-align: center;
+}
+
+.t2-pin input {
+  min-height: var(--tap);
+  text-align: center;
+  letter-spacing: 0.3em;
+  font-size: 1.4rem;
+}
+
+.t2-pin button {
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: var(--sp-2);
+}

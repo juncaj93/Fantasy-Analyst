@@ -16,13 +16,14 @@
       "name": "app JavaScript (gzipped)",
       "match": "assets/*.js",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/{demo,draft,setup}-*.js",
+      "excludeMatch": "assets/{demo,draft,setup,trades2,preview}-*.js",
       "maxGzipBytes": 125000,
       "why": "The one number a phone on a bad connection actually feels. Today ~140KB. Raised from 140KB, deliberately and with the reason attached: the ceiling had 0.2KB of headroom, which is a budget that fails the next commit whatever that commit is, and a number nobody can land under stops being a budget and becomes a coin toss. 148KB keeps roughly a second of 3G as the bound while leaving room to work in. It is not permission to grow: the next lane that needs more should be shrinking this rather than raising it again, and the Draft screen — 2,700 lines, the largest thing in here — is where that work is. Raised from 148KB by the lineup-legality and partial-market round (24 September 2026), by 0.6KB, for +157 bytes of its own: the Team card's empty-slot fill, the fill count on the bench line, and the completeness check the display ladder now runs before it prints a market number. That round had 66 bytes to work in. It moved the missing-markets sentence to the server to get there from +209, and stopped short of cutting unrelated screens owned by other lanes to find the rest; the Draft screen is still where the shrinking work is. That work landed on 24 September 2026: the Draft screen moved to its own lazily-loaded `draft-*.js` chunk (budgeted below) and Demo Mode stopped running the engines, which together took this from 148.1KB to ~124KB. Lowered from 148.6KB to 135KB the same day, on the owner's decision, so the ~24KB that work freed cannot quietly fill back up: roughly 10KB of headroom over ~124.8KB, the same proportion the older ceilings carried. Growth past it should come with a reason, as every raise above did. Lowered again from 135KB to 125KB on 8 October 2026, on the owner's decision, after Setup, Review and Data health moved to their own lazily-loaded `setup-*.js` chunk (budgeted below) and took this from ~134.3KB to ~115.0KB: the same ~10KB of headroom the 24 September ceiling was set to keep, so the space that move freed cannot quietly fill back up."
     },
     {
       "name": "app CSS (gzipped)",
       "match": "assets/*.css",
+      "excludeMatch": "assets/{trades2,preview}-*.css",
       "maxGzipBytes": 20000,
       "why": "Render-blocking, so it is worse per byte than the JavaScript. Today ~7.7KB."
     },
@@ -36,7 +37,7 @@
       "name": "everything the browser must fetch to render (gzipped)",
       "match": "**/*.{js,css,html}",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/{demo,draft,setup}-*.js",
+      "excludeMatch": "assets/{demo,draft,setup,trades2,preview}-*.{js,css}",
       "maxGzipBytes": 168000,
       "why": "The total, so splitting one large file into three does not quietly pass three budgets. Demo Mode is the one thing left out, because it is genuinely not on the render path — and it has a ceiling of its own directly below, so the exclusion buys nobody any headroom."
     },
@@ -53,6 +54,20 @@
       "excludeSuffix": ".map",
       "maxGzipBytes": 24000,
       "why": "The Draft screen and the mock draft behind it. `App.tsx` reaches them only through `lazy()`, and draws the screen only while `draftVisible` holds (see `web/draftGate.ts`), so outside the few weeks before a draft no page load fetches this at all. Split out of the entry chunk on 24 September 2026, which took ~14KB off every page load; it is budgeted here rather than excluded, for the same reason Demo Mode is. Today ~20.0KB, with the two small chunks it used to share with Demo Mode now folded into it. Anything the Draft screen shares with another screen stays in the entry chunk, which is correct: it is the other screen's cost."
+    },
+    {
+      "name": "Rebuilt Trades screens, fetched only when the switch is on (gzipped)",
+      "match": "assets/trades2-*.{js,css}",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 8000,
+      "why": "Round 19: Offers, Build and Check, rebuilt behind the TRADES_SCREENS switch. `TradesTab` reaches them only through `lazy()` when the switch is on, so with it off (the live site until Alex approves) no page load fetches them. Their stylesheet ships with them so the render-blocking sheet does not grow. Today ~4.9KB (JS and CSS). When the switch is flipped for good, the old Trades screens can go and their bytes come back to the main chunk's headroom."
+    },
+    {
+      "name": "Trades preview shell, built only for the preview upload (gzipped)",
+      "match": "assets/preview-*.{js,css}",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 3000,
+      "why": "Round 19: the PIN gate and the light/dark and week switches around the rebuilt Trades screens. Built only when the preview workflow sets VITE_PREVIEW=trades; the live build removes it at build time, so on the live site this budget matches nothing."
     },
     {
       "name": "Demo Mode, fetched only when a scenario is opened (gzipped)",

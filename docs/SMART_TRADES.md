@@ -46,6 +46,31 @@ get nothing.
 `core/trades/verdict.ts` is the one verdict both screens print: Good for you,
 Fair, or Bad for you. Check a trade's response carries it as `summary`.
 
+### The rebuilt screens (behind a switch)
+
+`TRADES_SCREENS` in `wrangler.toml` picks the Trades screens: `"old"` (today's)
+or `"new"`. The new screens (`web/screens/TradesScreenV2.tsx`,
+`web/components/trades2/`) are one screen with three tabs:
+
+- **Offers**: the finder's best three, each with its label, its exact edge, this
+  week's and the season's change for both sides, and one short reason. A tap
+  opens the direct comparison.
+- **Build**: one question, "Who do you want to sell or get?". Type a name, tap
+  the player, and the finder answers with its best deals around him
+  (`/api/trades/screens/offers?sell=` or `?get=`).
+- **Check**: pick the team and what each side gives; one line (Good for you,
+  Fair, Bad for you), both sides' this-week and season change, the edge, and
+  who gets better where.
+
+No info buttons, no help text, every control at least 44px. They are their own
+chunk and stylesheet, fetched only when the switch is on.
+
+**The preview.** `preview.yml` with mode `trades` uploads a version (never a
+deploy) with `TRADES_SCREENS = "new"`, `PREVIEW = "trades"` and the page built
+with `VITE_PREVIEW=trades`: a PIN, then only Trades, on the made-up preview
+league (`core/trades/previewLeague.ts`: four teams, the same names every
+time), with light/dark and normal/quiet-week switches. It reads no league data.
+
 Cost: no new reads beyond Check a trade's preparation of the league and two
 small reads for who trades often; about 50 ms of CPU on the real league. The
 older search still answers `/api/diagnostics/smart-trades` for the probe;

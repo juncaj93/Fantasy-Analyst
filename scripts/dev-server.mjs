@@ -136,6 +136,9 @@ const env = {
    * the deployed site. See docs/RELEASE.md.
    */
   releaseSha: process.env.FA_RELEASE_SHA ?? null,
+  // Round 19: the Trades switch and the preview's made-up league, as the Worker reads them.
+  tradesScreens: process.env.TRADES_SCREENS === 'new' ? 'new' : 'old',
+  preview: process.env.PREVIEW === 'trades' ? 'trades' : null,
   /*
    * Unset locally too, so the allowance panel says "not connected" rather than
    * reporting a real account's usage from a laptop. Settable for anyone who
