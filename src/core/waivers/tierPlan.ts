@@ -2,15 +2,15 @@
  * The tier plan as the Waivers screen draws it: each move with its bid, and the
  * instruction card.
  *
- * `tiers.ts` decides who and why; `bidModel.ts` decides what to bid. This file
- * joins the two, adds the value ceiling from the existing pricing pass (what he
- * is worth to this roster, so a bid never runs past it unnoticed), and writes
+ * `tiers.ts` decides who and why; `faab/smartBid.ts` decides what to bid,
+ * from the league's own bid history, with `bidModel.ts` saying only whether
+ * anybody else is likely to bid (round 20). This file joins them and writes
  * the claim card the screen opens on. It decides nothing itself.
  *
  * Nothing here transacts. Every line is a recommendation to act on in Sleeper.
  */
 
-import { recommendBid } from '../faab/strategy.ts';
+import { smartBid } from '../faab/smartBid.ts';
 import type { LeagueBudgetState } from '../faab/budget.ts';
 import { myBudget, playoffReserve } from '../faab/budget.ts';
 import type { PriceSummary } from '../faab/bids.ts';
@@ -59,8 +59,10 @@ export interface TierBid {
 
 export interface BidTrace {
   signals: BidSignals;
-  /** The advice before the value ceiling. */
+  /** The competition-only advice from before round 20, kept for the trace (the "old bid"). */
   advised: { recommended: number; low: number; high: number };
+  /** How the shown bid was set (`faab/smartBid.ts`). Absent on older responses. */
+  smart?: { basis: string; clearing: number | null; valueCap: number | null; thin: boolean };
   /** FAAB left. The cap on any bid is this less the playoff reserve until the playoffs. */
   remaining: number | null;
   /** What a bid may spend now: FAAB left less the playoff reserve. */
@@ -228,27 +230,30 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         position: m.position,
         posture: input.rivalsFor ? posture : undefined,
       });
+    /* The rival read decides only whether anybody else is likely to bid; the number is the league's own price (round 20). */
     const advice = adviseAt(reserve.spendable);
-    const ceiling = posture === 'stash' ? null : ceilingFor(m, input);
-    const overCeiling = ceiling != null && advice.recommended > ceiling;
-    const recommended = overCeiling ? ceiling : advice.recommended;
-    /* Did the reserve lower the bid? The same advice with the whole budget, compared. */
-    const whole = reserve.held > 0 ? adviseAt(remaining) : advice;
-    const uncapped = ceiling != null ? Math.min(ceiling, whole.recommended) : whole.recommended;
-    const capped = reserve.held > 0 && reserve.spendable != null && uncapped > (recommended ?? 0);
-    const reserveNote = capped ? ` Capped at $${reserve.spendable} to keep $${reserve.held} for the playoffs.` : '';
+    const smart = smartBid({
+      kind: posture,
+      position: m.position,
+      gain: m.gain,
+      expectedRivals: advice.expectedRivals,
+      noRival: advice.noRival,
+      spendable: reserve.spendable ?? remaining,
+      reserveHeld: reserve.held,
+    });
+    const recommended = smart.bid;
+    const ceiling = smart.valueCap;
+    const overCeiling = smart.basis === 'value';
+    const capped = smart.basis === 'reserve' && reserve.held > 0;
     return {
       ...m,
       lastWeekPoints,
       bid: {
         kind: 'claim',
         recommended,
-        low: Math.min(advice.low, recommended ?? advice.low),
-        high: overCeiling ? ceiling : advice.high,
-        reason:
-          (overCeiling
-            ? `${advice.why}. He is worth about $${ceiling} to you, less than the $${advice.recommended} it likely takes, so bid $${ceiling} only if you want him anyway.`
-            : advice.reason) + reserveNote,
+        low: recommended,
+        high: recommended,
+        reason: smart.reason,
         ceiling,
         overCeiling,
         likely: advice.rivals
@@ -262,6 +267,7 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         trace: {
           signals,
           advised: { recommended: advice.recommended, low: advice.low, high: advice.high },
+          smart: { basis: smart.basis, clearing: smart.clearing, valueCap: smart.valueCap, thin: smart.thin },
           remaining,
           spendable: reserve.spendable,
           validClaims,
@@ -332,32 +338,6 @@ export function buildTiersView(input: TierViewInput): WaiverTiersView {
         }
       : {}),
   };
-}
-
-/** What he is worth to this roster, from the pricing pass's valuation. */
-function ceilingFor(m: TierMove, input: TierViewInput): number | null {
-  if (!input.budgets || !input.prices) return null;
-  /* A per-week gain: the season's weighted weeks when the gain is a season total (round 6). */
-  const weights = (input.plan.season ?? input.plan.window).weights.reduce((a, b) => a + b, 0) || 1;
-  const role = input.evaluations.get(m.playerId)?.role;
-  const rec = recommendBid({
-    inputs: {
-      playerId: m.playerId,
-      name: m.name,
-      position: m.position,
-      weeklyGain: Math.max(0, m.gain / weights),
-      gainOverReplacement: null,
-      roleStability: role && role.games > 0 ? (role.trend.startsWith('rising') ? 'rising' : role.trend === 'stable' ? 'stable' : 'volatile') : 'unknown',
-      shelfLife: 'unknown',
-      futureOpportunity: 'normal',
-      marketHeat: null,
-      rivalsWithNeed: null,
-    },
-    budgetState: input.budgets,
-    prices: input.prices,
-    season: { week: input.week, finalWeek: input.finalWeek },
-  });
-  return rec.doNotExceed == null ? null : Math.max(1, rec.doNotExceed);
 }
 
 function emptyBid(kind: TierBid['kind'], reason: string, pickup: PickupState | null): TierBid {

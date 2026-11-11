@@ -9,8 +9,8 @@
  * Doubtful rival starter as available.
  */
 
-import { beforeAll, describe, expect, it } from 'vitest';
-import { captureDemoWaivers, type CapturedWaivers } from './helpers/waiverDecision.ts';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { captureDemoWaivers, DEMO_WAIVER_CLOCK, type CapturedWaivers } from './helpers/waiverDecision.ts';
 import { waiverRequestFromSnapshot } from '../src/core/support/waiverSnapshot.ts';
 import { assembleWaiverPlan } from '../src/core/waivers/assemble.ts';
 import type { SupportSnapshot } from '../src/core/support/schema.ts';
@@ -78,7 +78,7 @@ describe('block: only this week’s opponent, only a real need', () => {
   it('blocks the free agent who covers the opponent’s WR on bye', () => {
     const req = blockRequest({ opponent: { rosterId: 7, roster: opponentRoster({ wr1: { onBye: true } }) } });
     const line = blockPickup(req);
-    expect(line).toMatchObject({ playerId: 'wr', reason: 'opponent needs a WR', bid: { kind: 'claim', low: 1, high: 3 } });
+    expect(line).toMatchObject({ playerId: 'wr', reason: 'opponent needs a WR', bid: { kind: 'claim', low: 3, high: 3 } });
     expect(line!.detail).toBe('his WR Their wr1 is on bye');
     expect(line!.gain).toBeGreaterThanOrEqual(BLOCK_RULES.margin);
   });
@@ -110,9 +110,9 @@ describe('block: only this week’s opponent, only a real need', () => {
     expect(blockPickup(blockRequest({ opponent: null }))).toBeNull();
   });
 
-  it('never bids above $3', () => {
+  it('bids one number, never above $3 (round 20: a WR block is the league price, capped at $3)', () => {
     const line = blockPickup(blockRequest({ opponent: { rosterId: 7, roster: opponentRoster({ wr1: { onBye: true } }) }, spendable: 80 }));
-    expect(line?.bid).toEqual({ kind: 'claim', low: 1, high: BLOCK_RULES.maxBid });
+    expect(line?.bid).toEqual({ kind: 'claim', low: BLOCK_RULES.maxBid, high: BLOCK_RULES.maxBid });
   });
 
   it('never takes him under $20 for the playoffs', () => {
@@ -193,7 +193,7 @@ describe('upside stash: a real path to playoff value', () => {
     const line = upsideStash(
       stashRequest({ candidates: [cand('hurt', 'WR', 14, { designation: 'ir' })], verdicts: new Map([['hurt', backBy(13)]]) }),
     );
-    expect(line).toMatchObject({ playerId: 'hurt', reason: 'back around week 13', path: { kind: 'returning' }, bid: { kind: 'claim', low: 0, high: 1 } });
+    expect(line).toMatchObject({ playerId: 'hurt', reason: 'back around week 13', path: { kind: 'returning' }, bid: { kind: 'claim', low: 1, high: 1 } });
     expect(line!.room).toEqual({ kind: 'drop', playerId: 'bench1', name: 'Antonio Williams' });
   });
 
@@ -461,8 +461,19 @@ describe('the assembly draws the block for this week’s opponent only', () => {
       [byName.get('Kai Brennan')!, 11],
       [byName.get('Dane Petrossian')!, 9],
     ]);
-    const tiers = (await assembleWaiverPlan({ ...request, published, opponent })).tiers!;
-    return { tiers, rival };
+    /*
+     * Replayed on the clock it was captured on, as `waiverCard.test.ts` does:
+     * part of the assembly reads the real clock, so a real-clock replay
+     * drifts with the calendar (round 20).
+     */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(DEMO_WAIVER_CLOCK));
+    try {
+      const tiers = (await assembleWaiverPlan({ ...request, published, opponent })).tiers!;
+      return { tiers, rival };
+    } finally {
+      vi.useRealTimers();
+    }
   }
 
   it('blocks the free receiver his Out receiver leaves him needing', async () => {

@@ -154,4 +154,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * percent projection and 25 percent season average (was 50/50), and a
  * Sleeper-only week ranks one point lower in the tiers (was two).
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@22', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@23`, 11 November 2026 (round 20): every bid comes from
+ * `faab/smartBid.ts`, the league's own price for a starter at that position
+ * (three seasons of claims), $0 when nobody else is likely to bid, never above
+ * what the player is worth to the roster or into the playoff reserve. One
+ * number, not a range; a block is one number up to $3, a stash $0 or $1.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@23', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

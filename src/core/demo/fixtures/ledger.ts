@@ -135,10 +135,15 @@ const HABITS: ManagerHabit[] = [
  * the plan priced a claim nobody needed as uncontested. The bid model now reads
  * how this league's managers actually bid (`core/waivers/bidModel.ts`): with no
  * history to the contrary, about one other manager is likely to chase the #2
- * add on Sleeper, so the plan says $10, and that is what landed.
+ * add on Sleeper, so the plan said $10.
+ *
+ * **Six dollars, from the league's own prices (round 20, November 2026).**
+ * The bid is now the lowest amount that likely wins by what this league has
+ * paid for such a player (`core/faab/smartBid.ts`), with the same read of who
+ * else is likely to bid, so the plan says $6, and that is what landed.
  */
 export const WEEK_SEVEN_RUN = new Map<number, { bid: number }>([
-  [MY_ROSTER_ID, { bid: 10 }],
+  [MY_ROSTER_ID, { bid: 6 }],
   [2, { bid: 9 }],
   [6, { bid: 17 }],
 ]);

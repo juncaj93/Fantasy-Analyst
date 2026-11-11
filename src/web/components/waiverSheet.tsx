@@ -82,6 +82,12 @@ export function WaiverSheet({
             ))}
           </div>
         ) : null}
+        {/* The bid's one short reason (round 20): why this number. */}
+        {model.bidNote ? (
+          <div className="verdict-line faint" data-testid="wsheet-bid">
+            {model.bidNote}
+          </div>
+        ) : null}
 
         {weekly ? (
           <SegmentedControl

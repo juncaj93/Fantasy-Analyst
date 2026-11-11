@@ -34,6 +34,7 @@ import { availableWeekPoints, isOutThisWeek } from '../injury/weekAvailability.t
 import { TOSSUP_POINTS } from '../startsit/tossup.ts';
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
+import { smartBid } from '../faab/smartBid.ts';
 
 export const BLOCK_RULES = {
   /** The most a block may bid (Alex, 5 November 2026). */
@@ -140,9 +141,15 @@ export function blockPickup(request: BlockRequest): BlockLine | null {
     reason: `opponent needs a ${c.position}`,
     detail: needDetail(c, opponent.roster, slots, lineupPlayers, before.picks),
     gain,
-    bid: c.free ? { kind: 'free' } : bid,
+    bid: c.free ? { kind: 'free' } : bid.kind === 'claim' ? blockClaim(c.position, request) : bid,
     room,
   };
+}
+
+/** One number for the block (round 20): the shared bid rule, $1 to $3, inside the playoff reserve. */
+function blockClaim(position: string, request: BlockRequest): BlockLine['bid'] {
+  const { bid } = smartBid({ kind: 'block', position, gain: null, expectedRivals: null, spendable: request.spendable });
+  return { kind: 'claim', low: bid, high: bid };
 }
 
 /** $1 to $3, never into the playoff reserve. Null when the reserve leaves nothing to bid. */
