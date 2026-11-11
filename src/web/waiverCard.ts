@@ -136,11 +136,16 @@ function thisWeekGain(row: Pick<TierRow, 'reasonCode'> & { reason?: string }): n
   return m ? Number(m[1]) : row.reasonCode === 'start_tie' ? 0 : null;
 }
 
-/** `$3–7` or `$3`: the bid band the engine set. */
-function bidLabel(bid: TierRow['bid']): string | null {
+/** `$4`: one number, the bid to enter (round 20). Never a band. */
+export function bidLabel(bid: TierRow['bid']): string | null {
   if (bid.kind !== 'claim' || bid.recommended == null) return null;
-  if (bid.low != null && bid.high != null && bid.low !== bid.high) return `$${bid.low}–${bid.high}`;
   return `$${bid.recommended}`;
+}
+
+/** `Bid $4: In this league $4 wins a starting WR about half the time`, for the sheet. Null with no bid. */
+export function bidNote(bid: TierRow['bid']): string | null {
+  const label = bidLabel(bid);
+  return label ? `Bid ${label}: ${bid.reason.replace(/\.$/, '')}` : null;
 }
 
 /**
@@ -286,6 +291,8 @@ export interface WaiverSheetModel {
   period: SheetPeriod;
   /** Up to three, only when a drop is needed. */
   drops: SheetDrop[];
+  /** The bid and its one short reason (round 20); absent with no bid. */
+  bidNote?: string | null;
 }
 
 type Figures = NonNullable<import('../core/waivers/tierPlan.ts').WaiverTiersView['weekFigures']>;
@@ -387,6 +394,7 @@ export function tierSheet(row: TierRow, tiers: { window: { weeks: number[]; weig
     partner: sheetPartner(row, tiers.weekFigures, pickup),
     period: sheetPeriod(row, tiers.window),
     drops: sheetDrops(row),
+    bidNote: bidNote(row.bid),
   };
 }
 

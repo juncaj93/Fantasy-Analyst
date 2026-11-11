@@ -41,6 +41,7 @@ import { bestLineup, slotsOf, type LineupCandidate } from '../tradeValue/lineup.
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import type { StashVerdict } from './stash.ts';
 import { eliteBacks } from './dropScore.ts';
+import { smartBid } from '../faab/smartBid.ts';
 
 export const STASH_UPSIDE = {
   /** The most a stash bids: a stash is a cheap bet, never a fight. */
@@ -252,11 +253,12 @@ function roomFor(c: StashCandidate, path: StashPath, request: UpsideStashRequest
   return drop ? { kind: 'drop', playerId: drop.playerId, name: drop.name } : null;
 }
 
-/** $0 to $1, inside the playoff reserve. */
+/** One number, $1 at most, inside the playoff reserve: the shared bid rule (round 20). */
 function stashBid(request: UpsideStashRequest): UpsideStashLine['bid'] | null {
   if (!request.usesFaab) return { kind: 'none' };
   if (request.spendable == null) return null;
-  return { kind: 'claim', low: 0, high: Math.max(0, Math.min(STASH_UPSIDE.maxBid, Math.floor(request.spendable))) };
+  const { bid } = smartBid({ kind: 'stash', position: '', gain: null, expectedRivals: null, spendable: request.spendable });
+  return { kind: 'claim', low: bid, high: bid };
 }
 
 function round2(v: number): number {
