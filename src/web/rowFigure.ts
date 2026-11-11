@@ -62,9 +62,18 @@ export function noLineYet(evaluation: RowFigureEvaluation | null | undefined, no
  * (his slot), or `No projection` (nothing priced him and Sleeper has no week).
  * A Sleeper-only number before kickoff says `No line yet`.
  */
-export function rowNote(figure: RowFigure, evaluation: RowFigureEvaluation | null | undefined, now: number = Date.now()): string | null {
+export function rowNote(
+  figure: RowFigure,
+  evaluation: RowFigureEvaluation | null | undefined,
+  now: number = Date.now(),
+  /** The roster's own status word (`IR`, `Out`, `Sus`), for a row with no evaluation. */
+  status?: string | null,
+): string | null {
   if (figure.kind === 'none') {
-    if (evaluation?.onReserve) return 'On IR';
+    const word = (status ?? '').trim().toLowerCase();
+    if (evaluation?.onReserve || word === 'ir' || word.includes('injured reserve')) return 'On IR';
+    if (word === 'out') return 'Out';
+    if (word.startsWith('sus')) return 'Suspended';
     if (evaluation?.onBye) return 'Bye';
     return 'No projection';
   }

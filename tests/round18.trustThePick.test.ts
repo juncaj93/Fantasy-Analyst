@@ -252,3 +252,17 @@ describe('plain English on Team, Matchup and Compare', () => {
     expect(team).not.toMatch(/>\s*Locked\s*</);
   });
 });
+
+import { benchSummary } from '../src/web/benchSummary.ts';
+
+describe('Round 18 small words', () => {
+  it('an IR or Out row with no evaluation still says why, from the roster status', () => {
+    expect(rowNote(rowFigure(null, null), null, Date.now(), 'IR')).toBe('On IR');
+    expect(rowNote(rowFigure(null, null), null, Date.now(), 'Out')).toBe('Out');
+  });
+
+  it('the folded bench says "No line yet" when Best move does', () => {
+    expect(benchSummary({ found: true, swaps: [], fills: [], tossUps: [{ waitingOnLine: true }] })).toBe('No line yet');
+    expect(benchSummary({ found: true, swaps: [], fills: [], tossUps: [{}] })).toBe('Toss-up');
+  });
+});

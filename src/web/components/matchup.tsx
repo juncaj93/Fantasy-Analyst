@@ -529,9 +529,10 @@ function PlayerHalf({
           className="matchup-player-proj"
           data-testid="matchup-player-proj"
           data-projection-source={player.projectedFinal == null ? 'none' : 'market'}
+          /* Round 18: a missing number says why, and is never drawn as a bye (that is `onBye`, from the fixture list). The column is a number wide, so the words are the label. */
+          {...(player.projectedFinal == null ? { title: 'No projection', 'aria-label': 'No projection' } : {})}
         >
-          {/* Round 18: a missing number says so, and is never drawn as a bye (that is `onBye`, from the fixture list). */}
-          {player.projectedFinal == null ? 'No projection' : player.projectedFinal.toFixed(1)}
+          {player.projectedFinal == null ? '—' : player.projectedFinal.toFixed(1)}
         </span>
       )}
     </span>

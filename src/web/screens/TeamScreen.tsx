@@ -1099,7 +1099,7 @@ function VerdictCard({
           ? `, ${blocked?.reason ?? 'cannot be scored this week'}`
           : '') +
         spokenRowFigure(figure, (points) => spokenProjection(points, shown.source)) +
-        spokenNote(rowNote(figure, subjectEvaluation)) +
+        spokenNote(rowNote(figure, subjectEvaluation, undefined, subject.status)) +
         (row.locked ? ', game started' : '') +
         (subject.status ? `, ${subject.status}` : '')
       }
@@ -1154,7 +1154,7 @@ function VerdictCard({
             where it reads as part of the proposal rather than as a correction
             to the figure above it.
           */}
-          <RowFigureValue figure={figure} source={shown.source} testId="starter-proj" note={rowNote(figure, subjectEvaluation)} />
+          <RowFigureValue figure={figure} source={shown.source} testId="starter-proj" note={rowNote(figure, subjectEvaluation, undefined, subject.status)} />
         </span>
       </div>
       {/*
@@ -1400,7 +1400,7 @@ function BenchCard({
       aria-label={
         `${player.name}${position ? `, ${position}` : ''}, on your bench` +
         spokenRowFigure(figure, (points) => spokenProjection(points, projectionSource)) +
-        spokenNote(rowNote(figure, evaluation)) +
+        spokenNote(rowNote(figure, evaluation, undefined, player.status)) +
         `${player.status ? `, ${player.status}` : ''}`
       }
       onClick={onOpen}
@@ -1443,7 +1443,7 @@ function BenchCard({
 
         {/* The same field, the same semantics, the same dash — see `StarterCard`. */}
         <span className="row-value">
-          <RowFigureValue figure={figure} source={projectionSource} testId="bench-proj" note={rowNote(figure, evaluation)} />
+          <RowFigureValue figure={figure} source={projectionSource} testId="bench-proj" note={rowNote(figure, evaluation, undefined, player.status)} />
         </span>
       </div>
     </button>
