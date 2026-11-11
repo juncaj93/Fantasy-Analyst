@@ -12,6 +12,47 @@ what each half is not.
 
 ---
 
+## Round 19 (November 2026): the trade finder
+
+The Round 16 backtest replayed six weeks and no trade idea ever reached the
+screen. The rule at the end was not the reason: on the real league at week
+10, about 35 small deals pass Alex's fair-to-both rule. The search in front of
+it never looked at them. It took six of his players and six of theirs per
+team, scored twelve packages, and threw most of those out on this week's
+numbers and roster-shape guesses (weak spot, spare player, the partner
+"already has" a position) before the season was asked.
+
+`core/trades/finder.ts` replaced it on `/api/trades/smart`:
+
+1. **Every small deal, screened cheaply.** 1 for 1, 2 for 1 and 1 for 2 with
+   every manager who trades. Out: a piece worth nothing over a free agent,
+   value too far apart to be close, or a side whose lineup cannot get better
+   (nobody arriving would start in any week). The rest are screened on each
+   side's exact best lineup, week by week.
+2. **The best twenty, checked exactly** through Check a trade's own
+   evaluation, so an offer's numbers are the numbers Check a trade prints.
+3. **Ranked by Alex's rules:** his rest-of-season gain (playoff weeks 1.5
+   times) leads, then this week, a weak spot filled, sell high or buy low
+   (season average far from projection), a 2 for 1 or depth for a starter,
+   and a manager who trades often and gains from it. At most three, one
+   player once, two per manager.
+
+**Fair** is the same rule as before (`fairToBoth.ts`, unchanged). When no deal
+is fully fair, the closest few are shown, each labelled ("Close: you give a
+bit more than you get") with its exact edge, and never one Check a trade says
+leans to the other team. Managers the record shows almost never trade still
+get nothing.
+
+`core/trades/verdict.ts` is the one verdict both screens print: Good for you,
+Fair, or Bad for you. Check a trade's response carries it as `summary`.
+
+Cost: no new reads beyond Check a trade's preparation of the league and two
+small reads for who trades often; about 50 ms of CPU on the real league. The
+older search still answers `/api/diagnostics/smart-trades` for the probe;
+`/api/diagnostics/trade-finder` reports what each finder step removed.
+
+---
+
 ## The three questions, and why they stay separate
 
 Every surfaced offer passes three conceptual gates, in this order:

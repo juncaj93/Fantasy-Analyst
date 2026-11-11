@@ -33,7 +33,7 @@ import {
   type TradeAssembly,
   type TradeHistoryContext,
 } from '../../core/trades/assemble.ts';
-import type { BilateralReport } from '../../core/trades/bilateral.ts';
+import type { BilateralReport, OfferEvaluation } from '../../core/trades/bilateral.ts';
 import type { TradeAssemblyRequest } from '../../core/trades/assemble.ts';
 import type { LeagueRecord, RosterRecord } from '../../core/sleeper/types.ts';
 import { tradeCapabilityOf } from '../../core/trades/capability.ts';
@@ -224,6 +224,7 @@ export class SmartTradeService {
       arbitrageReads: ArbitrageRead[];
       closest?: ClosestIdea[];
       season?: ReturnType<typeof seasonSummary>;
+      seasonRule?: { checked: number; kept: number; leftOff: Record<string, number> };
     }
   > {
     const gathered = await this.gather(opts);
@@ -239,6 +240,12 @@ export class SmartTradeService {
        * `CLOSEST_CHECKED` season checks on the preparation already in hand.
        */
       ...(gathered.prepared ? { closest: this.closest(gathered, presented) } : {}),
+      /*
+       * Round 19: what the season rule did to the ideas the search kept (the
+       * shown ones and the reserve), counted by the reason each was left off.
+       * The last stage of the old pipeline, for the probe's funnel.
+       */
+      ...(gathered.prepared ? { seasonRule: this.seasonRule(gathered.prepared, presented) } : {}),
       /*
        * The buy-low and sell-high reads the search was handed, before any gate.
        *
@@ -437,6 +444,24 @@ export class SmartTradeService {
       arbitrageOff: off[0] ?? null,
       prepared,
     };
+  }
+
+  private seasonRule(prepared: Prepared, board: SmartTradeBoard & { reserve?: OfferEvaluation[] }) {
+    const ideas = [...board.offers, ...(board.reserve ?? [])];
+    const checks = new TradeValueService(this.db, NO_SLEEPER).checkPrepared(
+      prepared,
+      ideas.map((o) => ({ id: o.id, partnerRosterId: o.partner.rosterId, give: o.give.map((p) => p.playerId), get: o.get.map((p) => p.playerId) })),
+    );
+    const leftOff: Record<string, number> = {};
+    let kept = 0;
+    for (const idea of ideas) {
+      const evaluation = checks.get(idea.id);
+      const check = evaluation ? seasonCheckOf(evaluation) : undefined;
+      const why = !check || check.status !== 'ok' ? 'not_checked' : check.kind === 'leans_b' || check.kind === 'favors_b' ? 'leans_them' : (check.unfair ?? null);
+      if (why == null) kept += 1;
+      else leftOff[why] = (leftOff[why] ?? 0) + 1;
+    }
+    return { checked: ideas.length, kept, leftOff };
   }
 
   private closest(

@@ -9081,9 +9081,24 @@ div.matchup-result {
   color: var(--pos);
 }
 
-.smart-trade-kind[data-category='sell_high'] {
+.smart-trade-kind[data-category='sell_high'],
+.smart-trade-kind[data-category='close'] {
   background: var(--warn-tint);
   color: var(--warn);
+}
+
+.smart-trade-kind[data-category='fair'] {
+  background: var(--pos-tint);
+  color: var(--pos);
+}
+
+/* The trade finder's label is a short sentence, so it reads as one and wraps. */
+.smart-trade-kind[data-category='fair'],
+.smart-trade-kind[data-category='close'] {
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
 }
 
 /*

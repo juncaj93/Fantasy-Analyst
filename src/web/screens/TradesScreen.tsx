@@ -259,6 +259,12 @@ export function TradesScreen({ resetNonce }: { resetNonce: number }) {
         fails or finds nothing worth proposing. Nothing on this screen depends
         on it.
       */}
+      {/* Round 19: when nothing is fully fair, the closest few are shown, and said to be. */}
+      {smart && smart.offers.length > 0 && smart.status === 'close' && smart.notes[0] ? (
+        <StatusRow tone="info" data-testid="smart-trades-close">
+          {smart.notes[0]}
+        </StatusRow>
+      ) : null}
       {smart && smart.offers.length > 0 ? (
         <div data-testid="smart-trades">
           {/*
