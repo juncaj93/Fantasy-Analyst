@@ -16,6 +16,7 @@ import { envFor, forbiddenSleeper, seed, LEAGUE } from './helpers/tradeLeague.ts
 import {
   PLAYERS_INSEASON,
   injuryRead,
+  overFreeAgent,
   lastGames,
   nextWeeks,
   seasonValue,
@@ -24,6 +25,8 @@ import {
   type BoardRoster,
 } from '../src/core/players/inseason.ts';
 import { previewSeasonBoard, previewSeasonCard } from '../src/core/players/seasonPreview.ts';
+import { byWillingness } from '../src/core/players/seasonOrder.ts';
+import { seasonValueOver } from '../src/core/tradeValue/evaluate.ts';
 import type { SeasonBoard, SeasonCard } from '../src/core/players/seasonWire.ts';
 import { PREVIEW_NAMES, previewLeague } from '../src/core/trades/previewLeague.ts';
 import { perWeekValue, productionGames, seasonWeights } from '../src/core/value/restOfSeason.ts';
@@ -65,9 +68,30 @@ describe('rest-of-season value: the default sort', () => {
     expect(seasonValue(undefined, L.horizon)).toBeNull();
   });
 
-  it('the board is sorted by it, highest first, nulls last', () => {
-    const values = previewSeasonBoard().rows.map((r) => r.value ?? -1);
+  it('the board is sorted by value over a free agent at his position (Trades’ number), highest first', () => {
+    const values = previewSeasonBoard().rows.map((r) => r.overFreeAgent ?? -1);
     expect(values).toEqual([...values].sort((a, b) => b - a));
+  });
+
+  it('value over a free agent is Trades’ own seasonValueOver, with the same week weights', () => {
+    const r = rate('p01');
+    expect(overFreeAgent(r, L.replacement, L.horizon)).toBe(seasonValueOver(r, L.replacement, seasonWeights(L.horizon)));
+  });
+
+  it('so quarterbacks no longer fill the top: a QB far above the free-agent QB still ranks under a back far above his', () => {
+    /* Raw points a week: Trey Halloran 21.4 (free-agent QB 15.1) tops Marcus Vance 17.8 (free-agent RB 7.1). */
+    const rows = previewSeasonBoard().rows;
+    const qb = rows.findIndex((r) => r.name === 'Trey Halloran');
+    const rb = rows.findIndex((r) => r.name === 'Marcus Vance');
+    expect(rows[qb]!.value!).toBeGreaterThan(rows[rb]!.value!);
+    expect(rb).toBeLessThan(qb);
+    const topTen = rows.slice(0, 10).filter((r) => r.position === 'QB').length;
+    expect(topTen).toBeLessThanOrEqual(2);
+  });
+
+  it('free agents sit at zero over themselves and below every rostered starter', () => {
+    const fa = previewSeasonBoard().rows.find((r) => r.name === 'Colt Ambrose')!;
+    expect(fa.overFreeAgent).toBe(0);
   });
 });
 
@@ -122,7 +146,7 @@ describe('Trade targets and how likely the owner is to deal', () => {
     for (const [id, t] of targets) {
       expect(mine.has(id)).toBe(false);
       expect(t.gain).toBeGreaterThanOrEqual(PLAYERS_INSEASON.targetGain);
-      expect(t.reason).toBe(t.over ? `Starts at ${t.slot} over ${t.over}, +${t.gain.toFixed(1)} a week` : `Starts at ${t.slot} for you, +${t.gain.toFixed(1)} a week`);
+      expect(t.reason).toBe(t.over ? `Starts at ${t.slot}, ${t.over} to the bench, +${t.gain.toFixed(1)} a week` : `Starts at ${t.slot} for you, +${t.gain.toFixed(1)} a week`);
     }
   });
 
@@ -132,6 +156,7 @@ describe('Trade targets and how likely the owner is to deal', () => {
     expect(targets.get('p29')?.slot).toBe('TE');
     /* The direct comparison: the tight end he replaces, Teo Ferreira. */
     expect(targets.get('p28')?.over).toBe('Teo Ferreira');
+    expect(targets.get('p28')?.reason).toMatch(/^Starts at TE, Teo Ferreira to the bench, \+\d+\.\d a week$/);
     expect(targets.get('p28')?.overValue).toBeLessThan(targets.get('p28')!.gain + targets.get('p28')!.overValue!);
   });
 
@@ -212,6 +237,16 @@ describe('the preview', () => {
   it('uses only the made-up names the earlier previews used', () => {
     const names = new Set(PREVIEW_NAMES);
     for (const row of previewSeasonBoard().rows) expect(names.has(row.name)).toBe(true);
+  });
+
+  it('Trade targets list Likely first, then Maybe, then Unlikely', () => {
+    const rows = [
+      { name: 'a', trade: { willingness: 'Unlikely' as const } },
+      { name: 'b', trade: { willingness: 'Likely' as const } },
+      { name: 'c', trade: { willingness: 'Maybe' as const } },
+      { name: 'd', trade: null },
+    ];
+    expect([...rows].sort(byWillingness).map((r) => r.name)).toEqual(['b', 'c', 'a', 'd']);
   });
 
   it('has trade targets with all three willingness words available to show', () => {
@@ -295,8 +330,8 @@ describe('the switch', () => {
 describe('the switch on the live site and on the preview', () => {
   const read = (path: string) => readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
 
-  it('is off on the live site until Alex says go', () => {
-    expect(read('wrangler.toml')).toMatch(/^PLAYERS_INSEASON = "off"$/m);
+  it('is on on the live site since Alex said go, one line to set back to off', () => {
+    expect(read('wrangler.toml')).toMatch(/^PLAYERS_INSEASON = "on"$/m);
     expect(read('wrangler.toml')).not.toMatch(/^PREVIEW = /m);
   });
 

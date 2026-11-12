@@ -148,6 +148,7 @@
       "src/core/identity/normalize.ts",
       "src/core/nfl/teams.ts",
       "src/core/players/headshot.ts",
+      "src/core/players/seasonOrder.ts",
       "src/core/roster/ownership.ts",
       "src/core/search/players.ts",
       "src/core/sleeper/eligibility.ts",

@@ -113,10 +113,15 @@ test.describe('the in-season Players tab', () => {
     await expect(rows.first()).toBeVisible();
     const count = await rows.count();
     expect(count).toBe(previewSeasonBoard().rows.filter((r) => r.trade).length);
+    const words: string[] = [];
     for (let i = 0; i < count; i++) {
-      await expect(rows.nth(i).getByTestId('p2-willing')).toHaveText(/^(Likely|Maybe|Unlikely)$/);
+      words.push(await rows.nth(i).getByTestId('p2-willing').innerText());
       await expect(rows.nth(i).getByTestId('owner-pill')).not.toHaveText('You');
     }
+    /* Likely first, then Maybe, then Unlikely. */
+    const order = { Likely: 0, Maybe: 1, Unlikely: 2 } as Record<string, number>;
+    expect(words.every((w) => w in order)).toBe(true);
+    expect(words.map((w) => order[w])).toEqual([...words.map((w) => order[w])].sort((a, b) => a! - b!));
     expect(await horizontalOverflow(page)).toBe(0);
   });
 
@@ -150,8 +155,21 @@ test.describe('the in-season Players tab', () => {
     await page.getByTestId('player-search-row').first().locator('.dense-row-open').click();
     const card = page.getByTestId('p2-card');
     await expect(card.getByTestId('p2-card-willing')).toHaveText(/^(Likely|Maybe|Unlikely)$/);
-    await expect(card.getByTestId('p2-reason')).toContainText(/^Starts at /);
+    await expect(card.getByTestId('p2-reason')).toContainText(/^Starts at \w+, .+ to the bench, \+\d+\.\d a week$/);
     await expect(card.getByTestId('p2-versus')).toBeVisible();
+  });
+
+  test('a mistyped surname still finds the player, through the server search', async ({ page }) => {
+    await setup(page, { on: true, draftAhead: false });
+    await openPlayers(page);
+    const rows = page.getByTestId('player-search-row');
+    const before = await rows.count();
+    /* A dropped letter after the opening three, as the live smoke test types it. */
+    await page.getByTestId('player-search').fill('Mbei');
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeLessThan(before);
+    await expect(rows.first().locator('.player-name')).toHaveText('Silas Mbeki');
+    await page.getByTestId('player-search').fill('zzzqqqxxx');
+    await expect(page.getByText(/Nobody matching/i)).toBeVisible();
   });
 
   test('every control is a thumb, nothing scrolls sideways, and there is no info button', async ({ page }) => {

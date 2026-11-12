@@ -40,6 +40,12 @@ export interface SeasonRow {
   ownerRosterId: number | null;
   /** Rest-of-season value: expected points in an average remaining week, playoff weeks at their weight. */
   value: number | null;
+  /**
+   * What the list ranks by (Alex, Round 24 review): rest-of-season points over
+   * the free agent at his position, the number Trades values a player on
+   * (`seasonValueOver`). Null with no free-agent level at his position.
+   */
+  overFreeAgent: number | null;
   injury: SeasonInjuryRead | null;
   /** Set only on a player another team holds who would start for Alex. */
   trade: SeasonTradeRead | null;

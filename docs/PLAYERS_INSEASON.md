@@ -1,19 +1,22 @@
 # Players, in season (Round 24)
 
-Behind the `PLAYERS_INSEASON` switch in `wrangler.toml` ("off" until Alex has
-seen the preview and says go). With it off, or while a draft is ahead, the
-Players tab is exactly today's draft tool.
+Behind the `PLAYERS_INSEASON` switch in `wrangler.toml`, "on" since Alex's go
+on 12 November 2026. Set it to "off" and deploy to go back. With it off, or
+while a draft is ahead, the Players tab is exactly today's draft tool.
 
 ## What the tab does with the switch on
 
-- **Sort.** Rest-of-season value by default: expected points in an average
-  remaining week, playoff weeks at 1.5 (`perWeekValue` over the shared
-  `core/value/restOfSeason.ts` rate, the same value Trades and Waivers use).
+- **Sort.** Rest-of-season value over a free agent at his position by default
+  (Alex, after the preview): Trades' own `seasonValueOver` on the shared
+  `core/value/restOfSeason.ts` rate, playoff weeks at 1.5. So a one-QB
+  league's quarterbacks no longer fill the top. The card still shows his
+  points a week.
   Draft order is one tap away. Every row keeps the pick (`1.04`) and the 7-day
   and 30-day moves.
 - **Trade targets.** A player on another team whose addition lifts Alex's best
   lineup (the trade tools' lineup solver, byes and injuries counted) by at least
-  1 point a week. One reason: "Starts at TE over Teo Ferreira, +6.6 a week".
+  1 point a week. One reason: "Starts at TE, Teo Ferreira to the bench, +6.6 a week".
+  Listed Likely first, then Maybe, then Unlikely.
   Hidden once the trade deadline has passed.
 - **How likely the owner is to deal.** The trade finder's own signals: how often
   he trades (`activity.ts`, through `partnerActivity`), whether he has traded

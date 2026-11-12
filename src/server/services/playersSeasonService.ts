@@ -29,7 +29,8 @@
 
 import { orderPlayers } from '../../core/draft/playerOrder.ts';
 import { draftPickLabel } from '../../core/draft/provenance.ts';
-import { injuryRead, lastGames, nextWeeks, seasonValue, tradeTargets, type BoardRoster } from '../../core/players/inseason.ts';
+import { injuryRead, lastGames, nextWeeks, overFreeAgent, seasonValue, tradeTargets, type BoardRoster } from '../../core/players/inseason.ts';
+import { byOverFreeAgent } from '../../core/players/seasonOrder.ts';
 import { previewSeasonBoard, previewSeasonCard } from '../../core/players/seasonPreview.ts';
 import type { SeasonBoard, SeasonCard, SeasonRow } from '../../core/players/seasonWire.ts';
 import { ownerTeams, rosterOwnership } from '../../core/roster/ownership.ts';
@@ -151,6 +152,7 @@ export class PlayersSeasonService {
         status: players.get(id)?.status ?? null,
         ownerRosterId: owned.get(id) ?? null,
         value: seasonValue(rate, horizon),
+        overFreeAgent: overFreeAgent(rate, prepared.replacement, horizon),
         injury: injuryRead(rate, horizon),
         trade: targets.get(id) ?? null,
         draftRank: order?.draftRank ?? null,
@@ -161,7 +163,7 @@ export class PlayersSeasonService {
         lifetime: signal?.raw.net ?? 0,
       };
     });
-    rows.sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.name.localeCompare(b.name));
+    rows.sort(byOverFreeAgent);
     return { league: named, week: horizon.weeks.length > 0 ? horizon.currentWeek : null, tradeOpen: !horizon.deadlinePassed, teams: ownerTeams(rosters), rows };
   }
 
