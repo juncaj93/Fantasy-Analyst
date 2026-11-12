@@ -36,7 +36,7 @@ export class TradeScreensService {
   async offers(focus: { sell?: string | null; get?: string | null } | null): Promise<ScreensOffers> {
     if (this.preview) {
       const L = previewLeague(this.preview);
-      const result = findTrades({ horizon: L.horizon, shape: L.shape, replacement: L.replacement, rates: L.rates, rosters: L.rosters, rosterLimit: L.rosterLimit, focus });
+      const result = findTrades({ horizon: L.horizon, shape: L.shape, replacement: L.replacement, rates: L.rates, rosters: L.rosters, rosterLimit: L.rosterLimit, focus, opponent: L.opponent });
       return { league: L.league, status: result.status, note: result.note, offers: result.offers, deadline: { week: L.horizon.deadlineWeek, weeksLeft: L.horizon.weeksToDeadline } };
     }
     const run = await new TradeFinderService(this.db, this.sleeper).find(focus ? { focus } : {});

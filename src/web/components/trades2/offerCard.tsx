@@ -25,8 +25,15 @@ export function OfferCard({ offer, onOpen }: { offer: FoundOffer; onOpen: () => 
   return (
     <button type="button" className="card t2-offer" data-testid="t2-offer" data-kind={offer.kind} onClick={onOpen}>
       <span className="t2-offer-head">
-        <span className="t2-label" data-testid="t2-label" data-kind={offer.kind} data-verdict={offer.verdict}>
-          {offer.label}
+        <span className="t2-chips">
+          <span className="t2-label" data-testid="t2-label" data-kind={offer.kind} data-verdict={offer.verdict}>
+            {offer.label}
+          </span>
+          {offer.opponent ? (
+            <span className="t2-label" data-kind="opponent" data-testid="t2-opponent">
+              This week&rsquo;s opponent
+            </span>
+          ) : null}
         </span>
         <span className="t2-edge" data-testid="t2-edge">
           {edgeText(offer.edgePercent)}
@@ -41,11 +48,14 @@ export function OfferCard({ offer, onOpen }: { offer: FoundOffer; onOpen: () => 
         <span className="t2-names">{names(offer.get)}</span>
       </span>
       <span className="t2-numbers" data-testid="t2-numbers">
-        <span>This week {signed(offer.you.thisWeek, 1)}</span>
-        <span>Season {signed(offer.you.restOfSeason)}</span>
-        <span>
-          {offer.partner.label} {signed(offer.them.restOfSeason)}
-        </span>
+        <span className="t2-who">You</span>
+        <span>{signed(offer.you.thisWeek, 1)} this week</span>
+        <span>{signed(offer.you.restOfSeason)} season</span>
+      </span>
+      <span className="t2-numbers" data-testid="t2-numbers-them">
+        <span className="t2-who">{offer.partner.label}</span>
+        <span>{signed(offer.them.thisWeek ?? 0, 1)} this week</span>
+        <span>{signed(offer.them.restOfSeason)} season</span>
       </span>
       <span className="t2-reason" data-testid="t2-reason">
         {offer.reason}
@@ -68,11 +78,12 @@ export function OfferSheet({ offer, onClose }: { offer: FoundOffer; onClose: () 
           <span className="t2-verdict-word" data-testid="t2-sheet-label">
             {offer.label}
           </span>
+          {offer.opponent ? <span className="t2-verdict-reason">This week&rsquo;s opponent</span> : null}
           <span className="t2-verdict-reason">{offer.reason}</span>
         </div>
         <Compare
           rows={[
-            ['This week', signed(offer.you.thisWeek, 1), null],
+            ['This week', signed(offer.you.thisWeek, 1), offer.them.thisWeek == null ? null : signed(offer.them.thisWeek, 1)],
             ['Rest of season', signed(offer.you.restOfSeason), signed(offer.them.restOfSeason)],
             ['Playoffs', signed(offer.you.playoffs), null],
           ]}

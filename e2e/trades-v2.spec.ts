@@ -110,16 +110,89 @@ test.describe('the rebuilt Trades screens', () => {
     await page.getByTestId('t2-check-give-add').click();
     await page.getByTestId('t2-check-option').filter({ hasText: 'Bo Ashworth' }).click();
     await page.getByTestId('t2-check-option').filter({ hasText: 'Kai Brennan' }).click();
-    await page.getByTestId('sheet-close').click();
+    await page.getByTestId('t2-picker-add').click();
     await page.getByTestId('t2-check-get-add').click();
     await page.getByTestId('t2-check-option').filter({ hasText: 'Andre Sotelo' }).click();
-    await page.getByTestId('sheet-close').click();
+    await page.getByTestId('t2-picker-add').click();
     await expect(page.getByTestId('t2-check-word')).toHaveText('Fair');
     await expect(page.getByTestId('t2-check-result').getByTestId('t2-compare')).toContainText('This week');
     await expect(page.getByTestId('t2-check-edge')).toContainText('%');
     await expect(page.getByTestId('t2-check-better-you')).toContainText('TE');
     await expectTapTargets(page, '[data-testid="t2-check-team"], [data-testid="t2-check-give-player"], [data-testid="t2-check-get-add"]');
     expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+test.describe('the player picker (Round 19 review)', () => {
+  for (const scheme of ['light', 'dark'] as const) test(`checks players, adds them with one green button, and the X cancels (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openNewTrades(page);
+    await page.getByTestId('t2-tab-check').click();
+    await page.getByTestId('t2-check-team').selectOption({ label: 'Dermot' });
+    await page.getByTestId('t2-check-give-add').click();
+
+    const add = page.getByTestId('t2-picker-add');
+    await expect(add).toBeDisabled();
+    await expect(add).toHaveText('Add players');
+    const grey = await add.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+    await page.getByTestId('t2-check-option').filter({ hasText: 'Bo Ashworth' }).click();
+    await expect(add).toBeEnabled();
+    await expect(add).toHaveText('Add 1 player');
+    await page.getByTestId('t2-check-option').filter({ hasText: 'Kai Brennan' }).click();
+    await expect(add).toHaveText('Add 2 players');
+    const pos = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--pos)';
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    });
+    /* The site's buttons fade their colour, so read it once the fade is done. */
+    await expect.poll(() => add.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(pos);
+    expect(pos).not.toBe(grey);
+
+    /* At least 44px, inside the screen, above the phone's bottom bar. */
+    const box = (await add.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(43.5);
+    const viewport = page.viewportSize()!;
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    const toolbar = await page.evaluate(() => {
+      const bar = document.querySelector('[data-testid="toolbar"], .toolbar, nav[aria-label]');
+      return bar ? bar.getBoundingClientRect().top : null;
+    });
+    const covered = await add.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !(hit === el || el.contains(hit));
+    });
+    expect(covered, `the Add button is covered (toolbar top ${toolbar})`).toBe(false);
+
+    await add.click();
+    await expect(page.getByTestId('t2-picker')).toHaveCount(0);
+    await expect(page.getByTestId('t2-check-give-player')).toHaveCount(2);
+
+    /* The X cancels: what was checked in this visit is not added. */
+    await page.getByTestId('t2-check-get-add').click();
+    await page.getByTestId('t2-check-option').filter({ hasText: 'Andre Sotelo' }).click();
+    await expect(page.getByTestId('t2-picker-add')).toHaveText('Add 1 player');
+    await page.getByTestId('sheet-close').click();
+    await expect(page.getByTestId('t2-picker')).toHaveCount(0);
+    await expect(page.getByTestId('t2-check-get-player')).toHaveCount(0);
+
+    /* And a player already on a side is not offered again. */
+    await page.getByTestId('t2-check-give-add').click();
+    await expect(page.getByTestId('t2-check-option').filter({ hasText: 'Bo Ashworth' })).toHaveCount(0);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('marks an offer with this week’s opponent', async ({ page }) => {
+    await openNewTrades(page);
+    const marked = page.getByTestId('t2-offer').filter({ has: page.getByTestId('t2-opponent') });
+    await expect(marked.first()).toContainText('Dermot');
+    await expect(marked.first().getByTestId('t2-opponent')).toHaveText('This week’s opponent');
+    await expect(marked.first().getByTestId('t2-numbers-them')).toContainText('this week');
   });
 });
 

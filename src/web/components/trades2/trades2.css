@@ -37,9 +37,27 @@
   color: var(--pos);
 }
 
-.t2-label[data-kind='close'] {
+.t2-label[data-kind='close'],
+.t2-label[data-kind='opponent'] {
   background: var(--warn-tint);
   color: var(--warn);
+}
+
+.t2-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.t2-who {
+  flex: 0 0 auto;
+  min-width: 4.5em;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
 }
 
 .t2-edge {
@@ -244,4 +262,30 @@
   width: 100%;
   min-height: var(--tap);
   margin-top: var(--sp-2);
+}
+
+/* The picker's one action, kept in view at the bottom of the list. */
+.t2-picker-foot {
+  position: sticky;
+  bottom: 0;
+  margin: 0 calc(-1 * var(--sp-4));
+  padding: var(--sp-2) var(--sp-4) var(--sp-1);
+  background: var(--surface);
+}
+
+button.t2-add-btn {
+  width: 100%;
+  min-height: var(--tap);
+  border: 0;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 700;
+  background: var(--pos);
+  color: var(--on-accent);
+}
+
+button.t2-add-btn:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-faint);
+  cursor: default;
 }

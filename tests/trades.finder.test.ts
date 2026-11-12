@@ -218,3 +218,72 @@ describe('one verdict for both screens', () => {
     expect(r.unfair).toBe('user_gain');
   });
 });
+
+/*
+ * Alex's Round 19 review: when only one or two offers are fair, the other
+ * slots go to the closest, labelled; and this week's opponent is marked, and
+ * hidden while the matchup is live if he gains more than Alex this week.
+ */
+describe('fair first, then the closest, labelled', () => {
+  for (const W of [7, 8, 9]) {
+    it(`fills the remaining slots with close offers at week ${W}`, () => {
+      const L = round16League(W);
+      const result = findTrades(inputOf(L));
+      expect(result.status).toBe('fair');
+      expect(result.offers.length).toBe(3);
+      const kinds = result.offers.map((o) => o.kind);
+      const firstClose = kinds.indexOf('close');
+      expect(firstClose).toBeGreaterThan(0);
+      expect(kinds.slice(firstClose).every((k) => k === 'close')).toBe(true);
+      for (const o of result.offers.filter((x) => x.kind === 'close')) {
+        expect(o.label).toMatch(/^Close: /);
+        expect(Number.isInteger(o.edgePercent)).toBe(true);
+        const reading = verdictOfEvaluation(checkDirectly(L, o.partner.rosterId, o.give.map((p) => p.playerId), o.get.map((p) => p.playerId)))!;
+        expect(reading.fairToBoth).toBe(false);
+      }
+      const ids = result.offers.flatMap((o) => [...o.give, ...o.get].map((p) => p.playerId));
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+  }
+
+  it('shows only fair offers when three are fair', () => {
+    const result = findTrades(inputOf(round16League(10)));
+    expect(result.offers.every((o) => o.kind === 'fair')).toBe(true);
+  });
+});
+
+describe('this week’s opponent', () => {
+  const L = round16League(10);
+  const plain = findTrades(inputOf(L));
+  /* The manager with the most offers among those checked. */
+  const opponentId = plain.offers[0]!.partner.rosterId;
+
+  it('hides a deal that helps him more than you this week while the matchup is live, and marks the rest', () => {
+    const live = findTrades({ ...inputOf(L), opponent: { rosterId: opponentId, final: false } });
+    for (const o of live.offers) {
+      if (o.partner.rosterId !== opponentId) {
+        expect(o.opponent).toBeFalsy();
+        continue;
+      }
+      expect(o.opponent).toBe(true);
+      expect(o.you.thisWeek).toBeGreaterThanOrEqual(o.them.thisWeek);
+    }
+    const hidden = plain.offers.filter((o) => o.partner.rosterId === opponentId && o.you.thisWeek < o.them.thisWeek);
+    for (const h of hidden) expect(live.offers.map((o) => o.id)).not.toContain(h.id);
+    expect(live.funnel.removed.opponent_this_week ?? 0).toBeGreaterThanOrEqual(hidden.length);
+  });
+
+  it('shows them again, marked, once the matchup is final', () => {
+    const final = findTrades({ ...inputOf(L), opponent: { rosterId: opponentId, final: true } });
+    expect(final.funnel.removed.opponent_this_week ?? 0).toBe(0);
+    expect(final.offers.map((o) => o.id)).toEqual(plain.offers.map((o) => o.id));
+    for (const o of final.offers) expect(Boolean(o.opponent)).toBe(o.partner.rosterId === opponentId);
+  });
+
+  it('carries both sides’ this-week change, so the two can be compared', () => {
+    for (const o of plain.offers) {
+      expect(Number.isFinite(o.you.thisWeek)).toBe(true);
+      expect(Number.isFinite(o.them.thisWeek)).toBe(true);
+    }
+  });
+});

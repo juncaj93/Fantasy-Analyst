@@ -216,6 +216,7 @@ export function App() {
       setUnlocked(status.unlocked);
       setCanUnlock(status.canUnlock);
     } catch {
+      setFeatures(null);
       setUnlocked(false);
     } finally {
       setReady(true);

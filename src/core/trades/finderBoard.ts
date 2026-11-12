@@ -125,7 +125,7 @@ export function boardOfferOf(
     seasonCheck,
     pick: {
       kind: offer.kind,
-      label: offer.label,
+      label: offer.opponent ? `${offer.label} · This week's opponent` : offer.label,
       verdict: offer.verdict,
       edgePercent: offer.edgePercent,
       thisWeek: offer.you.thisWeek,

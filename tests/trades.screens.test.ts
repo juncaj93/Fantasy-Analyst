@@ -109,6 +109,37 @@ describe('the live site', () => {
     expect(calls).toEqual([]);
   });
 
+  it('marks this week’s opponent from the stored matchup row, and stops hiding once it is final', async () => {
+    const { client, calls } = forbiddenSleeper();
+    const app = createApp();
+    const store = async (phase: string) =>
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO matchup_forecasts
+             (league_id, season, week, roster_id, matchup_id, opponent_roster_id, model_version,
+              first_forecast_at, first_phase, latest_forecast_at, latest_phase)
+           VALUES ('tony', '2026', 5, 1, 1, 2, 'test', '2026-10-08T00:00:00Z', 'pregame', '2026-10-08T00:00:00Z', ?)`,
+        )
+        .bind(phase)
+        .run();
+    const read = async () => (await (await app(new Request('http://x/api/diagnostics/trade-finder'), envFor(db, client))).json()) as ScreensOffers & {
+      funnel: { removed: Record<string, number> };
+    };
+
+    await store('live');
+    const live = await read();
+    for (const o of live.offers) {
+      expect(o.opponent).toBe(true);
+      expect(o.you.thisWeek).toBeGreaterThanOrEqual(o.them.thisWeek);
+    }
+    await store('final');
+    const final = await read();
+    expect(final.funnel.removed.opponent_this_week ?? 0).toBe(0);
+    for (const o of final.offers) expect(o.opponent).toBe(true);
+    expect(final.offers.length).toBeGreaterThanOrEqual(live.offers.length);
+    expect(calls).toEqual([]);
+  });
+
   it('refuses a verdict request with no team', async () => {
     const res = await createApp()(new Request('http://x/api/trades/screens/verdict?give=a'), envFor(db, forbiddenSleeper().client));
     expect(res.status).toBe(400);

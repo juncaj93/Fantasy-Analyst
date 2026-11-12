@@ -8,7 +8,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.ts';
 import type { ScreensTeams, ScreensVerdict } from '../../../core/trades/screensWire.ts';
-import { ListGroup, ListRow, Sheet, SkeletonRows } from '../native.tsx';
+import { ListGroup, ListRow, SkeletonRows } from '../native.tsx';
+import { PlayerPicker } from './playerPicker.tsx';
 import { Compare, Players, signed, startsFor } from './offerCard.tsx';
 
 const MAX_SIDE = 3;
@@ -49,10 +50,7 @@ export function CheckTab({ teams, query }: { teams: ScreensTeams | null; query: 
   if (!teams) return <SkeletonRows rows={3} testId="t2-check-loading" />;
   if (!mine || partners.length === 0) return <div className="faint t2-empty">{teams.reason ?? 'Nobody to trade with yet.'}</div>;
 
-  const toggle = (side: 'give' | 'get', id: string) => {
-    const set = side === 'give' ? setGive : setGet;
-    set((was) => (was.includes(id) ? was.filter((x) => x !== id) : was.length >= MAX_SIDE ? was : [...was, id]));
-  };
+  const remove = (side: 'give' | 'get', id: string) => (side === 'give' ? setGive : setGet)((was) => was.filter((x) => x !== id));
   const summary = verdict?.summary ?? null;
 
   return (
@@ -82,7 +80,7 @@ export function CheckTab({ teams, query }: { teams: ScreensTeams | null; query: 
         ids={give}
         nameOf={nameOf}
         onAdd={() => setPicking('give')}
-        onRemove={(id) => toggle('give', id)}
+        onRemove={(id) => remove('give', id)}
         testId="t2-check-give"
       />
       {partner ? (
@@ -91,7 +89,7 @@ export function CheckTab({ teams, query }: { teams: ScreensTeams | null; query: 
           ids={get}
           nameOf={nameOf}
           onAdd={() => setPicking('get')}
-          onRemove={(id) => toggle('get', id)}
+          onRemove={(id) => remove('get', id)}
           testId="t2-check-get"
         />
       ) : null}
@@ -150,24 +148,17 @@ export function CheckTab({ teams, query }: { teams: ScreensTeams | null; query: 
       ) : null}
 
       {picking ? (
-        <Sheet title={picking === 'give' ? 'You give' : `You get from ${partner?.label ?? ''}`} onClose={() => setPicking(null)} testId="t2-check-picker">
-          <ListGroup>
-            {(picking === 'give' ? mine.players : (partner?.players ?? [])).map((p) => {
-              const on = (picking === 'give' ? give : get).includes(p.playerId);
-              return (
-                <ListRow
-                  key={p.playerId}
-                  label={p.name}
-                  detail={`${p.position} · ${p.team}`}
-                  mark={on ? '✓' : undefined}
-                  pressed={on}
-                  onClick={() => toggle(picking, p.playerId)}
-                  testId="t2-check-option"
-                />
-              );
-            })}
-          </ListGroup>
-        </Sheet>
+        <PlayerPicker
+          title={picking === 'give' ? 'You give' : `You get from ${partner?.label ?? ''}`}
+          players={(picking === 'give' ? mine.players : (partner?.players ?? [])).filter((p) => !(picking === 'give' ? give : get).includes(p.playerId))}
+          room={MAX_SIDE - (picking === 'give' ? give : get).length}
+          onAdd={(ids) => {
+            const set = picking === 'give' ? setGive : setGet;
+            set((was) => [...was, ...ids.filter((id) => !was.includes(id))].slice(0, MAX_SIDE));
+            setPicking(null);
+          }}
+          onCancel={() => setPicking(null)}
+        />
       ) : null}
     </div>
   );

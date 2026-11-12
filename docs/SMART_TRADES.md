@@ -48,8 +48,10 @@ Fair, or Bad for you. Check a trade's response carries it as `summary`.
 
 ### The rebuilt screens (behind a switch)
 
-`TRADES_SCREENS` in `wrangler.toml` picks the Trades screens: `"old"` (today's)
-or `"new"`. The new screens (`web/screens/TradesScreenV2.tsx`,
+`TRADES_SCREENS` in `wrangler.toml` picks the Trades screens: `"new"` since
+Alex's review (Round 19), or `"old"` for the earlier screens. The buy/sell/hold
+market list is not on the new screens, by Alex's decision; it stays only on
+the old ones. The new screens (`web/screens/TradesScreenV2.tsx`,
 `web/components/trades2/`) are one screen with three tabs:
 
 - **Offers**: the finder's best three, each with its label, its exact edge, this
@@ -60,7 +62,16 @@ or `"new"`. The new screens (`web/screens/TradesScreenV2.tsx`,
   (`/api/trades/screens/offers?sell=` or `?get=`).
 - **Check**: pick the team and what each side gives; one line (Good for you,
   Fair, Bad for you), both sides' this-week and season change, the edge, and
-  who gets better where.
+  who gets better where. The player list: check players, then the green
+  "Add 2 players" button at the bottom adds them (grey until one is checked);
+  the X cancels and keeps nothing checked in that visit.
+
+**Alex's review (Round 19).** When only one or two offers are fair, the other
+slots go to the closest, each labelled "Close: ..." with its edge, after the
+fair ones. A deal with this week's opponent (the stored matchup pairing, the
+row Team and Waivers read) is marked "This week's opponent"; while the
+matchup is not final it is hidden unless Alex gains at least as much this
+week as the opponent does. Final, it shows again.
 
 No info buttons, no help text, every control at least 44px. They are their own
 chunk and stylesheet, fetched only when the switch is on.

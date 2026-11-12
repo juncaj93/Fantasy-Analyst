@@ -75,9 +75,10 @@ CLOUDFLARE_ACCOUNT_ID = ""
 # 2,000 rows a day, weekdays only, never newer than 3 weeks (odds) or 30 days
 # (injury log). Set to "off" and deploy to stop it.
 TRIM_OLD_ROWS = "on"
-# Which Trades screens the site draws (Round 19): "old" today, "new" for the
-# rebuilt screens once Alex has reviewed them on the preview. Change and deploy.
-TRADES_SCREENS = "old"
+# Which Trades screens the site draws (Round 19): "new" since Alex's review of
+# the preview (Offers, Build, Check); "old" brings back the earlier screens.
+# Change and deploy.
+TRADES_SCREENS = "new"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

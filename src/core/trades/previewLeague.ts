@@ -115,6 +115,8 @@ export interface PreviewLeague {
   rates: Map<string, PlayerRate>;
   rosters: (FinderRoster & { reserveIds: string[] })[];
   rosterLimit: number;
+  /** Dermot is your opponent this week, and the matchup is not final. */
+  opponent: { rosterId: number; final: boolean };
 }
 
 /**
@@ -173,6 +175,7 @@ export function previewLeague(week: PreviewWeek = 'normal'): PreviewLeague {
     rates,
     rosters,
     rosterLimit: shape.totalStarters + shape.benchSlots + 2,
+    opponent: { rosterId: 2, final: false },
   };
 }
 

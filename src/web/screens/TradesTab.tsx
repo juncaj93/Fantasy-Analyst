@@ -12,7 +12,8 @@ import { TradesScreen } from './TradesScreen.tsx';
 const TradesScreenV2 = lazy(() => import('./TradesScreenV2.tsx').then((m) => ({ default: m.TradesScreenV2 })));
 
 export function TradesTab({ resetNonce }: { resetNonce: number }) {
-  const { tradesScreens } = useFeatures();
+  const { tradesScreens, known } = useFeatures();
+  if (!known) return <SkeletonRows rows={4} testId="trades-skeleton" />;
   if (tradesScreens !== 'new') return <TradesScreen resetNonce={resetNonce} />;
   return (
     <Suspense fallback={<SkeletonRows rows={4} testId="trades-skeleton" />}>

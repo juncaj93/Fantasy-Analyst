@@ -95,6 +95,7 @@ export class TradeFinderService {
       };
     });
 
+    const opponent = await opponentOf(this.db, { leagueId: league.id, season: league.season, week: prepared.horizon.currentWeek, rosterId: mine.rosterId });
     const result = findTrades({
       horizon: prepared.horizon,
       shape: prepared.shape,
@@ -103,7 +104,35 @@ export class TradeFinderService {
       rosters: finderRosters,
       rosterLimit,
       ...(opts.focus ? { focus: opts.focus } : {}),
+      opponent,
     });
     return { league: named, capability, result, prepared, partners };
+  }
+}
+
+/**
+ * Alex's opponent this week, and whether their matchup is final: one stored
+ * row, the same one Team and Waivers read for the pairing (the matchup
+ * forecast, written when the Matchup screen or its Sunday capture first sees
+ * the week). Null when nobody has looked at this week's matchup yet, or on a
+ * bye: then nothing is marked or hidden. Never asks Sleeper.
+ */
+export async function opponentOf(
+  db: Database,
+  opts: { leagueId: string; season: string; week: number; rosterId: number },
+): Promise<{ rosterId: number; final: boolean } | null> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT opponent_roster_id AS opponent, latest_phase AS phase, settled_at AS settled
+           FROM matchup_forecasts
+          WHERE league_id = ? AND season = ? AND week = ? AND roster_id = ?`,
+      )
+      .bind(opts.leagueId, opts.season, opts.week, opts.rosterId)
+      .first<{ opponent: number | null; phase: string | null; settled: string | null }>();
+    if (!row || row.opponent == null) return null;
+    return { rosterId: Number(row.opponent), final: row.phase === 'final' || row.settled != null };
+  } catch {
+    return null;
   }
 }
