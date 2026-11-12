@@ -32,6 +32,7 @@ import {
 } from '../components/matchup.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { unwindOne } from '../tabReset.ts';
+import { useServerRefresh } from '../serverRefresh.ts';
 
 /**
  * How often the scoreboard is re-read while games are running.
@@ -97,6 +98,18 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   }, [load]);
 
   /*
+   * A pull runs Team's refresh (Round 22, `serverRefresh.ts`): roster, injury
+   * report, Vegas lines and kickoffs, finished on the server even if the phone
+   * leaves the app. The scoreboard reloads once when it lands, or straight
+   * away when there was nothing new to wait for.
+   */
+  const serverRefresh = useServerRefresh('startsit', { onFinished: load, enabled: selected != null });
+  const pull = useCallback(async () => {
+    const reloaded = await serverRefresh.start();
+    if (!reloaded) await load();
+  }, [serverRefresh.start, load]);
+
+  /*
    * The poll, and what switches it off.
    *
    * It stops while the tab is in the background and resumes on the way back,
@@ -158,7 +171,7 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const openable = useCallback((playerId: string) => Boolean(data?.cards[playerId]), [data]);
 
   return (
-    <PullToRefresh onRefresh={load} label="Matchup" testId="matchup-pull" live={data?.gameWindow?.live ?? false}>
+    <PullToRefresh onRefresh={pull} label="Matchup" testId="matchup-pull" live={data?.gameWindow?.live ?? false}>
       <NavBar
         testId="matchup-nav"
         title={data ? `Week ${data.week} Matchup` : 'Matchup'}

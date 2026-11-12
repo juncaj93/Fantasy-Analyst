@@ -14,7 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { inSeason, withoutTiers } from './helpers.ts';
+import { inSeason, stubRefreshJob, withoutTiers } from './helpers.ts';
 
 /**
  * Team, once the draft is over — which is the only state this file is about.
@@ -1070,141 +1070,72 @@ test.describe('the control row, and refresh', () => {
     }
   });
 
+  /*
+   * Round 22: the refresh is a server job (`serverRefresh.ts`). It is stubbed
+   * here for the same reason the old refresh was: a real press writes, and the
+   * viewport projects share one dev server. `tests/refreshJob.test.ts` runs
+   * the real job against a real database.
+   */
   test('refreshes from the button, not only from the pull', async ({ page }) => {
-    let calls = 0;
-    await page.route('**/api/startsit/refresh', async (route) => {
-      calls += 1;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          deduped: false,
-          sources: [{ source: 'sleeper', outcome: 'updated', detail: '1 roster re-read', freshAt: null }],
-          headline: 'Updated',
-          complete: true,
-        }),
-      });
-    });
-
+    const job = await stubRefreshJob(page, { runningChecks: 1 });
     await page.getByTestId('team-refresh').click();
-    await expect(page.getByTestId('refresh-status')).toContainText('Updated', { timeout: 20_000 });
-    expect(calls, 'the button runs the same all-source refresh the pull does').toBe(1);
+    await expect(page.getByTestId('team-updated')).toContainText('Updated', { timeout: 20_000 });
+    expect(job.posts, 'the button starts one start/sit job').toEqual(['startsit']);
     // And the screen it just refreshed is still readable.
     await expect(page.getByTestId('starters-title')).toBeVisible();
   });
 
-  /**
-   * The button, without letting it move the ground under the other tests.
-   *
-   * Pressing it for real is a *write*: it syncs the league from Sleeper,
-   * re-ingests injuries and usage, and asks the odds provider for lines. The
-   * three viewport projects share one dev server and one database, so a real
-   * press in this suite reaches into whatever the other two projects are
-   * reading — which is exactly what happened when this test was first written,
-   * and it took an unrelated draft-room assertion down with it.
-   *
-   * So the response is stubbed here and the server side is left to
-   * `tests/startsit.refresh.test.ts`, which exercises the real orchestrator
-   * against a real database — dedupe, budget refusal, partial failure and all.
-   * What is left for a browser to prove is the part only a browser can: that
-   * the button reports per-source outcomes rather than a bare "done", and that
-   * a partial refresh leaves the page it just refreshed still readable.
-   */
-  const stubRefresh = async (page: Page, sources: { source: string; outcome: string; detail: string }[]) => {
-    await page.route('**/api/startsit/refresh', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          deduped: false,
-          sources: sources.map((s) => ({ ...s, freshAt: null })),
-          headline: sources.some((s) => s.outcome === 'updated') ? 'Updated' : 'Already current',
-          complete: sources.every((s) => s.outcome !== 'unavailable'),
-        }),
-      });
+  test('says when it finished in the header, and adds no line under it', async ({ page }) => {
+    await stubRefreshJob(page, {
+      sources: [
+        { source: 'roster', outcome: 'updated', detail: '1 roster(s) re-read' },
+        { source: 'injury', outcome: 'current', detail: 'checked recently' },
+        { source: 'vegas', outcome: 'updated', detail: '2 game(s) re-priced' },
+        { source: 'schedule', outcome: 'current', detail: 'checked recently' },
+      ],
     });
-  };
-
-  test('reports what each source did, naming the one it has no feed for', async ({ page }) => {
-    await stubRefresh(page, [
-      { source: 'sleeper', outcome: 'updated', detail: '1 roster re-read' },
-      { source: 'injury', outcome: 'current', detail: 'checked 2 min ago' },
-      { source: 'usage', outcome: 'current', detail: 'through week 4' },
-      { source: 'vegas', outcome: 'updated', detail: '2 games re-priced' },
-      { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
-    ]);
-
     await pullToRefresh(page);
-
-    const status = page.getByTestId('refresh-status');
-    await expect(status).toBeVisible({ timeout: 20_000 });
-    await expect(status).toContainText('Updated');
-    // One short line; the sources behind it are a tap away.
-    const box = (await status.boundingBox())!;
-    expect(box.height, 'one line, not a paragraph').toBeLessThanOrEqual(46);
-    await page.getByTestId('refresh-status-toggle').click();
-    // Weather is named rather than quietly missing from the list.
-    await expect(status).toContainText('weather');
-    await expect(status).toContainText('no forecast source connected');
+    const updated = page.getByTestId('league-card').getByTestId('team-updated');
+    await expect(updated).toBeVisible({ timeout: 20_000 });
+    await expect(updated).toHaveText(/^Updated \d{1,2}:\d{2} [AP]M$/);
+    await expect(page.getByTestId('refresh-status')).toHaveCount(0);
   });
 
-  test('leaves the lineup readable when a source could not be refreshed', async ({ page }) => {
-    await stubRefresh(page, [
-      { source: 'sleeper', outcome: 'updated', detail: '1 roster re-read' },
-      { source: 'injury', outcome: 'unavailable', detail: 'injury source did not answer' },
-      { source: 'usage', outcome: 'current', detail: 'through week 4' },
-      { source: 'vegas', outcome: 'blocked', detail: 'monthly entity ceiling reached' },
-      { source: 'weather', outcome: 'skipped', detail: 'no forecast source connected' },
-    ]);
-
+  test('leaves the lineup readable when a source could not be refreshed, with no pop-up', async ({ page }) => {
+    await stubRefreshJob(page, {
+      sources: [
+        { source: 'roster', outcome: 'updated', detail: '1 roster(s) re-read' },
+        { source: 'injury', outcome: 'unavailable', detail: 'injury report did not answer' },
+        { source: 'vegas', outcome: 'blocked', detail: 'monthly entity ceiling reached' },
+        { source: 'schedule', outcome: 'current', detail: 'checked recently' },
+      ],
+    });
     await pullToRefresh(page);
-    const status = page.getByTestId('refresh-status');
-    await expect(status).toBeVisible({ timeout: 20_000 });
-    // The line counts them; the failures are named, not swallowed...
-    await expect(status).toContainText('2 sources behind');
-    await page.getByTestId('refresh-status-toggle').click();
-    await expect(status).toContainText('injury source did not answer');
-    await expect(status).toContainText('monthly entity ceiling reached');
+    await expect(page.getByTestId('team-updated')).toBeVisible({ timeout: 20_000 });
+    // Failures are Data health's to list, quietly; Team says nothing about them.
+    await expect(page.getByText('injury report did not answer')).toHaveCount(0);
+    await expect(page.getByText('monthly entity ceiling reached')).toHaveCount(0);
     // ...and the last-good recommendation is still on screen.
     await expect(page.getByTestId('starters-title')).toBeVisible();
     await expect(page.locator('[data-testid="starter-row"][data-starter="true"]').first()).toBeVisible();
   });
 
   /**
-   * One pull, one request.
+   * One pull, one job.
    *
-   * The guard is a ref rather than the state that paints the spinner, because
-   * state lands a render later and a second pull happens in between. Two pulls
-   * in quick succession are counted at the network, which is the only place the
-   * answer is not a matter of opinion.
+   * A second pull or tap while the job runs joins it: the spinner keeps
+   * spinning, the button cannot be pressed, and only one start reaches the
+   * server, which is the only place the answer is not a matter of opinion.
    */
   test('does not fire a second refresh while one is running', async ({ page }) => {
-    let calls = 0;
-    await page.route('**/api/startsit/refresh', async (route) => {
-      calls += 1;
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          deduped: false,
-          sources: [{ source: 'sleeper', outcome: 'current', detail: 'checked just now', freshAt: null }],
-          headline: 'Already current',
-          complete: true,
-        }),
-      });
-    });
-
+    const job = await stubRefreshJob(page, { runningChecks: 3 });
     await pullToRefresh(page);
+    await expect(page.getByTestId('team-refresh')).toBeDisabled();
+    await expect(page.getByTestId('team-refresh').locator('svg')).toHaveClass(/spin/);
     await pullToRefresh(page);
-    await expect(page.getByTestId('refresh-status')).toBeVisible({ timeout: 20_000 });
-    expect(calls, 'the second pull should have been swallowed by the one in flight').toBe(1);
+    await expect(page.getByTestId('team-updated')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('team-refresh')).toBeEnabled();
+    expect(job.posts, 'the second pull should have joined the one in flight').toHaveLength(1);
   });
 
   /**
