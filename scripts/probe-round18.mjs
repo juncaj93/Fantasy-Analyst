@@ -64,6 +64,13 @@ if (!leagueId) {
 }
 const env = { ...process.env, REPORT_NOW: new Date().toISOString(), LEAGUE_ID: leagueId };
 
+if (STEPS.has('diag')) {
+  heading('Why the app week reads what it reads');
+  const diag = safe(() => ts('scripts/round18-weekdiag.ts', '.', env));
+  console.log(diag);
+  probeRows += readLine(diag, 'week diag');
+}
+
 if (want('timing')) {
   heading('When lines first show up, by game day (Eastern)');
   const timing = safe(() => ts('scripts/round18-lines-timing.ts', '.', env));
