@@ -50,15 +50,15 @@ import type { ScoringProfile } from '../../core/sleeper/scoring.ts';
 import type { Database } from '../db.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { SleeperClient } from '../../core/sleeper/client.ts';
-import type { NflState } from '../../core/sleeper/phase.ts';
 import { resolveWeek } from '../../core/matchup/build.ts';
-import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { TradeValueService, type Prepared } from './tradeValueService.ts';
 import { seasonWeights, totalWeight } from '../../core/tradeValue/restOfSeason.ts';
 import { nearestRejections, rankClosest, type ClosestIdea } from '../../core/trades/closest.ts';
 import { SEASON_GATES } from '../../core/trades/bilateral.ts';
 import { seasonCheckOf } from '../../core/trades/seasonCheck.ts';
+import { readAppNflState } from './appWeek.ts';
 
 /**
  * The season pricing in numbers, for the probe (review T1): which stored weeks
@@ -344,7 +344,7 @@ export class SmartTradeService {
         warnings.push(`player inputs could not be read: ${String(err)}`);
         return [];
       }),
-      wanted ? new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null).catch(() => null) : Promise.resolve(null),
+      wanted ? readAppNflState(this.db).catch(() => null) : Promise.resolve(null),
     ]);
 
     /*

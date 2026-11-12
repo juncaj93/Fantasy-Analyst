@@ -39,9 +39,9 @@ import { InjuryService } from './injuryService.ts';
 import { SleeperSyncService } from './sleeperSync.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { resolveWeek } from '../../core/matchup/build.ts';
-import type { NflState } from '../../core/sleeper/phase.ts';
 import { UsageService } from './usageService.ts';
 import { VegasRefreshService } from './vegasRefresh.ts';
+import { readAppNflState } from './appWeek.ts';
 
 /** Taps closer together than this share one answer. */
 export const DEDUPE_SECONDS = 20;
@@ -113,7 +113,8 @@ const recent = new WeakMap<Database, { at: number; report: StartSitRefreshReport
  */
 export async function refreshPublishedWeek(db: Database, sleeper: SleeperClient, season: string): Promise<number> {
   try {
-    const state = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    /* Round 18: the week the screens show (`appWeek.ts`); on Tuesday and Wednesday that can be one ahead of Sleeper's. */
+    const state = await readAppNflState(db);
     const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
     const report = await new SleeperProjectionService(db, sleeper).refresh(season, week);
     return report.outcome === 'fetched' ? report.rows : 0;

@@ -29,10 +29,12 @@ const db = await d1Http();
 const leagueId =
   process.env.LEAGUE_ID ||
   String((await db.prepare('SELECT id FROM leagues WHERE is_selected = 1 LIMIT 1').first<{ id: string }>())?.id ?? '');
-const state = await new SettingsRepo(db).get<{ season?: string; week?: number } | null>(SETTING_KEYS.nflState, null);
+/* The app's week (Round 18 follow-up): the week every screen shows. Older code has no such read and falls back to Sleeper's. */
+const appState = await import('../src/server/services/appWeek.ts').then((m) => m.readAppNflState(db)).catch(() => null);
+const state = appState ?? (await new SettingsRepo(db).get<{ season?: string; week?: number } | null>(SETTING_KEYS.nflState, null));
 const season = String(state?.season ?? '');
 const week = Number(state?.week ?? 0);
-console.log(`season ${season}, week ${week}`);
+console.log(`season ${season}, app week ${week}, Sleeper week ${(appState as { sleeperWeek?: number } | null)?.sleeperWeek ?? week}`);
 
 const fixtures = await new NflScheduleRepo(db).forWeek(season, week);
 const playing = playingTeams(fixtures);

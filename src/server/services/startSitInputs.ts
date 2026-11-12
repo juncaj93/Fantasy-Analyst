@@ -15,7 +15,7 @@ import { EvidenceRepo } from '../repos/evidence.ts';
 import { VegasEventsRepo } from '../repos/vegasEvents.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { slateWindow } from '../../core/nfl/slateWindow.ts';
-import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import { homeByTeam, indoorByTeam, isOnBye, playingTeams } from '../../core/nfl/schedule.ts';
 import { tableRoofFor } from '../../core/nfl/roofs.ts';
 import type { TeamLines } from '../../core/startsit/staleLine.ts';
@@ -27,9 +27,9 @@ import type { StoredUsageWeek } from '../repos/usage.ts';
 import type { StartSitInput } from '../../core/startsit/engine.ts';
 import type { StartSitMode } from '../../core/startsit/mode.ts';
 import type { DefenseTendencyIndex } from '../../core/startsit/defense.ts';
-import type { NflState } from '../../core/sleeper/phase.ts';
 import { seasonPointsKey, type StoredSeasonPoints } from '../../core/sleeper/weekPoints.ts';
 import type { Database } from '../db.ts';
+import { readAppNflState } from './appWeek.ts';
 
 /**
  * Everything the start/sit engine knows about a set of players.
@@ -148,7 +148,7 @@ export async function startSitInputsFor(
    * would turn one query into forty. `context` is passed in by callers that
    * have already built it for a different endpoint on the same request.
    */
-  const context = opts.context ?? (await buildStartSitContext(db, usageService));
+  const context = opts.context ?? (await buildStartSitContext(db, usageService, opts.now ?? new Date()));
 
   /*
    * The priced kickoff, asked only for the players the fixture list misses.
@@ -376,7 +376,8 @@ export async function buildStartSitContext(
   const [events, defense, state] = await Promise.all([
     new VegasEventsRepo(db).between(from, to).catch(() => []),
     usageService.defenseTendencies().catch(() => new Map() as DefenseTendencyIndex),
-    new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null).catch(() => null),
+    /* The app's week (Round 18): the fixtures, and so the byes, are the week the screens show. */
+    readAppNflState(db, now).catch(() => null),
   ]);
 
   /*

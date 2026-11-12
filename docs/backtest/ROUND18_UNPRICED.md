@@ -42,7 +42,7 @@ out: they are real holes and never a judgment call.
 - **Unpriced and Questionable leading a priced player**, real outcome: gap 0
   to 2 won 29%, gap 2 to 3 won 47%, gap 3 to 5 about 50%.
 
-## The bar chosen: 3.5 (`UNPRICED_TOSSUP_POINTS`, `startsit/tossup.ts`)
+## The bar chosen: 3.5 (`WIDE_TOSSUP_POINTS`, `startsit/tossup.ts`)
 
 A pick whose own number is unpriced needs a 3.5-point lead; under it the call
 is a toss-up. The 2.0 bar is unchanged for everything else, and a priced lead

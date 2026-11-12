@@ -34,7 +34,8 @@ describe('the stadium table behind the fixture list', () => {
       [row('DET', 'GB', true, null), row('GB', 'DET', false, null), row('BUF', 'MIA', true, 'outdoors'), row('MIA', 'BUF', false, 'outdoors')],
       '2026-10-01T00:00:00.000Z',
     );
-    const context = await buildStartSitContext(db);
+    /* Before week 6's games: the app's week is still 6 (`appWeek.ts`). */
+    const context = await buildStartSitContext(db, undefined, new Date('2026-10-08T12:00:00.000Z'));
     expect(context.roofKnown?.has('BUF')).toBe(true);
     expect(context.roofKnown?.has('DET')).toBe(false);
     expect(context.home.get('GB')).toBe(false);

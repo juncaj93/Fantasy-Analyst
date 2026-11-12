@@ -163,6 +163,7 @@ import { DataHealthService } from './services/dataHealthService.ts';
 import { toSnapshotHealth } from '../core/health/snapshot.ts';
 import type { SnapshotDataHealth } from '../core/support/schema.ts';
 import { comparePool, parsePoolTab } from './services/comparePool.ts';
+import { readAppNflState } from './services/appWeek.ts';
 
 export interface AppEnv extends AuthEnv {
   db: Database;
@@ -3508,7 +3509,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * column and never the comparison.
      */
     const positions = new Map(inputs.map((input) => [input.player.id, input.player.position ?? null]));
-    const nflState = await new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    const nflState = await readAppNflState(db);
     const display = await gatherComparisonDisplay(db, ctx.env.sleeper, {
       league,
       profile,

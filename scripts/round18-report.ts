@@ -149,6 +149,13 @@ if (pair) {
 } else {
   line('Compare: (no Best move pair)');
 }
+/* Questionable calls: every toss-up or change whose pick is Questionable, with its lead (Round 18 follow-up). */
+const isQ = (id: string) => /^questionable/i.test(byId.get(id)?.statusFlag ?? '');
+const qCalls = [
+  ...d.swaps.filter((s) => isQ(s.inPlayerId)).map((s) => `Start ${s.inName} (Q) over ${s.outName} at ${s.slot}, +${pts(s.gain)}`),
+  ...tossUps.filter((t) => isQ(t.inPlayerId)).map((t) => `Toss-up lean ${t.inName} (Q) over ${t.outName} at ${t.slot}, ${pts(t.gain)} ahead`),
+];
+line(`Questionable calls: ${qCalls.join('; ') || 'none'}`);
 line(`priced starters: ${d.slots.filter((s) => byId.get(s.playerId ?? '')?.decision?.basis === 'market').length}/${d.slots.length}`);
 line('');
 line(`report rows read: ${source.rowsRead()}`);

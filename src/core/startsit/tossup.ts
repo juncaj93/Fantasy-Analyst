@@ -15,7 +15,8 @@
  *  - The gap is measured on the ranking number, so a Sleeper-only player
  *    carries his minus 1 here as everywhere (`rankingNumber`).
  *  - Under {@link TOSSUP_POINTS}: a toss-up. When the higher number is
- *    Sleeper-only (no Vegas line), under {@link UNPRICED_TOSSUP_POINTS}.
+ *    Sleeper-only (no Vegas line) or he is Questionable, under
+ *    {@link WIDE_TOSSUP_POINTS}.
  *    The app still names its lean and shows both numbers, and says "Toss-up". It is never a Best move headline,
  *    never a lineup change, never a "Pick up and start" card.
  *  - Never a toss-up when the player being replaced is a real hole: Out, IR,
@@ -40,9 +41,10 @@ import { spreadPoints, type SpreadReading } from './spread.ts';
 export const TOSSUP_POINTS = 2.0;
 
 /**
- * The wider bar when the pick rests on a number with no Vegas line (Round 18,
- * 11 November 2026). Under this gap, a lean whose own number is Sleeper-only
- * is a toss-up, not a pick.
+ * The wider bar for a shaky pick (Round 18, 11 November 2026): the lean's own
+ * number has no Vegas line, or the lean is Questionable (Alex's decision the
+ * same evening, with or without a line). Under this gap the call is a toss-up
+ * lean, not a pick. One constant for both, no second copy.
  *
  * Measured on the Round 16 backtest (`docs/backtest/round16-data.json`,
  * weeks 1 to 9, `docs/backtest/ROUND18_UNPRICED.md`): after the minus 1 an
@@ -50,14 +52,25 @@ export const TOSSUP_POINTS = 2.0;
  * (same-confidence gap 1.96, noise up to 2.68). An unpriced lead of a
  * Questionable player needs 2.87 even when he plays (noise up to 3.50), and
  * far more when a no-show counts as zero. The bar sits at the top of that
- * range. Only the lean's own number matters: a priced lead over an unpriced
- * player keeps the 2.0 bar (it wins at least as often).
+ * range. A priced Questionable lead needs 2.75 when he plays (noise up to
+ * 3.64) and about 4.9 when a no-show counts as zero, so 3.5 covers both kinds
+ * of shaky pick. Only the lean's own facts matter: a healthy, priced lead over
+ * an unpriced or Questionable player keeps the 2.0 bar.
+ *
+ * Questionable still counts full value with its chip; this changes only how
+ * big a lead must be before it is called a pick. Real holes (empty slot, bye,
+ * Out, Doubtful, IR) are never toss-ups, whatever the bar.
  */
-export const UNPRICED_TOSSUP_POINTS = 3.5;
+export const WIDE_TOSSUP_POINTS = 3.5;
 
-/** The bar a lean must clear: wider when his own number has no Vegas line. */
-export function tossUpBar(lean: { borrowed?: boolean }): number {
-  return lean.borrowed ? UNPRICED_TOSSUP_POINTS : TOSSUP_POINTS;
+/** Whether a designation is Questionable, as every start/sit screen reads it. */
+export function isQuestionable(designation: string | null | undefined): boolean {
+  return (designation ?? '').trim().toLowerCase() === 'questionable';
+}
+
+/** The bar a lean must clear: wider when his own number has no Vegas line or he is Questionable. */
+export function tossUpBar(lean: { borrowed?: boolean; questionable?: boolean }): number {
+  return lean.borrowed || lean.questionable ? WIDE_TOSSUP_POINTS : TOSSUP_POINTS;
 }
 
 /** One side of a start/sit call. */
@@ -66,6 +79,8 @@ export interface TossUpSide {
   points: number | null;
   /** A Sleeper-only number: ranks one point lower. */
   borrowed?: boolean;
+  /** Questionable on the injury report: as the lean, he needs {@link WIDE_TOSSUP_POINTS}. */
+  questionable?: boolean;
   /** Out, IR, suspended, Doubtful, on a bye, or an empty slot. See {@link isRealHole}. */
   hole?: boolean;
 }
@@ -113,8 +128,9 @@ export function waitsOnLine(lean: TossUpSide, other: TossUpSide): boolean {
   const gap = tossUpGap(lean, other);
   if (gap == null) return false;
   const pick = gap >= 0 ? lean : other;
-  const unpriced = pick.borrowed === true;
-  return unpriced && Math.abs(gap) + 1e-9 >= TOSSUP_POINTS;
+  /* Questionable is a second reason, so the line is not the only one. */
+  const onlyTheLine = pick.borrowed === true && pick.questionable !== true;
+  return onlyTheLine && Math.abs(gap) + 1e-9 >= TOSSUP_POINTS;
 }
 
 /** Whether a whole-lineup gain clears the bar. The same bar, for gains already summed. */

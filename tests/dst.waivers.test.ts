@@ -266,7 +266,8 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     );
     await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
 
-    const context = await buildStartSitContext(db);
+    /* Week 3's Wednesday: the app's week is still 3 (`appWeek.ts` rolls on the Tuesday after). */
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-02T12:00:00.000Z'));
 
     /*
      * The whole point of it living on the context rather than on each route: a
@@ -433,7 +434,7 @@ describe('the planner’s inputs, assembled from what is stored', () => {
     );
     await new SettingsRepo(db).set(SETTING_KEYS.nflState, { season: '2026', seasonType: 'regular', week: 3 });
 
-    const context = await buildStartSitContext(db);
+    const context = await buildStartSitContext(db, undefined, new Date('2026-09-02T12:00:00.000Z'));
 
     expect(context.indoor.get('DET')).toBe(true);
     expect(context.indoor.get('CHI')).toBe(true);
