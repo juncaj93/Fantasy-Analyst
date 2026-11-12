@@ -69,13 +69,14 @@ heading('2. Team lineup: Game total and Team points per player (what Compare sho
 try {
   const leagues = await getJson('/api/leagues');
   const list = Array.isArray(leagues) ? leagues : (leagues?.leagues ?? []);
-  const league = list.find((l) => l.selected) ?? list[0];
+  const league = list.find((l) => l.isSelected) ?? list[0];
   const lineup = league ? await getJson(`/api/leagues/${league.id}/lineup`) : null;
   const evaluations = [];
   const walk = (v) => {
     if (!v || typeof v !== 'object') return;
-    if (Array.isArray(v.evaluations)) evaluations.push(...v.evaluations);
-    for (const k of Object.keys(v)) if (k !== 'evaluations' && typeof v[k] === 'object') walk(v[k]);
+    // The lineup answer lists players under `starters` and `bench`.
+    for (const key of ['starters', 'bench', 'evaluations']) if (Array.isArray(v[key])) evaluations.push(...v[key]);
+    for (const k of Object.keys(v)) if (!['starters', 'bench', 'evaluations'].includes(k) && typeof v[k] === 'object') walk(v[k]);
   };
   walk(lineup);
   const seen = new Set();
