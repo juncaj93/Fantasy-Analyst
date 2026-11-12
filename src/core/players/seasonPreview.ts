@@ -16,7 +16,8 @@ import type { Designation } from '../injury/model.ts';
 import type { PlayerRate } from '../tradeValue/rate.ts';
 import { weeklyAvailability } from '../tradeValue/availability.ts';
 import { previewLeague } from '../trades/previewLeague.ts';
-import { injuryRead, lastGames, nextWeeks, seasonValue, tradeTargets, type BoardRoster } from './inseason.ts';
+import { injuryRead, lastGames, nextWeeks, overFreeAgent, seasonValue, tradeTargets, type BoardRoster } from './inseason.ts';
+import { byOverFreeAgent } from './seasonOrder.ts';
 import type { SeasonBoard, SeasonCard, SeasonRow } from './seasonWire.ts';
 
 /** Who is hurt in the preview, by existing preview id. */
@@ -104,6 +105,7 @@ function build(): PreviewData {
     status: TEAM_WORD[rate.designation] ?? null,
     ownerRosterId: owner.get(rate.playerId) ?? null,
     value: seasonValue(rate, L.horizon),
+    overFreeAgent: overFreeAgent(rate, L.replacement, L.horizon),
     injury: injuryRead(rate, L.horizon),
     trade: targets.get(rate.playerId) ?? null,
     draftRank: i + 1,
@@ -113,7 +115,7 @@ function build(): PreviewData {
     last30: fixed(`${rate.playerId}.30`, 4),
     lifetime: fixed(`${rate.playerId}.life`, 6),
   }));
-  rows.sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.name.localeCompare(b.name));
+  rows.sort(byOverFreeAgent);
 
   return {
     rates,

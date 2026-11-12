@@ -16,6 +16,7 @@ import { isOutThisWeek } from '../injury/weekAvailability.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import type { PlayerRate } from '../tradeValue/rate.ts';
+import { seasonValueOver, type ReplacementLevels } from '../tradeValue/evaluate.ts';
 import type { TradeHorizon } from '../tradeValue/weeks.ts';
 import { isRareTrader, type ActivityClass } from '../trades/activity.ts';
 import { perWeekValue, seasonWeights } from '../value/restOfSeason.ts';
@@ -49,6 +50,21 @@ export interface BoardRoster {
 export function seasonValue(rate: PlayerRate | undefined, horizon: Pick<TradeHorizon, 'weeks' | 'playoffWeeks'>): number | null {
   if (!rate || rate.rate == null || horizon.weeks.length === 0) return null;
   return perWeekValue(rate.rate, rate.weekly, seasonWeights(horizon));
+}
+
+/**
+ * What the list ranks by: rest-of-season points over the free agent at his
+ * position, Trades' own `seasonValueOver` with the same week weights. A
+ * quarterback's 28 points a week is worth less in a one-quarterback league
+ * than it looks, because the free-agent quarterback scores 15.
+ */
+export function overFreeAgent(
+  rate: PlayerRate | undefined,
+  replacement: ReplacementLevels,
+  horizon: Pick<TradeHorizon, 'weeks' | 'playoffWeeks'>,
+): number | null {
+  if (!rate || horizon.weeks.length === 0) return null;
+  return seasonValueOver(rate, replacement, seasonWeights(horizon));
 }
 
 /**
@@ -148,7 +164,7 @@ export function tradeTargets(args: {
         overId: bumped?.id ?? null,
         over,
         overValue: bumped ? round1(bumped.value) : null,
-        reason: over ? `Starts at ${slot} over ${over}, +${gain.toFixed(1)} a week` : `Starts at ${slot} for you, +${gain.toFixed(1)} a week`,
+        reason: over ? `Starts at ${slot}, ${over} to the bench, +${gain.toFixed(1)} a week` : `Starts at ${slot} for you, +${gain.toFixed(1)} a week`,
       });
     }
   }

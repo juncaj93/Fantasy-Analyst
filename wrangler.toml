@@ -80,9 +80,10 @@ TRIM_OLD_ROWS = "on"
 # Change and deploy.
 TRADES_SCREENS = "new"
 # The in-season Players tab (Round 24): "on" draws it once the draft is over
-# (sorted by rest-of-season value, Trade targets and Injured filters, a fuller
-# card). "off" keeps today's tab. Off until Alex has seen the preview and says go.
-PLAYERS_INSEASON = "off"
+# (sorted by rest-of-season value over a free agent, Trade targets and Injured
+# filters, a fuller card). On since Alex's go, 12 November 2026. To go back to
+# today's tab, set this to "off" and deploy; draft mode is never affected.
+PLAYERS_INSEASON = "on"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

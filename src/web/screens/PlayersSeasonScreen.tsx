@@ -16,6 +16,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type LeagueSummary } from '../api.ts';
 import type { SeasonBoard, SeasonCard, SeasonRow, Willingness } from '../../core/players/seasonWire.ts';
+import { byOverFreeAgent, byWillingness } from '../../core/players/seasonOrder.ts';
 import { FLX_FILTER, positionMatchesFilter } from '../../core/sleeper/eligibility.ts';
 import { buildRosterShape, startablePositions } from '../../core/sleeper/rosterShape.ts';
 import { ANYONE_OWNER, matchesOwner, parseOwnerFilter, resolveOwnerFilter, type OwnerTeam } from '../../core/roster/ownership.ts';
@@ -60,6 +61,7 @@ function fromDraftList(p: DraftListItem): SeasonRow {
     status: p.status,
     ownerRosterId: p.ownerRosterId ?? null,
     value: null,
+    overFreeAgent: null,
     injury: null,
     trade: null,
     draftRank: p.draftRank,
@@ -79,7 +81,7 @@ function fold(text: string): string {
     .toLowerCase();
 }
 
-const byValue = (a: SeasonRow, b: SeasonRow) => (b.value ?? -1) - (a.value ?? -1) || a.name.localeCompare(b.name);
+const byValue = byOverFreeAgent<SeasonRow>;
 const byDraft = (a: SeasonRow, b: SeasonRow) => (a.adjustedRank ?? Infinity) - (b.adjustedRank ?? Infinity) || byValue(a, b);
 
 export function PlayersSeasonScreen({
@@ -137,8 +139,12 @@ export function PlayersSeasonScreen({
   useEffect(() => setOwner(ANYONE_OWNER), [leagueId]);
   useEffect(() => setShown(PAGE), [query, position, owner, view, sort]);
 
-  /* A search that finds nobody on the board asks the draft list, so anybody can be found. */
-  const boardIds = useMemo(() => new Set((board?.rows ?? []).map((r) => r.id)), [board]);
+  /*
+   * A search also asks the draft list's server search, which forgives a typo
+   * and reaches every player. A player on the board comes back as his board
+   * row; the rest as plain rows with no value.
+   */
+  const boardById = useMemo(() => new Map((board?.rows ?? []).map((r) => [r.id, r] as const)), [board]);
   useEffect(() => {
     const q = query.trim();
     if (!searchBeyond || q.length < 2) {
@@ -150,14 +156,14 @@ export function PlayersSeasonScreen({
       const league = leagueId ? `&leagueId=${encodeURIComponent(leagueId)}` : '';
       api
         .get<{ players: DraftListItem[] }>(`/api/players?q=${encodeURIComponent(q)}${league}&limit=20&offset=0`)
-        .then((res) => live && setExtra(res.players.filter((p) => !boardIds.has(p.id)).map(fromDraftList)))
+        .then((res) => live && setExtra(res.players.map((p) => boardById.get(p.id) ?? fromDraftList(p))))
         .catch(() => live && setExtra([]));
     }, 250);
     return () => {
       live = false;
       window.clearTimeout(handle);
     };
-  }, [query, leagueId, boardIds, searchBeyond]);
+  }, [query, leagueId, boardById, searchBeyond]);
 
   useEffect(() => {
     if (resetNonce === 0) return;
@@ -193,12 +199,17 @@ export function PlayersSeasonScreen({
     for (const r of [...all, ...extra]) if (r.ownerRosterId != null) owned.set(r.id, r.ownerRosterId);
     const resolved = resolveOwnerFilter(ownerFilter, teams);
     const q = fold(query.trim());
-    const pool = q ? [...all.filter((r) => fold(r.name).includes(q)), ...extra] : all;
-    return pool
-      .filter((r) => position === ALL_FILTER || positionMatchesFilter(r.position, position))
-      .filter((r) => matchesOwner(r.id, resolved, owned))
-      .filter((r) => (view === 'trade' ? r.trade != null : view === 'injured' ? r.injury != null : true))
-      .sort(sort === 'value' ? byValue : byDraft);
+    const keep = (r: SeasonRow) =>
+      (position === ALL_FILTER || positionMatchesFilter(r.position, position)) &&
+      matchesOwner(r.id, resolved, owned) &&
+      (view === 'trade' ? r.trade != null : view === 'injured' ? r.injury != null : true);
+    /* Trade targets: Likely first, then Maybe, then Unlikely; the sort decides within each. */
+    const order = (a: SeasonRow, b: SeasonRow) => (view === 'trade' ? byWillingness(a, b) : 0) || (sort === 'value' ? byValue(a, b) : byDraft(a, b));
+    if (!q) return all.filter(keep).sort(order);
+    /* Names that contain the search first, in the list's order; then the server's other matches, best match first. */
+    const direct = all.filter((r) => fold(r.name).includes(q) && keep(r)).sort(order);
+    const seen = new Set(direct.map((r) => r.id));
+    return [...direct, ...extra.filter((r) => !seen.has(r.id) && keep(r))];
   }, [board, extra, query, position, owner, teams, view, sort]);
 
   const open = openId == null ? null : ([...(board?.rows ?? []), ...extra].find((r) => r.id === openId) ?? null);
@@ -323,7 +334,7 @@ export function PlayersSeasonScreen({
         <>
           <div className="list-head" data-testid="players-rank-head">
             <span className="list-head-rank">Rank</span>
-            <span className="list-head-note">{sort === 'value' ? 'Rest of season, points a week' : 'Draft order, moved by your research'}</span>
+            <span className="list-head-note">{sort === 'value' ? 'Rest of season, points over a free agent' : 'Draft order, moved by your research'}</span>
           </div>
           <div className="dense-group" role="list" aria-label={`Players, by ${SORT_LABEL[sort].toLowerCase()}`} data-testid="players-list">
             {rows.slice(0, shown).map((r, i) => (
@@ -341,7 +352,7 @@ export function PlayersSeasonScreen({
                   testId="player-search-row"
                   cluster
                   metrics={[
-                    { label: 'Value', testId: 'p2-value', value: r.value == null ? <span className="faint">—</span> : r.value.toFixed(1) },
+                    { label: 'Value', testId: 'p2-value', value: r.overFreeAgent == null ? <span className="faint">—</span> : r.overFreeAgent.toFixed(1) },
                     { label: '7d', value: <SignedValue net={r.last7} /> },
                     { label: '30d', value: <SignedValue net={r.last30} /> },
                     {
