@@ -164,7 +164,21 @@ optimal for slot eligibility. On top of it:
 
 ### Refresh
 
-`POST /api/startsit/refresh` orchestrates the services that already own each
+Since Round 22 (November 2026) the screens use `POST /api/refresh` (`kind`
+`startsit` or `waivers`), a job the server finishes on its own: the tap writes
+one settings row and answers at once, the work runs in the Worker's
+`waitUntil` slot so it survives the phone leaving the app, and the screens read
+`GET /api/refresh/status` while it runs and when they come back. The start/sit
+job refreshes only what decides a lineup (roster and starters from Sleeper, the
+injury report, Vegas lines, kickoffs), all at once, each skipped inside its
+freshness window, under a 20-second deadline per source. A second tap joins the
+running job, or the one that finished in the last 20 seconds. The Vegas pass
+uses a copy of the provider that never sleeps out the plan's per-minute limit;
+games past the tenth request are left for the next pass. The job records D1's
+own rows read and written. See `server/services/refreshJob.ts`.
+
+`POST /api/startsit/refresh` (the old, blocking refresh) is kept for a phone
+still running an older page. It orchestrates the services that already own each
 source. It re-asks a source only past that source's on-demand staleness
 threshold, collapses taps inside 20 seconds, catches each source separately, and
 creates no scheduled work. The Vegas budget layer is called exactly as the cron

@@ -17,7 +17,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { withoutTiers } from './helpers.ts';
+import { stubRefreshJob, withoutTiers } from './helpers.ts';
 
 /**
  * The app, told the regular season is under way.
@@ -315,19 +315,7 @@ test.describe('the waivers page, as an older payload draws it', () => {
     const labels = (await page.locator('button:visible').allInnerTexts()).map((t) => t.trim().toLowerCase());
     expect(labels.filter((l) => l === 'refresh')).toHaveLength(0);
 
-    let sleeper = 0;
-    let odds = 0;
-    await page.route('**/api/leagues/*/waivers/refresh', async (route) => {
-      sleeper += 1;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ transactions: null, trending: null, refreshedAt: new Date().toISOString() }),
-      });
-    });
-    page.on('request', (request) => {
-      if (request.url().includes('/api/startsit/refresh')) odds += 1;
-    });
+    const job = await stubRefreshJob(page);
 
     const box = (await page.getByTestId('waivers-pull').boundingBox())!;
     const x = box.x + box.width / 2;
@@ -337,8 +325,9 @@ test.describe('the waivers page, as an older payload draws it', () => {
     for (const step of [12, 60, 120, 190]) await page.mouse.move(x, y + step);
     await page.mouse.up();
 
-    await expect.poll(() => sleeper, { timeout: 10_000 }).toBe(1);
-    expect(odds).toBe(0);
+    // Round 22: the Waivers job (Sleeper only), never the start/sit job that buys odds.
+    await expect.poll(() => job.posts.length, { timeout: 10_000 }).toBe(1);
+    expect(job.posts).toEqual(['waivers']);
   });
 
   /**

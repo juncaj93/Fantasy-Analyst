@@ -21,7 +21,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type LeagueSummary, type WaiverAdvice, type WaiverRefreshReport } from '../api.ts';
+import { api, type LeagueSummary, type WaiverAdvice } from '../api.ts';
+import { formatUpdated, laterOf, useServerRefresh } from '../serverRefresh.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { budgetChip, DependentClaims, NoMoveCard, WaiverPlanCard, WaiverRow } from '../components/waivers.tsx';
@@ -85,26 +86,24 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   }, [load]);
 
   /*
-   * Sleeper, and nothing else.
+   * Sleeper, and nothing else, now as a server job (Round 22).
    *
-   * The trending lists and this week's and last week's transactions: about
-   * four Sleeper requests and no paid provider. This used to run the start/sit
-   * refresh, which buys odds; the props behind the Vegas yardstick keep their
-   * own schedule and budget, and nothing on this screen spends it. The pull
-   * gesture and the Refresh control below do the same thing.
+   * League moves, the trending lists, this week's projections and last week's
+   * points: the same Sleeper-only sources as before, no paid provider. The job
+   * finishes on the server even if the phone leaves the app, each source is
+   * skipped when it was read a moment ago, and the board reloads itself when
+   * it is done. The pull gesture and the button do the same thing.
    */
-  const [refreshing, setRefreshing] = useState(false);
+  const serverRefresh = useServerRefresh('waivers', {
+    onFinished: load,
+    onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+    enabled: selected != null,
+  });
+  const refreshing = serverRefresh.busy;
   const refresh = useCallback(async () => {
     if (!selected) return;
-    setRefreshing(true);
-    try {
-      await api.post<WaiverRefreshReport>(`/api/leagues/${selected.id}/waivers/refresh`, {});
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-    await load();
-    setRefreshing(false);
-  }, [load, selected]);
+    await serverRefresh.start();
+  }, [selected, serverRefresh.start]);
 
   const board = useMemo(() => (advice?.found ? buildWaiverBoard(advice) : null), [advice]);
 
@@ -170,6 +169,9 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
 
 
 
+  /* When the board's Sleeper inputs were last read, or a refresh last confirmed them. */
+  const updatedAt = laterOf(advice?.updatedAt ?? null, serverRefresh.finishedAt);
+
   return (
     <PullToRefresh onRefresh={refresh} label="Waivers" testId="waivers-pull" live={advice?.gameWindow?.live ?? false}>
       {/*
@@ -185,7 +187,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           advice?.found ? (
             <>
               <span data-testid="waivers-updated">
-                {advice.updatedAt ? `Updated ${formatUpdated(advice.updatedAt)}` : 'Not updated yet'}
+                {updatedAt ? `Updated ${formatUpdated(updatedAt)}` : 'Not updated yet'}
               </span>
               {/* The wallet, one muted fact beside the time. */}
               {budgetChip(advice.faab ?? null) ? <span data-testid="waivers-budget"> · {budgetChip(advice.faab ?? null)}</span> : null}
@@ -367,19 +369,5 @@ export function tierNoMove(tiers: WaiverTiersView): NoMoveSummary {
   };
 }
 
-/**
- * `5:00 AM` today, `Tue 5:00 AM` this week, `Sep 23` before that.
- *
- * In the reader's own clock. The instant is the server's; the words are the
- * phone's.
- */
-export function formatUpdated(iso: string, now: Date = new Date()): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return 'recently';
-  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const sameDay = at.toDateString() === now.toDateString();
-  if (sameDay) return time;
-  const days = (now.getTime() - at.getTime()) / 86_400_000;
-  if (days < 6) return `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
-  return at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
+/* `formatUpdated` lives with the shared refresh now; re-exported for older imports. */
+export { formatUpdated } from '../serverRefresh.ts';

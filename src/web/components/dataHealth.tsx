@@ -39,7 +39,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, type D1QuotaView, type DataHealthView, type SourceHealth, type StartSitRefreshReport } from '../api.ts';
+import { api, type D1QuotaView, type DataHealthView, type SourceHealth } from '../api.ts';
+import { formatUpdated, useServerRefresh } from '../serverRefresh.ts';
 import { Loading, Notice } from './common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon, PulseIcon } from './icons.tsx';
 import { ListGroup, ListRow, PushScreen } from './native.tsx';
@@ -135,49 +136,32 @@ export function DataHealthRow({ onOpen }: { onOpen: () => void }) {
 export function DataHealthScreen({ onBack }: { onBack: () => void }) {
   const { health, reload } = useDataHealth();
   const [technical, setTechnical] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [report, setReport] = useState<StartSitRefreshReport | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   /**
-   * The control this screen did not have.
+   * Refresh now: the same server job Team's button starts (Round 22).
    *
-   * Every source above was refreshable only by a clock. Vegas lines run on two
-   * weekend crons, so a fix deployed on a Monday cannot reach a screen until
-   * Saturday; the roster ran on no clock at all until this release. In between,
-   * the only way to ask was a pull down the Team or Waivers screen — a gesture
-   * on a different screen from the one reporting the staleness, and one an
-   * earlier session told the owner was a button in Setup that has never
-   * existed. This is that button, on the screen naming the stale rows.
-   *
-   * It calls the orchestrator the pull gesture calls and no endpoint of its own.
-   * That matters more than the saving: `/api/startsit/refresh` is where the
-   * dedupe, the per-source age gates and the odds budget's refusal all live, so
-   * a second entry point with its own idea of any of them is exactly how a
-   * screen starts disagreeing with the one next door. What is new here is the
-   * caller, not the behaviour.
-   *
-   * It never claims more than it did. `report.sources` is the orchestrator's own
-   * per-source outcome, printed verbatim — including `blocked`, which is the
-   * answer a reader needs when the month's odds allowance is spent and the
-   * lines on screen are the last ones this app is going to buy.
+   * It finishes on the server even if the phone leaves, and the rows below are
+   * that job's own per-source outcome, printed verbatim, including `blocked`
+   * when the month's odds allowance is spent. This is where a source that
+   * failed on any screen's refresh shows up; no screen pops it up.
    */
+  const serverRefresh = useServerRefresh('startsit', {
+    onFinished: reload,
+    onError: (err) => setFailure(err instanceof Error ? err.message : String(err)),
+  });
+  const refreshing = serverRefresh.busy;
+  const report = serverRefresh.job?.state === 'done' ? serverRefresh.job : null;
+  /* The Waivers screen's own job: only its problems are listed, under the rows above. */
+  const waiverRefresh = useServerRefresh('waivers', { onFinished: () => undefined });
+  const waiverProblems =
+    waiverRefresh.job?.state === 'done'
+      ? waiverRefresh.job.sources.filter((source) => source.outcome === 'unavailable' || source.outcome === 'blocked')
+      : [];
   const refreshNow = useCallback(async () => {
-    setRefreshing(true);
     setFailure(null);
-    try {
-      setReport(await api.post<StartSitRefreshReport>('/api/startsit/refresh', {}));
-    } catch (err) {
-      setReport(null);
-      setFailure(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRefreshing(false);
-      // The rows are re-read whatever happened: a refresh that failed half way
-      // still moved the sources it reached, and leaving the old ages on screen
-      // would misreport the ones that did land.
-      await reload();
-    }
-  }, [reload]);
+    await serverRefresh.start();
+  }, [serverRefresh.start]);
 
   return (
     <PushScreen
@@ -224,8 +208,10 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
               label={refreshing ? 'Refreshing…' : 'Refresh now'}
               detail={
                 refreshing
-                  ? 'Asking Sleeper for your roster, then the injury, usage and Vegas feeds.'
-                  : 'Re-reads your roster from Sleeper and asks for fresh injury, usage and Vegas lines. Games already priced this month are not bought again.'
+                  ? 'Roster, injury report, Vegas lines and kickoffs.'
+                  : report?.finishedAt
+                    ? `Last run ${formatUpdated(report.finishedAt)}`
+                    : 'Roster, injury report, Vegas lines and kickoffs.'
               }
               value={refreshing ? undefined : 'Run'}
               onClick={refreshing ? undefined : () => void refreshNow()}
@@ -246,6 +232,17 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
                 dataState={source.outcome}
                 state={<StateMark state={source.outcome === 'updated' ? 'current' : source.outcome} />}
                 label={REFRESH_SOURCE_LABELS[source.source] ?? source.source}
+                detail={source.detail}
+                value={source.outcome}
+              />
+            ))}
+            {waiverProblems.map((source) => (
+              <ListRow
+                key={`waivers-${source.source}`}
+                testId={`data-health-refresh-waivers-${source.source}`}
+                dataState={source.outcome}
+                state={<StateMark state={source.outcome} />}
+                label={`Waivers: ${REFRESH_SOURCE_LABELS[source.source] ?? source.source}`}
                 detail={source.detail}
                 value={source.outcome}
               />
@@ -322,9 +319,15 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
  */
 const REFRESH_SOURCE_LABELS: Record<string, string> = {
   sleeper: 'Your roster',
-  injury: 'Injuries',
+  roster: 'Your roster',
+  injury: 'Injury report',
   usage: 'Usage',
   vegas: 'Vegas lines',
+  schedule: 'Kickoffs',
+  transactions: 'League moves',
+  trending: 'Trending adds and drops',
+  projections: 'This week\'s projections',
+  points: 'Last week\'s points',
   weather: 'Weather',
 };
 

@@ -32,7 +32,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { centreOf, exploreMarket, inSeason, pastTheSettle, swipeSheetAway, touchDrag } from './helpers.ts';
+import { centreOf, exploreMarket, inSeason, pastTheSettle, stubRefreshJob, swipeSheetAway, touchDrag } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -195,7 +195,8 @@ async function pullScreen(page: Page, testId: string): Promise<void> {
 function watchRequests(page: Page, endpoint: string): string[] {
   const seen: string[] = [];
   page.on('request', (r) => {
-    if (r.url().includes(endpoint)) seen.push(r.url());
+    // Not the Round 22 refresh status read, which shares `/api/refresh`'s prefix.
+    if (r.url().includes(endpoint) && !r.url().includes('/api/refresh/status')) seen.push(r.url());
   });
   return seen;
 }
@@ -272,7 +273,7 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     await expect(page.getByTestId('weekly-sheet')).toBeVisible();
     await settled(page, 'sheet-grip');
 
-    const requests = watchRequests(page, '/api/startsit/refresh');
+    const requests = watchRequests(page, '/api/refresh');
     await watchPulls(page);
     await swipeSheetAway(page, { over: '.sheet-grip' });
 
@@ -454,21 +455,8 @@ test.describe('and gives it straight back', () => {
     await page.goto('/');
     await page.getByTestId('tab-team').click();
     await expect(page.getByTestId('team-pull')).toBeVisible();
-    await page.route('**/api/startsit/refresh', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          deduped: false,
-          sources: [{ source: 'sleeper', outcome: 'current', detail: 'checked just now', freshAt: null }],
-          headline: 'Already current',
-          complete: true,
-        }),
-      });
-    });
-    const requests = watchRequests(page, '/api/startsit/refresh');
+    await stubRefreshJob(page);
+    const requests = watchRequests(page, '/api/refresh');
     await watchPulls(page);
     await pullScreen(page, 'team-pull');
 

@@ -26,6 +26,7 @@ import { toEmailMessage } from '../core/newsletter/source.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
 import { SportsGameOddsProvider } from '../core/vegas/sportsGameOddsProvider.ts';
+import { RequestPacer } from '../core/vegas/pacer.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import { createApp, type AppEnv } from '../server/app.ts';
 import { uncaughtBody } from '../server/http/router.ts';
@@ -142,9 +143,18 @@ export interface WorkerEnv {
 
 const app = createApp();
 
-function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike): VegasProvider {
+function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike, opts: { quick?: boolean } = {}): VegasProvider {
   if (env.VEGAS_PROVIDER === 'sportsgameodds') {
-    return new SportsGameOddsProvider({ apiKey: env.SPORTSGAMEODDS_API_KEY, fetch: fetchImpl });
+    /*
+     * Round 22: `quick` is the background refresh's copy. Same key, same
+     * ten-a-minute ceiling, but it never sleeps out the minute: a request past
+     * the tenth is not sent and is left for the next pass, as a refusal is.
+     */
+    return new SportsGameOddsProvider({
+      apiKey: env.SPORTSGAMEODDS_API_KEY,
+      fetch: fetchImpl,
+      ...(opts.quick ? { pacer: new RequestPacer({ maxWaitMs: 0 }) } : {}),
+    });
   }
   if (env.VEGAS_PROVIDER === 'the-odds-api') {
     return new OddsApiProvider({ apiKey: env.ODDS_API_KEY, fetch: fetchImpl });
@@ -173,6 +183,7 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     ...(ctx ? { waitUntil: (task: Promise<unknown>) => ctx.waitUntil(task) } : {}),
     sleeper: fetchImpl ? new SleeperClient({ fetch: fetchImpl }) : new SleeperClient(),
     vegas: buildVegasProvider(env, fetchImpl),
+    ...(ctx ? { quickVegas: buildVegasProvider(env, fetchImpl, { quick: true }) } : {}),
     APP_PASSPHRASE: env.APP_PASSPHRASE,
     SESSION_SECRET: env.SESSION_SECRET,
     inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
