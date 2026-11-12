@@ -117,6 +117,18 @@ export interface WorkerEnv {
    */
   TRIM_OLD_ROWS?: string;
   /**
+   * Which Trades screens the site draws (Round 19): `"new"` for the rebuilt
+   * screens, anything else for today's. The switch Alex flips once he has
+   * reviewed the preview.
+   */
+  TRADES_SCREENS?: string;
+  /**
+   * Set only on the preview upload (`preview.yml`, mode `trades`): the
+   * Trades screens answer from a made-up league, behind a PIN. Never set on
+   * the live site.
+   */
+  PREVIEW?: string;
+  /**
    * A read-only Cloudflare API token with **Account Analytics: Read** and
    * nothing else.
    *
@@ -167,6 +179,8 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     releaseSha: env.RELEASE_SHA ?? null,
     cloudflareAccountId: env.CLOUDFLARE_ACCOUNT_ID ?? null,
     cloudflareAnalyticsToken: env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
+    tradesScreens: env.TRADES_SCREENS === 'new' ? 'new' : 'old',
+    preview: env.PREVIEW === 'trades' ? 'trades' : null,
   };
 }
 

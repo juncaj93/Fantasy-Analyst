@@ -10,6 +10,14 @@ const DRAFT_SCREEN_MODULES = ['/web/screens/DraftScreen.tsx', '/web/components/m
 /** The modules that make a chunk the Setup screen's own (October 2026). See `chunkFileNames`. */
 const SETUP_SCREEN_MODULES = ['/web/screens/SetupScreen.tsx', '/web/screens/ReviewScreen.tsx'];
 
+/*
+ * The rebuilt Trades screens (Round 19), fetched only when the site's
+ * TRADES_SCREENS switch is on, and the preview shell, built only for the
+ * preview upload. Their own chunks, budgeted in perf-budgets.json.
+ */
+const TRADES_V2_MODULES = ['/web/screens/TradesScreenV2.tsx', '/web/components/trades2/'];
+const PREVIEW_MODULES = ['/web/preview/'];
+
 export default defineConfig({
   plugins: [react()],
   root: r('./src/web'),
@@ -70,7 +78,18 @@ export default defineConfig({
               ? 'assets/draft-[hash].js'
               : chunk.moduleIds.some((id) => SETUP_SCREEN_MODULES.some((m) => id.endsWith(m)))
                 ? 'assets/setup-[hash].js'
-                : 'assets/[name]-[hash].js',
+                : chunk.moduleIds.some((id) => PREVIEW_MODULES.some((m) => id.includes(m)))
+                  ? 'assets/preview-[hash].js'
+                  : chunk.moduleIds.some((id) => TRADES_V2_MODULES.some((m) => id.endsWith(m) || id.includes(m)))
+                    ? 'assets/trades2-[hash].js'
+                    : 'assets/[name]-[hash].js',
+        /* The rebuilt Trades screens' and the preview's own stylesheets, named for their budgets. */
+        assetFileNames: (asset) => {
+          const name = asset.name ?? '';
+          if (name.endsWith('.css') && /TradesScreenV2|trades2/.test(name)) return 'assets/trades2-[hash][extname]';
+          if (name.endsWith('.css') && /PreviewApp|preview/.test(name)) return 'assets/preview-[hash][extname]';
+          return 'assets/[name]-[hash][extname]';
+        },
       },
     },
   },

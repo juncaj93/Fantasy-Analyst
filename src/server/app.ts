@@ -127,6 +127,7 @@ import { SetupService } from './services/setupService.ts';
 import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
 import { TradeFinderService } from './services/tradeFinderService.ts';
+import { TradeScreensService } from './services/tradeScreensService.ts';
 import { finderBoard } from '../core/trades/finderBoard.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
 import { MAX_MARKS, TradeBuilderService } from './services/tradeBuilderService.ts';
@@ -210,6 +211,10 @@ export interface AppEnv extends AuthEnv {
    */
   cloudflareAccountId?: string | null;
   cloudflareAnalyticsToken?: string | null;
+  /** Which Trades screens the site draws (Round 19). Absent: today's. */
+  tradesScreens?: 'old' | 'new';
+  /** `trades` only on the preview upload: Trades answers from a made-up league. */
+  preview?: 'trades' | null;
 }
 
 /**
@@ -387,6 +392,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       canUnlock,
       readOnly: !unlocked,
       authDisabled: !!ctx.env.disableAuth,
+      /* Round 19: the feature switches the screens read. */
+      features: { tradesScreens: ctx.env.tradesScreens ?? 'old', preview: ctx.env.preview ?? null },
     });
   });
 
@@ -2871,6 +2878,37 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     const run = await new TradeFinderService(ctx.env.db, ctx.env.sleeper).find(leagueId ? { leagueId } : {});
     const { funnel: _funnel, checkedDeals: _checked, ...result } = run.result;
     return jsonResponse({ league: run.league, horizon: run.prepared ? { currentWeek: run.prepared.horizon.currentWeek, deadlineWeek: run.prepared.horizon.deadlineWeek, weeksToDeadline: run.prepared.horizon.weeksToDeadline } : null, ...result });
+  });
+
+  /*
+   * The new Trades screens (Round 19): offers (optionally around one player),
+   * the rosters for the pickers, and Check a trade's one line. On the preview
+   * upload they answer from the made-up preview league; `week=quiet` there
+   * shows the week where nothing is fully fair.
+   */
+  const screens = (ctx: { env: AppEnv; url: URL }) =>
+    new TradeScreensService(
+      ctx.env.db,
+      ctx.env.sleeper,
+      ctx.env.preview === 'trades' ? (ctx.url.searchParams.get('week') === 'quiet' ? 'quiet' : 'normal') : null,
+    );
+  router.get('/api/trades/screens/offers', async (ctx) => {
+    const sell = ctx.url.searchParams.get('sell');
+    const get = ctx.url.searchParams.get('get');
+    return jsonResponse(await screens(ctx).offers(sell || get ? { sell, get } : null));
+  });
+  router.get('/api/trades/screens/teams', async (ctx) => jsonResponse(await screens(ctx).teams()));
+  router.get('/api/trades/screens/verdict', async (ctx) => {
+    const ids = (name: string) =>
+      (ctx.url.searchParams.get(name) ?? '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    const raw = ctx.url.searchParams.get('b');
+    const partner = raw ? Number(raw) : Number.NaN;
+    if (!Number.isInteger(partner)) return errorResponse('b must be a roster id', 400);
+    return jsonResponse(await screens(ctx).verdict({ partner, give: ids('give'), get: ids('get') }));
   });
 
   /**

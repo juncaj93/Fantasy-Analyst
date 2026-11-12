@@ -8,7 +8,9 @@
  *      reason and what the season rule then left off;
  *   3. the trade finder on Alex's real league (`/api/diagnostics/trade-finder`):
  *      what each step removed, the offers it shows, the deals it checked;
- *   4. Check a trade's one line on the top offer.
+ *   4. Check a trade's one line on the top offer;
+ *   5. the Trades preview loads, with its switches, on the made-up league
+ *      (no database read there).
  *
  * Every request carries `cost=1`, so the rows each one read are printed.
  * Times in Eastern.
@@ -116,6 +118,20 @@ if (!top) {
           `You get better at ${s.positions.you.better.join(', ') || 'nothing'}${s.positions.you.thinner.length ? `, thinner at ${s.positions.you.thinner.join(', ')}` : ''}; ` +
           `they get better at ${s.positions.them.better.join(', ') || 'nothing'}. Rows read: ${check.body?.cost?.rowsReturned ?? '?'}`,
       );
+  }
+}
+
+heading('The Trades preview (made-up league, reads no database)');
+{
+  const PREVIEW = process.env.PREVIEW_URL || 'https://ef6f57d0-fantasy-analyst.juncaj93.workers.dev';
+  const page = await fetch(`${PREVIEW}/`).catch(() => null);
+  const html = page ? await page.text() : '';
+  console.log(`  ${PREVIEW}: page HTTP ${page?.status ?? 'unreachable'}, ${/<div id="root"/.test(html) ? 'app shell served' : 'no app shell'}`);
+  const status = await fetch(`${PREVIEW}/api/auth/status`).then((r) => r.json()).catch(() => null);
+  console.log(`  switches: ${JSON.stringify(status?.features ?? null)}`);
+  for (const week of ['', '?week=quiet']) {
+    const body = await fetch(`${PREVIEW}/api/trades/screens/offers${week}`).then((r) => r.json()).catch(() => null);
+    console.log(`  offers${week || ' (normal week)'}: ${body?.league?.name ?? '?'}, status ${body?.status ?? '?'}, ${(body?.offers ?? []).map((o) => `[${o.label}] ${o.partner.label} edge ${o.edgePercent}%`).join('; ') || 'none'}`);
   }
 }
 

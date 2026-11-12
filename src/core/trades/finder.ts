@@ -114,6 +114,19 @@ export interface FinderInput {
   rates: ReadonlyMap<string, PlayerRate>;
   rosters: readonly FinderRoster[];
   rosterLimit: number;
+  /**
+   * Build a trade's one question (Round 19): only deals that send this player
+   * of Alex's (`sell`) or bring this player of another team's (`get`). A
+   * manager Alex names this way is asked even if he seldom trades.
+   */
+  focus?: { sell?: string | null; get?: string | null } | null;
+  /**
+   * Alex's opponent this week, and whether their matchup is final (Alex,
+   * Round 19 review). A deal with him that helps his lineup more than Alex's
+   * this week is hidden until the matchup is final; any deal with him is
+   * marked. Absent: nobody is marked or hidden.
+   */
+  opponent?: { rosterId: number; final: boolean } | null;
   /** Overrides, for tests. */
   bounds?: Partial<Pick<typeof FINDER, 'shown' | 'checked' | 'checkedPerPartner'>>;
 }
@@ -148,7 +161,9 @@ export interface FoundOffer {
   /** Alex's value edge, whole percent, positive his way. */
   edgePercent: number;
   you: { thisWeek: number; restOfSeason: number; playoffs: number };
-  them: { restOfSeason: number };
+  them: { thisWeek: number; restOfSeason: number };
+  /** The partner is Alex's opponent this week (marked "This week's opponent"). */
+  opponent?: boolean;
   /** Who gets better where: positions where each side's new player starts. */
   better: { you: string[]; them: string[] };
   /** The player Alex would cut to make room, when he receives more than he sends. */
@@ -157,11 +172,14 @@ export interface FoundOffer {
   /** One short reason. */
   reason: string;
   shape: '1 for 1' | '2 for 1' | '1 for 2';
+  /** Weeks left in the season, the count `starts` is out of. */
+  weeks?: number;
   /** The internal order. Never printed. */
   score: number;
 }
 
 export type FinderStep =
+  | 'opponent_this_week'
   | 'rare_trader'
   | 'worthless_piece'
   | 'value_far_apart'
@@ -262,9 +280,13 @@ export function findTrades(input: FinderInput): FinderResult {
   /* --------------------------------------------- 1. every deal, screened -- */
   const screened: Screened[] = [];
   const bars = gainBars(weights.reduce((a, b) => a + b, 0));
+  const focus = input.focus ?? null;
+  const opponent = input.opponent ?? null;
   for (const partner of input.rosters) {
     if (partner.isMine || partner.playerIds.length === 0) continue;
-    if (partner.activity && isRareTrader(partner.activity.class)) {
+    if (focus?.get && !partner.playerIds.includes(focus.get)) continue;
+    const named = focus?.get != null;
+    if (!named && partner.activity && isRareTrader(partner.activity.class)) {
       funnel.skippedPartners += 1;
       bump('rare_trader');
       continue;
@@ -291,6 +313,8 @@ export function findTrades(input: FinderInput): FinderResult {
     const userMax = FAIR_TO_BOTH.userEdgeMax + bounds.screenEdge.user;
     const partnerMax = FAIR_TO_BOTH.partnerEdgeMax + bounds.screenEdge.partner;
     const consider = (give: string[], get: string[], giveValue: number, getValue: number) => {
+      if (focus?.sell && !give.includes(focus.sell)) return;
+      if (focus?.get && !get.includes(focus.get)) return;
       const edge = valueEdge(giveValue, getValue);
       if (edge > userMax || -edge > partnerMax) {
         bump('value_far_apart');
@@ -394,6 +418,17 @@ export function findTrades(input: FinderInput): FinderResult {
       continue;
     }
     const offer = offerOf({ deal, evaluation, reading, weak, rates, horizon });
+    /*
+     * This week's opponent (Alex, Round 19 review): marked, and while their
+     * matchup is not final, hidden when it helps him more than Alex this week.
+     */
+    if (opponent && deal.partner.rosterId === opponent.rosterId) {
+      offer.opponent = true;
+      if (!opponent.final && offer.you.thisWeek < offer.them.thisWeek) {
+        bump('opponent_this_week');
+        continue;
+      }
+    }
     if (reading.fairToBoth) {
       bump('fair');
       fair.push(offer);
@@ -407,12 +442,18 @@ export function findTrades(input: FinderInput): FinderResult {
   funnel.close = close.length;
   checkedDeals.sort((a, b) => Number(b.unfair == null) - Number(a.unfair == null) || b.you - a.you);
 
-  /* --------------------------------------------------- 3. ranked, at most 3 -- */
+  /*
+   * ---------------------------------------------------- 3. ranked, at most 3 --
+   * Fair offers first, best first. When fewer than three are fair, the rest
+   * of the slots go to the closest, each labelled "Close: ..." with its edge
+   * (Alex, Round 19 review). A close offer is never labelled fair.
+   */
+  const nearest = [...close].sort((a, b) => closeness(a, bars) - closeness(b, bars) || b.score - a.score || a.id.localeCompare(b.id));
   if (fair.length > 0) {
-    return { status: 'fair', offers: pick(fair, bounds.shown), note: null, funnel, checkedDeals };
+    const shown = pick(fair, bounds.shown);
+    return { status: 'fair', offers: pick(nearest, bounds.shown, false, shown), note: null, funnel, checkedDeals };
   }
   if (close.length > 0) {
-    const nearest = [...close].sort((a, b) => closeness(a, bars) - closeness(b, bars) || b.score - a.score || a.id.localeCompare(b.id));
     return {
       status: 'close',
       offers: pick(nearest, bounds.shown, false),
@@ -424,7 +465,12 @@ export function findTrades(input: FinderInput): FinderResult {
   return {
     status: 'none',
     offers: [],
-    note: funnel.partners === 0 ? 'Nobody in this league trades often enough to suggest a deal.' : 'No trade helps both lineups right now.',
+    note:
+      funnel.partners === 0
+        ? 'Nobody in this league trades often enough to suggest a deal.'
+        : focus?.sell || focus?.get
+          ? 'No trade with this player helps both lineups right now.'
+          : 'No trade helps both lineups right now.',
     funnel,
     checkedDeals,
   };
@@ -472,12 +518,16 @@ function dealKey(d: Pick<Screened, 'give' | 'get'> & { partner: { rosterId: numb
   return `${d.partner.rosterId}:${[...d.give].sort().join('+')}>${[...d.get].sort().join('+')}`;
 }
 
-/** Up to `n`, best first, never one player twice, at most two per manager. */
-function pick(list: readonly FoundOffer[], n: number, sort = true): FoundOffer[] {
+/**
+ * Up to `n`, best first, never one player twice, at most two per manager.
+ * `after`: offers already chosen, kept first; the list fills what is left.
+ */
+function pick(list: readonly FoundOffer[], n: number, sort = true, after: readonly FoundOffer[] = []): FoundOffer[] {
   const ordered = sort ? [...list].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)) : [...list];
-  const out: FoundOffer[] = [];
-  const used = new Set<string>();
+  const out: FoundOffer[] = [...after];
+  const used = new Set<string>(after.flatMap((o) => [...o.give, ...o.get].map((p) => p.playerId)));
   const perPartner = new Map<number, number>();
+  for (const o of after) perPartner.set(o.partner.rosterId, (perPartner.get(o.partner.rosterId) ?? 0) + 1);
   for (const offer of ordered) {
     if (out.length >= n) break;
     const ids = [...offer.give, ...offer.get].map((p) => p.playerId);
@@ -542,6 +592,8 @@ function offerOf(args: {
   const a = evaluation.a!;
   const b = evaluation.b!;
   const weekly = (a.weekly ?? []).map((w) => w.lineupAfter + w.depthAfter - (w.lineupBefore + w.depthBefore));
+  const theirWeek = b.weekly?.[0];
+  const themWeek = theirWeek ? theirWeek.lineupAfter + theirWeek.depthAfter - (theirWeek.lineupBefore + theirWeek.depthBefore) : 0;
   const playoffWeeks = new Set(horizon.playoffWeeks);
   const thisWeek = round1(weekly[0] ?? 0);
   const playoffs = round1(weekly.reduce((s, d, i) => (playoffWeeks.has(horizon.weeks[i]!) ? s + d : s), 0));
@@ -596,12 +648,13 @@ function offerOf(args: {
     check: { kind: evaluation.verdict?.kind ?? null, headline: evaluation.verdict?.headline ?? null, confidence: evaluation.confidence },
     edgePercent: reading.edgePercent,
     you: { thisWeek, restOfSeason: round1(a.net), playoffs },
-    them: { restOfSeason: round1(b.net) },
+    them: { thisWeek: round1(themWeek), restOfSeason: round1(b.net) },
     better: { you: youBetter, them: themBetter },
     drop: a.mustDrop?.name ?? null,
     tags,
     reason: reasonOf({ tags, get, give, youBetter, partner: deal.partner.label, them: b.net, rates }),
     shape: deal.give.length === 2 ? '2 for 1' : deal.get.length === 2 ? '1 for 2' : '1 for 1',
+    weeks: horizon.weeks.length,
     score: Math.round(score * 100) / 100,
   };
 }

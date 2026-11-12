@@ -44,6 +44,11 @@ on:
         required: true
         type: string
         default: 'claude/new-session-54mfpx'
+      mode:
+        description: 'Leave empty for the whole app on the real league. "trades": the rebuilt Trades screens only, on the made-up preview league, behind a PIN (Round 19).'
+        required: false
+        type: string
+        default: ''
 
 # Never at the same time as a release or a rollback: they share one Worker, and
 # an upload racing a promotion is a good way to be unsure what is live.
@@ -117,14 +122,20 @@ jobs:
         id: d1
         run: |
           set -euo pipefail
-          id=$(npx wrangler d1 list --json 2>/dev/null \
-               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-                   const start = s.indexOf('[');
-                   let rows = [];
-                   try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
-                   const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
-                   process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
-                 })")
+          # Three tries: the October run lost this lookup once to an empty answer.
+          id=""
+          for attempt in 1 2 3; do
+            id=$(npx wrangler d1 list --json 2>/dev/null \
+                 | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                     const start = s.indexOf('[');
+                     let rows = [];
+                     try { rows = JSON.parse(start === -1 ? '[]' : s.slice(start)); } catch {}
+                     const hit = rows.find(r => r.name === process.env.DATABASE_NAME);
+                     process.stdout.write(hit && (hit.uuid || hit.database_id) ? (hit.uuid || hit.database_id) : '');
+                   })") || true
+            [ -n "$id" ] && break
+            sleep $((attempt * 5))
+          done
           # Deliberately does not create one. `release.yml` may bring a database
           # into existence; a preview that did so would be inventing production.
           if [ -z "$id" ]; then
@@ -169,7 +180,28 @@ jobs:
           " "$RELEASE_SHA"
           grep '^RELEASE_SHA' wrangler.toml
 
+      # Round 19: the Trades preview. The rebuilt Trades screens are switched on
+      # (TRADES_SCREENS = "new", the same switch the live site will flip), and
+      # PREVIEW = "trades" makes them answer from the made-up preview league.
+      # Every other var stays exactly as wrangler.toml has it, so every switch
+      # that is on for the live site is on here too.
+      - name: Set the Trades preview mode
+        if: ${{ inputs.mode == 'trades' }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            let text = fs.readFileSync(file, 'utf8');
+            if (!/^TRADES_SCREENS = \"[^\"]*\"$/m.test(text)) { console.error('::error::wrangler.toml has no TRADES_SCREENS line.'); process.exit(1); }
+            text = text.replace(/^TRADES_SCREENS = \"[^\"]*\"$/m, 'TRADES_SCREENS = \"new\"\nPREVIEW = \"trades\"');
+            fs.writeFileSync(file, text);
+          "
+          grep -E '^(TRADES_SCREENS|PREVIEW|TRIM_OLD_ROWS|VEGAS_PROVIDER) =' wrangler.toml
+
       - name: Build the site
+        env:
+          VITE_PREVIEW: ${{ inputs.mode }}
         run: npm run build
 
       # `versions upload`, never `deploy`. The difference is the whole file:
@@ -211,6 +243,10 @@ jobs:
             fi
             echo
             echo "**Revision:** \`$SHA\` (\`${{ inputs.ref }}\`)"
+            if [ "${{ inputs.mode }}" = "trades" ]; then
+              echo
+              echo "**Mode:** Trades preview: the rebuilt Trades screens only, on a made-up league, behind a PIN. Nothing here reads the real league."
+            fi
             echo
             echo "Production is untouched and is still serving whatever \`deploy.yml\` last released."
             echo
