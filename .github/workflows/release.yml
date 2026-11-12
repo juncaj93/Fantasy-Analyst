@@ -236,6 +236,25 @@ jobs:
           printf '%s' "${{ secrets.SPORTSGAMEODDS_API_KEY }}" | npx wrangler secret put SPORTSGAMEODDS_API_KEY
           echo "Odds provider key published to the Worker."
 
+      # Round 23: the two extra free odds sources. Each is optional: no secret
+      # means the source stays off and nothing else changes, so a missing key is
+      # a notice, never a warning or a failure. Piped in, never echoed.
+      - name: Store the extra odds source keys (optional)
+        run: |
+          set -uo pipefail
+          if [ -n "${{ secrets.THERUNDOWN_API_KEY }}" ]; then
+            printf '%s' "${{ secrets.THERUNDOWN_API_KEY }}" | npx wrangler secret put THERUNDOWN_API_KEY
+            echo "TheRundown key published to the Worker."
+          else
+            echo "No THERUNDOWN_API_KEY secret: TheRundown stays off."
+          fi
+          if [ -n "${{ secrets.ODDS_API_KEY }}" ]; then
+            printf '%s' "${{ secrets.ODDS_API_KEY }}" | npx wrangler secret put ODDS_API_KEY
+            echo "The Odds API key published to the Worker."
+          else
+            echo "No ODDS_API_KEY secret: The Odds API stays off."
+          fi
+
       # The first question after any deploy, asked before the slower ones: is
       # the code that answers requests the code this run built? Production says
       # so itself, and the answer is compared here rather than eyeballed.

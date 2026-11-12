@@ -602,3 +602,48 @@ later full copy replaced and looks that changed nothing.
 of lines change between looks, Round 21) plus one settings row per pass. Round
 21 estimated about 2,000 written rows a day (5,500 on a Sunday) against 5,300
 (17,000) before.
+
+## TheRundown and The Odds API (Round 23, steps 3 and 4)
+
+Two more free sources feed the same per-book average. Both are **off unless
+their key is set** (GitHub secrets `THERUNDOWN_API_KEY` and `ODDS_API_KEY`,
+published to the Worker by `release.yml` when present). No key: nothing is
+asked, nothing changes, and the kickoff clock's gate is exactly what it was.
+
+| Source | What | When | Cost |
+|---|---|---|---|
+| TheRundown | totals and spreads, per game date (BetMGM, DraftKings, FanDuel) | hourly when a tracked game is inside 48 h, else every 3 h | about 150 data points a date; capped at 6,000 a day (free: 20,000 a day; one page says 200,000 a month, unverified) |
+| The Odds API | totals and spreads, whole slate | every 8 h | 2 credits; about 180 a month |
+| The Odds API | player props, the week's tracked games | Friday from 9 AM ET, once | about 6 credits a game, at most 8 games; about 210 a month |
+
+The Odds API total: about 390 of 500 credits a month, and it stops with 60
+left (`x-requests-remaining`). TheRundown: no props on its free tier, so none
+are asked for.
+
+**Same refresh, no second path.** `ExtraOddsSources.runIfDue` runs at the end of
+every `VegasRefreshService.refresh` (the kickoff clock's passes and the refresh
+button's Vegas step) and on the clock's own wake-ups: the gate wakes for
+whichever is first, a checkpoint or a source's next turn, so the ordinary tick
+still reads one row. Each source is skipped inside its interval, so a second tap
+asks nothing.
+
+**Only tracked games.** A source's game is matched to a `vegas_events` row (the
+roster's, opponent's and waiver tier's games) by a shared side and a kickoff
+within six hours. Games nobody tracks are not created, so SportsGameOdds
+discovery still finds a team's game the ordinary way.
+
+**Book names** are folded onto SportsGameOdds' (`williamhill_us` is
+`caesars`), so a book seen through two APIs is one vote.
+
+**The Friday props fill** is stored as a look marked `topUp`. Its lines join the
+average like any other look's, but it does not count as SportsGameOdds having
+bought the game: `PropsRepo.get` and `newestFetchByEvent` skip it, so the clock
+and the refresh button still judge SportsGameOdds' own looks.
+
+**Checking a key**: Probe workflow, script `probe-round23-keys.mjs`. One call
+each (The Odds API's `/sports` is free; then one 2-credit slate call), prints
+whether the key works and the answer's shape. Never prints a key.
+
+**Credit on screen**: neither provider's free terms ask for on-screen
+attribution (The Odds API's terms, Aug 31 2026; TheRundown's were not
+checked in Round 21 and should be read at signup). Nothing is shown.

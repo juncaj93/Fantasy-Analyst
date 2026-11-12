@@ -26,6 +26,7 @@ import { toEmailMessage } from '../core/newsletter/source.ts';
 import { MockVegasProvider } from '../core/vegas/mockProvider.ts';
 import { OddsApiProvider } from '../core/vegas/oddsApiProvider.ts';
 import { SportsGameOddsProvider } from '../core/vegas/sportsGameOddsProvider.ts';
+import { OddsApiExtraSource, TheRundownSource } from '../core/vegas/extraSources.ts';
 import { RequestPacer } from '../core/vegas/pacer.ts';
 import type { VegasProvider } from '../core/vegas/types.ts';
 import { createApp, type AppEnv } from '../server/app.ts';
@@ -83,6 +84,12 @@ export interface WorkerEnv {
   SESSION_SECRET?: string;
   ODDS_API_KEY?: string;
   SPORTSGAMEODDS_API_KEY?: string;
+  /**
+   * TheRundown's free-tier key (Round 23): game totals and spreads for the
+   * per-book average. A secret. Absent means the source is skipped quietly.
+   * `ODDS_API_KEY` above does the same for The Odds API's lines and Friday props.
+   */
+  THERUNDOWN_API_KEY?: string;
   /** 'mock' (default), 'sportsgameodds' or 'the-odds-api'. */
   VEGAS_PROVIDER?: string;
   /**
@@ -150,10 +157,21 @@ function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike, opts: { quick
      * ten-a-minute ceiling, but it never sleeps out the minute: a request past
      * the tenth is not sent and is left for the next pass, as a refusal is.
      */
-    return new SportsGameOddsProvider({
+    const provider = new SportsGameOddsProvider({
       apiKey: env.SPORTSGAMEODDS_API_KEY,
       fetch: fetchImpl,
       ...(opts.quick ? { pacer: new RequestPacer({ maxWaitMs: 0 }) } : {}),
+    });
+    /*
+     * Round 23: the two other free sources ride along with the provider, so the
+     * same Vegas refresh (clock and refresh button) feeds them into the per-book
+     * average. Each is built from its own key and is skipped when it has none.
+     */
+    return Object.assign(provider, {
+      extraSources: {
+        rundown: new TheRundownSource({ apiKey: env.THERUNDOWN_API_KEY, fetch: fetchImpl }),
+        oddsApi: new OddsApiExtraSource({ apiKey: env.ODDS_API_KEY, fetch: fetchImpl }),
+      },
     });
   }
   if (env.VEGAS_PROVIDER === 'the-odds-api') {

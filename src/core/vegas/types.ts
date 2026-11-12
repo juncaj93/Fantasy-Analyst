@@ -177,6 +177,13 @@ export interface RawPropSet {
    * `player_props` rows are only the lines that changed. Absent on a full copy.
    */
   delta?: boolean;
+  /**
+   * A top-up look from a second source (The Odds API's Friday props fill). Its
+   * lines join the average like any look's, but it does not count as the
+   * primary provider having bought the game: the kickoff clock and the refresh
+   * button still judge SportsGameOdds' own looks.
+   */
+  topUp?: boolean;
 }
 
 /** Consensus across books for one player/market, after identity resolution. */

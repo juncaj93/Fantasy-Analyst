@@ -47,6 +47,7 @@ import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import { VegasRefreshService, type VegasRefreshReport } from './vegasRefresh.ts';
 import { LeagueRepo } from '../repos/league.ts';
+import { ExtraOddsSources, extraSourcesOf } from './extraOddsSources.ts';
 
 /** How long a pass that could not reach every due game waits before trying again. */
 export const CLOCK_RETRY_MINUTES = 10;
@@ -119,10 +120,18 @@ export class VegasKickoffClock {
 
     const pending = checkpointPending(kickoffs, state.processedThrough, now);
     if (!pending) {
+      /*
+       * No SportsGameOdds checkpoint, but TheRundown or The Odds API may be due
+       * (Round 23). They ride this same gate: it wakes for whichever comes
+       * first, so the ordinary tick still reads one row. With no keys set,
+       * nothing changes.
+       */
+      const extras = extraSourcesOf(this.provider);
+      const run = extras ? await new ExtraOddsSources(this.db, extras).runIfDue(now).catch(() => null) : null;
       await this.writeState({
         ...state,
         processedThrough: state.processedThrough ?? iso(now),
-        next: iso(this.nextWake(kickoffs, now)),
+        next: iso(this.withExtras(this.nextWake(kickoffs, now), run?.nextDue ?? null, now)),
         retries: 0,
       });
       return null;
@@ -142,7 +151,11 @@ export class VegasKickoffClock {
     const report = await new VegasRefreshService(this.db, this.provider).refresh({ clock: true, now });
 
     const retry = report.leftover > 0 && state.retries < CLOCK_MAX_RETRIES;
-    const wake = retry ? now + CLOCK_RETRY_MINUTES * 60_000 : this.nextWake(kickoffs, now);
+    const wake = this.withExtras(
+      retry ? now + CLOCK_RETRY_MINUTES * 60_000 : this.nextWake(kickoffs, now),
+      report.extras?.nextDue ?? null,
+      now,
+    );
     const last: ClockLast = {
       at: iso(now),
       outcome: 'ran',
@@ -263,6 +276,12 @@ export class VegasKickoffClock {
     } catch {
       return null;
     }
+  }
+
+  /** The earlier of the clock's own wake and the extra sources' next due time (never in the past). */
+  private withExtras(wake: number, extrasDue: number | null, now: number): number {
+    if (extrasDue == null || !Number.isFinite(extrasDue)) return wake;
+    return Math.min(wake, Math.max(extrasDue, now + 5 * 60_000));
   }
 
   /** The next checkpoint, but never further off than the sleep ceiling. */
