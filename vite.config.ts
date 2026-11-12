@@ -18,6 +18,9 @@ const SETUP_SCREEN_MODULES = ['/web/screens/SetupScreen.tsx', '/web/screens/Revi
 const TRADES_V2_MODULES = ['/web/screens/TradesScreenV2.tsx', '/web/components/trades2/'];
 const PREVIEW_MODULES = ['/web/preview/'];
 
+/* The in-season Players tab (Round 24), fetched only when PLAYERS_INSEASON is on and the draft is over. */
+const PLAYERS_V2_MODULES = ['/web/screens/PlayersSeasonScreen.tsx', '/web/components/players2/'];
+
 export default defineConfig({
   plugins: [react()],
   root: r('./src/web'),
@@ -82,11 +85,14 @@ export default defineConfig({
                   ? 'assets/preview-[hash].js'
                   : chunk.moduleIds.some((id) => TRADES_V2_MODULES.some((m) => id.endsWith(m) || id.includes(m)))
                     ? 'assets/trades2-[hash].js'
-                    : 'assets/[name]-[hash].js',
+                    : chunk.moduleIds.some((id) => PLAYERS_V2_MODULES.some((m) => id.endsWith(m) || id.includes(m)))
+                      ? 'assets/players2-[hash].js'
+                      : 'assets/[name]-[hash].js',
         /* The rebuilt Trades screens' and the preview's own stylesheets, named for their budgets. */
         assetFileNames: (asset) => {
           const name = asset.name ?? '';
           if (name.endsWith('.css') && /TradesScreenV2|trades2/.test(name)) return 'assets/trades2-[hash][extname]';
+          if (name.endsWith('.css') && /PlayersSeasonScreen|players2/.test(name)) return 'assets/players2-[hash][extname]';
           if (name.endsWith('.css') && /PreviewApp|preview/.test(name)) return 'assets/preview-[hash][extname]';
           return 'assets/[name]-[hash][extname]';
         },

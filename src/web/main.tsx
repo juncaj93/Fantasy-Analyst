@@ -28,15 +28,17 @@ const render = () =>
  * the overwhelmingly common case of no demo being requested at all.
  */
 /*
- * The Trades preview (Round 19) is a separate build: the preview workflow sets
- * VITE_PREVIEW=trades, and only then is the PIN-gated, Trades-only shell drawn.
- * On the live build this branch is removed at build time, chunk and all.
+ * The previews are a separate build: the preview workflow sets VITE_PREVIEW to
+ * `trades` (Round 19) or `players` (Round 24), and only then is the PIN-gated
+ * shell for that one tab drawn. On the live build this branch is removed at
+ * build time, chunk and all.
  */
-if (import.meta.env.VITE_PREVIEW === 'trades') {
+if (import.meta.env.VITE_PREVIEW === 'trades' || import.meta.env.VITE_PREVIEW === 'players') {
+  const mode = import.meta.env.VITE_PREVIEW;
   void import('./preview/PreviewApp.tsx').then(({ PreviewApp }) =>
     createRoot(container).render(
       <StrictMode>
-        <PreviewApp />
+        <PreviewApp mode={mode} />
       </StrictMode>,
     ),
   );

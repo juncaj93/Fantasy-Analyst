@@ -131,9 +131,15 @@ export interface WorkerEnv {
    */
   TRADES_SCREENS?: string;
   /**
-   * Set only on the preview upload (`preview.yml`, mode `trades`): the
-   * Trades screens answer from a made-up league, behind a PIN. Never set on
-   * the live site.
+   * The in-season Players tab (Round 24): `"on"` draws it once the draft is
+   * over; anything else, or nothing, keeps today's tab. Off in code and in
+   * `wrangler.toml` until Alex has looked at the preview and says go.
+   */
+  PLAYERS_INSEASON?: string;
+  /**
+   * Set only on the preview upload (`preview.yml`): `trades` (Round 19) or
+   * `players` (Round 24). That tab answers from a made-up league, behind a
+   * PIN. Never set on the live site.
    */
   PREVIEW?: string;
   /**
@@ -209,7 +215,8 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     cloudflareAccountId: env.CLOUDFLARE_ACCOUNT_ID ?? null,
     cloudflareAnalyticsToken: env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
     tradesScreens: env.TRADES_SCREENS === 'new' ? 'new' : 'old',
-    preview: env.PREVIEW === 'trades' ? 'trades' : null,
+    preview: env.PREVIEW === 'trades' ? 'trades' : env.PREVIEW === 'players' ? 'players' : null,
+    playersInSeason: env.PLAYERS_INSEASON === 'on',
   };
 }
 
