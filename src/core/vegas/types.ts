@@ -107,6 +107,22 @@ export interface RawPropQuote {
   overPrice: number | null;
   underPrice: number | null;
   book: string;
+  /**
+   * When this book's quote was seen, ISO. Absent means "with the set"
+   * (`RawPropSet.fetchedAt`). Read by the per-book average (Round 23).
+   */
+  at?: string;
+}
+
+/** One book's quote as kept on a stored line, so the next look can average across time. */
+export interface BookQuote {
+  book: string;
+  line: number | null;
+  price: number | null;
+  at: string;
+  source?: string;
+  /** Fresh, but set aside as an outlier on the last combine. */
+  out?: boolean;
 }
 
 /**
@@ -131,6 +147,14 @@ export interface GameLines {
   spread: number | null;
   /** Whose handicap it is, as the provider names the team. */
   spreadTeam: string | null;
+  /**
+   * Each book's own total and spread, when the provider sent them (Round 23).
+   * Combined by `combineGameLines`; `total`/`spread` above stay the provider's
+   * own consensus for anything that reads them directly.
+   */
+  books?: import('./combine.ts').GameBookLine[];
+  /** The game's two sides, in the app's team codes, when the provider named them. */
+  teams?: string[];
 }
 
 export interface RawPropSet {
@@ -148,6 +172,11 @@ export interface RawPropSet {
   gameLines?: GameLines;
   /** Untouched provider payload, persisted for audit. */
   raw: unknown;
+  /**
+   * Set on a stored look written by Round 23's write-on-change path: its
+   * `player_props` rows are only the lines that changed. Absent on a full copy.
+   */
+  delta?: boolean;
 }
 
 /** Consensus across books for one player/market, after identity resolution. */
@@ -160,9 +189,16 @@ export interface PlayerProp {
   underPrice: number | null;
   /** Number of books contributing to the consensus. */
   bookCount: number;
-  consensusMethod: 'median' | 'single' | 'none';
+  /**
+   * How the books were combined. `average` and `newest` are the Round 23
+   * per-book rules (`core/vegas/combine.ts`); `none` on a stored row means the
+   * line was withdrawn and the row is a marker that it is gone.
+   */
+  consensusMethod: 'median' | 'single' | 'none' | 'average' | 'newest';
   /** Books that contributed, for auditability. */
   books: string[];
+  /** Each fresh book's own quote and when it was seen (Round 23), carried to the next look. */
+  bookDetail?: BookQuote[];
   /** De-vigged probability for binary markets (anytime TD). */
   impliedProbability: number | null;
   /**

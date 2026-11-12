@@ -19,7 +19,7 @@ describe('priced player count', () => {
     const db = await createTestDb();
     const counting = countingDb(db);
     const repo = new PropsRepo(counting.db);
-    const live = 'COUNT(DISTINCT pp.player_id)';
+    const live = 'AS priced';
 
     expect(await repo.pricedPlayerCount('t1|3')).toBe(0);
     expect(await repo.pricedPlayerCount('t1|3')).toBe(0);
@@ -37,7 +37,7 @@ describe('priced player count', () => {
     const repo = new PropsRepo(counting.db);
     await repo.pricedPlayerCount();
     await repo.pricedPlayerCount();
-    expect(counting.callsMatching('COUNT(DISTINCT pp.player_id)')).toBe(2);
+    expect(counting.callsMatching('AS priced')).toBe(2);
   });
 });
 

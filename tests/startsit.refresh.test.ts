@@ -234,11 +234,14 @@ describe('the Start/Sit refresh', () => {
      * is not a schedule: it records when the week's fixtures were last *bought*.
      * `vegas.discoveryEmpty` is the same kind of record: which teams were asked
      * about and had no game, so the next tap does not pay to ask again.
+     * `vegas.gameBooks` (Round 23) is each book's last total and spread, the
+     * memory the per-book average needs: data, not work.
      */
     const allowed = new Set<string>([
       SETTING_KEYS.lastVegasRefresh,
       SETTING_KEYS.lastVegasSchedule,
       SETTING_KEYS.vegasDiscoveryEmpty,
+      SETTING_KEYS.vegasGameBooks,
     ]);
     const added = Object.keys(after).filter((k) => !(k in before));
     expect(added.filter((key) => !allowed.has(key))).toEqual([]);

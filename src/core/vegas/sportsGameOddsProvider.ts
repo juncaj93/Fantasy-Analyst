@@ -48,6 +48,7 @@ import {
   type VegasProvider,
 } from './types.ts';
 import { RequestPacer } from './pacer.ts';
+import type { GameBookLine } from './combine.ts';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -257,6 +258,28 @@ interface SgoOdd {
   bookOdds?: string | number | null;
   fairOdds?: string | number | null;
   cancelled?: boolean;
+  /**
+   * Each sportsbook's own quote, keyed by book ("draftkings", "fanduel").
+   * Measured on the free plan by `probe-round23-books.mjs` (Nov 12, 2026):
+   * `odds`, `overUnder` or `spread`, `lastUpdatedAt`, `available`, `deeplink`.
+   * 5 to 8 books on a game line, typically 5 on a player prop.
+   */
+  byBookmaker?: Record<string, SgoBookQuote | undefined>;
+}
+
+interface SgoBookQuote {
+  odds?: string | number | null;
+  overUnder?: string | number | null;
+  spread?: string | number | null;
+  available?: boolean;
+  lastUpdatedAt?: string;
+}
+
+/** The books on an odd that are taking bets now. */
+function liveBooks(odd: SgoOdd): [string, SgoBookQuote][] {
+  return Object.entries(odd.byBookmaker ?? {}).filter(
+    (entry): entry is [string, SgoBookQuote] => entry[1] != null && entry[1].available !== false,
+  );
 }
 
 interface SgoEvent {
@@ -386,29 +409,43 @@ export class SportsGameOddsProvider implements VegasProvider {
       const playerName = nameOf(players[entity], entity);
       if (!playerName) continue;
 
-      quotes.push({
-        playerName,
-        market,
-        line: toNumber(odd.bookOverUnder ?? odd.fairOverUnder),
-        overPrice: toNumber(odd.bookOdds ?? odd.fairOdds),
-        // The provider quotes each side separately and this row is the over, so
-        // the under price is genuinely absent rather than zero.
-        underPrice: null,
-        // The provider's own consensus number, called one book because that is
-        // what it is. `byBookmaker` does now carry named books on many quotes;
-        // until their spread is actually read, one is the honest count — it
-        // understates the agreement behind a line rather than inventing it.
-        book: this.name,
-      });
+      /*
+       * One quote per sportsbook (Round 23), so lines are averaged by book and
+       * not by provider (`core/vegas/combine.ts`). With no per-book entries the
+       * provider's own consensus stands in as one book, exactly as before.
+       *
+       * The provider quotes each side separately and this row is the over, so
+       * the under price is genuinely absent rather than zero.
+       */
+      const consensusLine = toNumber(odd.bookOverUnder ?? odd.fairOverUnder);
+      let added = 0;
+      for (const [book, quote] of liveBooks(odd)) {
+        const line = toNumber(quote.overUnder) ?? consensusLine;
+        const price = toNumber(quote.odds);
+        if (line == null && price == null) continue;
+        quotes.push({ playerName, market, line, overPrice: price, underPrice: null, book });
+        added++;
+      }
+      if (added === 0) {
+        quotes.push({
+          playerName,
+          market,
+          line: consensusLine,
+          overPrice: toNumber(odd.bookOdds ?? odd.fairOdds),
+          underPrice: null,
+          book: this.name,
+        });
+      }
     }
 
+    const fetchedAt = new Date().toISOString();
     return {
       provider: this.name,
       eventId,
       gameStart: event.status?.startsAt ?? '',
-      fetchedAt: new Date().toISOString(),
+      fetchedAt,
       quotes,
-      gameLines: toGameLines(event),
+      gameLines: toGameLines(event, fetchedAt),
       raw: event,
     };
   }
@@ -705,10 +742,17 @@ function nameOf(player: SgoPlayer | undefined, entityId: string): string | null 
  *     is discarded rather than assumed — a game script model fed a spread with
  *     the wrong sign is worse than one fed nothing.
  */
-function toGameLines(event: SgoEvent): GameLines {
+function toGameLines(event: SgoEvent, fetchedAt: string = new Date().toISOString()): GameLines {
   let total: number | null = null;
   let spread: number | null = null;
   let spreadTeam: string | null = null;
+  /** Each book's total and spread (Round 23), merged by book name. */
+  const perBook = new Map<string, GameBookLine>();
+  const bookLine = (book: string): GameBookLine => {
+    const held = perBook.get(book) ?? { book, total: null, spread: null, spreadTeam: null, at: fetchedAt, source: 'sportsgameodds' };
+    perBook.set(book, held);
+    return held;
+  };
 
   // Whose spread it is, established from the event's own team map before any
   // number is read. No team, no spread.
@@ -736,11 +780,24 @@ function toGameLines(event: SgoEvent): GameLines {
 
     if (odd.betTypeID === 'ou' && odd.sideID === 'over' && (entity === 'all' || entity === 'game')) {
       total ??= toNumber(odd.bookOverUnder ?? odd.fairOverUnder);
+      for (const [book, quote] of liveBooks(odd)) {
+        const value = toNumber(quote.overUnder);
+        if (value != null) bookLine(book).total ??= value;
+      }
       continue;
     }
-    if (odd.betTypeID === 'sp' && spread == null) {
+    if (odd.betTypeID === 'sp') {
       const team = teamFor(entity);
       if (!team) continue;
+      for (const [book, quote] of liveBooks(odd)) {
+        const value = toNumber(quote.spread);
+        const held = bookLine(book);
+        if (value != null && held.spread == null) {
+          held.spread = value;
+          held.spreadTeam = team;
+        }
+      }
+      if (spread != null) continue;
       const value = toNumber(odd.bookSpread ?? odd.fairSpread ?? odd.bookOverUnder ?? odd.fairOverUnder);
       if (value == null) continue;
       spread = value;
@@ -748,7 +805,17 @@ function toGameLines(event: SgoEvent): GameLines {
     }
   }
 
-  return { total, spread, spreadTeam };
+  const teams = Object.keys(event.teams ?? {})
+    .map((entity) => teamFor(entity))
+    .filter((t): t is string => t != null);
+  const books = [...perBook.values()].filter((b) => b.total != null || b.spread != null);
+  return {
+    total,
+    spread,
+    spreadTeam,
+    ...(books.length > 0 ? { books } : {}),
+    ...(teams.length === 2 ? { teams } : {}),
+  };
 }
 
 /** Lines and prices arrive as strings; anything unparseable is absent, not zero. */

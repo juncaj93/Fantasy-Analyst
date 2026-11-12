@@ -93,7 +93,32 @@ async function trimInjuryLog(db: Database, cutoff: string, limit: number): Promi
  * Odds: whole copies, oldest first, each with its lines, never a game's final
  * copy. A copy whose lines would overrun the budget has only as many lines
  * deleted as fit, and keeps the rest for tomorrow.
+ *
+ * Since Round 23 a look writes only the lines that changed, so a game's current
+ * lines are spread over every look since its newest full copy (see
+ * `PropsRepo.latestForPlayers`). A copy is therefore only trimmed when nothing
+ * reads it any more:
+ *
+ *   - a later **full** copy of the same game exists (it holds every line), or
+ *   - it has no lines at all (a look that changed nothing) and is not the newest.
+ *
+ * Change-only looks that carry lines, and the newest full copy before them,
+ * are kept: they are a game's current lines. They are small (about 120 rows a
+ * game a week).
  */
+const TRIMMABLE = `
+  EXISTS (
+    SELECT 1 FROM prop_snapshots later
+     WHERE later.event_id = ps.event_id AND +later.scope = 'week' AND later.fetched_at > ps.fetched_at
+  )
+  AND (
+    NOT EXISTS (SELECT 1 FROM player_props pp0 WHERE pp0.snapshot_id = ps.id)
+    OR EXISTS (
+      SELECT 1 FROM prop_snapshots whole
+       WHERE whole.event_id = ps.event_id AND +whole.scope = 'week' AND whole.fetched_at > ps.fetched_at
+         AND json_extract(whole.raw_json, '$.delta') IS NULL
+    )
+  )`;
 async function trimOdds(db: Database, cutoff: string, limit: number): Promise<{ lines: number; copies: number }> {
   let lines = 0;
   let copies = 0;
@@ -104,10 +129,7 @@ async function trimOdds(db: Database, cutoff: string, limit: number): Promise<{ 
          FROM prop_snapshots ps
         WHERE ps.scope = 'week'
           AND ps.fetched_at < ?
-          AND EXISTS (
-            SELECT 1 FROM prop_snapshots later
-             WHERE later.event_id = ps.event_id AND +later.scope = 'week' AND later.fetched_at > ps.fetched_at
-          )
+          AND ${TRIMMABLE}
         ORDER BY ps.fetched_at ASC, ps.id ASC
         LIMIT 200`,
     )
@@ -129,6 +151,7 @@ async function trimOdds(db: Database, cutoff: string, limit: number): Promise<{ 
                 SELECT pp.id FROM player_props pp
                   JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
                  WHERE pp.snapshot_id = ? AND ps.scope = 'week' AND ps.fetched_at < ?
+                   AND ${TRIMMABLE}
                  ORDER BY pp.id
                  LIMIT ?
               )`,
@@ -142,13 +165,12 @@ async function trimOdds(db: Database, cutoff: string, limit: number): Promise<{ 
       await db
         .prepare(
           `DELETE FROM prop_snapshots
-            WHERE id = ? AND scope = 'week' AND fetched_at < ?
-              AND NOT EXISTS (SELECT 1 FROM player_props WHERE snapshot_id = ?)
-              AND EXISTS (
-                SELECT 1 FROM prop_snapshots later
-                 WHERE later.event_id = prop_snapshots.event_id AND +later.scope = 'week'
-                   AND later.fetched_at > prop_snapshots.fetched_at
-              )`,
+            WHERE id IN (
+              SELECT ps.id FROM prop_snapshots ps
+               WHERE ps.id = ? AND ps.scope = 'week' AND ps.fetched_at < ?
+                 AND NOT EXISTS (SELECT 1 FROM player_props WHERE snapshot_id = ?)
+                 AND ${TRIMMABLE}
+            )`,
         )
         .bind(id, cutoff, id)
         .run(),

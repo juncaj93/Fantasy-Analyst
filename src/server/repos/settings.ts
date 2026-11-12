@@ -166,6 +166,12 @@ export const SETTING_KEYS = {
    */
   vegasClock: 'vegas.clock',
   /**
+   * Each sportsbook's latest total and spread per game, from every odds source
+   * (Round 23). One row; the game's combined line is written to `vegas_events`
+   * only when it changes. See `server/repos/gameBooks.ts`.
+   */
+  vegasGameBooks: 'vegas.gameBooks',
+  /**
    * The Detroit date the weekly manager-tendencies refresh last finished on,
    * as `YYYY-MM-DD`, so a Wednesday window that spans several ticks stops once
    * the work is done. See `core/league/managerIntelCadence.ts`.

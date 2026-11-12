@@ -24,7 +24,9 @@ import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/b
 import { buildFetchPlan, manualRefreshThresholdMinutes, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
 import { slateWindow } from '../../core/nfl/slateWindow.ts';
 import { FIRST_LOOK_HOURS, reconcileKickoff } from '../../core/vegas/kickoffClock.ts';
-import { buildConsensus } from '../../core/vegas/normalize.ts';
+import { combineLook } from '../../core/vegas/combineProps.ts';
+import type { GameBookLine } from '../../core/vegas/combine.ts';
+import { GameBooksRepo } from '../repos/gameBooks.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
@@ -148,6 +150,7 @@ export class VegasRefreshService {
   private readonly usage: VegasUsageRepo;
   private readonly events: VegasEventsRepo;
   private readonly props: PropsRepo;
+  private readonly gameBooks: GameBooksRepo;
 
   constructor(
     private readonly db: Database,
@@ -156,6 +159,7 @@ export class VegasRefreshService {
     this.usage = new VegasUsageRepo(db);
     this.events = new VegasEventsRepo(db);
     this.props = new PropsRepo(db);
+    this.gameBooks = new GameBooksRepo(db);
   }
 
   /**
@@ -252,7 +256,14 @@ export class VegasRefreshService {
     }
     for (const [i, event] of planned.entries()) {
       try {
-        const result = await getPropsWithCache(event.eventId, this.provider, this.props, {
+        /*
+         * The cache decides whether to buy; storing is done below, after the
+         * ledger, by `storeLook` (Round 23: averaged by book, and only the lines
+         * that changed are written). So the store handed to the cache reads and
+         * never writes.
+         */
+        const readOnly = { get: (id: string) => this.props.get(id), put: async () => undefined };
+        const result = await getPropsWithCache(event.eventId, this.provider, readOnly, {
           now,
           manual: opts.manual ?? false,
           perGame: clock,
@@ -302,11 +313,10 @@ export class VegasRefreshService {
             outcome: 'fetched',
             reason: clock ? `kickoff clock: ${event.reason}` : event.reason,
           });
-          await this.persist(result.snapshot.raw);
-          // The same response carries the game's own total and spread. Stored
-          // here as well as at discovery, because these move during the week
-          // and this is the fetch that happens on a Sunday morning.
-          await this.storeGameLines(result.snapshot.raw);
+          // The look, its game line and the player lines that changed. The game's
+          // total and spread move during the week, and this is the fetch that
+          // happens on a Sunday morning.
+          await this.storeLook(result.snapshot.raw);
         } else if (result.origin === 'cache') {
           cached++;
         } else {
@@ -329,6 +339,9 @@ export class VegasRefreshService {
       }
     }
 
+    await this.gameBooks.flush(now).catch((err: unknown) => {
+      errors.push(`could not save the per-book game lines: ${err instanceof Error ? err.message : String(err)}`);
+    });
     await new SettingsRepo(this.db).set(SETTING_KEYS.lastVegasRefresh, new Date(now).toISOString());
     /*
      * The provider's count again, now that this pass has spent.
@@ -664,22 +677,15 @@ export class VegasRefreshService {
            * about" and not "the home side", so a spread stored against a column
            * position would be read backwards for half the slate.
            */
-          total: row.set.gameLines?.total ?? null,
-          spread: row.set.gameLines?.spread ?? null,
-          spreadTeam: row.set.gameLines?.spreadTeam ?? null,
+          // The lines are left to `storeLook` below, which averages the books
+          // and writes the game's total and spread only when they change.
+          total: null,
+          spread: null,
+          spreadTeam: null,
         })),
       );
 
-      for (const { set } of fixtures) {
-        await this.props.put({
-          provider: set.provider,
-          eventId: set.eventId,
-          gameStart: set.gameStart,
-          fetchedAt: set.fetchedAt,
-          raw: set,
-        });
-        await this.persist(set);
-      }
+      for (const { set } of fixtures) await this.storeLook(set);
 
       /*
        * Remember which teams had nothing on offer, so the next tap does not
@@ -832,34 +838,66 @@ export class VegasRefreshService {
   }
 
   /**
-   * Keep the game's own lines beside its event row.
+   * Store one look at a game (Round 23).
    *
-   * A no-op when the provider did not quote the game, which leaves whatever was
-   * last known in place — the repo COALESCEs, so a quiet week cannot erase a
-   * spread the app already had.
+   *   1. The game's books (each sportsbook's total and spread) join what other
+   *      looks and sources said; the combined line is written to the game's row
+   *      only if it moved (`GameBooksRepo`).
+   *   2. The player lines are averaged by book and compared with what is on
+   *      file; only the ones that changed are written (`combineLook`).
+   *   3. The look itself is one small row: when it happened, the combined game
+   *      line, and the combined player lines for audit. It is what the kickoff
+   *      clock and the refresh button read to know how old a game's lines are.
    */
-  private async storeGameLines(set: RawPropSet): Promise<void> {
+  private async storeLook(set: RawPropSet): Promise<void> {
+    const at = Date.parse(set.fetchedAt);
+    const now = Number.isFinite(at) ? at : Date.now();
+    const kickoff = set.gameStart || null;
     const lines = set.gameLines;
-    if (!lines || (lines.total == null && lines.spread == null)) return;
-    await this.events.upsertMany([
-      {
-        eventId: set.eventId,
-        provider: set.provider,
-        kickoff: set.gameStart || null,
-        homeTeam: null,
-        awayTeam: null,
-        total: lines.total,
-        spread: lines.spread,
-        spreadTeam: lines.spreadTeam,
-      },
-    ]);
-  }
+    const incoming: GameBookLine[] =
+      lines?.books && lines.books.length > 0
+        ? lines.books
+        : lines && (lines.total != null || lines.spread != null)
+          ? [{ book: set.provider, total: lines.total, spread: lines.spread, spreadTeam: lines.spreadTeam, at: set.fetchedAt, source: set.provider }]
+          : [];
+    const combined =
+      incoming.length > 0
+        ? await this.gameBooks.addAndCombine(set.eventId, incoming, {
+            now,
+            kickoff,
+            ...(lines?.teams ? { teams: lines.teams } : {}),
+            provider: set.provider,
+          })
+        : null;
 
-  /** Resolve names to players and store the consensus rows Start/Sit reads. */
-  private async persist(set: RawPropSet): Promise<void> {
+    const stored = await this.props.currentForEvent(set.eventId);
+    const look = combineLook(set.quotes ?? [], stored, await this.playerIndex(), { now, kickoff, source: set.provider });
+
+    await this.props.put({
+      provider: set.provider,
+      eventId: set.eventId,
+      gameStart: set.gameStart,
+      fetchedAt: set.fetchedAt,
+      raw: {
+        ...set,
+        gameLines: {
+          total: combined?.total ?? lines?.total ?? null,
+          spread: combined?.spread ?? lines?.spread ?? null,
+          spreadTeam: combined?.spread != null ? combined.spreadTeam : (lines?.spreadTeam ?? null),
+        },
+        quotes: look.current.map((p) => ({
+          playerName: p.sourcePlayerName,
+          market: p.market,
+          line: p.line,
+          overPrice: p.overPrice,
+          underPrice: null,
+          book: `average of ${p.bookCount}`,
+        })),
+        delta: true,
+      },
+    });
     const snapshotId = await this.props.snapshotId(set.provider, set.eventId, set.fetchedAt);
-    if (snapshotId == null) return;
-    await this.props.saveConsensus(snapshotId, buildConsensus(set.quotes ?? [], await this.playerIndex()));
+    if (snapshotId != null) await this.props.saveChanges(snapshotId, look.changed);
   }
 
   /**

@@ -40,7 +40,10 @@ describe('the slate reads use the window and the player, not the season', () => 
     const take = async (name: string, run: () => Promise<unknown>, out: Record<string, string>) => {
       const before = counting.tallies().length;
       await run();
-      out[name] = counting.tallies()[before]!.sql;
+      // Since Round 23, latest and previous run the same statement (the lines
+      // by player; which look counts is decided after), so the second one adds
+      // no new tally: it is the statement already counted.
+      out[name] = (counting.tallies()[before] ?? counting.tallies().find((t) => t.sql.includes('FROM player_props pp')))!.sql;
     };
     const sqls: Record<string, string> = {};
     await take('latest', () => repo.latestForPlayers(['a', 'b'], window), sqls);

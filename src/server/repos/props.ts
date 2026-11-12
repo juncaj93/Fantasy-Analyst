@@ -8,8 +8,9 @@
  */
 
 import type { CachedSnapshot, SnapshotStore } from '../../core/vegas/cache.ts';
-import type { PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
-import { MAX_BOUND_PARAMS, chunk, nowIso, parseJson, toJson, type Database } from '../db.ts';
+import type { BookQuote, PlayerProp, RawPropSet } from '../../core/vegas/types.ts';
+import type { StoredLine } from '../../core/vegas/combineProps.ts';
+import { MAX_BOUND_PARAMS, chunk, parseJson, toJson, type Database } from '../db.ts';
 import { storedCount } from './storedCounts.ts';
 import {
   PROPS_FRESHNESS_KEY,
@@ -97,6 +98,23 @@ export class PropsRepo implements SnapshotStore {
   /** Persist the resolved consensus rows for a snapshot. */
   async saveConsensus(snapshotId: number, props: PlayerProp[]): Promise<void> {
     await this.db.prepare('DELETE FROM player_props WHERE snapshot_id = ?').bind(snapshotId).run();
+    await this.saveRows(snapshotId, props);
+  }
+
+  /**
+   * Write only the lines a look changed (Round 23).
+   *
+   * Unlike {@link saveConsensus} nothing is deleted first: the snapshot is a new
+   * look, and the lines it does not carry are still the ones on file from an
+   * earlier look of the same game. See {@link latestForPlayers} for how they are
+   * read back.
+   */
+  async saveChanges(snapshotId: number, props: PlayerProp[]): Promise<void> {
+    if (props.length === 0) return;
+    await this.saveRows(snapshotId, props);
+  }
+
+  private async saveRows(snapshotId: number, props: PlayerProp[]): Promise<void> {
     for (const batch of chunk(props, 100)) {
       await this.db.batch(
         batch.map((p) =>
@@ -116,14 +134,155 @@ export class PropsRepo implements SnapshotStore {
               p.overPrice,
               p.underPrice,
               p.bookCount,
-              toJson(p.books),
+              toJson(p.bookDetail && p.bookDetail.length > 0 ? p.bookDetail : p.books),
               p.consensusMethod,
               p.impliedProbability,
-              toJson({ savedAt: nowIso() }),
+              '{}',
             ),
         ),
       );
     }
+  }
+
+  /**
+   * The lines on file for one game, newest per player and market, "gone"
+   * markers included, with each book's last quote. What a new look is compared
+   * against before anything is written.
+   *
+   * Reads the game's looks by its event index and their lines by the snapshot
+   * index: about 65 to 150 rows a game.
+   */
+  async currentForEvent(eventId: string): Promise<StoredLine[]> {
+    const snaps = await this.snapshotsForEvents([eventId]);
+    const list = snaps.get(eventId) ?? [];
+    const eligible = eligibleSnapshots(list, false);
+    if (eligible.length === 0) return [];
+    const ids = eligible.map((s) => s.id);
+    const rows: Record<string, unknown>[] = [];
+    for (const batch of chunk(ids, MAX_BOUND_PARAMS)) {
+      const { results } = await this.db
+        .prepare(`SELECT * FROM player_props WHERE snapshot_id IN (${batch.map(() => '?').join(',')}) AND scope = 'week'`)
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      rows.push(...results);
+    }
+    const order = new Map(eligible.map((s, i) => [s.id, i]));
+    const newest = new Map<string, Record<string, unknown>>();
+    for (const r of rows) {
+      const k = `${String(r['source_player_name'] ?? '').toLowerCase()}|${String(r['market'])}`;
+      const held = newest.get(k);
+      if (!held || isNewer(r, held, order)) newest.set(k, r);
+    }
+    return [...newest.values()].map((r) => {
+      const prop = toProp(r['player_id'] == null ? (null as unknown as string) : String(r['player_id']), r);
+      return { ...prop, playerId: r['player_id'] == null ? null : String(r['player_id']), gone: prop.consensusMethod === 'none' };
+    });
+  }
+
+  /** Every weekly look of these games, newest first, with the game line each carried. */
+  private async snapshotsForEvents(eventIds: string[]): Promise<Map<string, SnapshotRef[]>> {
+    const out = new Map<string, SnapshotRef[]>();
+    const unique = [...new Set(eventIds)].filter(Boolean);
+    for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
+      const { results } = await this.db
+        .prepare(
+          `SELECT id, event_id, fetched_at,
+                  json_extract(raw_json, '$.delta') AS delta,
+                  json_extract(raw_json, '$.gameLines.total') AS total,
+                  json_extract(raw_json, '$.gameLines.spread') AS spread,
+                  json_extract(raw_json, '$.gameLines.spreadTeam') AS spread_team
+             FROM prop_snapshots
+            WHERE event_id IN (${batch.map(() => '?').join(',')}) AND +scope = 'week'`,
+        )
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      for (const r of results) {
+        const ref: SnapshotRef = {
+          id: Number(r['id']),
+          eventId: String(r['event_id']),
+          fetchedAt: String(r['fetched_at']),
+          delta: r['delta'] === 1 || r['delta'] === true || r['delta'] === 'true',
+          total: r['total'] == null ? null : Number(r['total']),
+          spread: r['spread'] == null ? null : Number(r['spread']),
+          spreadTeam: r['spread_team'] == null ? null : String(r['spread_team']),
+        };
+        const list = out.get(ref.eventId) ?? [];
+        list.push(ref);
+        out.set(ref.eventId, list);
+      }
+    }
+    for (const list of out.values()) list.sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt) || b.id - a.id);
+    return out;
+  }
+
+  /**
+   * The newest line per player, game and market, as of the newest look
+   * (`previous` false) or the look before it (`previous` true).
+   *
+   * Since Round 23 a look writes only the lines that changed, so a game's lines
+   * are spread over its looks: the newest row for each player and market is the
+   * current one. Looks written before that are full copies, and the newest full
+   * copy is where a game's history starts, so a line an old full copy dropped
+   * is not brought back. "Gone" markers are read and then left out.
+   *
+   * Each line carries the look it is current as of (time and game line), which
+   * is what the stale-prop check compares with the latest game line.
+   */
+  private async linesAsOf(
+    playerIds: string[],
+    window: SlateWindow | undefined,
+    previous: boolean,
+  ): Promise<Map<string, PlayerProp[]>> {
+    const out = new Map<string, PlayerProp[]>();
+    if (playerIds.length === 0) return out;
+    const rows: Record<string, unknown>[] = [];
+    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(
+          `SELECT pp.*, ps.event_id AS snapshot_event_id
+             FROM player_props pp
+             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+            WHERE pp.player_id IN (${placeholders})
+              AND ps.scope = 'week'
+              ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}`,
+        )
+        .bind(...batch, ...(window ? [window.from, window.to] : []))
+        .all<Record<string, unknown>>();
+      rows.push(...results);
+    }
+    if (rows.length === 0) return out;
+    const snaps = await this.snapshotsForEvents(rows.map((r) => String(r['snapshot_event_id'])));
+
+    const newest = new Map<string, { row: Record<string, unknown>; asOf: SnapshotRef }>();
+    const plan = new Map<string, { asOf: SnapshotRef; order: Map<number, number> } | null>();
+    for (const r of rows) {
+      const eventId = String(r['snapshot_event_id']);
+      if (!plan.has(eventId)) {
+        const eligible = eligibleSnapshots(snaps.get(eventId) ?? [], previous);
+        plan.set(eventId, eligible.length === 0 ? null : { asOf: eligible[0]!, order: new Map(eligible.map((s, i) => [s.id, i])) });
+      }
+      const p = plan.get(eventId);
+      if (!p || !p.order.has(Number(r['snapshot_id']))) continue;
+      const k = `${String(r['player_id'])}|${eventId}|${String(r['market'])}`;
+      const held = newest.get(k);
+      if (!held || isNewer(r, held.row, p.order)) newest.set(k, { row: r, asOf: p.asOf });
+    }
+    for (const { row, asOf } of newest.values()) {
+      if (String(row['consensus_method'] ?? '') === 'none') continue;
+      const pid = String(row['player_id']);
+      const prop = toProp(pid, {
+        ...row,
+        snapshot_fetched_at: asOf.fetchedAt,
+        snapshot_total: asOf.total,
+        snapshot_spread: asOf.spread,
+        snapshot_spread_team: asOf.spreadTeam,
+      });
+      const list = out.get(pid);
+      if (list) list.push(prop);
+      else out.set(pid, [prop]);
+    }
+    return out;
   }
 
   /**
@@ -169,43 +328,7 @@ export class PropsRepo implements SnapshotStore {
    * allowance alert. See `scripts/probe-props-reads.mjs`.
    */
   async latestForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
-    const out = new Map<string, PlayerProp[]>();
-    if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
-      const placeholders = batch.map(() => '?').join(',');
-      const rows = await this.db
-        .prepare(
-          /*
-           * The snapshot's own time and game line ride along on each quote:
-           * the same joined row, so no extra rows are read. They are what the
-           * stale-prop check compares with the latest line (`staleLine.ts`).
-           */
-          `SELECT pp.*, ps.fetched_at AS snapshot_fetched_at,
-                  json_extract(ps.raw_json, '$.gameLines.total') AS snapshot_total,
-                  json_extract(ps.raw_json, '$.gameLines.spread') AS snapshot_spread,
-                  json_extract(ps.raw_json, '$.gameLines.spreadTeam') AS snapshot_spread_team
-             FROM player_props pp
-             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
-            WHERE pp.player_id IN (${placeholders})
-              AND ps.scope = 'week'
-              ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
-              AND ps.id = (
-                SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
-                 ORDER BY s2.fetched_at DESC LIMIT 1
-              )`,
-        )
-        .bind(...batch, ...(window ? [window.from, window.to] : []))
-        .all<Record<string, unknown>>();
-      for (const r of rows.results) {
-        const pid = String(r['player_id']);
-        const prop = toProp(pid, r);
-        const list = out.get(pid);
-        if (list) list.push(prop);
-        else out.set(pid, [prop]);
-      }
-    }
-    return out;
+    return this.linesAsOf(playerIds, window, false);
   }
 
   /**
@@ -315,42 +438,7 @@ export class PropsRepo implements SnapshotStore {
    * once has no previous lines, and no movement is claimed for them.
    */
   async previousForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
-    const out = new Map<string, PlayerProp[]>();
-    if (playerIds.length === 0) return out;
-    for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
-      const placeholders = batch.map(() => '?').join(',');
-      const rows = await this.db
-        .prepare(
-          /*
-           * The snapshot's own time and game line ride along on each quote:
-           * the same joined row, so no extra rows are read. They are what the
-           * stale-prop check compares with the latest line (`staleLine.ts`).
-           */
-          `SELECT pp.*, ps.fetched_at AS snapshot_fetched_at,
-                  json_extract(ps.raw_json, '$.gameLines.total') AS snapshot_total,
-                  json_extract(ps.raw_json, '$.gameLines.spread') AS snapshot_spread,
-                  json_extract(ps.raw_json, '$.gameLines.spreadTeam') AS snapshot_spread_team
-             FROM player_props pp
-             JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
-            WHERE pp.player_id IN (${placeholders})
-              AND ps.scope = 'week'
-              ${window ? 'AND ps.game_start >= ? AND ps.game_start <= ?' : ''}
-              AND ps.id = (
-                SELECT id FROM prop_snapshots s2
-                 WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
-                 ORDER BY s2.fetched_at DESC LIMIT 1 OFFSET 1
-              )`,
-        )
-        .bind(...batch, ...(window ? [window.from, window.to] : []))
-        .all<Record<string, unknown>>();
-      for (const r of rows.results) {
-        const pid = String(r['player_id']);
-        const list = out.get(pid) ?? [];
-        list.push(toProp(pid, r));
-        out.set(pid, list);
-      }
-    }
-    return out;
+    return this.linesAsOf(playerIds, window, true);
   }
 
   /**
@@ -474,19 +562,39 @@ export class PropsRepo implements SnapshotStore {
     return storedCount(this.db, 'props.priced', anchor, () => this.pricedPlayerCountLive());
   }
 
+  /**
+   * Players with a line on the newest look of their game, counting the lines
+   * earlier looks wrote and the newest did not repeat (Round 23).
+   *
+   * The snapshot side is filtered first (a weekly look at or after its game's
+   * newest full copy), and only those looks' lines are read through the
+   * snapshot index, which is the same set the old "newest copy only" count
+   * read for a full copy. A player whose only line has since been withdrawn
+   * ("gone" marker newer than it) is not counted.
+   */
   private async pricedPlayerCountLive(): Promise<number> {
     const row = await this.db
       .prepare(
-        `SELECT COUNT(DISTINCT pp.player_id) AS priced
-           FROM player_props pp
-           JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
-          WHERE pp.player_id IS NOT NULL
-            AND ps.scope = 'week'
-            AND ps.id = (
-              SELECT id FROM prop_snapshots s2
-               WHERE s2.event_id = ps.event_id AND +s2.scope = 'week'
-               ORDER BY s2.fetched_at DESC LIMIT 1
-            )`,
+        `WITH base AS (
+           SELECT event_id, MAX(fetched_at) AS since
+             FROM prop_snapshots
+            WHERE scope = 'week' AND json_extract(raw_json, '$.delta') IS NULL
+            GROUP BY event_id
+         ),
+         looks AS (
+           SELECT ps.id, ps.event_id, ps.fetched_at
+             FROM prop_snapshots ps
+             LEFT JOIN base ON base.event_id = ps.event_id
+            WHERE ps.scope = 'week' AND ps.fetched_at >= COALESCE(base.since, '')
+         ),
+         lines AS (
+           SELECT pp.player_id, pp.market, ps.event_id, pp.consensus_method,
+                  ROW_NUMBER() OVER (PARTITION BY pp.player_id, pp.market, ps.event_id
+                                     ORDER BY ps.fetched_at DESC, pp.id DESC) AS rn
+             FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id
+            WHERE pp.snapshot_id IN (SELECT id FROM looks) AND pp.player_id IS NOT NULL
+         )
+         SELECT COUNT(DISTINCT l.player_id) AS priced FROM lines l WHERE l.rn = 1 AND l.consensus_method <> 'none'`,
       )
       .first<{ priced: number }>();
     return Number(row?.priced ?? 0);
@@ -504,7 +612,7 @@ function toProp(playerId: string, r: Record<string, unknown>): PlayerProp {
     underPrice: r['under_price'] == null ? null : Number(r['under_price']),
     bookCount: Number(r['book_count'] ?? 0),
     consensusMethod: String(r['consensus_method'] ?? 'none') as PlayerProp['consensusMethod'],
-    books: parseJson<string[]>(r['books_json'], []),
+    ...booksFrom(r['books_json']),
     impliedProbability: r['implied_probability'] == null ? null : Number(r['implied_probability']),
     ...(r['snapshot_fetched_at'] == null
       ? {}
@@ -539,4 +647,51 @@ async function markPropsChanged(db: Database): Promise<void> {
       .run()
       .catch(() => undefined);
   }
+}
+
+/** One weekly look at a game, as the delta reads need it. */
+interface SnapshotRef {
+  id: number;
+  eventId: string;
+  fetchedAt: string;
+  /** Written by Round 23's write-on-change path: carries only the lines that changed. */
+  delta: boolean;
+  total: number | null;
+  spread: number | null;
+  spreadTeam: string | null;
+}
+
+/**
+ * The looks whose lines count, newest first.
+ *
+ * From the newest look (or the one before it, for "previous") back to and
+ * including the newest full copy, since a full copy holds every line the game
+ * had and anything older is superseded by it. With no full copy at all (a game
+ * first bought after Round 23) every look counts.
+ */
+export function eligibleSnapshots<T extends { delta: boolean }>(newestFirst: readonly T[], previous: boolean): T[] {
+  const list = previous ? newestFirst.slice(1) : newestFirst.slice();
+  const out: T[] = [];
+  for (const s of list) {
+    out.push(s);
+    if (!s.delta) break;
+  }
+  return out;
+}
+
+/** Is row `a` newer than row `b`, by its look's place in the newest-first order, then by id? */
+function isNewer(a: Record<string, unknown>, b: Record<string, unknown>, order: Map<number, number>): boolean {
+  const ra = order.get(Number(a['snapshot_id'])) ?? Infinity;
+  const rb = order.get(Number(b['snapshot_id'])) ?? Infinity;
+  if (ra !== rb) return ra < rb;
+  return Number(a['id']) > Number(b['id']);
+}
+
+/** `books_json` is a list of names (before Round 23) or of per-book quotes (since). */
+function booksFrom(raw: unknown): { books: string[]; bookDetail?: BookQuote[] } {
+  const parsed = parseJson<unknown[]>(raw, []);
+  if (!Array.isArray(parsed)) return { books: [] };
+  if (parsed.every((b) => typeof b === 'string')) return { books: parsed as string[] };
+  const detail = parsed.filter((b): b is BookQuote => b != null && typeof b === 'object' && typeof (b as BookQuote).book === 'string');
+  return { books: [...new Set(detail.filter((b) => !b.out).map((b) => b.book))].sort(), bookDetail: detail };
 }
