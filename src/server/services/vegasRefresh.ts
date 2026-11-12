@@ -23,7 +23,7 @@ import { getPropsWithCache } from '../../core/vegas/cache.ts';
 import { canSpend, readProviderUsage, type BudgetView } from '../../core/vegas/budget.ts';
 import { buildFetchPlan, manualRefreshThresholdMinutes, type FetchPlan, type PlannedPlayer, type PlanTier } from '../../core/vegas/plan.ts';
 import { slateWindow } from '../../core/nfl/slateWindow.ts';
-import { KICKOFF_CHECKPOINT_HOURS, reconcileKickoff } from '../../core/vegas/kickoffClock.ts';
+import { FIRST_LOOK_HOURS, reconcileKickoff } from '../../core/vegas/kickoffClock.ts';
 import { buildConsensus } from '../../core/vegas/normalize.ts';
 import { isRateLimited, type RawPropSet, type VegasProvider } from '../../core/vegas/types.ts';
 import type { Database } from '../db.ts';
@@ -127,8 +127,11 @@ const NEXT_SLATE_MAX_DAYS = 28;
  */
 const EMPTY_TEAM_RETRY_HOURS = 6;
 
-/** How far the kickoff clock's discovery looks. See {@link VegasRefreshService.discoverIfNeeded}. */
-const CLOCK_DISCOVERY_DAYS = 3;
+/**
+ * How far past a team's next stored kickoff the kickoff clock's discovery window
+ * reaches. See {@link clockDiscoveryWindowEnd}.
+ */
+const CLOCK_DISCOVERY_MARGIN_HOURS = 2;
 
 /**
  * nflverse's code for a team where it differs from Sleeper's.
@@ -459,12 +462,14 @@ export class VegasRefreshService {
     const ordered = this.discoveryOrder(players, await this.rosterTeams());
     if (ordered.length === 0) return { entities: 0, requests: 0, events: 0 };
     /*
-     * The clock asks for the next three days and no more. A longer window
-     * returns, and bills, a team's second game whenever one falls inside it —
-     * an entity per extra event — and the first checkpoint is 48 hours out.
+     * The clock's window is filled in below, once it knows which teams it is
+     * asking about: just past the latest of their next kickoffs. A wider window
+     * returns, and bills, a team's second game whenever one falls inside it
+     * (a Sunday game and the next Thursday are four days apart), and the
+     * first look is now five days out.
      */
-    const to = sink.clock
-      ? new Date(now + CLOCK_DISCOVERY_DAYS * 86_400_000).toISOString()
+    let to = sink.clock
+      ? new Date(now + (FIRST_LOOK_HOURS + CLOCK_DISCOVERY_MARGIN_HOURS) * 3_600_000).toISOString()
       : await this.discoveryWindowEnd(now, ordered);
 
     /*
@@ -489,11 +494,14 @@ export class VegasRefreshService {
      */
     const emptyAt = await settings.get<Record<string, string>>(SETTING_KEYS.vegasDiscoveryEmpty, {});
     let unknown = await this.teamsWithoutAFixture(ordered, now, to);
+    let nextKickoffs: Map<string, number | null> | null = null;
     if (sink.clock) {
       const fixtures = await this.scheduleKickoffs(unknown);
-      const firstLook = KICKOFF_CHECKPOINT_HOURS[0]! * 3_600_000;
+      const firstLook = FIRST_LOOK_HOURS * 3_600_000;
+      nextKickoffs = new Map();
       unknown = unknown.filter((team) => {
         const next = (fixtures.get(scheduleCode(team)) ?? []).filter((at) => at > now).sort((a, b) => a - b)[0];
+        nextKickoffs!.set(team, next ?? null);
         // No stored fixture is not evidence of a bye, so it is still asked.
         return next == null || next - now <= firstLook;
       });
@@ -526,6 +534,7 @@ export class VegasRefreshService {
 
     const from = new Date(now).toISOString();
     const asking = teams.slice(0, decision.entities);
+    if (nextKickoffs) to = clockDiscoveryWindowEnd(now, asking.map((t) => nextKickoffs!.get(t) ?? null));
     /*
      * Stamped before the call, and only when the ask covers the whole roster.
      *
@@ -1187,6 +1196,31 @@ export class VegasRefreshService {
     }
     return out;
   }
+}
+
+/**
+ * Where the kickoff clock's discovery window closes, as an ISO instant.
+ *
+ * Just past the latest next kickoff among the teams being asked about, so a
+ * team's following game (a Sunday game and the next Thursday are only four days
+ * apart) is not returned and billed with it. A team whose next game the schedule
+ * does not know stretches the window to the first look plus a margin, which is
+ * the widest the clock ever asks.
+ */
+export function clockDiscoveryWindowEnd(now: number, nextKickoffs: readonly (number | null)[]): string {
+  const widest = now + (FIRST_LOOK_HOURS + CLOCK_DISCOVERY_MARGIN_HOURS) * 3_600_000;
+  if (nextKickoffs.length === 0 || nextKickoffs.some((k) => k == null || !Number.isFinite(k))) {
+    return new Date(widest).toISOString();
+  }
+  const latest = Math.max(...(nextKickoffs as number[]));
+  const end = Math.min(widest, latest + CLOCK_DISCOVERY_MARGIN_HOURS * 3_600_000);
+  /*
+   * Up to the next midnight UTC. The adapter sends the window as a date
+   * (`startsBefore=2026-11-16`), so an end in the middle of the kickoff's own
+   * day would be cut back to that day's start and drop the very game asked for.
+   */
+  const day = 86_400_000;
+  return new Date(Math.ceil((end + 1) / day) * day).toISOString();
 }
 
 /**

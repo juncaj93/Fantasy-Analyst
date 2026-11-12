@@ -268,12 +268,15 @@ those are covered by the discovery-order fix above.
 
 | | Entities |
 |---|---|
-| Discovery: one per covered team, when its game is inside 48 hours | 12 |
-| Six looks at each of up to 12 roster games | 72 |
-| **Per week, worst case** | **84** |
-| **Per month (5 weeks)** | **420 of 2,500 — 17%** |
+| Discovery: one per covered team, when its game is inside 120 hours | 12 |
+| Nine looks at each of up to 12 roster games (Round 23) | 108 |
+| **Per week, worst case** | **120** |
+| **Per month (5 weeks)** | **600 of 2,500 — 24%** |
 | A person's own taps (September's were 255, mostly one defect) | ~255 |
-| **With taps** | **~675 — 27%, still under the 50% caution line** |
+| **With taps** | **~855 — 34%, still under the 50% caution line** |
+
+Typical, from the October to November month (496 entities with six looks):
+about 700 a month with nine looks, 28%.
 
 Typical is lower: the roster spans about ten games, and a look at a game whose
 lines are younger than the staleness table's wait buys nothing. Season markets
@@ -289,8 +292,10 @@ are not in the table because they stop when the draft is over.
 weekend Vegas runs, which had nothing for a Thursday night, a Monday night, a
 holiday game on a Wednesday or Saturday, or a game the league moved.
 
-**Driven by the stored NFL schedule.** A game is looked at 48, 24, 6, 3, 1.5 and
-0.5 hours before its own stored kickoff. Nothing in the code knows a weekday: a
+**Driven by the stored NFL schedule.** A game is looked at 120, 96, 72, 48, 24, 6, 3, 1.5 and
+0.5 hours before its own stored kickoff. The first three were added in Round 23:
+props post and move most 48 to 96 hours out (Round 21 probe), where the clock
+used to be blind. Nothing in the code knows a weekday: a
 Thursday night, a Monday night and a Saturday game are the same case, and a
 flexed game moves its checkpoints with its kickoff.
 
@@ -316,8 +321,9 @@ kickoff wins where the two are within four days, which is how a flexed game is
 on its new clock at once. The schedule refresh clears the gate only when an
 upcoming kickoff actually changed.
 
-**Discovery asks about a team only when its own game is inside 48 hours**, for
-no more than three days ahead, and is not held off by the old three-day stamp.
+**Discovery asks about a team only when its own game is inside 120 hours** (the
+first look), with a window that ends at the midnight UTC after the latest next
+kickoff it is asking about, so a team's following game is not bought with it, and is not held off by the old three-day stamp.
 
 `GET /api/vegas/budget` now carries `clock`: the gate, and the passes the stored
 schedule implies for the next seven days. The Probe workflow's

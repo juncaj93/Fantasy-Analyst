@@ -25,7 +25,8 @@ import {
   VegasKickoffClock,
   type ClockState,
 } from '../src/server/services/vegasKickoffClock.ts';
-import { VegasRefreshService } from '../src/server/services/vegasRefresh.ts';
+import { VegasRefreshService, clockDiscoveryWindowEnd } from '../src/server/services/vegasRefresh.ts';
+import { tickFor } from '../src/core/vegas/kickoffClock.ts';
 import { ScheduleService } from '../src/server/services/scheduleService.ts';
 import { createTestDb } from './helpers/db.ts';
 import { countingDb } from './helpers/countingDb.ts';
@@ -200,14 +201,19 @@ describe('the odds job on the five-minute tick', () => {
     expect(provider.asked).toEqual([]);
 
     const state = await clock.state();
-    // The first checkpoint is a day out, so the gate sleeps for its ceiling.
-    expect(Date.parse(state.next!)).toBe(now + 6 * H);
-    expect(KICKOFF_1 - 48 * H).toBeGreaterThan(now + 6 * H);
+    // The games are three days out, so the next checkpoint is the second
+    // game's 72-hour look, two hours on, and the gate sleeps until then.
+    expect(Date.parse(state.next!)).toBe(tickFor(KICKOFF_2 - 72 * H));
+    expect(KICKOFF_2 - 72 * H).toBeLessThan(now + 6 * H);
   });
 
   it('buys the games whose checkpoint has arrived, and only those', async () => {
     const clock = new VegasKickoffClock(db, provider);
     await tick(clock, provider, Date.now() + 1 * H);
+    // The second game's 72-hour look comes first (bought once its lines are
+    // past the six-hour wait); then only the first game is owed.
+    await tick(clock, provider, KICKOFF_2 - 72 * H + 7 * H);
+    provider.asked.length = 0;
 
     // Just past the 48-hour mark of the first game. The second game starts
     // three hours later, so its own mark is still ahead.
@@ -241,6 +247,7 @@ describe('the odds job on the five-minute tick', () => {
   it('then buys the second game at its own checkpoint, three hours on', async () => {
     const clock = new VegasKickoffClock(db, provider);
     await tick(clock, provider, Date.now() + 1 * H);
+    await tick(clock, provider, KICKOFF_2 - 72 * H + 7 * H);
     await tick(clock, provider, KICKOFF_1 - 48 * H + 3 * M);
     provider.asked.length = 0;
 
@@ -285,6 +292,9 @@ describe('the odds job on the five-minute tick', () => {
     await learnWeek(db, provider, { [GAME_1]: KICKOFF_1 + 30 * H });
     const clock = new VegasKickoffClock(db, provider);
     await tick(clock, provider, Date.now() + 1 * H);
+    // Its new time's 96-hour look (K1 - 66h), which is owed and bought.
+    provider.now = KICKOFF_1 - 66 * H + 3 * M;
+    await new VegasRefreshService(db, provider).refresh({ clock: true, now: provider.now });
     provider.asked.length = 0;
 
     // The old time's 48-hour mark: nothing is due, because the game is not
@@ -476,7 +486,8 @@ describe('finding a game on the clock', () => {
    * game, over an eight-day window, once every three days: on a Sunday afternoon
    * that buys next Sunday's games a week before anybody can use them. The clock
    * asks about a team only when that team's own stored kickoff is inside its
-   * first checkpoint, 48 hours, and for no longer than three days ahead.
+   * first checkpoint (120 hours since Round 23), and its window ends just past
+   * the latest of those kickoffs.
    */
   async function worldWithFixtures(hoursOut: Record<string, number>) {
     const db = await createTestDb();
@@ -508,7 +519,7 @@ describe('finding a game on the clock', () => {
   });
 
   it('asks about nobody when every game is further out than that', async () => {
-    const { db, provider, now } = await worldWithFixtures({ KC: 4 * 24, DAL: 4 * 24, DET: 6 * 24, NYJ: 6 * 24, JAX: 6 * 24 });
+    const { db, provider, now } = await worldWithFixtures({ KC: 6 * 24, DAL: 5.5 * 24, DET: 6 * 24, NYJ: 6 * 24, JAX: 6 * 24 });
     const report = await new VegasRefreshService(db, provider).refresh({ clock: true, now });
     expect(provider.teamCalls).toEqual([]);
     expect(report.discovered).toBe(0);
@@ -534,5 +545,29 @@ describe('finding a game on the clock', () => {
     );
     await new VegasRefreshService(db, provider).refresh({ clock: true, now });
     expect(provider.teamCalls[0]).not.toContain('DAL');
+  });
+});
+
+describe('the clock discovery window (Round 23)', () => {
+  const NOW = Date.parse('2026-11-12T13:00:00.000Z'); // Thu 8am ET
+
+  it('ends at the midnight after the latest next kickoff, so the game itself is inside it', () => {
+    // A Sunday 1pm ET game: the adapter sends a date, so the window must run
+    // to Monday 00:00 UTC, never stop on Sunday.
+    const sunday = Date.parse('2026-11-15T18:00:00.000Z');
+    expect(clockDiscoveryWindowEnd(NOW, [sunday])).toBe('2026-11-16T00:00:00.000Z');
+  });
+
+  it('does not reach a team\'s following game four days later', () => {
+    const sunday = Date.parse('2026-11-15T18:00:00.000Z');
+    const end = Date.parse(clockDiscoveryWindowEnd(NOW, [sunday]));
+    const nextThursday = Date.parse('2026-11-20T01:15:00.000Z');
+    expect(end).toBeLessThan(nextThursday);
+  });
+
+  it('opens to the first look, five days and a margin, when a team\'s next game is unknown', () => {
+    const end = Date.parse(clockDiscoveryWindowEnd(NOW, [null]));
+    expect(end).toBeGreaterThanOrEqual(NOW + 122 * H);
+    expect(end - NOW).toBeLessThanOrEqual(122 * H + 24 * H);
   });
 });
