@@ -571,3 +571,47 @@ describe('the clock discovery window (Round 23)', () => {
     expect(end - NOW).toBeLessThanOrEqual(122 * H + 24 * H);
   });
 });
+
+describe('the extra sources ride the same clock (Round 23)', () => {
+  it('a pass runs TheRundown when its key is set, and the gate wakes in time for its next turn', async () => {
+    const { TheRundownSource } = await import('../src/core/vegas/extraSources.ts');
+    const db = await createTestDb();
+    await seedDemoData(db);
+    const provider = new CountingProvider();
+    await learnWeek(db, provider);
+    const calls: string[] = [];
+    Object.assign(provider, {
+      extraSources: {
+        rundown: new TheRundownSource({
+          apiKey: 'k',
+          fetch: async (url: string) => {
+            calls.push(url);
+            return new Response(JSON.stringify({ events: [] }), { status: 200 });
+          },
+        }),
+      },
+    });
+    const clock = new VegasKickoffClock(db, provider);
+    const now = Date.now() + 1 * H;
+    await tick(clock, provider, now);
+    expect(calls.length).toBeGreaterThan(0);
+    const state = await clock.state();
+    // The games are three days out, so TheRundown's turn is every 3 hours; the
+    // gate never sleeps past it (here the next checkpoint comes even sooner).
+    expect(Date.parse(state.next!)).toBeLessThanOrEqual(now + 180 * M);
+    const second = calls.length;
+    await tick(clock, provider, now + 181 * M);
+    expect(calls.length).toBeGreaterThan(second);
+  });
+
+  it('with no key, the gate is exactly what it was', async () => {
+    const db = await createTestDb();
+    await seedDemoData(db);
+    const provider = new CountingProvider();
+    await learnWeek(db, provider);
+    const clock = new VegasKickoffClock(db, provider);
+    const now = Date.now() + 1 * H;
+    await tick(clock, provider, now);
+    expect(Date.parse((await clock.state()).next!)).toBe(tickFor(KICKOFF_2 - 72 * H));
+  });
+});
