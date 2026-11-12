@@ -1,0 +1,42 @@
+Round 21 probe (scripts/probe-round21.mjs), Probe run 43215273225, Thu Nov 12 2026 7:09 AM ET.
+Read-only. D1 before: 656,837 of 5,000,000 rows read today (13.1%). Rows read by the probe: 81,996.
+Production sha: 18af1a525e2d2a1f6fac199723dafa0867ff690e. No odds provider was called.
+
+495 stored weekly snapshots (looks), 31,156 stored prop lines, 66 games (Oct 12 to Nov 16).
+
+2. By kickoff slot: median hours before kickoff
+slot        games  firstLook  firstTotal  firstProps  firstLookAlreadyHadTotal  firstLookAlreadyHadProps  neverProps
+Mon             6      112.1       112.1       112.1                       6/6                       6/6           0
+Thu             5       48.0        48.0        48.0                       5/5                       5/5           0
+Sun early      36      102.7       102.7        83.2                     36/36                     30/36           0
+Sun late       15      116.5       116.5       102.4                     15/15                     10/15           0
+Sun night       4      101.8       101.8       101.8                       4/4                       4/4           0
+
+Games whose first look had a total but no props (first look -> first props, hours before kickoff):
+Sun 10/18 1:00 PM 166.0 -> 122.4 | Sun 10/18 1:00 PM 166.0 -> 122.4 | Sun 10/18 4:25 PM 169.5 -> 125.9
+Sun 10/25 1:00 PM 168.1 -> 113.1 | Sun 10/25 1:00 PM 168.1 -> 66.7 | Sun 10/25 4:25 PM 171.5 -> 116.5
+Sun 11/1 1:00 PM 180.0 -> 75.7  | Sun 11/1 4:05 PM 183.1 -> 78.8  | Sun 11/8 1:00 PM 171.1 -> 69.1
+Sun 11/8 4:05 PM 174.2 -> 72.2  | Sun 11/8 4:25 PM 174.6 -> 72.5
+Props per game: about 50 at first look, about 70 at last look.
+
+3. When lines moved, by hours before kickoff (consecutive looks compared)
+bucket   looks  totalMoved  spreadMoved  propLooks  propLooksWithAChange  linesChanged/compared  newLinesAppeared
+>96h        56           6            6         11                    11                102/568                27
+72-96h      23           9            5         11                    11                157/623                49
+48-72h      42           8           13         27                    27               459/1357               281
+24-48h      82           9           14         75                    75               778/4514               246
+6-24h       81          13            8         81                    79               543/5204               125
+1.5-6h     106           9           20        106                   105               823/7188               115
+<1.5h      105          21           19        105                   104               640/7250                35
+
+4. Odds rows written per day (UTC day; still stored, so lower bounds)
+10-29 908 | 10-30 1190 | 10-31 1690 | 11-01 2921 | 11-02 341 | 11-03 72 | 11-04 71
+11-05 932 | 11-06 714 | 11-07 1628 | 11-08 3217 | 11-09 292 | 11-10 75 | 11-11 1744 | 11-12 63 (partial)
+Total 15,858 player_props rows in 15 days, about 1,060 a day. Each row also writes 4 indexes.
+
+5. Provider ledger (entities): Sundays 10/25 65, 11/1 47, 11/8 46; weekdays 1 to 35.
+No refused, blocked or failed calls in the last 8 days.
+Provider count this billing month: 496 of 2,500 (read Wed Nov 11, 8:15 PM ET).
+
+6. Clock gate: last pass Wed 8:15 PM (1 game fetched), next pass Thu 8:15 AM.
+vegas_events: 145 games stored, 143 with total and spread.
