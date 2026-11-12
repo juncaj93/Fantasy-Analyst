@@ -119,6 +119,22 @@ describe('reading TheRundown', () => {
     expect(game.books.map((b) => `${b.book}:${b.total}:${b.spread}:${b.spreadTeam}`)).toEqual(['draftkings:39.5:-4.5:LAC', 'betmgm:39:-4:LAC']);
   });
 
+  it('finds the away side when only is_home is sent, and the Raiders by name when the code is LAS', () => {
+    // As TheRundown answered on Nov 12: no is_away field, and "LAS" for Las Vegas.
+    const game = rundownGame(
+      {
+        ...RUNDOWN_EVENT,
+        teams_normalized: [
+          { abbreviation: 'SEA', name: 'Seattle', mascot: 'Seahawks', is_home: false },
+          { abbreviation: 'LAS', name: 'Las Vegas', mascot: 'Raiders', is_home: true },
+        ],
+      },
+      '2026-11-14T17:00:00.000Z',
+    )!;
+    expect(game.teams).toEqual(['LV', 'SEA']);
+    expect(game.books[0]!.spreadTeam).toBe('LV');
+  });
+
   it('sends the key in a header, one request per date', async () => {
     const { fn, calls } = fakeFetch(() => ({ events: [RUNDOWN_EVENT] }));
     let header: string | null = null;

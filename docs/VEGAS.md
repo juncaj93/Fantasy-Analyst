@@ -612,7 +612,7 @@ asked, nothing changes, and the kickoff clock's gate is exactly what it was.
 
 | Source | What | When | Cost |
 |---|---|---|---|
-| TheRundown | totals and spreads, per game date (BetMGM, DraftKings, FanDuel) | hourly when a tracked game is inside 48 h, else every 3 h | about 150 data points a date; capped at 6,000 a day (free: 20,000 a day; one page says 200,000 a month, unverified) |
+| TheRundown | totals and spreads, per game date (BetMGM, DraftKings, FanDuel) | hourly when a tracked game is inside 48 h, else every 3 h | 132 data points for a 12-game Sunday (11 a game); capped at 6,000 a day, so at most 186,000 a month (free: 20,000 a day and 200,000 a month, both confirmed by the key check on Nov 12, 2026) |
 | The Odds API | totals and spreads, whole slate | every 8 h | 2 credits; about 180 a month |
 | The Odds API | player props, the week's tracked games | Friday from 9 AM ET, once | about 6 credits a game, at most 8 games; about 210 a month |
 

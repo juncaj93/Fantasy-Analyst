@@ -187,8 +187,10 @@ export function rundownGame(event: RundownEvent, at: string): ExternalGame | nul
   const sides = event.teams_normalized ?? event.teams ?? [];
   const code = (t: RundownTeam | undefined) =>
     t ? nflTeamCode(t.abbreviation) || nflTeamCode([t.name, t.mascot].filter(Boolean).join(' ')) || nflTeamCode(t.mascot) : '';
-  const home = code(sides.find((t) => t.is_home));
-  const away = code(sides.find((t) => t.is_away));
+  // The live answer may carry only `is_home`, so the away side is the other one.
+  const homeSide = sides.find((t) => t.is_home === true);
+  const home = code(homeSide);
+  const away = code(sides.find((t) => t.is_away === true) ?? sides.find((t) => t !== homeSide));
   if (!home || !away || !event.event_date) return null;
   const books: GameBookLine[] = [];
   for (const [id, line] of Object.entries(event.lines ?? {})) {
