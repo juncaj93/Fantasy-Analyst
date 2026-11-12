@@ -129,8 +129,13 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
+/**
+ * Half away from zero, so a spread reads the same from either side: -4.25 is
+ * -4.3 because +4.25 is +4.3 (`Math.round` alone would give -4.2).
+ */
 function round(value: number, kind: LineKind): number {
-  return kind === 'anytime_td' ? Math.round(value * 10_000) / 10_000 : Math.round(value * 10) / 10;
+  const scale = kind === 'anytime_td' ? 10_000 : 10;
+  return (Math.sign(value) * Math.round(Math.abs(value) * scale)) / scale;
 }
 
 /**

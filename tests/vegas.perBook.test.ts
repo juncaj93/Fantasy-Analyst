@@ -443,3 +443,13 @@ describe('a refresh that finds nothing new writes no lines', () => {
     expect(await seen(), 'the game line did not change, so its row was not rewritten').toEqual(linesFirst);
   });
 });
+
+describe('rounding', () => {
+  it('reads a spread the same from either side (half away from zero)', () => {
+    const at = new Date(NOW).toISOString();
+    const lac = combineBookValues([{ book: 'a', value: -4.5, at }, { book: 'b', value: -4, at }], 'spread', opts);
+    const bal = combineBookValues([{ book: 'a', value: 4.5, at }, { book: 'b', value: 4, at }], 'spread', opts);
+    expect(lac.value).toBe(-4.3);
+    expect(bal.value).toBe(4.3);
+  });
+});
