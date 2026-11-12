@@ -79,6 +79,10 @@ TRIM_OLD_ROWS = "on"
 # the preview (Offers, Build, Check); "old" brings back the earlier screens.
 # Change and deploy.
 TRADES_SCREENS = "new"
+# The in-season Players tab (Round 24): "on" draws it once the draft is over
+# (sorted by rest-of-season value, Trade targets and Injured filters, a fuller
+# card). "off" keeps today's tab. Off until Alex has seen the preview and says go.
+PLAYERS_INSEASON = "off"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

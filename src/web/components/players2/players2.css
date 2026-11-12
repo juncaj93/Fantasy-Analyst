@@ -1,0 +1,167 @@
+/*
+  Players, in season (Round 24, behind PLAYERS_INSEASON). Loaded with the
+  in-season screen only, so the render-blocking sheet does not grow. The
+  site's own tokens; nothing new except the arrangement.
+*/
+
+/* The filters share a row with the sort control, like positions and owner above. */
+.p2-views .filter-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Willingness, and an injured player's return week. */
+.p2-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+}
+.p2-tag[data-word='Likely'] {
+  background: var(--pos-tint);
+  color: var(--pos);
+}
+.p2-tag[data-word='Maybe'] {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+.p2-tag[data-word='out'] {
+  background: var(--neg-tint);
+  color: var(--neg);
+}
+
+/* The card. */
+.p2-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.p2-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.p2-pick-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.p2-why {
+  font-weight: 600;
+  min-width: 0;
+}
+
+/* The direct comparison: him against the starter he replaces. */
+.p2-versus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  font-variant-numeric: tabular-nums;
+}
+.p2-versus-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.p2-versus-them {
+  text-align: right;
+  color: var(--text-dim);
+}
+.p2-versus-num {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.p2-win {
+  color: var(--pos);
+}
+
+.p2-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.p2-this {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: var(--sp-3);
+  align-items: baseline;
+}
+.p2-this .p2-label {
+  grid-column: 1 / -1;
+}
+.p2-big {
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.p2-season {
+  justify-self: end;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+.p2-season strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.p2-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* Four weeks or five games, side by side; never wider than the phone. */
+.p2-cells {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.p2-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: var(--sp-1) 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+.p2-cell[data-bye='yes'] {
+  background: var(--warn-tint);
+}
+.p2-cell-week {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+.p2-cell-num {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.p2-bye {
+  color: var(--warn);
+  font-size: 0.8rem;
+}
+.p2-out {
+  color: var(--neg);
+}

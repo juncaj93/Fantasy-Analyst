@@ -938,6 +938,13 @@ describe('no recommendation engine can reach the fallback', () => {
          * from Sleeper), and a complete market always outranks it.
          */
         'server/services/smartTradeService.ts',
+        /*
+         * The in-season Players card (Round 24). It reads the published week
+         * for one player for exactly what Compare's list reads it for, through
+         * `weekPoints`, so the card's "This week" is the number Team and Compare
+         * print, with the Sleeper mark when it is the base. It decides nothing.
+         */
+        'server/services/playersSeasonService.ts',
         'worker/index.ts',
       ].map((p) => path.join(ROOT, ...p.split('/'))),
     );
