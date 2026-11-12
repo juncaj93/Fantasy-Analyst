@@ -47,7 +47,7 @@ import { staleScale, type TeamLines } from './staleLine.ts';
 import { pillFor, type PillReading } from './pills.ts';
 import { readSpread, type SpreadReading } from './spread.ts';
 import { playedWeeksOf } from '../value/restOfSeason.ts';
-import { isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, waitsOnLine, type LeanTag } from './tossup.ts';
+import { isQuestionable, isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, waitsOnLine, type LeanTag } from './tossup.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
 
 export interface StartSitInput {
@@ -1187,6 +1187,7 @@ export function compareStartSit(
     return {
       points: real ? e.decision!.points : null,
       borrowed: e.decision?.basis === 'published',
+      questionable: isQuestionable(e.injury?.designation),
       hole: isRealHole({ ruledOut: e.ruledOut, onReserve: e.onReserve ?? false, designation: e.injury?.designation ?? null }),
     };
   };

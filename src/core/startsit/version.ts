@@ -70,11 +70,16 @@ import { composeEngineVersion } from '../engineVersion.ts';
  */
 /*
  * `startsit@9`, 11 November 2026 (round 18): a pick whose own number has no
- * Vegas line needs a 3.5-point lead (`UNPRICED_TOSSUP_POINTS`), and a toss-up
+ * Vegas line needs a 3.5-point lead (`WIDE_TOSSUP_POINTS`), and a toss-up
  * held back only by the missing line is marked `waitingOnLine`. Evaluations
  * carry the schedule's bye. The late-game notes are rewritten in plain words.
  */
-export const STARTSIT_ENGINE_VERSION = 'startsit@9';
+/*
+ * `startsit@10`, 11 November 2026 evening (Alex's decision): every
+ * Questionable pick needs the same wide bar (`WIDE_TOSSUP_POINTS`, 3.5), with
+ * or without a line. The screens' week comes from `appWeek.ts`.
+ */
+export const STARTSIT_ENGINE_VERSION = 'startsit@10';
 
 /**
  * The optimiser, and the weekly intelligence pass layered onto it.
@@ -144,4 +149,5 @@ export const STARTSIT_ENGINE_VERSION = 'startsit@9';
  * `lineup@13`, 11 November 2026 (round 18): the same wider bar for an
  * unpriced lead on Team's swaps and Best move.
  */
-export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@13', STARTSIT_ENGINE_VERSION);
+/* `lineup@14`, 11 November 2026 evening: the Questionable bar on Team's swaps and Best move. */
+export const LINEUP_ENGINE_VERSION = composeEngineVersion('lineup@14', STARTSIT_ENGINE_VERSION);

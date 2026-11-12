@@ -62,6 +62,7 @@ import { MatchupService } from '../server/services/matchupService.ts';
 import { resolveWeek } from '../core/matchup/build.ts';
 import { trimEnabled, trimOldRows } from '../server/services/trimOldRows.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
+import { readAppNflState } from '../server/services/appWeek.ts';
 
 /**
  * What one step of a scheduled run reports about itself.
@@ -1247,9 +1248,17 @@ async function refreshMatchupCalibration(env: WorkerEnv, appEnv: AppEnv): Promis
 async function refreshPublishedProjections(env: WorkerEnv, appEnv: AppEnv): Promise<StepResult> {
   const league = await new LeagueRepo(env.DB).getSelectedLeague();
   if (!league) return { outcome: 'skipped', note: 'no league selected' };
-  const state = await new SettingsRepo(env.DB).get<NflState | null>(SETTING_KEYS.nflState, null);
-  const week = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
-  const report = await new SleeperProjectionService(env.DB, appEnv.sleeper).refresh(league.season, week);
+  const state = await readAppNflState(env.DB);
+  const week = resolveWeek(null, state?.sleeperWeek ?? null, state?.seasonType ?? null);
+  const service = new SleeperProjectionService(env.DB, appEnv.sleeper);
+  const report = await service.refresh(league.season, week);
+  /*
+   * Round 18: once the app has moved to next week (Tuesday, `appWeek.ts`) and
+   * Sleeper has not, the week the screens show needs its published numbers too.
+   * Sleeper's own week is still refreshed first, as it always was.
+   */
+  const shown = resolveWeek(null, state?.week ?? null, state?.seasonType ?? null);
+  if (shown !== week) await service.refresh(league.season, shown).catch(() => null);
   if (report.outcome === 'unavailable') {
     console.log(`published projections ${report.season} week ${report.week}: ${report.detail ?? 'unavailable'}`);
   }

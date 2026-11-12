@@ -20,7 +20,7 @@
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { PropsRepo } from '../repos/props.ts';
-import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import { startSitInputsFor, buildStartSitContext, readSeasonPoints } from './startSitInputs.ts';
 import { MatchupRepo } from '../repos/matchup.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
@@ -72,6 +72,7 @@ import { tradeHorizon } from '../../core/tradeValue/weeks.ts';
 import { readWaiverRound2 } from './waiverRound2.ts';
 import { lastCompletedWeek } from '../../core/sleeper/weekPoints.ts';
 import { normalizeName, normalizeTeam } from '../../core/identity/normalize.ts';
+import { readAppNflState } from './appWeek.ts';
 
 /** How old the betting market is, in the shape every screen already prints. */
 export type PropsFreshness = { fetchedAt: string | null; provider: string | null; events: number };
@@ -108,7 +109,8 @@ async function leagueBase(db: Database, leagueId: string): Promise<LeagueDecisio
     leagueRepo.getLeague(leagueId),
     leagueRepo.listRosters(leagueId),
     new PropsRepo(db).freshness(),
-    new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
+    /* The app's week (Round 18, `core/season/appWeek.ts`): Team and Waivers show the same week as every screen. */
+    readAppNflState(db),
   ]);
   if (!league) throw new NoDecision('league not found', 404);
 

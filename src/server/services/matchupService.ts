@@ -49,6 +49,7 @@ import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { PreseasonProjectionsRepo } from '../repos/preseasonProjections.ts';
 import { projectionScoringFrom, scoringKey } from '../../core/startWho/scoring.ts';
 import type { Database } from '../db.ts';
+import { readAppNflState } from './appWeek.ts';
 
 /*
  * Re-exported so the endpoint, the tests and anything else that already imports
@@ -136,7 +137,8 @@ export class MatchupService {
       },
       matchups: (league: LeagueRecord, week: number) =>
         this.deps.sleeper.getMatchups(league.sleeperLeagueId, week) as Promise<SleeperMatchup[]>,
-      nflState: () => new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null),
+      /* The app's week (Round 18, `core/season/appWeek.ts`), the same one Team, Compare, Waivers and Trades show. */
+      nflState: () => readAppNflState(this.db, this.now()),
       startSitInputs: (playerIds) => startSitInputsFor(this.db, playerIds),
       /*
        * Read from the database only. The fetch runs on the crons, so a matchup

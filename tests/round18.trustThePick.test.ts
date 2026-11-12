@@ -2,7 +2,7 @@
  * Round 18 (11 November 2026): trust the pick.
  *
  * A pick that rests on a number with no Vegas line needs a 3.5-point lead,
- * not 2.0 (`UNPRICED_TOSSUP_POINTS` in `startsit/tossup.ts`, measured in
+ * not 2.0 (`WIDE_TOSSUP_POINTS` in `startsit/tossup.ts`, measured in
  * `docs/backtest/ROUND18_UNPRICED.md`). Alex's real case on Wednesday
  * 11 November: Team said "Start Ladd McConkey over Omar Cooper Jr. at FLEX,
  * 10.3 vs 7.3". McConkey had no lines and was Questionable (Sleeper's number
@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { compareStartSit } from '../src/core/startsit/engine.ts';
-import { TOSSUP_POINTS, UNPRICED_TOSSUP_POINTS, isTossUp } from '../src/core/startsit/tossup.ts';
+import { TOSSUP_POINTS, WIDE_TOSSUP_POINTS, isTossUp } from '../src/core/startsit/tossup.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { candidate, pricedCandidate } from './helpers/startsit.ts';
 
@@ -36,7 +36,7 @@ function mcconkeyVsCooper(rankedLead = 3.0) {
 describe('the measured bar', () => {
   it('is wider than 2.0 for an unpriced number, one shared constant', () => {
     expect(TOSSUP_POINTS).toBe(2);
-    expect(UNPRICED_TOSSUP_POINTS).toBe(3.5);
+    expect(WIDE_TOSSUP_POINTS).toBe(3.5);
   });
 
   it('McConkey 10.3 (unpriced, minus 1 already in) over Cooper 7.3 (priced) is a toss-up', () => {
@@ -101,11 +101,22 @@ describe('waiting on lines', () => {
     expect(waitsOnLine({ points: 12.5, borrowed: true }, { points: 10 })).toBe(false);
   });
 
-  it('Team and Compare both mark Alex’s FLEX call as waiting on a line', () => {
+  it('Alex’s FLEX call is a plain toss-up: McConkey is Questionable too, so the line is not the only reason', () => {
     const { cooper, ladd, published } = mcconkeyVsCooper(3.0);
     const r = recommendLineup([cooper, ladd], FLEX, PROFILE, { currentStarterIds: ['cooper'], published });
-    expect(r.tossUps?.[0]?.waitingOnLine).toBe(true);
+    expect(r.tossUps?.[0]?.inPlayerId).toBe('ladd');
+    expect(r.tossUps?.[0]?.waitingOnLine).toBeUndefined();
     const c = compareStartSit([ladd, cooper], PROFILE, { published });
+    expect(c.tossUp?.leanPlayerId).toBe('ladd');
+    expect(c.tossUp?.waitingOnLine).toBeUndefined();
+  });
+
+  it('a healthy unpriced lead of 3.0 is waiting on a line, on Team and Compare', () => {
+    const { cooper, published } = mcconkeyVsCooper(3.0);
+    const healthy = candidate('ladd', 'Ladd McConkey', 'WR', 3, { team: 'LAC' });
+    const r = recommendLineup([cooper, healthy], FLEX, PROFILE, { currentStarterIds: ['cooper'], published });
+    expect(r.tossUps?.[0]?.waitingOnLine).toBe(true);
+    const c = compareStartSit([healthy, cooper], PROFILE, { published });
     expect(c.tossUp?.waitingOnLine).toBe(true);
   });
 
@@ -264,5 +275,64 @@ describe('Round 18 small words', () => {
   it('the folded bench says "No line yet" when Best move does', () => {
     expect(benchSummary({ found: true, swaps: [], fills: [], tossUps: [{ waitingOnLine: true }] })).toBe('No line yet');
     expect(benchSummary({ found: true, swaps: [], fills: [], tossUps: [{}] })).toBe('Toss-up');
+  });
+});
+
+
+/* ------------------------------------------------- Questionable bar (Alex, 11 Nov) */
+
+describe('every Questionable pick needs the wide bar, with or without a line', () => {
+  /** Two priced receivers; the bench one Questionable, `lead` points ahead on his number. */
+  function pricedQ(lead: number, status: string | null = 'Questionable') {
+    const starter = pricedCandidate('st', 'Starter Guy', 'WR', 10);
+    const base = recommendLineup([starter], FLEX, PROFILE, { currentStarterIds: ['st'] });
+    const at = pointsOf(base, 'st').points + lead;
+    return { starter, q: pricedCandidate('q', 'Questionable Guy', 'WR', at, { status }) };
+  }
+
+  it('one constant: the same 3.5 as the unpriced bar', () => {
+    expect(isTossUp({ points: 13, questionable: true }, { points: 10 })).toBe(true);
+    expect(isTossUp({ points: 13.5, questionable: true }, { points: 10 })).toBe(false);
+    /* A healthy priced lead over a Questionable player keeps 2.0. */
+    expect(isTossUp({ points: 12 }, { points: 10, questionable: true })).toBe(false);
+  });
+
+  it('a priced Questionable lead of 3.0 is a toss-up lean on Team, not a swap; 4.0 is a swap', () => {
+    const three = pricedQ(3.0);
+    const r3 = recommendLineup([three.starter, three.q], FLEX, PROFILE, { currentStarterIds: ['st'] });
+    expect(r3.swaps).toEqual([]);
+    expect(r3.tossUps?.map((t) => [t.inPlayerId, t.reason, t.waitingOnLine])).toEqual([['q', 'Toss-up', undefined]]);
+    const four = pricedQ(4.0);
+    const r4 = recommendLineup([four.starter, four.q], FLEX, PROFILE, { currentStarterIds: ['st'] });
+    expect(r4.swaps.map((s) => s.inPlayerId)).toEqual(['q']);
+  });
+
+  it('Compare: no Start for a Questionable lead under 3.5, a Start at 4.0', () => {
+    const three = pricedQ(3.0);
+    const c3 = compareStartSit([three.q, three.starter], PROFILE);
+    expect(c3.recommendedPlayerId).toBeNull();
+    expect(c3.tossUp?.leanPlayerId).toBe('q');
+    const four = pricedQ(4.0);
+    expect(compareStartSit([four.q, four.starter], PROFILE).recommendedPlayerId).toBe('q');
+  });
+
+  it('the same lead from a healthy player is still a pick (2.0 bar unchanged)', () => {
+    const three = pricedQ(3.0, null);
+    const r = recommendLineup([three.starter, three.q], FLEX, PROFILE, { currentStarterIds: ['st'] });
+    expect(r.swaps.map((s) => s.inPlayerId)).toEqual(['q']);
+  });
+
+  it('a real hole still wins: a Questionable player over an Out starter is a swap at any gap', () => {
+    const starter = pricedCandidate('st', 'Starter Guy', 'WR', 10, { status: 'Out' });
+    const q = pricedCandidate('q', 'Questionable Guy', 'WR', 4, { status: 'Questionable' });
+    const r = recommendLineup([starter, q], FLEX, PROFILE, { currentStarterIds: ['st'] });
+    expect(r.swaps.map((s) => s.inPlayerId)).toEqual(['q']);
+    expect(r.tossUps).toEqual([]);
+  });
+
+  it('Questionable still counts full value: his number is not cut', () => {
+    const healthy = recommendLineup([pricedCandidate('h', 'H', 'WR', 12)], FLEX, PROFILE, {});
+    const q = recommendLineup([pricedCandidate('h', 'H', 'WR', 12, { status: 'Questionable' })], FLEX, PROFILE, {});
+    expect(pointsOf(q, 'h').points).toBeCloseTo(pointsOf(healthy, 'h').points, 6);
   });
 });

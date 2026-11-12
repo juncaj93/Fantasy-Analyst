@@ -21,7 +21,6 @@
 
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import { resolveWeek } from '../../core/matchup/build.ts';
-import type { NflState } from '../../core/sleeper/phase.ts';
 import { positionMatchesFilter } from '../../core/sleeper/eligibility.ts';
 import type { LeagueRecord } from '../../core/sleeper/types.ts';
 import { buildScoringProfile } from '../../core/sleeper/scoring.ts';
@@ -34,11 +33,11 @@ import { byWeekPoints, weekPoints, type WeekPoints } from '../../core/startsit/w
 import type { SleeperClient } from '../../core/sleeper/client.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
-import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
 import type { Database } from '../db.ts';
 import { draftRanks } from './decisionInputs.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
 import { startSitInputsFor } from './startSitInputs.ts';
+import { readAppNflState } from './appWeek.ts';
 
 export type PoolTab = 'mine' | 'waivers' | 'all';
 
@@ -88,7 +87,7 @@ export async function comparePool(
   const playerRepo = new PlayerRepo(db);
   const [rosters, nflState] = await Promise.all([
     new LeagueRepo(db).listRosters(league.id),
-    new SettingsRepo(db).get<NflState | null>(SETTING_KEYS.nflState, null),
+    readAppNflState(db),
   ]);
   const mine = rosters.find((r) => r.isMine) ?? null;
   const ownerOf = new Map<string, { owner: 'mine' | 'rostered'; name: string | null }>();

@@ -68,7 +68,7 @@ import type { StartSitMode } from './mode.ts';
 import { marketIsComplete, weeklyProjection, type ProjectionSource } from './projection.ts';
 import { BORROWED_RANKING_DISCOUNT, decisionPoints, rankingNumber, settleOnPublishedWeek } from './decisionPoints.ts';
 import type { MatchupAssessment } from './defense.ts';
-import { isRealHole, isTossUp, tossUpLean, waitsOnLine, type LeanTag } from './tossup.ts';
+import { isQuestionable, isRealHole, isTossUp, tossUpLean, waitsOnLine, type LeanTag } from './tossup.ts';
 import { spreadPoints } from './spread.ts';
 import { fixtureLabel, fixtureSpoken } from '../nfl/teams.ts';
 
@@ -1309,8 +1309,13 @@ function buildSwaps(
       onReserve: outgoing.onReserve ?? false,
       designation: outgoing.injury?.designation ?? null,
     });
-    const inSide = { points: incomingBasis.points, borrowed: incomingBasis.borrowed };
-    const outSide = { points: outgoingBasis?.points ?? null, borrowed: outgoingBasis?.borrowed ?? false, hole };
+    const inSide = { points: incomingBasis.points, borrowed: incomingBasis.borrowed, questionable: isQuestionable(incoming.injury?.designation) };
+    const outSide = {
+      points: outgoingBasis?.points ?? null,
+      borrowed: outgoingBasis?.borrowed ?? false,
+      questionable: isQuestionable(outgoing.injury?.designation),
+      hole,
+    };
     const tossUp = isTossUp(inSide, outSide);
     if (tossUp) {
       tossUps.push({
@@ -1382,7 +1387,9 @@ function leanTossUps(
   const byId = new Map(ctx.evaluations.map((e) => [e.playerId, e]));
   const sideOf = (e: StartSitEvaluation) => {
     const basis = rankingPoints(e, ctx.published);
-    return basis == null ? null : { points: basis.points, borrowed: basis.borrowed, position: e.position, spread: e.spread ?? null };
+    return basis == null
+      ? null
+      : { points: basis.points, borrowed: basis.borrowed, questionable: isQuestionable(e.injury?.designation), position: e.position, spread: e.spread ?? null };
   };
 
   const out: LineupSwap[] = [];
@@ -1446,7 +1453,7 @@ function leanTossUps(
         if (!c) continue;
         const gap = rankingNumber(s.points, s.borrowed) - rankingNumber(c.points, c.borrowed);
         if (gap < 0) continue;
-        if (!isTossUp({ points: s.points, borrowed: s.borrowed }, { points: c.points, borrowed: c.borrowed, hole: false })) continue;
+        if (!isTossUp(s, { ...c, hole: false })) continue;
         const after = [...lineup].filter((id) => id !== starterId);
         after.push(candidate.playerId);
         if (seated(after) < before) continue;
@@ -1456,7 +1463,7 @@ function leanTossUps(
         const sign = ctx.mode === 'floor' ? -1 : 1;
         const swing = (x: typeof c) => spreadPoints(x.spread, x.points, x.position);
         const edge = rankingNumber(c.points, c.borrowed) + sign * swing(c) - (rankingNumber(s.points, s.borrowed) + sign * swing(s));
-        const waiting = waitsOnLine({ points: s.points, borrowed: s.borrowed }, { points: c.points, borrowed: c.borrowed, hole: false });
+        const waiting = waitsOnLine(s, { ...c, hole: false });
         if (!pick || edge > pick.edge) pick = { bench: candidate, edge, tag, gap, waiting };
       }
       if (!pick) continue;

@@ -23,7 +23,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const APP = process.env.APP_URL ?? 'https://fantasy-analyst.juncaj93.workers.dev';
-const BEFORE_SHA = process.env.BEFORE_SHA || '7918f3f7c1ffe88791864ed651b7a8dd98e49e66';
+/* Round 18 follow-up (app week, Questionable bar): before is main as deployed, f74eb31. */
+const BEFORE_SHA = process.env.BEFORE_SHA || 'f74eb311699b1f2b99119bf140bb4bf52d7130b1';
+/* STEPS (Probe workflow input): a comma list of timing, team, byes, live. Empty runs all. */
+const STEPS = new Set((process.env.STEPS ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+const want = (step) => STEPS.size === 0 || STEPS.has(step);
 const eastern = (d = new Date()) => new Date(d).toLocaleString('en-US', { timeZone: 'America/New_York', hour12: true });
 const heading = (t) => console.log(`\n## ${t}`);
 const ts = (script, cwd = '.', env = process.env) =>
@@ -60,13 +64,15 @@ if (!leagueId) {
 }
 const env = { ...process.env, REPORT_NOW: new Date().toISOString(), LEAGUE_ID: leagueId };
 
-heading('When lines first show up, by game day (Eastern)');
-const timing = safe(() => ts('scripts/round18-lines-timing.ts', '.', env));
-console.log(timing);
-probeRows += readLine(timing, 'lines timing');
+if (want('timing')) {
+  heading('When lines first show up, by game day (Eastern)');
+  const timing = safe(() => ts('scripts/round18-lines-timing.ts', '.', env));
+  console.log(timing);
+  probeRows += readLine(timing, 'lines timing');
+}
 
+if (want('team')) {
 heading(`Alex's real Team, Best move and Compare: before (${BEFORE_SHA.slice(0, 7)}) and after (this checkout)`);
-{
   const REPORT = 'scripts/round18-report.ts';
   const dir = mkdtempSync(join(tmpdir(), 'round18-'));
   let before = '(unavailable)';
@@ -98,13 +104,15 @@ heading(`Alex's real Team, Best move and Compare: before (${BEFORE_SHA.slice(0, 
   probeRows += readLine(before, 'report') + readLine(after, 'report');
 }
 
-heading('Real byes against every screen, every rostered player');
-const byes = safe(() => ts('scripts/round18-byes.ts', '.', env));
-console.log(byes);
-probeRows += readLine(byes, 'bye check');
+if (want('byes')) {
+  heading('Real byes against every screen, every rostered player');
+  const byes = safe(() => ts('scripts/round18-byes.ts', '.', env));
+  console.log(byes);
+  probeRows += readLine(byes, 'bye check');
+}
 
-heading('What the live Matchup and Team screens returned (one support snapshot each)');
-for (const context of ['matchup', 'lineup']) {
+if (want('live')) heading('What the live Matchup and Team screens returned (one support snapshot each)');
+for (const context of want('live') ? ['matchup', 'lineup'] : []) {
   try {
     const started = Date.now();
     const res = await fetch(`${APP}/api/leagues/${encodeURIComponent(leagueId)}/support-snapshot?context=${context}`);

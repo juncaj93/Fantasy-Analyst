@@ -64,13 +64,14 @@ import { LeagueRepo } from '../repos/league.ts';
 import { NflScheduleRepo } from '../repos/nflSchedule.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SeasonMarketsRepo } from '../repos/seasonMarkets.ts';
-import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
+import { SettingsRepo } from '../repos/settings.ts';
 import { TransactionRepo } from '../repos/transactions.ts';
 import type { SeasonMarketKey } from '../../core/vegas/types.ts';
 import type { CanonicalPlayer } from '../../core/identity/types.ts';
 import type { Database } from '../db.ts';
 import { buildStartSitContext, startSitInputsFor } from './startSitInputs.ts';
 import { SleeperProjectionService } from './sleeperProjectionService.ts';
+import { readAppNflState } from './appWeek.ts';
 
 
 /** Most players on one side of a checked trade. */
@@ -168,7 +169,8 @@ export class TradeValueService {
     if (!league) throw new TradeCheckError('league not found', 404);
     const [rosters, state] = await Promise.all([
       this.leagues.listRosters(league.id),
-      new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null),
+      /* The app's week (Round 18), the same one every screen shows. */
+      readAppNflState(this.db, this.now()),
     ]);
     return { league, rosters, state };
   }
