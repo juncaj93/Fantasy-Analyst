@@ -40,7 +40,9 @@ export class PropsRepo implements SnapshotStore {
     const row = await this.db
       .prepare(
         `SELECT provider, event_id, game_start, fetched_at, json_remove(raw_json, '$.raw') AS raw_json
-         FROM prop_snapshots WHERE event_id = ? AND scope = 'week' ORDER BY fetched_at DESC LIMIT 1`,
+         FROM prop_snapshots WHERE event_id = ? AND scope = 'week'
+          AND json_extract(raw_json, '$.topUp') IS NULL
+         ORDER BY fetched_at DESC LIMIT 1`,
       )
       .bind(eventId)
       .first<Record<string, unknown>>();
@@ -185,34 +187,25 @@ export class PropsRepo implements SnapshotStore {
     const unique = [...new Set(eventIds)].filter(Boolean);
     for (const batch of chunk(unique, MAX_BOUND_PARAMS)) {
       const { results } = await this.db
-        .prepare(
-          `SELECT id, event_id, fetched_at,
-                  json_extract(raw_json, '$.delta') AS delta,
-                  json_extract(raw_json, '$.gameLines.total') AS total,
-                  json_extract(raw_json, '$.gameLines.spread') AS spread,
-                  json_extract(raw_json, '$.gameLines.spreadTeam') AS spread_team
-             FROM prop_snapshots
-            WHERE event_id IN (${batch.map(() => '?').join(',')}) AND +scope = 'week'`,
-        )
+        .prepare(`${SNAPSHOT_REF_SELECT} WHERE event_id IN (${batch.map(() => '?').join(',')}) AND +scope = 'week'`)
         .bind(...batch)
         .all<Record<string, unknown>>();
-      for (const r of results) {
-        const ref: SnapshotRef = {
-          id: Number(r['id']),
-          eventId: String(r['event_id']),
-          fetchedAt: String(r['fetched_at']),
-          delta: r['delta'] === 1 || r['delta'] === true || r['delta'] === 'true',
-          total: r['total'] == null ? null : Number(r['total']),
-          spread: r['spread'] == null ? null : Number(r['spread']),
-          spreadTeam: r['spread_team'] == null ? null : String(r['spread_team']),
-        };
-        const list = out.get(ref.eventId) ?? [];
-        list.push(ref);
-        out.set(ref.eventId, list);
-      }
+      addSnapshotRefs(out, results);
     }
-    for (const list of out.values()) list.sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt) || b.id - a.id);
-    return out;
+    return sortSnapshotRefs(out);
+  }
+
+  /**
+   * Every weekly look of the games in a slate, by the window index. Asked at the
+   * same time as the lines (it needs nothing from them), so a screen's read is
+   * one round trip, not two.
+   */
+  private async snapshotsInWindow(window: SlateWindow): Promise<Map<string, SnapshotRef[]>> {
+    const { results } = await this.db
+      .prepare(`${SNAPSHOT_REF_SELECT} WHERE scope = 'week' AND game_start >= ? AND game_start <= ?`)
+      .bind(window.from, window.to)
+      .all<Record<string, unknown>>();
+    return sortSnapshotRefs(addSnapshotRefs(new Map(), results));
   }
 
   /**
@@ -235,6 +228,9 @@ export class PropsRepo implements SnapshotStore {
   ): Promise<Map<string, PlayerProp[]>> {
     const out = new Map<string, PlayerProp[]>();
     if (playerIds.length === 0) return out;
+    // The slate's looks need nothing from the lines, so they are asked for at the same time.
+    const inWindow = window ? this.snapshotsInWindow(window) : null;
+    inWindow?.catch(() => undefined);
     const rows: Record<string, unknown>[] = [];
     for (const batch of chunk(playerIds, MAX_BOUND_PARAMS - 2)) {
       const placeholders = batch.map(() => '?').join(',');
@@ -252,7 +248,10 @@ export class PropsRepo implements SnapshotStore {
       rows.push(...results);
     }
     if (rows.length === 0) return out;
-    const snaps = await this.snapshotsForEvents(rows.map((r) => String(r['snapshot_event_id'])));
+    const snaps = window ? await inWindow! : new Map<string, SnapshotRef[]>();
+    // A game whose looks are not all in the window (a flexed kickoff), or no window at all.
+    const missing = [...new Set(rows.map((r) => String(r['snapshot_event_id'])))].filter((id) => !snaps.has(id));
+    if (missing.length > 0) for (const [id, list] of await this.snapshotsForEvents(missing)) snaps.set(id, list);
 
     const newest = new Map<string, { row: Record<string, unknown>; asOf: SnapshotRef }>();
     const plan = new Map<string, { asOf: SnapshotRef; order: Map<number, number> } | null>();
@@ -479,6 +478,7 @@ export class PropsRepo implements SnapshotStore {
         .prepare(
           `SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots
             WHERE scope = 'week' AND event_id IN (${placeholders})
+              AND json_extract(raw_json, '$.topUp') IS NULL
             GROUP BY event_id`,
         )
         .bind(...batch)
@@ -694,4 +694,34 @@ function booksFrom(raw: unknown): { books: string[]; bookDetail?: BookQuote[] } 
   if (parsed.every((b) => typeof b === 'string')) return { books: parsed as string[] };
   const detail = parsed.filter((b): b is BookQuote => b != null && typeof b === 'object' && typeof (b as BookQuote).book === 'string');
   return { books: [...new Set(detail.filter((b) => !b.out).map((b) => b.book))].sort(), bookDetail: detail };
+}
+
+const SNAPSHOT_REF_SELECT = `SELECT id, event_id, fetched_at,
+        json_extract(raw_json, '$.delta') AS delta,
+        json_extract(raw_json, '$.gameLines.total') AS total,
+        json_extract(raw_json, '$.gameLines.spread') AS spread,
+        json_extract(raw_json, '$.gameLines.spreadTeam') AS spread_team
+   FROM prop_snapshots`;
+
+function addSnapshotRefs(out: Map<string, SnapshotRef[]>, results: Record<string, unknown>[]): Map<string, SnapshotRef[]> {
+  for (const r of results) {
+    const ref: SnapshotRef = {
+      id: Number(r['id']),
+      eventId: String(r['event_id']),
+      fetchedAt: String(r['fetched_at']),
+      delta: r['delta'] === 1 || r['delta'] === true || r['delta'] === 'true',
+      total: r['total'] == null ? null : Number(r['total']),
+      spread: r['spread'] == null ? null : Number(r['spread']),
+      spreadTeam: r['spread_team'] == null ? null : String(r['spread_team']),
+    };
+    const list = out.get(ref.eventId) ?? [];
+    list.push(ref);
+    out.set(ref.eventId, list);
+  }
+  return out;
+}
+
+function sortSnapshotRefs(out: Map<string, SnapshotRef[]>): Map<string, SnapshotRef[]> {
+  for (const list of out.values()) list.sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt) || b.id - a.id);
+  return out;
 }

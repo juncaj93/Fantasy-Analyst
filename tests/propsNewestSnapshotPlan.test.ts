@@ -70,6 +70,12 @@ describe('the props reads', () => {
     expect(windowed?.plan).toContain('idx_prop_snapshots_window (scope=? AND game_start>? AND game_start<?)');
   });
 
+  it('read a slate\'s looks by the window index too, beside the lines (one round trip)', async () => {
+    const all = await plans();
+    const looks = all.find(({ sql }) => /FROM prop_snapshots\s+WHERE scope = 'week' AND game_start >= \?/.test(sql));
+    expect(looks?.plan).toContain('idx_prop_snapshots_window (scope=? AND game_start>? AND game_start<?)');
+  });
+
   it('count priced players from the counted looks\' lines only', async () => {
     const all = await plans();
     const count = all.find(({ sql }) => sql.includes('AS priced'));
