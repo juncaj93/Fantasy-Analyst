@@ -146,6 +146,7 @@ import { SleeperSyncService } from './services/sleeperSync.ts';
 /* Which season it is, from Sleeper's own state rather than from the clock. */
 import { currentSeason } from './services/seasonService.ts';
 import { StartSitRefreshService, refreshPublishedWeek } from './services/startSitRefresh.ts';
+import { RefreshJobService, parseRefreshKind } from './services/refreshJob.ts';
 /* The one assembly of everything the start/sit engine reads. Shared, not copied. */
 import { startSitInputsFor, buildStartSitContext, readSeasonPoints } from './services/startSitInputs.ts';
 import { D1QuotaService } from './services/d1QuotaService.ts';
@@ -190,6 +191,12 @@ export interface AppEnv extends AuthEnv {
    * result must await it itself.
    */
   waitUntil?: (task: Promise<unknown>) => void;
+  /**
+   * Round 22: the odds provider the background refresh job uses. The same
+   * provider, paced without waiting out the plan's minute (a background slot
+   * cannot wait sixty seconds). Absent: `vegas`. See `services/refreshJob.ts`.
+   */
+  quickVegas?: VegasProvider;
   /**
    * The exact git revision this deployment was built from, injected at deploy
    * time and reported by `/api/health` — so "what code is production running?"
@@ -237,6 +244,8 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
   // (and one test) rather than leaking across everything in the process.
   const loginLimiter = new RateLimiter(8, 5 * 60_000);
   const refreshLimiter = new RateLimiter(4, 15 * 60_000);
+  /* Round 22: new background refresh jobs (joins and status reads are free). */
+  const jobLimiter = new RateLimiter(10, 15 * 60_000);
   /*
    * The manager backfill gets its own, looser allowance.
    *
@@ -3448,6 +3457,39 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
     if (!limit.allowed) return errorResponse(`too many refreshes; retry in ${limit.retryAfterSeconds}s`, 429);
     const service = new StartSitRefreshService(ctx.env.db, { sleeper: ctx.env.sleeper, vegas: ctx.env.vegas });
     return jsonResponse(await service.refresh());
+  });
+
+  /*
+   * Round 22: the refresh button as a job the server finishes on its own.
+   *
+   * POST starts one (or joins the one running or just finished) and answers at
+   * once; the work runs in the Worker's background slot, so it finishes even
+   * when the phone leaves the app. GET is the job's one settings row, which the
+   * screens ask for while it runs and when they come back. `kind=startsit`
+   * (Team, Matchup, Data health) or `kind=waivers`. See `refreshJob.ts`.
+   *
+   * Only starting a new job counts against the limiter. When it is spent the
+   * last job comes back as it is: no pop-up, nothing extra fetched.
+   */
+  const refreshJobs = (ctx: { env: AppEnv }) =>
+    new RefreshJobService(ctx.env.db, {
+      sleeper: ctx.env.sleeper,
+      vegas: ctx.env.quickVegas ?? ctx.env.vegas,
+      ...(ctx.env.waitUntil ? { background: ctx.env.waitUntil } : {}),
+      log: (line) => console.log(line),
+    });
+  router.post('/api/refresh', async (ctx) => {
+    const body = await ctx.json<{ kind?: string }>().catch(() => null);
+    const kind = parseRefreshKind(body?.kind ?? ctx.url.searchParams.get('kind'));
+    const ip = ctx.request.headers.get('cf-connecting-ip') ?? 'local';
+    const { job, joined } = await refreshJobs(ctx).start(kind, {
+      allowNew: () => jobLimiter.check(`${kind}:${ip}`).allowed,
+    });
+    return jsonResponse({ job, joined }, joined ? 200 : 202);
+  });
+  router.get('/api/refresh/status', async (ctx) => {
+    const kind = parseRefreshKind(ctx.url.searchParams.get('kind'));
+    return jsonResponse({ job: await refreshJobs(ctx).status(kind) });
   });
 
   /* Four: two or three fit a phone, four scroll sideways (13 October 2026). */

@@ -367,3 +367,66 @@ export async function withoutTiers(page: Page, over: Record<string, unknown> = {
     }
   });
 }
+
+/**
+ * Round 22: the refresh job, answered by the browser instead of the server.
+ *
+ * Pressing refresh for real is a write that reaches Sleeper, the injury feed
+ * and the odds provider, and every viewport project shares one dev server and
+ * one database, so the tests stub it, as they stubbed the old refresh. POST
+ * `/api/refresh` answers "running"; the status read answers "running" for
+ * `runningChecks` asks and "done" after that (or at once, when it is 0).
+ * Counters say what the screen asked for.
+ */
+export interface StubbedRefresh {
+  posts: string[];
+  statusChecks: () => number;
+  /** Make the next status read answer "done" whatever `runningChecks` said. */
+  finishNow: () => void;
+  finishedAt: string;
+}
+export async function stubRefreshJob(
+  page: Page,
+  opts: {
+    runningChecks?: number;
+    sources?: { source: string; outcome: string; detail: string }[];
+    finishedAt?: string;
+    /** A job already finished before the screen opened (it ran from another screen, or while away). */
+    doneOnOpen?: boolean;
+  } = {},
+): Promise<StubbedRefresh> {
+  const posts: string[] = [];
+  let checks = 0;
+  let runningLeft = opts.runningChecks ?? 0;
+  const finishedAt = opts.finishedAt ?? new Date().toISOString();
+  const startedAt = new Date(Date.parse(finishedAt) - 4_000).toISOString();
+  const job = (kind: string, state: 'running' | 'done') => ({
+    id: `stub-${kind}`,
+    kind,
+    state,
+    startedAt,
+    finishedAt: state === 'done' ? finishedAt : null,
+    ms: state === 'done' ? 4_000 : null,
+    sources: state === 'done' ? (opts.sources ?? [{ source: 'roster', outcome: 'updated', detail: '1 roster(s) re-read' }]).map((s) => ({ ...s, freshAt: null, ms: 900 })) : [],
+    complete: true,
+    cost: null,
+  });
+  await page.route('**/api/refresh/status*', async (route) => {
+    checks += 1;
+    const kind = new URL(route.request().url()).searchParams.get('kind') ?? 'startsit';
+    if (posts.length === 0) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job: opts.doneOnOpen ? job(kind, 'done') : null }) });
+      return;
+    }
+    const state = runningLeft > 0 ? 'running' : 'done';
+    if (runningLeft > 0) runningLeft -= 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job: job(kind, state) }) });
+  });
+  await page.route('**/api/refresh', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = (route.request().postDataJSON() ?? {}) as { kind?: string };
+    posts.push(body.kind ?? 'startsit');
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ job: job(body.kind ?? 'startsit', 'running'), joined: false }) });
+  });
+  return { posts, statusChecks: () => checks, finishNow: () => (runningLeft = 0), finishedAt };
+}

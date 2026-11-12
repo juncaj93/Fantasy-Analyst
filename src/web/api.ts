@@ -1567,6 +1567,31 @@ export interface LineupRecommendation {
   lateSwapRisks?: { playerId: string; name: string; verdict: string; detail: string; starting: boolean }[];
 }
 
+/**
+ * Round 22: a refresh the server runs on its own (`/api/refresh`).
+ * Mirrors `RefreshJob` in `server/services/refreshJob.ts`.
+ */
+export type RefreshKind = 'startsit' | 'waivers';
+export interface RefreshJobSource {
+  source: 'roster' | 'injury' | 'vegas' | 'schedule' | 'transactions' | 'trending' | 'projections' | 'points';
+  outcome: 'updated' | 'current' | 'unavailable' | 'skipped' | 'blocked';
+  detail: string;
+  freshAt: string | null;
+  ms: number;
+}
+export interface RefreshJob {
+  id: string;
+  kind: RefreshKind;
+  state: 'running' | 'done';
+  startedAt: string;
+  /** Null on a job that was cut off before it finished. */
+  finishedAt: string | null;
+  ms: number | null;
+  sources: RefreshJobSource[];
+  complete: boolean;
+  cost: { rowsRead: number; rowsWritten: number; statements: number } | null;
+}
+
 /** What one tap of the Start/Sit refresh actually did, per source. */
 export interface StartSitRefreshReport {
   startedAt: string;

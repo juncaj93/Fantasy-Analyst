@@ -31,7 +31,6 @@ import {
   type RosterPlayer,
   type StartSitEvaluation,
   type SlotFixture,
-  type StartSitRefreshReport,
   type WaiverAdvice,
 } from '../api.ts';
 import {
@@ -45,6 +44,7 @@ import {
 } from '../components/common.tsx';
 import { SLEEPER_NUM_CLASS, SLEEPER_SPOKEN, isSleeperSource, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
 import { NavBar, PullToRefresh, SkeletonRows } from '../components/native.tsx';
+import { formatUpdated, useServerRefresh } from '../serverRefresh.ts';
 import { CompareIcon, DisclosureChevronIcon, RefreshIcon } from '../components/icons.tsx';
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { WaiverRow } from '../components/waivers.tsx';
@@ -127,16 +127,6 @@ export function TeamScreen({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
   const [waivers, setWaivers] = useState<WaiverAdvice | null>(null);
-  /** What the last all-source refresh did, per source. */
-  const [refresh, setRefresh] = useState<StartSitRefreshReport | null>(null);
-  /**
-   * Whether a refresh is in flight, so the button can say so.
-   *
-   * The pull gesture has the rubber band to show its work; a button has
-   * nothing, and a control that looks identical while a two-second round trip
-   * happens is one a reader presses again.
-   */
-  const [refreshing, setRefreshing] = useState(false);
   /** Open with the slot it was launched from, and whoever it was launched on. */
   /*
    * Open with the slot it was launched from, and whoever it was launched on.
@@ -231,49 +221,29 @@ export function TeamScreen({
   }, [loadRoster, loadLineup, loadWaivers]);
 
   /**
-   * What a pull down the screen does.
+   * What the refresh button and a pull down the screen do (Round 22).
    *
-   * One request to the existing all-source refresh — the same orchestrator the
-   * "Refresh data" button used to call, with the same dedupe, the same budget
-   * refusal and the same per-source report — and then the three reads this
-   * screen is drawn from. It also subsumes the old bar control: syncing the
-   * league from Sleeper is the refresh's first source, so there is no longer a
-   * reason for two separate ways to ask.
-   *
-   * Concurrency is the gesture's problem and it is already solved: the hook is
-   * single-flight, so a second pull while this is running moves nothing and
-   * requests nothing.
+   * Both start the same server job (`serverRefresh.ts`): roster and lineup
+   * from Sleeper, the injury report, Vegas lines and kickoffs, each skipped
+   * when it was refreshed a moment ago. The server finishes it even if the
+   * phone leaves the app; when it is done this screen re-reads the roster,
+   * the lineup and the waiver scan, and the header shows when. A source that
+   * failed is listed in Data health, not here.
    */
+  const reloadAll = useCallback(async () => {
+    onLeaguesChanged();
+    await Promise.all([loadRoster(), loadLineup(), loadWaivers()]);
+  }, [loadRoster, loadLineup, loadWaivers, onLeaguesChanged]);
+  const serverRefresh = useServerRefresh('startsit', {
+    onFinished: reloadAll,
+    onError: (err) => setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) }),
+    enabled: selected != null,
+  });
+  const refreshing = serverRefresh.busy;
   const refreshAll = useCallback(async () => {
     setMessage(null);
-    try {
-      const report = await api.post<StartSitRefreshReport>('/api/startsit/refresh', {});
-      setRefresh(report);
-      onLeaguesChanged();
-      // Recompute against whatever actually landed. A refresh that updates the
-      // sources and leaves the screen showing the old answer is worse than none.
-      await Promise.all([loadRoster(), loadLineup(), loadWaivers()]);
-    } catch (err) {
-      setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
-    }
-  }, [loadRoster, loadLineup, loadWaivers, onLeaguesChanged]);
-
-  /**
-   * The same refresh, from a control rather than from a gesture.
-   *
-   * It wraps `refreshAll` rather than repeating it: one refresh on this screen,
-   * one scope, one report line under the row. All this adds is the in-flight
-   * flag, which the pull does not need because the rubber band already says it.
-   */
-  const runRefresh = useCallback(async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      await refreshAll();
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refreshAll, refreshing]);
+    await serverRefresh.start();
+  }, [serverRefresh.start]);
 
   /** Every player on the roster, however Sleeper currently has them arranged. */
   const byId = useMemo(() => {
@@ -474,6 +444,9 @@ export function TeamScreen({
         <NavBar
           testId="league-card"
           title={selected.name}
+          {...(serverRefresh.finishedAt && !roster?.live
+            ? { subtitle: <span data-testid="team-updated">Updated {formatUpdated(serverRefresh.finishedAt)}</span> }
+            : {})}
           trailing={
             roster?.live ? null : (
               <span className="nav-actions-group" data-testid="team-controls">
@@ -503,7 +476,7 @@ export function TeamScreen({
                   aria-label="Refresh roster and this week's data"
                   title="Refresh"
                   disabled={refreshing}
-                  onClick={() => void runRefresh()}
+                  onClick={() => void refreshAll()}
                 >
                   <RefreshIcon className={refreshing ? 'spin' : undefined} />
                 </button>
@@ -521,8 +494,6 @@ export function TeamScreen({
         <Empty>No league chosen yet. Open Setup to connect Sleeper and pick your league.</Empty>
       ) : (
         <>
-          {refresh ? <RefreshStatus refresh={refresh} /> : null}
-
           {!roster ? (
             <SkeletonRows rows={6} testId="roster-skeleton" />
           ) : !roster.found ? (
@@ -1754,56 +1725,6 @@ function LineupSourcing({ lineup }: { lineup: LineupRecommendation }) {
     >
       {priced}/{filled.length} priced
     </span>
-  );
-}
-
-/**
- * What the last refresh did, in one short line that opens on a tap.
- *
- * It used to spell out every source that was behind, which on 13 October 2026
- * was two lines of "injury: refused: 77 of 113 players changed at once…" above
- * the lineup. Now: the headline and how many sources are behind, and the
- * detail one tap away. Weather is always "not connected" and is not counted,
- * but it is still listed when the line is opened.
- */
-function RefreshStatus({ refresh }: { refresh: StartSitRefreshReport }) {
-  const [open, setOpen] = useState(false);
-  const behind = refresh.sources.filter((s) => s.outcome === 'unavailable' || s.outcome === 'blocked' || s.outcome === 'skipped');
-  const counted = behind.filter((s) => s.source !== 'weather');
-  if (behind.length === 0) {
-    return (
-      <div className="faint refresh-status" data-testid="refresh-status">
-        {refresh.headline}
-      </div>
-    );
-  }
-  return (
-    <div className="refresh-status" data-testid="refresh-status">
-      <button
-        type="button"
-        className="refresh-status-toggle faint"
-        aria-expanded={open}
-        data-testid="refresh-status-toggle"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="refresh-status-line">
-          {refresh.headline}
-          {counted.length > 0 ? ` · ${counted.length} source${counted.length === 1 ? '' : 's'} behind` : ''}
-        </span>
-        <span className="dense-chevron" aria-hidden="true">
-          {open ? '⌃' : '›'}
-        </span>
-      </button>
-      {open ? (
-        <ul className="refresh-status-detail faint" data-testid="refresh-status-detail">
-          {behind.map((s) => (
-            <li key={s.source}>
-              <strong>{s.source}:</strong> {s.detail}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
   );
 }
 

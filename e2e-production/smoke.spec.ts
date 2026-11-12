@@ -2347,6 +2347,9 @@ test.describe('the decision intelligence', () => {
     // refused. This suite never authenticates, so the refresh is never run.
     const write = await request.post('/api/startsit/refresh', { failOnStatusCode: false });
     expect([401, 429, 503]).toContain(write.status());
+    // Round 22: the background refresh job the screens use now, closed the same way.
+    const job = await request.post('/api/refresh', { data: { kind: 'startsit' }, failOnStatusCode: false });
+    expect([401, 429, 503]).toContain(job.status());
   });
 
   test('every Start/Sit component the deployed engine emits is one it can explain', async ({ page }) => {

@@ -20,6 +20,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { stubRefreshJob } from './helpers.ts';
 
 /** The A → C, B → C, B → D structure, as the seam produces it. */
 function planFixture(over: Record<string, unknown> = {}) {
@@ -666,19 +667,7 @@ test.describe('the plan grouped by drop', () => {
 test.describe('the refresh button', () => {
   test('is Team\'s round icon button, says when the board was updated, and refreshes from Sleeper only', async ({ page }) => {
     await inSeason(page);
-    const sleeperOnly: string[] = [];
-    const vegas: string[] = [];
-    await page.route('**/api/leagues/*/waivers/refresh', async (route) => {
-      sleeperOnly.push(route.request().method());
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ transactions: null, trending: null, refreshedAt: new Date().toISOString() }),
-      });
-    });
-    page.on('request', (request) => {
-      if (request.url().includes('/api/startsit/refresh')) vegas.push(request.url());
-    });
+    const job = await stubRefreshJob(page, { runningChecks: 1 });
     await openWaivers(page);
 
     const line = page.getByTestId('waivers-updated');
@@ -696,8 +685,9 @@ test.describe('the refresh button', () => {
     expect(box.width).toBeGreaterThanOrEqual(40);
 
     await button.click();
-    await expect.poll(() => sleeperOnly.length).toBeGreaterThan(0);
-    expect(sleeperOnly[0]).toBe('POST');
-    expect(vegas).toEqual([]);
+    // Round 22: the Waivers job, Sleeper only; the start/sit job (odds) is never asked for.
+    await expect.poll(() => job.posts.length).toBeGreaterThan(0);
+    expect(job.posts).toEqual(['waivers']);
+    await expect(line).toHaveText(/^Updated \d{1,2}:\d{2} [AP]M$/);
   });
 });
