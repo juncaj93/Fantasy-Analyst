@@ -1,0 +1,67 @@
+Seasons 2024, 2025, 2026; weeks {"2024":17,"2025":17,"2026":9}; 622 claims, 303 players won, 94 contested.
+Won at $0 or $1: 52%. Price per point: $0.5.
+starter QB   claims  18  contested   4  wins it: half the time $1, 3 in 4 $6  (winners paid $6)
+starter RB   claims  13  contested   9  wins it: half the time $7, 3 in 4 $11  (winners paid $16)
+starter WR   claims  27  contested  10  wins it: half the time $6, 3 in 4 $10  (winners paid $13.5)
+starter TE   claims  12  contested   4  wins it: half the time $1, 3 in 4 $2  (winners paid $11.5)
+starter DEF  claims  35  contested  11  wins it: half the time $2, 3 in 4 $3  (winners paid $2)
+starter ALL  claims 105  contested  38  wins it: half the time $3, 3 in 4 $7  (winners paid $11)
+depth   QB   claims  14  contested   5  wins it: half the time $1, 3 in 4 $1  (winners paid $2)
+depth   RB   claims  63  contested  19  wins it: half the time $2, 3 in 4 $4  (winners paid $6)
+depth   WR   claims  56  contested  16  wins it: half the time $3, 3 in 4 $6  (winners paid $8.5)
+depth   TE   claims  20  contested   6  wins it: half the time $1, 3 in 4 $4  (winners paid $4)
+depth   DEF  claims  40  contested   8  wins it: half the time $2, 3 in 4 $3  (winners paid $1)
+depth   ALL  claims 193  contested  54  wins it: half the time $2, 3 in 4 $4  (winners paid $4)
+weeks 1-4: 114 won, typical $1, $0-1 52%, contested price to win $2
+weeks 5-8: 101 won, typical $2, $0-1 40%, contested price to win $3
+weeks 9-13: 71 won, typical $0, $0-1 66%, contested price to win $1
+weeks 14-17: 17 won, typical $0, $0-1 65%, contested price to win $1
+Top bid $5+ over second: 38 of 94 contested. Dollars paid over second+1: $633.
+FAAB left now: #1 $48, #2 $69, #3 $48, #4 $89, #5 $89, #6 $28, #7 $98, #8 $100, #9 $66, #10 $76
+  rivals who can bid $1 or more: 9 of 9
+  rivals who can bid $5 or more: 9 of 9
+  rivals who can bid $10 or more: 9 of 9
+  rivals who can bid $20 or more: 9 of 9
+  rivals who can bid $28 or more: 9 of 9
+  rivals who can bid $48 or more: 8 of 9
+
+Backtest (each season priced from the other seasons only)
+2026 Alex: 41 claims, 25 won. New rule keeps 24, loses 1, adds 1. Saved $19 on kept wins; $25 more where it bids higher (mostly $1 stashes he bid $0 on).
+2026 players he meant to start (bid $3+): old won 5 for $67; new wins 5 for $50.
+  wk  2 TE  Dalton Schultz           old $3 lost  new $10 loses (winner paid $15)
+  wk  3 RB  Braelon Allen            old $16 won   new $10 loses (next bid $11)
+  wk  5 QB  Jordan Love              old $7 won   new $10 wins  (next bid $5)
+  wk  6 WR  Omar Cooper Jr.          old $19 won   new $10 wins  (next bid $5)
+  wk  7 RB  Jonah Coleman            old $16 won   new $10 wins  (next bid $6)
+  wk  8 RB  TreVeyon Henderson       old $3 lost  new $10 wins  (winner paid $6)
+  wk  9 QB  C.J. Stroud              old $9 won   new $10 wins  (nobody else bid)
+2026 every contested starter: the new price wins 11 of 12; on those it costs $89 where the winners paid $91.
+2025 Alex: 44 claims, 30 won. New rule keeps 29, loses 1, adds 1. Saved $45 on kept wins; $32 more where it bids higher (mostly $1 stashes he bid $0 on).
+2025 players he meant to start (bid $3+): old won 8 for $193; new wins 8 for $72.
+  wk  1 WR  Quentin Johnston         old $3 lost  new $9 loses (winner paid $20)
+  wk  1 WR  Marquise Brown           old $9 lost  new $9 loses (winner paid $15)
+  wk  2 WR  Troy Franklin            old $3 won   new $9 wins  (next bid $0)
+  wk  3 WR  Elic Ayomanor            old $9 won   new $9 wins  (next bid $5)
+  wk  3 TE  Hunter Henry             old $14 won   new $9 wins  (nobody else bid)
+  wk  5 RB  Kimani Vidal             old $14 won   new $9 wins  (next bid $2)
+  wk  5 RB  Hassan Haskins           old $9 won   new $9 wins  (next bid $6)
+  wk  6 DEF Kansas City Chiefs       old $4 won   new $9 wins  (nobody else bid)
+  wk  7 DEF Indianapolis Colts       old $4 lost  new $9 wins  (winner paid $5)
+  wk  7 RB  Kyle Monangai            old $6 lost  new $9 loses (winner paid $18)
+  wk  8 WR  Jameson Williams         old $39 won   new $9 wins  (nobody else bid)
+  wk  8 RB  Tyrone Tracy Jr.         old $101 won   new $9 loses (next bid $30)
+2025 every contested starter: the new price wins 11 of 13; on those it costs $99 where the winners paid $165.
+2024 Alex: 68 claims, 42 won. New rule keeps 37, loses 5, adds 6. Saved $39 on kept wins; $38 more where it bids higher (mostly $1 stashes he bid $0 on).
+2024 players he meant to start (bid $3+): old won 5 for $153; new wins 2 for $12.
+  wk  1 TE  Isaiah Likely            old $16 lost  new $6 loses (winner paid $26)
+  wk  2 WR  Tee Higgins              old $73 won   new $6 loses (next bid $52)
+  wk  4 WR  Dontayvion Wicks         old $3 lost  new $6 loses (winner paid $28)
+  wk  5 WR  Darnell Mooney           old $6 lost  new $6 loses (winner paid $27)
+  wk  6 TE  Evan Engram              old $19 won   new $6 loses (next bid $15)
+  wk  7 WR  Jauan Jennings           old $9 lost  new $6 loses (winner paid $12)
+  wk  8 WR  Cedric Tillman           old $33 won   new $6 wins  (next bid $2)
+  wk 10 RB  Audric Estime            old $17 won   new $6 wins  (next bid $4)
+  wk 13 RB  Isaac Guerendo           old $11 won   new $6 loses (next bid $10)
+2024 every contested starter: the new price wins 8 of 13; on those it costs $48 where the winners paid $40.
+All seasons, contested starters: wins 30 of 38 (79%), $236 against $296 paid.
+

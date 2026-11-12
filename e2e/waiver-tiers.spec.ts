@@ -297,8 +297,8 @@ test.describe('the tiers as a layout', () => {
     expect(name.width).toBeGreaterThan(100);
 
     const claim = page.locator('[data-testid="waiver-tier-row"][data-player-id="t2"]');
-    /* One chip for the claim: the waiver status and the bid band together (22 October 2026). */
-    await expect(claim.getByTestId('wcard-chip')).toHaveText(['Waivers $64–100', 'Drop: Miller']);
+    /* One chip for the claim: the waiver status and the bid, one number even when the payload carries a band (round 20). */
+    await expect(claim.getByTestId('wcard-chip')).toHaveText(['Waivers $100', 'Drop: Miller']);
     const box = (await claim.boundingBox())!;
     expect(box.height, 'a row this tall is a paragraph, not a row').toBeLessThan(110);
     await noSidewaysScroll(page);
@@ -306,7 +306,10 @@ test.describe('the tiers as a layout', () => {
 
     /* The sheet carries the card's chips: the status or bid, then the drop. */
     await claim.click();
-    await expect(page.getByTestId('tier-detail').getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $64–100', 'Drop: Miller']);
+    await expect(page.getByTestId('tier-detail').getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $100', 'Drop: Miller']);
+    /* And the bid's one short reason under the chips (round 20), on the phone. */
+    await expect(page.getByTestId('tier-detail').getByTestId('wsheet-bid')).toHaveText(/^Bid \$100: Two or more other managers/);
+    await noSidewaysScroll(page);
   });
 
   test('says each tier under its own heading, in order, the long lists folded', async ({ page }) => {
@@ -490,15 +493,15 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     await noTransactionControl(page);
   });
 
-  test('labels a stash with no known return on the Watch list, at $0 to $1', async ({ page }) => {
+  test('labels a stash with no known return on the Watch list, at one number ($0)', async ({ page }) => {
     await openFolds(page);
     const row = page.locator('[data-testid="waiver-tier-row"][data-player-id="r3"]');
     await expect(row.getByTestId('tier-gain')).toHaveText('—');
     await expect(row.getByTestId('tier-reason')).toHaveText('Out now, return unknown');
-    await expect(row.locator('[data-chip="waivers"]')).toHaveText('Waivers $0–1');
+    await expect(row.locator('[data-chip="waivers"]')).toHaveText('Waivers $0');
     await row.click();
     const sheet = page.getByTestId('tier-detail');
-    await expect(sheet.getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $0–1', 'Drop: McConkey']);
+    await expect(sheet.getByTestId('wsheet-chips').locator('[data-chip]')).toHaveText(['Waivers $0', 'Drop: McConkey']);
     /* This payload carries no week figures, so the sheet has this week only (the three-week default for a stash is a unit test). */
     await noSidewaysScroll(page);
   });
@@ -508,7 +511,10 @@ test.describe('round 2: two holes, their own drops, and the reasons', () => {
     const sheet = page.getByTestId('tier-detail');
     await expect(sheet.getByTestId('tier-detail-best-drop')).toHaveCount(1);
     await expect(sheet.getByTestId('tier-detail-best-drop')).toContainText('Will Shipley');
-    for (const gone of ['Not cutting', 'jfletcher433', 'least points lately', 'Bid $9']) await expect(sheet).not.toContainText(gone);
+    for (const gone of ['Not cutting', 'jfletcher433', 'least points lately']) await expect(sheet).not.toContainText(gone);
+    /* The bid is said once, with its one short reason (round 20), and nothing about the rivals. */
+    await expect(sheet.getByTestId('wsheet-bid')).toHaveCount(1);
+    await expect(sheet.getByTestId('wsheet-bid')).toHaveText(/^Bid \$9: /);
     const box = (await sheet.getByTestId('wsheet-drops').boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await noSidewaysScroll(page);
@@ -719,8 +725,8 @@ test.describe('the waiver card on a phone', () => {
       };
     });
     expect(lines.chipRows).toBe(1);
-    /* "Waivers $5–14" fits whole beside the name at every width. */
-    expect(lines.waivers).toBe('Waivers $5–14');
+    /* "Waivers $9", one number (round 20), fits whole beside the name at every width. */
+    expect(lines.waivers).toBe('Waivers $9');
     expect(lines.waiversClipped, 'the waiver chip was cut off').toBe(false);
     expect(lines.nameWraps).toBe(false);
     await noSidewaysScroll(page);
