@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLOCK_TICK_MINUTES,
+  FIRST_LOOK_HOURS,
   KICKOFF_CHECKPOINT_HOURS,
   checkpointPending,
   checkpointsFor,
@@ -50,6 +51,9 @@ const WEEK_5 = [THURSDAY_NIGHT, LONDON, ...Array(8).fill(EARLY), LATE_A, LATE_B,
 describe('a game\'s checkpoints', () => {
   it('are counted back from its own kickoff', () => {
     expect(checkpointsFor(THURSDAY_NIGHT).map((t) => new Date(t).toISOString())).toEqual([
+      '2026-10-04T00:15:00.000Z',
+      '2026-10-05T00:15:00.000Z',
+      '2026-10-06T00:15:00.000Z',
       '2026-10-07T00:15:00.000Z',
       '2026-10-08T00:15:00.000Z',
       '2026-10-08T18:15:00.000Z',
@@ -59,16 +63,21 @@ describe('a game\'s checkpoints', () => {
     ]);
   });
 
-  it('are six looks, so a game costs at most six entities a week', () => {
-    expect(KICKOFF_CHECKPOINT_HOURS).toHaveLength(6);
-    expect(worstCaseWeeklyEntities(10)).toBe(60);
+  it('are nine looks, so a game costs at most nine entities a week', () => {
+    expect(KICKOFF_CHECKPOINT_HOURS).toHaveLength(9);
+    expect(worstCaseWeeklyEntities(10)).toBe(90);
+  });
+
+  it('start five days out, so props are seen in the 48 to 96 hours they move most (Round 23)', () => {
+    expect(KICKOFF_CHECKPOINT_HOURS.slice(0, 3)).toEqual([120, 96, 72]);
+    expect(FIRST_LOOK_HOURS).toBe(120);
   });
 
   it('each land in a different row of the staleness table', () => {
     // The point of the ladder is that it is not the staleness table run flat
-    // out: 48h is the six-hour row, 24 to 3h the one-hour row, 1.5h and 0.5h
-    // the fifteen-minute row.
-    expect(KICKOFF_CHECKPOINT_HOURS).toEqual([48, 24, 6, 3, 1.5, 0.5]);
+    // out: 120h to 48h are the six-hour row (a day apart, so never under the
+    // wait), 24 to 3h the one-hour row, 1.5h and 0.5h the fifteen-minute row.
+    expect(KICKOFF_CHECKPOINT_HOURS).toEqual([120, 96, 72, 48, 24, 6, 3, 1.5, 0.5]);
   });
 
   it('do not exist for a game with no kickoff', () => {
@@ -77,7 +86,10 @@ describe('a game\'s checkpoints', () => {
   });
 
   it('give the newest one that has passed, and nothing before the first', () => {
-    expect(latestCheckpoint(THURSDAY_NIGHT, at('2026-10-06T12:00:00Z'))).toBeNull();
+    expect(latestCheckpoint(THURSDAY_NIGHT, at('2026-10-03T12:00:00Z'))).toBeNull();
+    expect(new Date(latestCheckpoint(THURSDAY_NIGHT, at('2026-10-06T12:00:00Z'))!).toISOString()).toBe(
+      '2026-10-06T00:15:00.000Z',
+    );
     expect(new Date(latestCheckpoint(THURSDAY_NIGHT, at('2026-10-08T20:00:00Z'))!).toISOString()).toBe(
       '2026-10-08T18:15:00.000Z',
     );
@@ -140,21 +152,21 @@ describe('a holiday game on a Wednesday or a Saturday', () => {
   const WEDNESDAY_NIGHT = '2026-12-24T01:00:00.000Z'; // Wed 23 Dec, 8:00pm ET
   const SATURDAY_AFTERNOON = '2026-12-19T21:30:00.000Z'; // Sat 19 Dec, 4:30pm ET
 
-  it('get the same six looks as any other game', () => {
+  it('get the same nine looks as any other game', () => {
     for (const kickoff of [WEDNESDAY_NIGHT, SATURDAY_AFTERNOON]) {
-      const passes = plannedPasses([kickoff], at(kickoff) - 3 * 24 * H, at(kickoff));
-      expect(passes).toHaveLength(6);
+      const passes = plannedPasses([kickoff], at(kickoff) - 6 * 24 * H, at(kickoff));
+      expect(passes).toHaveLength(9);
     }
   });
 
   it('start from the right day', () => {
-    const wednesday = plannedPasses([WEDNESDAY_NIGHT], at('2026-12-20T00:00:00Z'), at(WEDNESDAY_NIGHT));
-    // 48 hours before Wednesday 8pm ET is Monday 8pm ET.
-    expect(wednesday[0]!.at).toBe('2026-12-22T01:00:00.000Z');
+    const wednesday = plannedPasses([WEDNESDAY_NIGHT], at('2026-12-17T00:00:00Z'), at(WEDNESDAY_NIGHT));
+    // 120 hours before Wednesday 8pm ET is Friday 8pm ET.
+    expect(wednesday[0]!.at).toBe('2026-12-19T01:00:00.000Z');
 
-    const saturday = plannedPasses([SATURDAY_AFTERNOON], at('2026-12-15T00:00:00Z'), at(SATURDAY_AFTERNOON));
-    // 48 hours before Saturday 4:30pm ET is Thursday 4:30pm ET.
-    expect(saturday[0]!.at).toBe('2026-12-17T21:30:00.000Z');
+    const saturday = plannedPasses([SATURDAY_AFTERNOON], at('2026-12-10T00:00:00Z'), at(SATURDAY_AFTERNOON));
+    // 120 hours before Saturday 4:30pm ET is Monday 4:30pm ET.
+    expect(saturday[0]!.at).toBe('2026-12-14T21:30:00.000Z');
   });
 
   it('are due in the hours before them, on the Saturday and on the Wednesday', () => {
@@ -232,8 +244,10 @@ describe('a bye-heavy week', () => {
     const sparse = plannedPasses(SPARSE, at('2026-10-06T17:30:00Z'), at('2026-10-13T00:15:00Z'));
     const full = plannedPasses(WEEK_5, at('2026-10-06T17:30:00Z'), at('2026-10-13T00:15:00Z'));
     expect(sparse.length).toBeLessThan(full.length);
-    // Three distinct slots, six looks each.
-    expect(sparse).toHaveLength(18);
+    // Three distinct slots. Inside this Tuesday-to-Monday window the Sunday
+    // slots get all nine looks and Monday night eight (its 120-hour look was
+    // the Wednesday before the window opened).
+    expect(sparse).toHaveLength(26);
   });
 
   it('puts two games in the same slot into one pass, not two', () => {
@@ -371,7 +385,8 @@ describe('the gate', () => {
 
   it('sleeps until the next checkpoint of any game', () => {
     const next = nextPassAfter(WEEK_5, at('2026-10-06T17:30:00Z'));
-    expect(new Date(next!).toISOString()).toBe('2026-10-07T00:15:00.000Z');
+    // The 4:05pm game's 120-hour look, Tuesday 4:05pm ET.
+    expect(new Date(next!).toISOString()).toBe('2026-10-06T20:05:00.000Z');
   });
 
   it('has a checkpoint pending only if one fell after the last one processed', () => {
@@ -387,7 +402,8 @@ describe('the gate', () => {
 });
 
 describe('the week of 5 October 2026, end to end', () => {
-  const FROM = at('2026-10-06T17:30:00Z');
+  // From the Saturday before, so Thursday night's 120-hour look is inside.
+  const FROM = at('2026-10-03T17:30:00Z');
   const TO = at('2026-10-13T00:15:00Z');
   const passes = plannedPasses(WEEK_5, FROM, TO);
 
@@ -396,8 +412,10 @@ describe('the week of 5 October 2026, end to end', () => {
     expect(slots).toEqual(new Set([THURSDAY_NIGHT, LONDON, EARLY, LATE_A, LATE_B, SUNDAY_NIGHT, MONDAY_NIGHT]));
   });
 
-  it('is seven slots and six looks, so forty-two passes, none of them on a fixed weekday', () => {
-    expect(passes).toHaveLength(42);
+  it('is seven slots and nine looks, so sixty-two passes, none of them on a fixed weekday', () => {
+    // 63 checkpoints, but Monday night's five-day look and Thursday night's
+    // day-before look fall on the same tick (Wed 8:15pm ET) and are one pass.
+    expect(passes).toHaveLength(62);
   });
 
   it('fires at no instant the old two clocks would have', () => {
@@ -407,10 +425,10 @@ describe('the week of 5 October 2026, end to end', () => {
     expect(instants.has('2026-10-11T15:00:00.000Z')).toBe(false);
   });
 
-  it('costs at most 60 entities in a week for a roster that spans ten of its games', () => {
+  it('costs at most 90 entities in a week for a roster that spans ten of its games', () => {
     // The roster the stored events show on 6 October: Tampa Bay on Thursday,
     // six of the 1:00pm games, Chargers, Lions and Falcons. Ten games.
-    expect(worstCaseWeeklyEntities(10)).toBe(60);
+    expect(worstCaseWeeklyEntities(10)).toBe(90);
   });
 
   it('stays far inside the month\'s allowance with a person\'s own taps added', () => {
@@ -421,7 +439,8 @@ describe('the week of 5 October 2026, end to end', () => {
     const manualTaps = 100; // the last full month of taps was 255, mostly one defect
     const month = Math.ceil(clock + discovery + manualTaps);
     expect(month).toBeLessThan(BUDGET.monthlyEntities * BUDGET.cautionAt);
-    expect(month / BUDGET.monthlyEntities).toBeLessThan(0.2);
+    // Nine looks (Round 23) put the worst case at about a quarter of the month.
+    expect(month / BUDGET.monthlyEntities).toBeLessThan(0.3);
   });
 });
 

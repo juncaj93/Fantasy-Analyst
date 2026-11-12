@@ -289,7 +289,8 @@ describe('the cost of a season', () => {
     // And the new one is a fraction of that.
     const now = simulateMonth(STRATEGY, BUDGET.monthlyEntities);
     expect(now.fraction).toBeLessThan(BUDGET.cautionAt / 2);
-    expect(now.monthly).toBeLessThan(oldWay.monthly / 4);
+    // A third since Round 23's three earlier looks (600 against 1,820); it was a quarter.
+    expect(now.monthly).toBeLessThan(oldWay.monthly / 3);
   });
 
   it('shows its arithmetic', () => {

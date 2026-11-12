@@ -46,6 +46,9 @@ import { manualRefreshThresholdMinutes } from './staleness.ts';
  * Chosen against what a lineup decision needs, then checked against the
  * staleness table so each one lands in a different row of it:
  *
+ *  120   five days out: the week's totals are up, props are posting  (6 h row)
+ *   96   props have posted for a Sunday game by now                 (6 h row)
+ *   72   the 48 to 96 hours where props move most (Round 21 probe)  (6 h row)
  *   48   the week's board is up and the first look is worth having  (6 h row)
  *   24   the day before                                            (1 h row)
  *    6   the morning of a one o'clock game                         (1 h row)
@@ -53,11 +56,19 @@ import { manualRefreshThresholdMinutes } from './staleness.ts';
  *   1.5  when inactives are announced                             (15 min row)
  *    0.5 the last look before the lineup locks                    (15 min row)
  *
- * Six looks, so six entities per game per week at most. A night checkpoint is
- * not removed for being at night: lines move little then and the entity is
- * still only spent if the game's lines are stale.
+ * Nine looks, so nine entities per game per week at most. The three early ones
+ * (120, 96, 72) were added in Round 23: the Round 21 probe found props move
+ * most 48 to 96 hours out, exactly where the clock used to be blind, and
+ * Thursday games were first seen only 48 hours out. A night checkpoint is not
+ * removed for being at night: lines move little then and the entity is still
+ * only spent if the game's lines are stale.
+ *
+ * Earliest first, so `[0]` is the first look (discovery uses it).
  */
-export const KICKOFF_CHECKPOINT_HOURS: readonly number[] = [48, 24, 6, 3, 1.5, 0.5];
+export const KICKOFF_CHECKPOINT_HOURS: readonly number[] = [120, 96, 72, 48, 24, 6, 3, 1.5, 0.5];
+
+/** The first look, in hours before kickoff. Discovery asks about a team only inside it. */
+export const FIRST_LOOK_HOURS = Math.max(...KICKOFF_CHECKPOINT_HOURS);
 
 /** The platform tick the job rides, which sets how late a checkpoint can fire. */
 export const CLOCK_TICK_MINUTES = 5;
