@@ -134,7 +134,8 @@ describe('a billed call is in the ledger even if storing it fails', () => {
     await db.prepare("UPDATE prop_snapshots SET fetched_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 days', '-' || id || ' seconds')").run();
 
     const before = (await new VegasUsageRepo(db).ledger()).entities;
-    const spy = vi.spyOn(PropsRepo.prototype, 'saveConsensus').mockRejectedValue(new Error('D1 is unwell'));
+    // Since Round 23 a look writes its changed lines with saveChanges.
+    const spy = vi.spyOn(PropsRepo.prototype, 'saveChanges').mockRejectedValue(new Error('D1 is unwell'));
     try {
       const report = await service.refresh({ manual: true });
       expect(report.errors.join(' ')).toContain('D1 is unwell');

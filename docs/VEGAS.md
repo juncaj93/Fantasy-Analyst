@@ -546,3 +546,59 @@ Per (player, market): drop books whose line deviates more than 25% from the
 median, then take the median of what remains. Binary markets (anytime TD) are
 de-vigged across the two sides; with only one side priced, the raw implied
 probability is used and is an overestimate — treat it as approximate.
+
+That rule still serves the mock provider and season markets. Weekly lines
+since Round 23 use the per-book average below.
+
+## Per-book average and write-on-change (Round 23)
+
+Alex's decision after Round 21: "more data the better, just average it."
+
+**By book, not by provider.** SportsGameOdds sends each sportsbook's own quote
+in `byBookmaker` on the free plan (probe run 43224973540, Nov 12: 5 to 8 books
+on a game line, typically 5 on a player prop: DraftKings, Caesars, FanDuel,
+ESPN BET, BetMGM, Bovada). The adapter now sends one quote per live book
+(`available !== false`) instead of the provider's single blended number. A
+quote with no per-book entries falls back to the blended number as one book.
+
+**The rules** (`core/vegas/combine.ts`, from `docs/vegas/ROUND21_SOURCES.md` s.6):
+
+| | |
+|---|---|
+| Fresh | seen within 12 h (game over 24 h out), 3 h (2 to 24 h), 45 min (under 2 h) |
+| 3+ books | drop any book further from the median than the band, average the rest |
+| 2 books | average inside the band, else the newest |
+| 1 book | as is |
+| No fresh book | no number; the minus-1 rule downstream, unchanged |
+| Bands | total 3.0, spread 2.5, yards max(10, 15%), catches 1.0, TD lines 0.5, anytime TD 15 points |
+
+Anytime touchdown is averaged as a chance (from each book's price), on the line
+most books quote. One decimal for lines.
+
+**Game lines.** Each book's total and spread, from every source, live in one
+settings row (`vegas.gameBooks`, `server/repos/gameBooks.ts`). Spreads are turned
+to one side before averaging. The game's `vegas_events` row, which every screen
+reads (team points = combined total / 2 minus combined spread / 2), is written
+only when the combined total or spread changes.
+
+**Write-on-change** (`core/vegas/combineProps.ts`). A look stores one small
+snapshot row (time, combined game line, combined lines for audit, `delta: true`)
+plus only the player lines whose number changed: the line, the anytime chance
+by 0.5 points or more, or one book versus several. A line withdrawn at every
+book until its books go stale gets a "gone" marker row. Prices on yardage and
+catch lines do not count as a change: no screen reads them (the de-vig needs
+both sides, and only the over is sent).
+
+**Reading it back** (`PropsRepo.latestForPlayers`). A game's current lines are
+the newest row per player and market across its looks since its newest full
+copy (looks before Round 23 are full copies, so nothing an old copy dropped can
+come back). Each line carries the newest look's time and game line, so the
+stale-prop check does not scale a line the books re-confirmed. `previousForPlayers`
+is the same as of the look before. The nightly trim keeps change-only looks
+that carry lines (a game's current lines), and still trims full copies that a
+later full copy replaced and looks that changed nothing.
+
+**What it costs.** Per look: one snapshot row plus the changed lines (about 13%
+of lines change between looks, Round 21) plus one settings row per pass. Round
+21 estimated about 2,000 written rows a day (5,500 on a Sunday) against 5,300
+(17,000) before.
