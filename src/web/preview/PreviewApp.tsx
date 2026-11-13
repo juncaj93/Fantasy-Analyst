@@ -17,6 +17,8 @@ import { SegmentedControl } from '../components/native.tsx';
 import { TradesScreenV2 } from '../screens/TradesScreenV2.tsx';
 import { PlayersSeasonScreen } from '../screens/PlayersSeasonScreen.tsx';
 import type { LeagueSummary } from '../api.ts';
+import { ExtraLines } from '../components/waiverTiers.tsx';
+import { previewLookAhead } from '../../core/waivers/lookAheadPreview.ts';
 import { applyAppearance, readAppearance, resolveAppearance, storeAppearance } from '../theme.ts';
 
 /** SHA-256 of the PIN, so the page carries no PIN in plain text. */
@@ -36,10 +38,11 @@ function wasUnlocked(): boolean {
   }
 }
 
-export function PreviewApp({ mode = 'trades' }: { mode?: 'trades' | 'players' }) {
+export function PreviewApp({ mode = 'trades' }: { mode?: 'trades' | 'players' | 'waivers' }) {
   const [unlocked, setUnlocked] = useState(wasUnlocked);
-  if (!unlocked) return <PinGate title={mode === 'players' ? 'Players preview' : 'Trades preview'} onUnlock={() => setUnlocked(true)} />;
-  return mode === 'players' ? <PreviewPlayers /> : <PreviewTrades />;
+  const title = mode === 'players' ? 'Players preview' : mode === 'waivers' ? 'Waivers preview' : 'Trades preview';
+  if (!unlocked) return <PinGate title={title} onUnlock={() => setUnlocked(true)} />;
+  return mode === 'players' ? <PreviewPlayers /> : mode === 'waivers' ? <PreviewWaivers /> : <PreviewTrades />;
 }
 
 function PinGate({ title, onUnlock }: { title: string; onUnlock: () => void }) {
@@ -157,6 +160,37 @@ function PreviewPlayers() {
         />
       </div>
       <PlayersSeasonScreen leagues={[PREVIEW_LEAGUE]} resetNonce={0} searchBeyond={false} dossier={false} />
+    </main>
+  );
+}
+
+/**
+ * Round 26: the Waivers look-ahead lines on the made-up league, drawn by the
+ * real section the Waivers screen uses (`ExtraLines`), with the light and
+ * dark switch. Computed here from the same functions the server runs.
+ */
+function PreviewWaivers() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => resolveAppearance(readAppearance()));
+  useEffect(() => {
+    applyAppearance(theme);
+    storeAppearance(theme);
+  }, [theme]);
+  const [lines] = useState(previewLookAhead);
+  return (
+    <main className="app-main" data-testid="preview-waivers">
+      <div className="t2-preview-bar">
+        <SegmentedControl<'light' | 'dark'>
+          label="Light or dark"
+          value={theme}
+          onChange={setTheme}
+          testId="preview-theme"
+          segments={[
+            { id: 'light', label: 'Light' },
+            { id: 'dark', label: 'Dark' },
+          ]}
+        />
+      </div>
+      <ExtraLines tiers={lines} />
     </main>
   );
 }

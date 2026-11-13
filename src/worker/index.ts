@@ -137,6 +137,12 @@ export interface WorkerEnv {
    */
   PLAYERS_INSEASON?: string;
   /**
+   * Round 26: Waivers looks ahead (the Opportunity finder, cover pickups for
+   * the next three weeks, the block in the opponent's terms). `"on"` turns it
+   * on; anything else, or nothing, keeps today's lines.
+   */
+  WAIVERS_LOOKAHEAD?: string;
+  /**
    * Set only on the preview upload (`preview.yml`): `trades` (Round 19) or
    * `players` (Round 24). That tab answers from a made-up league, behind a
    * PIN. Never set on the live site.
@@ -217,6 +223,7 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     tradesScreens: env.TRADES_SCREENS === 'new' ? 'new' : 'old',
     preview: env.PREVIEW === 'trades' ? 'trades' : env.PREVIEW === 'players' ? 'players' : null,
     playersInSeason: env.PLAYERS_INSEASON === 'on',
+    waiversLookahead: env.WAIVERS_LOOKAHEAD === 'on',
   };
 }
 

@@ -225,6 +225,8 @@ export interface AppEnv extends AuthEnv {
   preview?: 'trades' | 'players' | null;
   /** The in-season Players tab (Round 24). Absent or false: today's tab. */
   playersInSeason?: boolean;
+  /** Round 26: Waivers looks ahead (Opportunity, cover, named block). Absent or false: today's lines. */
+  waiversLookahead?: boolean;
 }
 
 /**
@@ -986,6 +988,9 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
    * this app, and this endpoint is a GET that writes nothing.
    */
   router.get('/api/leagues/:id/waivers', async (ctx) => {
+    /* Round 26: `cost=1` meters the rows this load reads, as the Players routes do. */
+    const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+    const waiverDb = metered?.db ?? ctx.env.db;
     /*
      * The reads, from the one place that does them.
      *
@@ -995,7 +1000,13 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      */
     let gathered;
     try {
-      gathered = await gatherWaiverInputs(ctx.env.db, ctx.env.sleeper, ctx.params['id']!);
+      /*
+       * Round 26: the switch, or `lookahead=1` on one request (read-only, for
+       * the round's probe to see the lines on the real league while the switch
+       * is off; the screen never sends it).
+       */
+      const lookahead = ctx.env.waiversLookahead === true || ctx.url.searchParams.get('lookahead') === '1';
+      gathered = await gatherWaiverInputs(waiverDb, ctx.env.sleeper, ctx.params['id']!, { lookahead });
     } catch (err) {
       if (err instanceof NoDecision) {
         return err.status === 404
@@ -1056,6 +1067,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
             trendingCapturedAt: strategy.trendingCapturedAt,
           }
         : null,
+      ...(metered ? { cost: metered.cost() } : {}),
     });
   });
 

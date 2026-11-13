@@ -141,6 +141,7 @@ const env = {
   preview: process.env.PREVIEW === 'trades' ? 'trades' : process.env.PREVIEW === 'players' ? 'players' : null,
   // Round 24: the in-season Players tab.
   playersInSeason: process.env.PLAYERS_INSEASON === 'on',
+  waiversLookahead: process.env.WAIVERS_LOOKAHEAD === 'on',
   /*
    * Unset locally too, so the allowance panel says "not connected" rather than
    * reporting a real account's usage from a laptop. Settable for anyone who

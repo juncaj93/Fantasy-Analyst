@@ -35,6 +35,7 @@ import { TOSSUP_POINTS } from '../startsit/tossup.ts';
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import { smartBid } from '../faab/smartBid.ts';
+import { rosterHoles } from './lookAhead.ts';
 
 export const BLOCK_RULES = {
   /** The most a block may bid (Alex, 5 November 2026). */
@@ -86,6 +87,13 @@ export interface BlockRequest {
   spendable: number | null;
   /** False in a league that does not bid. */
   usesFaab: boolean;
+  /**
+   * Round 26 (`WAIVERS_LOOKAHEAD`): say the need in the opponent's own terms,
+   * from the look-ahead's hole rule (`lookAhead.ts`): `Matty has no TE this
+   * week` for a hole, `Matty is thin at TE` for a weak starter. The name is
+   * the manager's. Absent: `opponent needs a TE`, as before.
+   */
+  named?: { opponentName: string | null } | null;
 }
 
 export interface BlockLine {
@@ -138,12 +146,43 @@ export function blockPickup(request: BlockRequest): BlockLine | null {
     name: c.name,
     position: c.position,
     team: c.team,
-    reason: `opponent needs a ${c.position}`,
+    reason: request.named ? namedReason(c.position, request.named.opponentName, request.shape, lineupPlayers, request.excludedPositions) : `opponent needs a ${c.position}`,
     detail: needDetail(c, opponent.roster, slots, lineupPlayers, before.picks),
     gain,
     bid: c.free ? { kind: 'free' } : bid.kind === 'claim' ? blockClaim(c.position, request) : bid,
     room,
   };
+}
+
+/**
+ * `Matty has no TE this week` when his position has a hole by the look-ahead's
+ * rule (a starter who cannot play and no bench cover, or nobody to start),
+ * else `Matty is thin at TE`: his starter there is weak and the free agent
+ * beats him by the toss-up bar.
+ */
+function namedReason(
+  position: string,
+  opponentName: string | null,
+  shape: RosterShape,
+  lineupPlayers: readonly BlockPlayer[],
+  excluded: ReadonlySet<string>,
+): string {
+  const who = opponentName?.trim() || 'Your opponent';
+  const holes = rosterHoles({
+    shape,
+    weeks: [0],
+    excludedPositions: excluded,
+    roster: lineupPlayers.map((p) => ({
+      playerId: p.playerId,
+      name: p.name,
+      position: p.position,
+      team: p.team,
+      rate: p.points,
+      weekly: [p.onBye || isOutThisWeek(p.designation) ? 0 : 1],
+      byeWeek: p.onBye ? 0 : null,
+    })),
+  });
+  return holes.some((h) => h.position === position) ? `${who} has no ${position} this week` : `${who} is thin at ${position}`;
 }
 
 /** One number for the block (round 20): the shared bid rule, $1 to $3, inside the playoff reserve. */

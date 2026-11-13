@@ -161,4 +161,11 @@ import { DST_ENGINE_VERSION } from '../dst/version.ts';
  * what the player is worth to the roster or into the playoff reserve. One
  * number, not a range; a block is one number up to $3, a stash $0 or $1.
  */
-export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@23', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);
+/*
+ * `waiver@24`, 13 November 2026 (round 26), behind `WAIVERS_LOOKAHEAD`: the
+ * Opportunity finder on the stash line (`opportunity.ts`: a free agent who
+ * inherits a starter's role), cover pickups for holes in the next three weeks
+ * (`lookAhead.ts`), the block said in the opponent's terms, and at most three
+ * of those lines together. With the switch off every line is as at @23.
+ */
+export const WAIVER_ENGINE_VERSION = composeEngineVersion('waiver@24', LINEUP_ENGINE_VERSION, DST_ENGINE_VERSION);

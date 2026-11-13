@@ -12,7 +12,7 @@ import { useState } from 'react';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import { PlayerIdentity } from './common.tsx';
 import { FoldedGroup, WaiverCard } from './waiverCard.tsx';
-import { byGain, extraLine, roomLine, tierCard } from '../waiverCard.ts';
+import { byGain, extraLine, extraTitle, roomLine, tierCard } from '../waiverCard.ts';
 
 /** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window (`Return unknown` when nobody knows when). */
 export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
@@ -65,20 +65,22 @@ export function DropReadyRows({ tiers }: { tiers: WaiverTiersView }) {
  * pick and one reason, with the spot it uses under it. Nothing to tap: the
  * line is the whole answer, and nothing here adds, drops or bids.
  */
-export function ExtraLines({ tiers }: { tiers: WaiverTiersView }) {
+export function ExtraLines({ tiers }: { tiers: Pick<WaiverTiersView, 'upsideStash' | 'block' | 'cover'> }) {
   const rows = [
     ...(tiers.upsideStash ? [{ kind: 'stash' as const, line: tiers.upsideStash }] : []),
+    /* Round 26: cover pickups for the next three weeks, earliest first. */
+    ...(tiers.cover ?? []).map((line) => ({ kind: 'cover' as const, line })),
     ...(tiers.block ? [{ kind: 'block' as const, line: tiers.block }] : []),
   ];
   if (rows.length === 0) return null;
   return (
     <>
       <div className="section-title" data-testid="tier-extra-title">
-        Stash and block
+        {extraTitle(rows.map((r) => r.kind))}
       </div>
       <section className="slot-group" data-testid="tier-extra">
         {rows.map(({ kind, line }) => (
-          <div key={kind} className="player-row" data-testid={`waiver-${kind}-line`} data-player-id={line.playerId}>
+          <div key={`${kind}-${line.playerId}`} className="player-row" data-testid={`waiver-${kind}-line`} data-player-id={line.playerId}>
             <div className="player-row-top">
               <span className="player-identity">
                 <PlayerIdentity position={line.position} />

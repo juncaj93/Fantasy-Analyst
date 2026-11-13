@@ -84,6 +84,11 @@ TRADES_SCREENS = "new"
 # filters, a fuller card). On since Alex's go, 12 November 2026. To go back to
 # today's tab, set this to "off" and deploy; draft mode is never affected.
 PLAYERS_INSEASON = "on"
+# Waivers looks ahead (Round 26): "on" adds the Opportunity finder to the stash
+# line (a free agent who inherits a starter's role), cover pickups for holes in
+# the next three weeks, and the block said in the opponent's terms. "off" keeps
+# today's lines. Change and deploy.
+WAIVERS_LOOKAHEAD = "off"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

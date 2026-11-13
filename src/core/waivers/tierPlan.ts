@@ -24,6 +24,7 @@ import { FREE_AGENT_PHRASE } from './claimPlan.ts';
 import type { StartSitEvaluation } from '../startsit/engine.ts';
 import type { BlockLine } from './block.ts';
 import type { UpsideStashLine } from './upsideStash.ts';
+import type { CoverLine } from './lookAhead.ts';
 
 export interface TierBid {
   /** `free`: first come, no bid. `claim`: on waivers, bid. `none`: this league does not bid. */
@@ -154,6 +155,12 @@ export interface WaiverTiersView {
    * (`block.ts`). Null or absent: none this week.
    */
   block?: BlockLine | null;
+  /**
+   * Round 26 (`WAIVERS_LOOKAHEAD`): pickups that cover a hole in Alex's next
+   * three weeks before the week comes (`lookAhead.ts`), earliest first.
+   * Absent: none, or the switch is off.
+   */
+  cover?: CoverLine[];
   /** The rival read, per manager: record, need is per player. Not drawn. */
   bidderReads?: { name: string; rate: number; seasons: string[]; source: 'history' | 'seed'; remaining: number | null; interest: Record<string, number>; chase: number }[];
 }
