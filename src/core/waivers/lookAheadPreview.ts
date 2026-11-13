@@ -93,7 +93,6 @@ export function previewLookAhead(): Pick<WaiverTiersView, 'upsideStash' | 'cover
     spendable,
     usesFaab: true,
     opportunities: new Map(leads.map((l) => [l.playerId, l] as const)),
-    seasonWeight: L.horizon.weeks.filter((w) => w >= WEEKS[0]!).reduce((s, w) => s + (L.horizon.playoffWeeks.includes(w) ? 1.5 : 1), 0),
   });
   const stashBid = stash?.bid.kind === 'claim' ? stash.bid.high : 0;
 

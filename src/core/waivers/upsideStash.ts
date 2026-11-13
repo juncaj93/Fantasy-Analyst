@@ -109,12 +109,10 @@ export interface UpsideStashRequest {
   /**
    * Round 26 (`WAIVERS_LOOKAHEAD`): free agents who inherit a starter's role
    * (`opportunity.ts`), by player id. Such a player is judged on his role's
-   * estimate, comes first, and is priced by the shared bid rule as a Worth
-   * considering claim. Absent: the two paths above only, as before.
+   * estimate and comes first. He is still a stash: the Round 20 stash bid,
+   * $0 or $1, inside the playoff reserve. Absent: the two paths above only.
    */
   opportunities?: ReadonlyMap<string, OpportunityLead>;
-  /** The season's weighted weeks left, for an opportunity's value cap. Absent: no cap. */
-  seasonWeight?: number;
 }
 
 export type StashPath =
@@ -143,12 +141,6 @@ export function upsideStash(request: UpsideStashRequest): UpsideStashLine | null
   const pool: LineupCandidate[] = request.roster
     .filter((p) => !p.onReserve && !request.excludedPositions.has(p.position) && p.seasonRate != null)
     .map((p) => ({ id: p.playerId, position: p.position, value: Math.max(0, p.seasonRate ?? 0) }));
-  const before = bestLineup(slots, pool).total;
-  /* What a player worth `value` a game adds to your best season lineup a week; 0 when he would not start. */
-  const addsForYou = (id: string, position: string, value: number): number => {
-    const after = bestLineup(slots, [...pool, { id, position, value }]);
-    return after.picks.some((x) => x?.id === id) ? Math.max(0, after.total - before) : 0;
-  };
   /* Would a player worth `value` a game start for you over the season? */
   const startsForYou = (id: string, position: string, value: number): boolean =>
     bestLineup(slots, [...pool, { id, position, value }]).picks.some((x) => x?.id === id);
@@ -197,7 +189,8 @@ export function upsideStash(request: UpsideStashRequest): UpsideStashLine | null
       path,
       reason: lead ? lead.reason : path.kind === 'returning' ? path.label : `next up behind ${path.starterName}, hurt`,
       value: round2(value),
-      bid: c.free ? { kind: 'free' } : lead ? opportunityBid(c.position, addsForYou(c.playerId, c.position, value), request) : bid,
+      /* Every stash, an inherited role included, bids the Round 20 stash rule: $0 or $1. */
+      bid: c.free ? { kind: 'free' } : bid,
       room,
     };
   }
@@ -285,19 +278,6 @@ function roomFor(c: StashCandidate, path: StashPath, request: UpsideStashRequest
   if (request.room.open > 0) return { kind: 'open' };
   const drop = request.room.dropReady[0];
   return drop ? { kind: 'drop', playerId: drop.playerId, name: drop.name } : null;
-}
-
-/**
- * An inherited role is priced as a Worth considering claim by the shared bid
- * rule (Round 20): what this league pays for a starter at his position, never
- * more than he is worth to you over the season, never into the $20 playoff
- * reserve.
- */
-function opportunityBid(position: string, gainPerWeek: number, request: UpsideStashRequest): UpsideStashLine['bid'] {
-  if (!request.usesFaab) return { kind: 'none' };
-  const gain = request.seasonWeight != null ? gainPerWeek * request.seasonWeight : null;
-  const { bid } = smartBid({ kind: 'consider', position, gain, expectedRivals: null, spendable: request.spendable });
-  return { kind: 'claim', low: bid, high: bid };
 }
 
 /** One number, $1 at most, inside the playoff reserve: the shared bid rule (round 20). */

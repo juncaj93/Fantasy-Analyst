@@ -62,6 +62,7 @@ left a starter-level role to a free agent.
 ## Decision
 
 The brief's bar: at least 2 of the top picks good. Read as the picks Alex would
-have seen (one stash a week), it is 1 of 3, so `WAIVERS_LOOKAHEAD` stays
-**off**. Read as every pick that passes the bar, it is 3 of 6. The look-ahead
-covers were 2 of 2.
+have seen (one stash a week), it is 1 of 3, so the backtest alone left
+`WAIVERS_LOOKAHEAD` **off**. Read as every pick that passes the bar, it is 3
+of 6. The look-ahead covers were 2 of 2. Alex reviewed this and the preview
+and turned it **on** on 13 November 2026, with the stash bid held to $0 to $1.

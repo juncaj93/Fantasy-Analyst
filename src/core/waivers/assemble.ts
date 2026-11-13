@@ -1134,10 +1134,6 @@ function stashAndBlock(
           }).map((l) => [l.playerId, l] as const),
         )
       : undefined;
-  const firstWeek = inputs.window.weeks[0] ?? request.week;
-  const seasonWeight = request.seasonHorizon
-    ? request.seasonHorizon.weeks.filter((w) => w >= firstWeek).reduce((sum, w) => sum + (request.seasonHorizon!.playoffWeeks.includes(w) ? 1.5 : 1), 0)
-    : undefined;
   const stash = round2
     ? upsideStash({
         shape: request.shape,
@@ -1161,7 +1157,6 @@ function stashAndBlock(
         spendable,
         usesFaab,
         ...(opportunities ? { opportunities } : {}),
-        ...(lookahead && seasonWeight != null ? { seasonWeight } : {}),
       })
     : null;
   if (stash) {

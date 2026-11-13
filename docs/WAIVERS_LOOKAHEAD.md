@@ -1,8 +1,8 @@
 # Waivers that look ahead (Round 26)
 
-Behind the `WAIVERS_LOOKAHEAD` switch in `wrangler.toml`. "off" until the
-backtest and Alex's preview say go. Set it to "on" and deploy to turn it on;
-"off" and deploy to go back. With it off every Waivers line is exactly as
+Behind the `WAIVERS_LOOKAHEAD` switch in `wrangler.toml`. "on" since Alex's
+go on 13 November 2026 (the backtest alone left it off). Set it to "off" and
+deploy to go back. With it off every Waivers line is exactly as
 before (`waiver@23`).
 
 ## What changes on the Waivers screen
@@ -11,7 +11,7 @@ Nothing new to learn. The section under Worth considering that held the stash
 and the block now holds up to three lines, titled "Cover, stash and block"
 when a cover line is there:
 
-- `Stash: Lars Penhall (Holloway out for the season, gets his targets), bid $6`
+- `Stash: Lars Penhall (Holloway out for the season, gets his targets), bid $1`
 - `Add: Rocco Bianchi (covers your Week 12 bye at TE), bid $3`
 - `Block: Ivo Brandt (Dermot has no RB this week), bid $3`
 
@@ -37,8 +37,8 @@ He must gain at least 2 points a game, be healthy, and have played in at least
 one of his club's last two games. A backup quarterback already scoring like a
 starter is skipped (one QB plays). The lead then has to pass the stash bar
 (`upsideStash.ts`): at that number he would start in Alex's best season
-lineup. The price is the Round 20 rule as a Worth considering claim, capped by
-his value and the $20 playoff reserve.
+lineup. It is still a stash: the Round 20 stash bid, $0 or $1, never into the
+$20 playoff reserve, and at most one stash line a week.
 
 A trade is read from the daily player sync, which now keeps each depth-charted
 player's club and any change for about six weeks (`core/sleeper/playerNotes.ts`,
@@ -54,8 +54,10 @@ can fill. The best free agent for the hole is offered when he gains 2 points or
 more that week. A hole in a later week waits for its own waiver run unless the
 wire is thin (fewer than 3 free agents would fill it about as well; review
 W12). A hole a Do this or Worth considering move already fills gets no second
-pickup. Bids come after the Do this claims and the stash, never into the $20
-reserve.
+pickup. A cover is a pickup, not a stash, so it bids the Round 20 Worth
+considering rule (this league's price for the position, capped by what the one
+week is worth). Bids come after the Do this claims and the stash, never into
+the $20 reserve.
 
 ## C. Block, smarter (`core/waivers/block.ts`)
 

@@ -264,11 +264,37 @@ describe('A. the Opportunity pick shows in the stash category', () => {
   const lead = findOpportunities(oppInput())[0]!;
 
   it('stashes the backup who inherits a role worth a start, with the role as the reason', () => {
-    const line = upsideStash(stashRequest({ candidates: [cand('wr2', 6, { helpsNow: true })], opportunities: new Map([['wr2', lead]]), seasonWeight: 9 }));
+    const line = upsideStash(stashRequest({ candidates: [cand('wr2', 6, { helpsNow: true })], opportunities: new Map([['wr2', lead]]) }));
     expect(line).toMatchObject({ playerId: 'wr2', reason: 'Chase out for the season, gets his targets', path: { kind: 'opportunity', starterId: 'chase' } });
-    /* Priced by the shared bid rule as a claim, inside the reserve. */
-    expect(line!.bid.kind).toBe('claim');
-    if (line!.bid.kind === 'claim') expect(line!.bid.high).toBeLessThanOrEqual(28);
+    /* Still a stash: the Round 20 stash bid, $1 at most. */
+    expect(line!.bid).toEqual({ kind: 'claim', low: 1, high: 1 });
+  });
+
+  it('bids $0 to $1 and never into the $20 playoff reserve', () => {
+    for (const spendable of [0, 1, 28, 80]) {
+      const line = upsideStash(stashRequest({ candidates: [cand('wr2', 6)], opportunities: new Map([['wr2', lead]]), spendable }));
+      expect(line!.bid.kind).toBe('claim');
+      if (line!.bid.kind === 'claim') {
+        expect(line!.bid.high).toBeLessThanOrEqual(1);
+        expect(line!.bid.high).toBeLessThanOrEqual(spendable);
+      }
+    }
+  });
+
+  it('shows one Opportunity line a week, the strongest role', () => {
+    const second = { ...lead, playerId: 'wr3', name: 'Third Receiver', estimate: lead.estimate - 2 };
+    const line = upsideStash(
+      stashRequest({
+        candidates: [cand('wr3', 3), cand('wr2', 6)],
+        opportunities: new Map([
+          ['wr2', lead],
+          ['wr3', second],
+        ]),
+      }),
+    );
+    expect(line?.playerId).toBe('wr2');
+    /* The function returns one line or none: one stash a week. */
+    expect(Array.isArray(line)).toBe(false);
   });
 
   it('never stashes a role that would not start for you', () => {
