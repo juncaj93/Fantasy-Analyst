@@ -128,6 +128,7 @@ import { TradeService } from './services/tradeService.ts';
 import { SmartTradeService } from './services/smartTradeService.ts';
 import { TradeFinderService } from './services/tradeFinderService.ts';
 import { TradeScreensService } from './services/tradeScreensService.ts';
+import { PlayersSeasonService } from './services/playersSeasonService.ts';
 import { finderBoard } from '../core/trades/finderBoard.ts';
 import { TradeCheckError, TradeValueService } from './services/tradeValueService.ts';
 import { MAX_MARKS, TradeBuilderService } from './services/tradeBuilderService.ts';
@@ -221,7 +222,9 @@ export interface AppEnv extends AuthEnv {
   /** Which Trades screens the site draws (Round 19). Absent: today's. */
   tradesScreens?: 'old' | 'new';
   /** `trades` only on the preview upload: Trades answers from a made-up league. */
-  preview?: 'trades' | null;
+  preview?: 'trades' | 'players' | null;
+  /** The in-season Players tab (Round 24). Absent or false: today's tab. */
+  playersInSeason?: boolean;
 }
 
 /**
@@ -402,7 +405,12 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       readOnly: !unlocked,
       authDisabled: !!ctx.env.disableAuth,
       /* Round 19: the feature switches the screens read. */
-      features: { tradesScreens: ctx.env.tradesScreens ?? 'old', preview: ctx.env.preview ?? null },
+      features: {
+        tradesScreens: ctx.env.tradesScreens ?? 'old',
+        preview: ctx.env.preview ?? null,
+        /* Round 24: the in-season Players tab. Sent only when on; absent reads as off. */
+        ...(ctx.env.playersInSeason === true ? { playersInSeason: true } : {}),
+      },
     });
   });
 
@@ -2347,6 +2355,27 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
         ...(leagueId ? { draftPick: draftPicks.get(row.player.id) ?? null } : {}),
       })),
     });
+  });
+
+  /*
+   * The in-season Players tab (Round 24, behind `PLAYERS_INSEASON`): the
+   * board (every rostered player and the free-agent pool, with rest-of-season
+   * value, trade-target and injury reads) and one player's card (this week,
+   * the next four weeks, the last five games). On the preview upload they
+   * answer from the made-up preview league. `cost=1` meters the rows read.
+   */
+  router.get('/api/players/season', async (ctx) => {
+    const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+    const service = new PlayersSeasonService(metered?.db ?? ctx.env.db, ctx.env.sleeper, ctx.env.preview === 'players');
+    const board = await service.board(ctx.url.searchParams.get('leagueId'));
+    return jsonResponse({ ...board, ...(metered ? { cost: metered.cost() } : {}) });
+  });
+  router.get('/api/players/:id/season', async (ctx) => {
+    const metered = ctx.url.searchParams.get('cost') === '1' ? meterDatabase(ctx.env.db) : null;
+    const service = new PlayersSeasonService(metered?.db ?? ctx.env.db, ctx.env.sleeper, ctx.env.preview === 'players');
+    const card = await service.card(ctx.params['id']!, ctx.url.searchParams.get('leagueId'));
+    if (!card) return errorResponse('player not found', 404);
+    return jsonResponse({ ...card, ...(metered ? { cost: metered.cost() } : {}) });
   });
 
   router.get('/api/players/:id', async (ctx) => {

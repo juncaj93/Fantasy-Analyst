@@ -138,7 +138,9 @@ const env = {
   releaseSha: process.env.FA_RELEASE_SHA ?? null,
   // Round 19: the Trades switch and the preview's made-up league, as the Worker reads them.
   tradesScreens: process.env.TRADES_SCREENS === 'new' ? 'new' : 'old',
-  preview: process.env.PREVIEW === 'trades' ? 'trades' : null,
+  preview: process.env.PREVIEW === 'trades' ? 'trades' : process.env.PREVIEW === 'players' ? 'players' : null,
+  // Round 24: the in-season Players tab.
+  playersInSeason: process.env.PLAYERS_INSEASON === 'on',
   /*
    * Unset locally too, so the allowance panel says "not connected" rather than
    * reporting a real account's usage from a laptop. Settable for anyone who

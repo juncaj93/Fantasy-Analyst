@@ -24,7 +24,7 @@ import { DemoIndicator, useDemoWorld } from './demo/DemoIndicator.tsx';
 import { useKeyboardOpen } from './viewport.ts';
 import { shouldDrawDraftScreen } from './draftGate.ts';
 import { MatchupScreen } from './screens/MatchupScreen.tsx';
-import { PlayersScreen } from './screens/PlayersScreen.tsx';
+import { PlayersTab } from './screens/PlayersTab.tsx';
 import { TradesTab } from './screens/TradesTab.tsx';
 import { setFeatures, type Features } from './features.ts';
 import { TeamScreen } from './screens/TeamScreen.tsx';
@@ -424,7 +424,7 @@ export function App() {
         {tab === 'matchup' ? <MatchupScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'waivers' ? <WaiversScreen leagues={leagues} resetNonce={resetNonce} /> : null}
         {tab === 'trades' ? <TradesTab resetNonce={resetNonce} /> : null}
-        {tab === 'players' ? <PlayersScreen leagues={leagues} resetNonce={resetNonce} draftAhead={draftVisible} /> : null}
+        {tab === 'players' ? <PlayersTab leagues={leagues} resetNonce={resetNonce} draftAhead={draftVisible} /> : null}
         {tab === 'setup' ? (
           <ScreenLoadBoundary what="Setup" onRetry={() => setSetupScreen(lazySetupScreen)}>
             <Suspense fallback={<Loading what="Setup" />}>

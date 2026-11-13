@@ -16,14 +16,14 @@
       "name": "app JavaScript (gzipped)",
       "match": "assets/*.js",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/{demo,draft,setup,trades2,preview}-*.js",
+      "excludeMatch": "assets/{demo,draft,setup,trades2,players2,preview}-*.js",
       "maxGzipBytes": 125000,
       "why": "The one number a phone on a bad connection actually feels. Today ~140KB. Raised from 140KB, deliberately and with the reason attached: the ceiling had 0.2KB of headroom, which is a budget that fails the next commit whatever that commit is, and a number nobody can land under stops being a budget and becomes a coin toss. 148KB keeps roughly a second of 3G as the bound while leaving room to work in. It is not permission to grow: the next lane that needs more should be shrinking this rather than raising it again, and the Draft screen — 2,700 lines, the largest thing in here — is where that work is. Raised from 148KB by the lineup-legality and partial-market round (24 September 2026), by 0.6KB, for +157 bytes of its own: the Team card's empty-slot fill, the fill count on the bench line, and the completeness check the display ladder now runs before it prints a market number. That round had 66 bytes to work in. It moved the missing-markets sentence to the server to get there from +209, and stopped short of cutting unrelated screens owned by other lanes to find the rest; the Draft screen is still where the shrinking work is. That work landed on 24 September 2026: the Draft screen moved to its own lazily-loaded `draft-*.js` chunk (budgeted below) and Demo Mode stopped running the engines, which together took this from 148.1KB to ~124KB. Lowered from 148.6KB to 135KB the same day, on the owner's decision, so the ~24KB that work freed cannot quietly fill back up: roughly 10KB of headroom over ~124.8KB, the same proportion the older ceilings carried. Growth past it should come with a reason, as every raise above did. Lowered again from 135KB to 125KB on 8 October 2026, on the owner's decision, after Setup, Review and Data health moved to their own lazily-loaded `setup-*.js` chunk (budgeted below) and took this from ~134.3KB to ~115.0KB: the same ~10KB of headroom the 24 September ceiling was set to keep, so the space that move freed cannot quietly fill back up."
     },
     {
       "name": "app CSS (gzipped)",
       "match": "assets/*.css",
-      "excludeMatch": "assets/{trades2,preview}-*.css",
+      "excludeMatch": "assets/{trades2,players2,preview}-*.css",
       "maxGzipBytes": 20000,
       "why": "Render-blocking, so it is worse per byte than the JavaScript. Today ~7.7KB."
     },
@@ -37,7 +37,7 @@
       "name": "everything the browser must fetch to render (gzipped)",
       "match": "**/*.{js,css,html}",
       "excludeSuffix": ".map",
-      "excludeMatch": "assets/{demo,draft,setup,trades2,preview}-*.{js,css}",
+      "excludeMatch": "assets/{demo,draft,setup,trades2,players2,preview}-*.{js,css}",
       "maxGzipBytes": 168000,
       "why": "The total, so splitting one large file into three does not quietly pass three budgets. Demo Mode is the one thing left out, because it is genuinely not on the render path — and it has a ceiling of its own directly below, so the exclusion buys nobody any headroom."
     },
@@ -61,6 +61,13 @@
       "excludeSuffix": ".map",
       "maxGzipBytes": 8000,
       "why": "Round 19: Offers, Build and Check, rebuilt behind the TRADES_SCREENS switch. `TradesTab` reaches them only through `lazy()` when the switch is on, so with it off (the live site until Alex approves) no page load fetches them. Their stylesheet ships with them so the render-blocking sheet does not grow. Today ~4.9KB (JS and CSS). When the switch is flipped for good, the old Trades screens can go and their bytes come back to the main chunk's headroom."
+    },
+    {
+      "name": "In-season Players tab, fetched only when the switch is on (gzipped)",
+      "match": "assets/players2-*.{js,css}",
+      "excludeSuffix": ".map",
+      "maxGzipBytes": 6000,
+      "why": "Round 24: Players in season (Value sort, Trade targets and Injured filters, the fuller card), behind the PLAYERS_INSEASON switch. `PlayersTab` reaches it only through `lazy()` when the switch is on and the draft is over, so with it off no page load fetches it. Its stylesheet ships with it so the render-blocking sheet does not grow."
     },
     {
       "name": "Trades preview shell, built only for the preview upload (gzipped)",
@@ -113,7 +120,10 @@
     "scripts/lib/chunkOwnership.mjs and tests/chunkOwnership.test.ts."
   ],
   "chunkOwnership": {
-    "watch": ["src/core/", "src/web/demo/"],
+    "watch": [
+      "src/core/",
+      "src/web/demo/"
+    ],
     "renderPath": [
       "src/core/draft/boardGrid.ts",
       "src/core/draft/boardSort.ts",
@@ -138,6 +148,7 @@
       "src/core/identity/normalize.ts",
       "src/core/nfl/teams.ts",
       "src/core/players/headshot.ts",
+      "src/core/players/seasonOrder.ts",
       "src/core/roster/ownership.ts",
       "src/core/search/players.ts",
       "src/core/sleeper/eligibility.ts",
@@ -194,7 +205,7 @@
       "name": "draft board",
       "maxGzipBytes": 7000,
       "maxWaves": 20,
-      "why": "The largest answer this API sends, and the one whose growth nobody was watching. It was 11kB gzipped over 125kB of JSON, mid-draft, on a phone; the two known Draft-side trims have since landed and it is 4.9kB over 32kB \u2014 the ranking rationale is computed on every board, drawn on none, and no longer travels to a client. See core/draft/boardWire.ts. The ceiling came down with the payload: a 14kB ceiling over a 5kB answer would let the whole explanation creep back without failing. 17 waves today."
+      "why": "The largest answer this API sends, and the one whose growth nobody was watching. It was 11kB gzipped over 125kB of JSON, mid-draft, on a phone; the two known Draft-side trims have since landed and it is 4.9kB over 32kB — the ranking rationale is computed on every board, drawn on none, and no longer travels to a client. See core/draft/boardWire.ts. The ceiling came down with the payload: a 14kB ceiling over a 5kB answer would let the whole explanation creep back without failing. 17 waves today."
     },
     {
       "name": "waivers board",
