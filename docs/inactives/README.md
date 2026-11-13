@@ -5,7 +5,9 @@ Teams announce inactives about 90 minutes before kickoff. A player listed
 Questionable on Friday who is ruled inactive Sunday can still look startable
 here until a later download catches it.
 
-Answer: **not built.** Measured on 13 November 2026. All times Eastern.
+Answer: **no new source built.** Measured on 13 November 2026. All times
+Eastern. Alex approved one small change the same day: Sunday's one Sleeper
+download moves from 11:45 AM to 12:15 PM (see the end).
 
 ## Sources
 
@@ -96,15 +98,20 @@ The brief allows a build only if all three hold:
   60 to 70 rows on a Sunday. Cheap, but too late to matter, and the 8 MB file
   is too big to parse inside one free-plan Worker run.
 
-## What it would take
+## What it would take, and what was done
 
-- **Free, inside every rule (recommended):** move Sunday's one Sleeper download
-  from 11:45 AM to 12:15 PM. Still once a day. It gives Sleeper 45 minutes after
-  the 1 PM inactives, still before the 1 PM lock, and costs nothing new. It does
-  not help 4 PM, night or Thursday games. A one-line change in
-  `core/sleeper/playerListClock.ts` plus its test.
-- **Cover every kickoff:** one extra Sleeper download about 60 minutes before
-  each kickoff window (Thursday, Sunday 4 PM, Sunday night, Monday). Three or
-  four more downloads a week. Needs Alex to accept going past Sleeper's
-  once-a-day ask.
+- **Done (Alex approved, 13 November):** Sunday's one Sleeper download moves
+  from 11:45 AM to 12:15 PM, retries at 12:30 and 12:45 PM only if the one
+  before failed. Still one download per Eastern day; every other day is
+  unchanged. It gives Sleeper 45 minutes after the 1 PM inactives and is still
+  before the 1 PM lock. A player Sleeper marks `Out` (including "Coach's
+  Decision") already reaches start/sit as Out through the existing injury
+  data: the newer, worse status beats Friday's Questionable, and the shared
+  `weekAvailability` rule zeroes him. No shared function was edited.
+  Files: `core/sleeper/playerListClock.ts`, the worker comment, and tests
+  `playerListClock.test.ts`, `playerListClock.worker.test.ts`,
+  `inactives.round27.test.ts` (inactive, active, source missing, stale).
+- **Not done, by decision:** later games (Sunday 4 PM, Sunday night, Monday,
+  Thursday). Covering them needs three or four more Sleeper downloads a week,
+  past Sleeper's once-a-day ask.
 - **Paid feed:** ruled out ($0 only).

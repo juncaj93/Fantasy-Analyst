@@ -1,5 +1,6 @@
 /**
- * The Sunday game-time download through the real `scheduled()` (24 October 2026).
+ * The Sunday game-time download through the real `scheduled()` (24 October 2026;
+ * moved to 12:15 PM Eastern in Round 27).
  *
  * The pure clock is in `playerListClock.test.ts`. This drives the worker's own
  * ticks against a stubbed network and counts the requests for `/players/nfl`,
@@ -49,35 +50,38 @@ function tick(iso: string): Promise<void> {
   return worker.scheduled({ cron: TICK, scheduledTime: Date.parse(iso) }, { DB: db } as never);
 }
 
-describe('Sunday, on the five-minute tick', () => {
-  it('downloads at 11:45 AM EDT and not on the retry slots after a success', async () => {
-    await tick('2026-10-25T15:40:00Z'); // 11:40 AM
+describe('Sunday, on the five-minute tick (12:15 PM since Round 27)', () => {
+  it('downloads once at 12:15 PM EST, not at the old 11:45 AM, and not again that day', async () => {
+    await tick('2026-11-15T16:45:00Z'); // 11:45 AM, the old slot
+    await tick('2026-11-15T17:10:00Z'); // 12:10 PM
     expect(downloads).toBe(0);
-    await tick('2026-10-25T15:45:00Z'); // 11:45 AM
+    await tick('2026-11-15T17:15:00Z'); // 12:15 PM
     expect(downloads).toBe(1);
     expect(await new SettingsRepo(db).playersLastSuccessAt()).not.toBeNull();
-    await tick('2026-10-25T16:15:00Z'); // 12:15 PM
-    await tick('2026-10-25T16:30:00Z'); // 12:30 PM
+    await tick('2026-11-15T17:30:00Z'); // 12:30 PM
+    await tick('2026-11-15T17:45:00Z'); // 12:45 PM
+    await tick('2026-11-15T20:15:00Z'); // 3:15 PM, before the 4 PM games: nothing new
+    await tick('2026-11-16T00:15:00Z'); // 7:15 PM, before the night game: nothing new
     expect(downloads).toBe(1);
   });
 
-  it('retries at 12:15 PM after a failed 11:45 AM, and stops once it succeeds', async () => {
+  it('retries at 12:30 PM after a failed 12:15 PM, and stops once it succeeds', async () => {
     failing = true;
-    await tick('2026-10-25T15:45:00Z');
+    await tick('2026-11-15T17:15:00Z');
     expect(downloads).toBeGreaterThanOrEqual(1);
     expect(await new SettingsRepo(db).playersLastSuccessAt()).toBeNull();
     failing = false;
     const afterFailure = downloads;
-    await tick('2026-10-25T16:15:00Z');
+    await tick('2026-11-15T17:30:00Z');
     expect(downloads).toBe(afterFailure + 1);
-    await tick('2026-10-25T16:30:00Z');
+    await tick('2026-11-15T17:45:00Z');
     expect(downloads).toBe(afterFailure + 1);
   });
 
-  it('11:45 AM EST after 1 November is the 16:45 UTC tick', async () => {
-    await tick('2026-11-01T15:45:00Z');
+  it('12:15 PM EDT before November is the 16:15 UTC tick', async () => {
+    await tick('2026-10-25T15:45:00Z');
     expect(downloads).toBe(0);
-    await tick('2026-11-01T16:45:00Z');
+    await tick('2026-10-25T16:15:00Z');
     expect(downloads).toBe(1);
   });
 });
