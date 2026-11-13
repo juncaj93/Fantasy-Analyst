@@ -338,8 +338,8 @@ export default {
       /*
        * Sunday's one player-list download, at game time.
        *
-       * 11:45 AM Eastern, after the 1 PM games' inactives, with retries at
-       * 12:15 PM and 12:30 PM that run only if nothing has succeeded that
+       * 12:15 PM Eastern, after the 1 PM games' inactives, with retries at
+       * 12:30 PM and 12:45 PM that run only if nothing has succeeded that
        * Eastern day. The 09:00 tick skips Sundays so this is the day's only
        * download. See `core/sleeper/playerListClock.ts`.
        *

@@ -9,15 +9,24 @@
  * out then stayed Questionable here until Monday's download.
  *
  * So on Sundays the morning download is skipped and the day's one download
- * runs at 11:45 AM Eastern instead, with two retries (12:15 PM and 12:30 PM)
+ * runs at 12:15 PM Eastern instead, with two retries (12:30 PM and 12:45 PM)
  * that run only if nothing has succeeded that Eastern day. Every other day is
  * unchanged.
  *
- * The Sunday attempts ride the five-minute tick, which fires at both 15:45 and
- * 16:45 UTC every Sunday. Which of those is 11:45 AM is the zone database's
- * answer for that date (`core/time/zoned.ts`), so the change on 1 November
- * needs no special case and no cron line of its own: the account's five cron
- * triggers are spoken for.
+ * Why 12:15 and not 11:45 (Round 27, Alex's decision 13 November 2026):
+ * Sleeper marks an inactive player `Out` (healthy scratches read
+ * "Coach's Decision"), but its news stamps on Thursday 12 November and Sunday
+ * 8 November landed 20 to 35 minutes after the announcement. 11:45 AM is only
+ * 15 minutes after the 1 PM games' inactives, so it could read the list before
+ * Sleeper had caught up. 12:15 PM gives Sleeper 45 minutes and is still before
+ * the 1 PM lock. Still one download per Eastern day; the retries only run when
+ * the one before failed, and the last (12:45 PM) is still before kickoff.
+ *
+ * The Sunday attempts ride the five-minute tick, which fires at both 16:15 and
+ * 17:15 UTC every Sunday. Which of those is 12:15 PM is the zone database's
+ * answer for that date (`core/time/zoned.ts`), so the clock change in
+ * November needs no special case and no cron line of its own: the account's
+ * five cron triggers are spoken for.
  *
  * Known limit, accepted: the 9:30 AM international games and the 4 PM and night
  * games get no download of their own. The injury report, checked every five
@@ -28,8 +37,8 @@ import { zonedDate, zonedParts } from '../time/zoned.ts';
 
 export const PLAYER_LIST_ZONE = 'America/Detroit';
 
-/** Sunday's attempts, in minutes after midnight Eastern: 11:45 AM, 12:15 PM, 12:30 PM. */
-export const SUNDAY_PLAYER_LIST_MINUTES = [11 * 60 + 45, 12 * 60 + 15, 12 * 60 + 30] as const;
+/** Sunday's attempts, in minutes after midnight Eastern: 12:15 PM, then 12:30 PM and 12:45 PM only if it failed. */
+export const SUNDAY_PLAYER_LIST_MINUTES = [12 * 60 + 15, 12 * 60 + 30, 12 * 60 + 45] as const;
 
 /** True when a download already succeeded on the Eastern date of `at`. */
 export function playerListDownloadedToday(at: number, lastSuccessAt: string | null | undefined): boolean {
