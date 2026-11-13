@@ -453,3 +453,40 @@ describe('rounding', () => {
     expect(bal.value).toBe(4.3);
   });
 });
+
+describe("a game stored with one side gets the other side from its books", () => {
+  it('fills the missing team once, so a Packers player gets Team points (Nov 13 check: Jordan Love)', async () => {
+    const { GameBooksRepo } = await import('../src/server/repos/gameBooks.ts');
+    const { VegasEventsRepo } = await import('../src/server/repos/vegasEvents.ts');
+    const db = await createTestDb();
+    const events = new VegasEventsRepo(db);
+    // As production held it: only the team discovery asked about, the spread on the other side.
+    await events.upsertMany([
+      { eventId: 'gb-min', provider: 'sportsgameodds', kickoff: SUNDAY, homeTeam: 'GB', awayTeam: null, total: 42, spread: 3, spreadTeam: 'MIN' },
+    ]);
+    const at = iso(NOW);
+    const repo = new GameBooksRepo(db);
+    await repo.addAndCombine(
+      'gb-min',
+      [
+        { book: 'draftkings', total: 42, spread: 3, spreadTeam: 'MIN', at },
+        { book: 'fanduel', total: 42, spread: -3, spreadTeam: 'GB', at },
+      ],
+      { now: NOW, kickoff: SUNDAY, teams: ['GB', 'MIN'], provider: 'sportsgameodds' },
+    );
+    const row = (await events.forEvents(['gb-min'])).get('gb-min')!;
+    expect([row.homeTeam, row.awayTeam]).toEqual(['GB', 'MIN']);
+    expect(row.total).toBe(42);
+    expect(row.spreadTeam === 'MIN' ? row.spread : -row.spread!).toBe(3);
+
+    // Nothing moved and both sides are on file: the next pass writes nothing.
+    const seen = row.seenAt;
+    await new GameBooksRepo(db).addAndCombine('gb-min', [{ book: 'betmgm', total: 42, spread: 3, spreadTeam: 'MIN', at }], {
+      now: NOW,
+      kickoff: SUNDAY,
+      teams: ['GB', 'MIN'],
+      provider: 'sportsgameodds',
+    });
+    expect((await events.forEvents(['gb-min'])).get('gb-min')!.seenAt).toBe(seen);
+  });
+});

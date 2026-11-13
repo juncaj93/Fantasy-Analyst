@@ -122,18 +122,31 @@ export interface RundownOptions {
   apiKey: string | null | undefined;
   fetch?: FetchLike;
   baseUrl?: string;
+  /** How to pause between requests; tests pass a fake clock. */
+  wait?: (ms: number) => Promise<void>;
 }
+
+/**
+ * TheRundown's free tier allows one request a second (`x-rate-limit: 1`), so
+ * dates are asked a little over a second apart, and a 429 gets one more try
+ * after two seconds. A pass asks for two or three dates, so this adds a few
+ * seconds of waiting, not work.
+ */
+const RUNDOWN_GAP_MS = 1_100;
+const RUNDOWN_RETRY_MS = 2_000;
 
 export class TheRundownSource {
   readonly name = 'therundown';
   private readonly apiKey: string | null;
   private readonly fetchImpl: FetchLike;
   private readonly baseUrl: string;
+  private readonly wait: (ms: number) => Promise<void>;
 
   constructor(opts: RundownOptions) {
     this.apiKey = opts.apiKey?.trim() || null;
     this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
     this.baseUrl = (opts.baseUrl ?? 'https://therundown.io/api/v1').replace(/\/$/, '');
+    this.wait = opts.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   isConfigured(): boolean {
@@ -154,13 +167,20 @@ export class TheRundownSource {
     let remaining: number | null = null;
     for (const { date, offsetMinutes } of dates) {
       const url = `${this.baseUrl}/sports/${RUNDOWN_NFL}/events/${encodeURIComponent(date)}?offset=${offsetMinutes}`;
-      let res: Response;
-      try {
-        res = await this.fetchImpl(url, { headers: { 'X-TheRundown-Key': this.apiKey, accept: 'application/json' } });
-      } catch (err) {
-        throw new SourceError(`network error: ${err instanceof Error ? err.message : String(err)}`, this.name);
-      }
+      if (requests > 0) await this.wait(RUNDOWN_GAP_MS);
+      const ask = async (): Promise<Response> => {
+        try {
+          return await this.fetchImpl(url, { headers: { 'X-TheRundown-Key': this.apiKey!, accept: 'application/json' } });
+        } catch (err) {
+          throw new SourceError(`network error: ${err instanceof Error ? err.message : String(err)}`, this.name);
+        }
+      };
+      let res = await ask();
       requests++;
+      if (res.status === 429) {
+        await this.wait(RUNDOWN_RETRY_MS);
+        res = await ask();
+      }
       if (!res.ok) throw new SourceError(`HTTP ${res.status}`, this.name, res.status);
       const points = num(res.headers.get('x-datapoints') ?? res.headers.get('x-datapoints-used'));
       if (points != null) cost += points;

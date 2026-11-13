@@ -135,6 +135,46 @@ describe('reading TheRundown', () => {
     expect(game.books[0]!.spreadTeam).toBe('LV');
   });
 
+  it('keeps to one request a second, and tries once more after a 429', async () => {
+    // TheRundown's free tier allows one request a second (x-rate-limit: 1). On
+    // Nov 13 a pass asking for Sunday and Monday back to back got HTTP 429.
+    let clock = 0;
+    let last = -Infinity;
+    const waited: number[] = [];
+    const calls: string[] = [];
+    let refuseNext = false;
+    const fetchFn = async (url: string) => {
+      calls.push(url);
+      const tooSoon = clock - last < 1000;
+      last = clock;
+      if (tooSoon || refuseNext) {
+        refuseNext = false;
+        return new Response('slow down', { status: 429 });
+      }
+      return new Response(JSON.stringify({ events: [RUNDOWN_EVENT] }), { status: 200, headers: { 'x-datapoints': '11' } });
+    };
+    const source = new TheRundownSource({
+      apiKey: 'k',
+      fetch: fetchFn,
+      wait: async (ms: number) => {
+        waited.push(ms);
+        clock += ms;
+      },
+    });
+    const answer = await source.gameLines([
+      { date: '2026-11-15', offsetMinutes: 300 },
+      { date: '2026-11-16', offsetMinutes: 300 },
+    ]);
+    expect(answer.value).toHaveLength(2);
+    expect(answer.requests).toBe(2);
+
+    // A 429 anyway (the limit is shared with nothing else, but be safe): one retry.
+    refuseNext = true;
+    const again = await source.gameLines([{ date: '2026-11-15', offsetMinutes: 300 }]);
+    expect(again.value).toHaveLength(1);
+    expect(waited.some((ms) => ms >= 2000)).toBe(true);
+  });
+
   it('sends the key in a header, one request per date', async () => {
     const { fn, calls } = fakeFetch(() => ({ events: [RUNDOWN_EVENT] }));
     let header: string | null = null;
