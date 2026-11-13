@@ -111,6 +111,7 @@ export async function readWaiverRound2(
     drafted: moves ? opts.mine.playerIds.filter((id) => heldSince[id] == null) : [],
     injuryNotes: notes.injury,
     depthOrder: notes.depth,
+    moved: notes.moved,
     reserveAllows: opts.reserveAllows,
     draftRounds,
   };

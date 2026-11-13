@@ -42,6 +42,7 @@ import type { RosterShape } from '../sleeper/rosterShape.ts';
 import type { StashVerdict } from './stash.ts';
 import { eliteBacks } from './dropScore.ts';
 import { smartBid } from '../faab/smartBid.ts';
+import type { OpportunityLead } from './opportunity.ts';
 
 export const STASH_UPSIDE = {
   /** The most a stash bids: a stash is a cheap bet, never a fight. */
@@ -105,11 +106,19 @@ export interface UpsideStashRequest {
   /** What a bid may spend now: FAAB left less the playoff reserve. Null: unknown. */
   spendable: number | null;
   usesFaab: boolean;
+  /**
+   * Round 26 (`WAIVERS_LOOKAHEAD`): free agents who inherit a starter's role
+   * (`opportunity.ts`), by player id. Such a player is judged on his role's
+   * estimate and comes first. He is still a stash: the Round 20 stash bid,
+   * $0 or $1, inside the playoff reserve. Absent: the two paths above only.
+   */
+  opportunities?: ReadonlyMap<string, OpportunityLead>;
 }
 
 export type StashPath =
   | { kind: 'returning'; week: number | null; label: string }
-  | { kind: 'next_man_up'; starterId: string; starterName: string; starterRate: number };
+  | { kind: 'next_man_up'; starterId: string; starterName: string; starterRate: number }
+  | { kind: 'opportunity'; starterId: string; starterName: string; cause: OpportunityLead['vacancy']['cause']; estimate: number; basis: OpportunityLead['basis'] };
 
 export interface UpsideStashLine {
   playerId: string;
@@ -138,31 +147,49 @@ export function upsideStash(request: UpsideStashRequest): UpsideStashLine | null
 
   const found: { c: StashCandidate; path: StashPath; value: number }[] = [];
   for (const c of request.candidates) {
-    if (c.helpsNow || c.planExcluded || request.taken.has(c.playerId) || request.excludedPositions.has(c.position)) continue;
+    if (c.planExcluded || request.taken.has(c.playerId) || request.excludedPositions.has(c.position)) continue;
+    /* Round 26: a role he inherits. Judged on the role, so helping this week does not hand him to the tiers. */
+    const lead = request.opportunities?.get(c.playerId);
+    if (lead) {
+      if (startsForYou(c.playerId, c.position, lead.estimate)) {
+        found.push({
+          c,
+          path: {
+            kind: 'opportunity',
+            starterId: lead.vacancy.playerId,
+            starterName: lead.vacancy.name,
+            cause: lead.vacancy.cause,
+            estimate: lead.estimate,
+            basis: lead.basis,
+          },
+          value: lead.estimate,
+        });
+      }
+      continue;
+    }
+    if (c.helpsNow) continue;
     const path = stashPath(c, request);
     if (!path) continue;
-    const value = path.kind === 'returning' ? (c.seasonRate ?? 0) : path.starterRate;
+    const value = path.kind === 'returning' ? (c.seasonRate ?? 0) : path.kind === 'next_man_up' ? path.starterRate : path.estimate;
     if (!(value > 0) || !startsForYou(c.playerId, c.position, value)) continue;
     found.push({ c, path, value });
   }
-  /* Back for the playoffs first (the surer path), then the most valuable role. */
-  found.sort(
-    (a, b) =>
-      Number(b.path.kind === 'returning') - Number(a.path.kind === 'returning') ||
-      b.value - a.value ||
-      a.c.name.localeCompare(b.c.name),
-  );
+  /* A role opening now first (Round 26), then back for the playoffs (the surer path), then the most valuable role. */
+  const rank = (p: StashPath) => (p.kind === 'opportunity' ? 2 : p.kind === 'returning' ? 1 : 0);
+  found.sort((a, b) => rank(b.path) - rank(a.path) || b.value - a.value || a.c.name.localeCompare(b.c.name));
   for (const { c, path, value } of found) {
     const room = roomFor(c, path, request);
     if (!room || !bid) continue;
+    const lead = path.kind === 'opportunity' ? request.opportunities?.get(c.playerId) : undefined;
     return {
       playerId: c.playerId,
       name: c.name,
       position: c.position,
       team: c.team,
       path,
-      reason: path.kind === 'returning' ? path.label : `next up behind ${path.starterName}, hurt`,
+      reason: lead ? lead.reason : path.kind === 'returning' ? path.label : `next up behind ${path.starterName}, hurt`,
       value: round2(value),
+      /* Every stash, an inherited role included, bids the Round 20 stash rule: $0 or $1. */
       bid: c.free ? { kind: 'free' } : bid,
       room,
     };

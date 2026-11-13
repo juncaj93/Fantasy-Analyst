@@ -15,6 +15,7 @@ import type { TierRow } from '../core/waivers/tierPlan.ts';
 import type { WaiverBoardRow } from '../core/waivers/board.ts';
 import type { BlockLine } from '../core/waivers/block.ts';
 import type { UpsideStashLine } from '../core/waivers/upsideStash.ts';
+import type { CoverLine } from '../core/waivers/lookAhead.ts';
 
 /** The fixed set of chips a card may carry, two at most. */
 export interface CardChip {
@@ -417,10 +418,17 @@ export function boardSheet(row: WaiverBoardRow): WaiverSheetModel {
  * The stash and block lines (round 8), in the words Alex chose:
  * `Block: Name (opponent needs a WR), bid $1 to $3`. One short reason, then
  * the bid; the room it uses is the faint second line ({@link roomLine}).
+ * Round 26 adds the cover line: `Add: Name (covers your Week 12 bye at TE), bid $2`.
  */
-export function extraLine(kind: 'stash' | 'block', line: Pick<UpsideStashLine, 'name' | 'reason' | 'bid'>): string {
+export function extraLine(kind: 'stash' | 'block' | 'cover', line: Pick<UpsideStashLine, 'name' | 'reason' | 'bid'>): string {
   const bid = extraBid(line.bid);
-  return `${kind === 'stash' ? 'Stash' : 'Block'}: ${line.name} (${line.reason})${bid ? `, ${bid}` : ''}`;
+  const word = kind === 'stash' ? 'Stash' : kind === 'cover' ? 'Add' : 'Block';
+  return `${word}: ${line.name} (${line.reason})${bid ? `, ${bid}` : ''}`;
+}
+
+/** The section's title: `Stash and block`, or `Cover, stash and block` when a cover line is there (Round 26). */
+export function extraTitle(kinds: readonly ('stash' | 'block' | 'cover')[]): string {
+  return kinds.includes('cover') ? 'Cover, stash and block' : 'Stash and block';
 }
 
 /** `bid $1 to $3`, `bid $0 to $1`, `free agent, no bid`; nothing in a league that does not bid. */
@@ -431,7 +439,7 @@ function extraBid(bid: UpsideStashLine['bid']): string | null {
 }
 
 /** Where he goes: `Drop Antonio Williams (drop-ready)`, `Open bench spot`, `Open IR slot`. */
-export function roomLine(room: UpsideStashLine['room'] | BlockLine['room']): string {
+export function roomLine(room: UpsideStashLine['room'] | BlockLine['room'] | CoverLine['room']): string {
   if (room.kind === 'reserve') return 'Open IR slot';
   if (room.kind === 'open') return 'Open bench spot';
   return `Drop ${room.name} (drop-ready)`;

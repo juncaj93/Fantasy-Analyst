@@ -179,5 +179,14 @@ export function previewLeague(week: PreviewWeek = 'normal'): PreviewLeague {
   };
 }
 
+/**
+ * The free agents, as rows: id, name, position, club, points a game. Read by
+ * the Waivers preview (Round 26), which needs them as players, not only as
+ * the replacement level.
+ */
+export function previewFreeAgents(): { id: string; name: string; position: string; team: string; rate: number }[] {
+  return FREE.map(([id, name, position, team, rate]) => ({ id, name, position, team, rate }));
+}
+
 /** Every made-up name the preview uses, for a test that holds the set fixed. */
 export const PREVIEW_NAMES: readonly string[] = [...YOU, ...DERMOT, ...KIM, ...SAM, ...FREE].map((r) => r[1]);

@@ -45,7 +45,7 @@ on:
         type: string
         default: 'claude/new-session-54mfpx'
       mode:
-        description: 'Leave empty for the whole app on the real league. "trades": the rebuilt Trades screens only, on the made-up preview league, behind a PIN (Round 19). "players": the in-season Players tab only, the same way (Round 24).'
+        description: 'Leave empty for the whole app on the real league. "trades": the rebuilt Trades screens only, on the made-up preview league, behind a PIN (Round 19). "players": the in-season Players tab only, the same way (Round 24). "waivers": the Waivers look-ahead lines, the same way (Round 26).'
         required: false
         type: string
         default: ''
@@ -218,6 +218,25 @@ jobs:
           "
           grep -E '^(TRADES_SCREENS|PLAYERS_INSEASON|PREVIEW|TRIM_OLD_ROWS|VEGAS_PROVIDER) =' wrangler.toml
 
+      # Round 26: the Waivers preview. The look-ahead is switched on
+      # (WAIVERS_LOOKAHEAD = "on", the same switch the live site will flip), and
+      # PREVIEW = "waivers" marks the upload. Every other var stays exactly as
+      # wrangler.toml has it, so every switch that is on for the live site is on
+      # here too.
+      - name: Set the Waivers preview mode
+        if: ${{ inputs.mode == 'waivers' }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            let text = fs.readFileSync(file, 'utf8');
+            if (!/^WAIVERS_LOOKAHEAD = \"[^\"]*\"$/m.test(text)) { console.error('::error::wrangler.toml has no WAIVERS_LOOKAHEAD line.'); process.exit(1); }
+            text = text.replace(/^WAIVERS_LOOKAHEAD = \"[^\"]*\"$/m, 'WAIVERS_LOOKAHEAD = \"on\"\nPREVIEW = \"waivers\"');
+            fs.writeFileSync(file, text);
+          "
+          grep -E '^(TRADES_SCREENS|PLAYERS_INSEASON|WAIVERS_LOOKAHEAD|PREVIEW|TRIM_OLD_ROWS|VEGAS_PROVIDER) =' wrangler.toml
+
       - name: Build the site
         env:
           VITE_PREVIEW: ${{ inputs.mode }}
@@ -269,6 +288,10 @@ jobs:
             if [ "${{ inputs.mode }}" = "players" ]; then
               echo
               echo "**Mode:** Players preview: the in-season Players tab only, on a made-up league, behind a PIN. Nothing here reads the real league."
+            fi
+            if [ "${{ inputs.mode }}" = "waivers" ]; then
+              echo
+              echo "**Mode:** Waivers preview: the look-ahead lines only, on a made-up league, behind a PIN. Nothing here reads the real league."
             fi
             echo
             echo "Production is untouched and is still serving whatever \`deploy.yml\` last released."

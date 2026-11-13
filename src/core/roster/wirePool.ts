@@ -20,7 +20,9 @@
  *  3. the best 4 per position by this week's published number;
  *  4. Sleeper's 10 most-added;
  *  5. last week's top 3 scorers per position;
- *  6. the back behind every hurt top back.
+ *  6. the back behind every hurt top back;
+ *  7. with `WAIVERS_LOOKAHEAD` on (Round 26), the free agent who inherits a
+ *     starter's role: out for the season, on IR, traded or benched.
  *
  * Pure: every input is something the caller has already read.
  */
@@ -33,6 +35,8 @@ import {
   trendingFreeAgentIds,
 } from './freeAgents.ts';
 import { eliteBackRates, stashScanIds } from '../waivers/upsideStash.ts';
+import { opportunityScanIds } from '../waivers/opportunity.ts';
+import type { InjuryNote } from '../waivers/stash.ts';
 
 export interface WirePoolInputs {
   players: CanonicalPlayer[];
@@ -53,6 +57,15 @@ export interface WirePoolInputs {
     through: number;
     depthOrder: Readonly<Record<string, number>>;
     injuryStatus: Readonly<Record<string, string | null>>;
+  } | null;
+  /**
+   * Round 26 (`WAIVERS_LOOKAHEAD`): also scan the free agents who inherit a
+   * starter's role (`waivers/opportunity.ts`), slice 7. Absent: six slices, as before.
+   */
+  opportunity?: {
+    week: number;
+    injuryNotes: Readonly<Record<string, InjuryNote>>;
+    moved?: Readonly<Record<string, { from: string; to: string; week?: number }>>;
   } | null;
 }
 
@@ -129,12 +142,29 @@ export function wirePool(input: WirePoolInputs): {
           elite: eliteBackRates(new Map(Object.entries(season.points)), (id) => positionOf.get(id) === 'RB'),
         })
       : [];
-    return { trendingIds, lastWeekIds, stashIds };
+    const opportunityIds =
+      season && input.opportunity
+        ? opportunityScanIds(
+            {
+              week: input.opportunity.week,
+              players,
+              rosteredIds,
+              depthOrder: new Map(Object.entries(season.depthOrder)),
+              injuryNotes: new Map(Object.entries(input.opportunity.injuryNotes)),
+              seasonPoints: new Map(Object.entries(season.points)),
+              through: season.through,
+              moved: new Map(Object.entries(input.opportunity.moved ?? {})),
+            },
+            new Set([...taken, ...trendingIds, ...lastWeekIds, ...stashIds]),
+          )
+        : [];
+    return { trendingIds, lastWeekIds, stashIds, opportunityIds };
   };
   const scan = later([...scanned, ...inWindow, ...byWeek]);
   const pool = byWeek.length === 0 ? scan : later([...scanned, ...inWindow]);
   return {
-    ids: [...scanned, ...inWindow, ...byWeek, ...scan.trendingIds, ...scan.lastWeekIds, ...scan.stashIds],
+    ids: [...scanned, ...inWindow, ...byWeek, ...scan.trendingIds, ...scan.lastWeekIds, ...scan.stashIds, ...scan.opportunityIds],
+    /* Slice 7 stays out of the season pool: an inherited role is not what a free agent is worth, so replacement levels do not move. */
     seasonPool: [...scanned, ...inWindow, ...pool.trendingIds, ...pool.lastWeekIds, ...pool.stashIds],
     lastWeekIds: scan.lastWeekIds,
     stashIds: scan.stashIds,

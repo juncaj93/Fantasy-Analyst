@@ -484,6 +484,8 @@ export async function gatherWaiverInputs(
   db: Database,
   sleeper: SleeperClient,
   leagueId: string,
+  /** Round 26: `lookahead` is the `WAIVERS_LOOKAHEAD` switch. Absent: off. */
+  opts: { lookahead?: boolean } = {},
 ): Promise<WaiverDecisionInputs> {
   const base = await leagueBase(db, leagueId);
   const { league, rosters, mine, shape, profile } = base;
@@ -597,6 +599,8 @@ export async function gatherWaiverInputs(
           injuryStatus: Object.fromEntries(Object.entries(round2.injuryNotes).map(([id, n]) => [id, n.status] as const)),
         }
       : null,
+    /* Round 26: the free agents who inherit a starter's role, only with the switch on. */
+    opportunity: opts.lookahead && round2 ? { week, injuryNotes: round2.injuryNotes, moved: round2.moved ?? {} } : null,
   });
 
   /*
@@ -835,6 +839,7 @@ export async function gatherWaiverInputs(
       history,
       round2,
       opponent,
+      ...(opts.lookahead ? { lookahead: true } : {}),
       /*
        * A league that starts no defence does not have its schedule read to be
        * told so — see `WaiverAssemblyRequest.dstSources`.

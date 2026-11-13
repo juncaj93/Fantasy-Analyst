@@ -29,11 +29,11 @@ const render = () =>
  */
 /*
  * The previews are a separate build: the preview workflow sets VITE_PREVIEW to
- * `trades` (Round 19) or `players` (Round 24), and only then is the PIN-gated
+ * `trades` (Round 19), `players` (Round 24) or `waivers` (Round 26), and only then is the PIN-gated
  * shell for that one tab drawn. On the live build this branch is removed at
  * build time, chunk and all.
  */
-if (import.meta.env.VITE_PREVIEW === 'trades' || import.meta.env.VITE_PREVIEW === 'players') {
+if (import.meta.env.VITE_PREVIEW === 'trades' || import.meta.env.VITE_PREVIEW === 'players' || import.meta.env.VITE_PREVIEW === 'waivers') {
   const mode = import.meta.env.VITE_PREVIEW;
   void import('./preview/PreviewApp.tsx').then(({ PreviewApp }) =>
     createRoot(container).render(

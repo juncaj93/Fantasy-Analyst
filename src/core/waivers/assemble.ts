@@ -77,6 +77,8 @@ import { blendRivalTendency, seedTendency, type RivalSeasonAggregate } from './r
 import { positionNeed } from './rivalNeed.ts';
 import { blockPickup, type BlockCandidate, type BlockPlayer, type BlockRoom } from './block.ts';
 import { eliteBackRates, upsideStash } from './upsideStash.ts';
+import { findOpportunities } from './opportunity.ts';
+import { coverPickups, LOOK_AHEAD, type CoverLine } from './lookAhead.ts';
 import { addableBefore, reserveTakes, type TierInputs } from './tierInputs.ts';
 import { myBudget, playoffReserve } from '../faab/budget.ts';
 import { DESIGNATION_SEVERITY, normalizeDesignation, type Designation } from '../injury/model.ts';
@@ -124,6 +126,8 @@ export interface WaiverRound2Inputs {
   draftRounds?: Record<string, number>;
   /** Which statuses this league's IR slots take beyond IR itself (`reserve_allow_*`). Absent on older files. */
   reserveAllows?: { out: boolean; doubtful: boolean; sus: boolean };
+  /** Round 26: players who changed NFL clubs, from the daily player sync (`playerNotes.ts`). Absent on older files. */
+  moved?: Record<string, { from: string; to: string; week?: number }>;
 }
 
 export interface WaiverAssemblyRequest {
@@ -272,6 +276,12 @@ export interface WaiverAssemblyRequest {
    * or null: no block line, and the rival reads use Sleeper's status alone.
    */
   opponent?: { rosterId: number; designations: Record<string, Designation> } | null | undefined;
+  /**
+   * Round 26, the `WAIVERS_LOOKAHEAD` switch: the Opportunity finder on the
+   * stash line, cover pickups for Alex's next three weeks, and the block in
+   * the opponent's own terms. Absent or false: every line exactly as before.
+   */
+  lookahead?: boolean | undefined;
   budgets: LeagueBudgetState | null;
   prices: PriceSummary | null;
   observations: BidObservation[];
@@ -920,7 +930,9 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
           return { upsideStash: null, block: null };
         }
       })();
-      const listed = new Set([lines.upsideStash?.playerId, lines.block?.playerId].filter((x): x is string => x != null));
+      const listed = new Set(
+        [lines.upsideStash?.playerId, lines.block?.playerId, ...(lines.cover ?? []).map((c) => c.playerId)].filter((x): x is string => x != null),
+      );
       return {
         ...view,
         /* One player, one line: a stash or a block is not also on the Watch list. */
@@ -929,6 +941,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
         /* Only when there is one: an empty line costs every response bytes for nothing. */
         ...(lines.upsideStash ? { upsideStash: lines.upsideStash } : {}),
         ...(lines.block ? { block: lines.block } : {}),
+        ...(lines.cover && lines.cover.length > 0 ? { cover: lines.cover } : {}),
       };
     } catch {
       return null;
@@ -1081,8 +1094,9 @@ function stashAndBlock(
   view: WaiverTiersView,
   fixtures: readonly ScheduleTeamWeek[],
   pickup: Readonly<Record<string, PickupState>>,
-): Pick<NonNullable<WaiverAssembly['tiers']>, 'upsideStash' | 'block'> {
+): Pick<NonNullable<WaiverAssembly['tiers']>, 'upsideStash' | 'block' | 'cover'> {
   const round2 = request.round2 ?? null;
+  const lookahead = request.lookahead === true;
   const shown = [...(view.doThese ?? []), ...view.consider];
   const taken = new Set(shown.map((m) => m.playerId));
   const excluded = new Set([DEFENCE_POSITION]);
@@ -1100,6 +1114,26 @@ function stashAndBlock(
   const firstMoves = new Map(plan.all.map((m) => [m.playerId, m] as const));
 
   const positionOf = new Map(request.players.map((p) => [p.id, (p.position ?? '').toUpperCase()] as const));
+  /* Round 26 (A): roles a free agent inherits, from rows already held. */
+  const opportunities =
+    lookahead && round2
+      ? new Map(
+          findOpportunities({
+            week: request.week,
+            players: request.players,
+            rosteredIds: request.rosteredIds,
+            depthOrder: new Map(Object.entries(round2.depthOrder)),
+            injuryNotes: new Map(Object.entries(round2.injuryNotes)),
+            seasonPoints: new Map(Object.entries(round2.seasonPoints)),
+            through: round2.seasonPointsThrough,
+            moved: new Map(Object.entries(round2.moved ?? {})),
+            onBye: (() => {
+              const byeOf = byeReader(fixtures);
+              return (team: string, week: number) => byeOf(team, week) === true;
+            })(),
+          }).map((l) => [l.playerId, l] as const),
+        )
+      : undefined;
   const stash = round2
     ? upsideStash({
         shape: request.shape,
@@ -1122,6 +1156,7 @@ function stashAndBlock(
         elite: eliteBackRates(new Map(Object.entries(round2.seasonPoints)), (id) => positionOf.get(id) === 'RB'),
         spendable,
         usesFaab,
+        ...(opportunities ? { opportunities } : {}),
       })
     : null;
   if (stash) {
@@ -1130,6 +1165,52 @@ function stashAndBlock(
     else if (stash.room.kind === 'open') open -= 1;
   }
   const stashDrop = stash?.room.kind === 'drop' ? stash.room.playerId : null;
+
+  /*
+   * Round 26 (B): cover pickups for Alex's next three weeks, on the room and
+   * money the lines above leave. The Do this claims and the stash are paid
+   * first, so a cover never spends what they need or the playoff reserve.
+   */
+  const claimOf = (bid: { kind: string; high?: number | null; recommended?: number | null }): number =>
+    bid.kind === 'claim' ? Number(bid.recommended ?? bid.high ?? 0) : 0;
+  let left = spendable;
+  if (left != null) {
+    for (const m of view.doThese ?? []) left -= claimOf(m.bid);
+    if (stash) left -= claimOf(stash.bid);
+    left = Math.max(0, left);
+  }
+  let roomLeft: BlockRoom[] = [
+    ...Array.from({ length: Math.max(0, open) }, () => ({ kind: 'open' as const })),
+    ...dropReady.filter((d) => d.playerId !== stashDrop).map((d) => ({ kind: 'drop' as const, playerId: d.playerId, name: d.name })),
+  ];
+  let cover: CoverLine[] = [];
+  if (lookahead) {
+    const weeks = inputs.request.weeks.slice(0, LOOK_AHEAD.weeks);
+    const covered = new Set<string>();
+    for (const m of shown) {
+      for (const w of m.byWeek ?? []) if (weeks.includes(w.week) && w.change >= LOOK_AHEAD.margin) covered.add(`${w.week}:${m.position}`);
+    }
+    cover = coverPickups({
+      shape: request.shape,
+      roster: inputs.request.roster,
+      candidates: inputs.request.candidates.map((c) => ({ ...c, free: pickup[c.playerId]?.state === 'free' })),
+      weeks,
+      leadWeeks: inputs.request.leadWeeks ?? 1,
+      excludedPositions: excluded,
+      taken,
+      covered,
+      room: roomLeft,
+      spendable: left,
+      usesFaab,
+    });
+    for (const c of cover) {
+      taken.add(c.playerId);
+      if (left != null) left = Math.max(0, left - claimOf(c.bid));
+      const used = c.room;
+      const at = roomLeft.findIndex((r) => r.kind === used.kind && (r.kind === 'open' || (used.kind === 'drop' && r.kind === 'drop' && r.playerId === used.playerId)));
+      if (at >= 0) roomLeft = [...roomLeft.slice(0, at), ...roomLeft.slice(at + 1)];
+    }
+  }
 
   /* The block is about this week's game: only while it is still ahead. */
   const opponent = request.opponent ? (request.rosters.find((r) => r.rosterId === request.opponent!.rosterId && !r.isMine) ?? null) : null;
@@ -1165,10 +1246,12 @@ function stashAndBlock(
       addable: c.planExcluded == null && addableBefore(inputOf.get(c.playerId) ?? {}, pickup[c.playerId], request.now),
       free: pickup[c.playerId]?.state === 'free',
     }));
-    const room: BlockRoom[] = [
-      ...(open > 0 ? [{ kind: 'open' as const }] : []),
-      ...dropReady.filter((d) => d.playerId !== stashDrop).map((d) => ({ kind: 'drop' as const, playerId: d.playerId, name: d.name })),
-    ];
+    const room: BlockRoom[] = lookahead
+      ? roomLeft
+      : [
+          ...(open > 0 ? [{ kind: 'open' as const }] : []),
+          ...dropReady.filter((d) => d.playerId !== stashDrop).map((d) => ({ kind: 'drop' as const, playerId: d.playerId, name: d.name })),
+        ];
     block = blockPickup({
       shape: request.shape,
       opponent: { rosterId: opponent.rosterId, roster: theirs },
@@ -1176,12 +1259,22 @@ function stashAndBlock(
       taken,
       excludedPositions: excluded,
       room,
-      spendable,
+      /* Round 26 (C): only what the lines above leave, so a block never costs Alex what he needs more. */
+      spendable: lookahead ? left : spendable,
       usesFaab,
+      ...(lookahead ? { named: { opponentName: opponent.ownerName ?? null } } : {}),
     });
   }
-  return { upsideStash: stash, block };
+  if (!lookahead) return { upsideStash: stash, block };
+  /* At most three lines: the stash, then the covers, then the block. */
+  const room3 = LOOK_AHEAD_LINES - (stash ? 1 : 0);
+  cover = cover.slice(0, Math.max(0, room3));
+  if (block && (stash ? 1 : 0) + cover.length >= LOOK_AHEAD_LINES) block = null;
+  return { upsideStash: stash, block, cover };
 }
+
+/** Round 26: the stash, cover and block lines together, at most this many. */
+export const LOOK_AHEAD_LINES = 3;
 
 /** The app's designation word as the shared type; anything else is unknown. */
 function asDesignation(d: string): Designation {

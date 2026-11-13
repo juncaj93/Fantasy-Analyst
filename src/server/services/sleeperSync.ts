@@ -21,7 +21,7 @@ import { nowIso, type Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { PlayerRepo } from '../repos/players.ts';
 import { SETTING_KEYS, SettingsRepo } from '../repos/settings.ts';
-import { PLAYER_NOTES_KEY, playerNotesOf } from '../../core/sleeper/playerNotes.ts';
+import { PLAYER_NOTES_KEY, playerNotesOf, type StoredPlayerNotes } from '../../core/sleeper/playerNotes.ts';
 
 export interface SleeperUserSetting {
   userId: string;
@@ -51,7 +51,9 @@ export class SleeperSyncService {
       const canonical = toCanonicalPlayers(raw);
       const { written, changed } = await this.players.upsertMany(canonical);
       /* Depth order and injury notes for Waivers, from the same answer: one settings row, no request. */
-      await this.settings.set(PLAYER_NOTES_KEY, playerNotesOf(raw, new Date())).catch(() => undefined);
+      /* Round 26: the last row first (one read a day), so a club change is seen. */
+      const previous = await this.settings.get<StoredPlayerNotes | null>(PLAYER_NOTES_KEY, null).catch(() => null);
+      await this.settings.set(PLAYER_NOTES_KEY, playerNotesOf(raw, new Date(), previous)).catch(() => undefined);
       const total = await this.players.count();
       await this.settings.markPlayersSynced(nowIso());
       console.log(`player list: ${written} sent, ${changed} changed`);

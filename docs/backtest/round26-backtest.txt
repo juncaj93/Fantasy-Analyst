@@ -1,0 +1,75 @@
+A. OPPORTUNITY
+  cases tried: 37 (32 long absences, 5 trades)
+  wk 3 Carson Wentz (QB, out for good, week 3): Max Brosmer est 8.66 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 3 Carson Wentz (QB, out for good, week 3): Kyler Murray est 3.54 (own -0.4, inferred), scored 12.4 / 11.5, rank 27 / 27 -> miss
+  wk 3 Drew Lock (QB, out for good, week 3): Sam Darnold est 12.11 (own 0.5, inferred), scored 35.7 / 17.3, rank 2 / 17 -> GOOD
+  wk 3 Caleb Williams (QB, out for good, week 3): Tyson Bagent est 15.68 (own 2.2, inferred), scored 0 / 8.8, rank - / 30 -> miss
+  wk 3 Caleb Williams (QB, out for good, week 3): Case Keenum est 6.13 (own 0, inferred), scored 28.5 / 0, rank 8 / - -> GOOD
+  wk 3 Jaxson Dart (QB, out for good, week 3): Jameis Winston est 11.69 (own 2.5, inferred), scored 6.1 / 24, rank 31 / 7 -> GOOD
+  wk 3 Jaxson Dart (QB, out for good, week 3): J.J. McCarthy est 4.18 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 4 Breece Hall (RB, out for good, week 4): no free-agent lead
+  wk 4 Rashee Rice (WR, out for good, week 4): Tyquan Thornton est 12.68 (own 6.9, inferred), scored 25.6 / 0, rank 4 / - -> GOOD
+  wk 4 Nate Adkins (TE, out for good, week 4): Evan Engram est 12.37 (own 7.25, inferred), scored 1.1 / 7.5, rank 53 / 17 -> GOOD
+  wk 4 Nate Adkins (TE, out for good, week 4): Dallen Bentley est 2.33 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 4 Terrance Ferguson (TE, out for good, week 4): Tyler Higbee est 12.55 (own 8.2, inferred), scored 9.2 / 10.8, rank 14 / 10 -> GOOD
+  wk 5 Marcus Mariota (QB, out for good, week 5): Athan Kaliakmanis est 20.77 (own 13, inferred), scored 0 / 0, rank - / - -> miss
+  wk 5 Lamar Jackson (QB, out for good, week 5): Tyler Huntley est 16.63 (own 4.1, inferred), scored 28 / 15.4, rank 10 / 17 -> GOOD
+  wk 5 Lamar Jackson (QB, out for good, week 5): Joe Fagnano est 5.7 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 5 Roman Wilson (WR, out for good, week 5): no free-agent lead
+  wk 5 Kyle Monangai (RB, out for good, week 5): no free-agent lead
+  wk 6 Case Keenum (QB, out for good, week 6): no free-agent lead
+  wk 6 Deebo Samuel Sr. (WR, out for good, week 6): Brandin Cooks est 9.54 (own 7.2, inferred), scored 1.8 / 1.8, rank 87 / 76 -> miss
+  wk 6 Jalen Hurts (QB, out for good, week 6): Joe Milton est 8.98 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 6 Jalen Hurts (QB, out for good, week 6): Tanner McKee est 4.08 (own 0, inferred), scored 14.6 / 12.5, rank 18 / 22 -> GOOD
+  wk 6 Tyquan Thornton (WR, out for good, week 6): Jalen Royals est 7.88 (own 4.6, inferred), scored 3.4 / 0, rank 66 / - -> miss
+  wk 6 Marvin Harrison Jr. (WR, traded from ARI, week 6): no free-agent lead
+  wk 7 Davante Adams (WR, out for good, week 7): no free-agent lead
+  wk 7 DeVonta Smith (WR, out for good, week 7): no free-agent lead
+  wk 7 Romeo Doubs (WR, out for good, week 7): Kyle Williams est 8.43 (own 5.93, inferred), scored 0 / 10.8, rank - / 24 -> miss
+  wk 7 Brian Robinson Jr. (RB, out for good, week 7): Jam Miller est 2.49 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 8 Terry McLaurin (WR, out for good, week 8): Treylon Burks est 10.18 (own 7.93, inferred), scored 9.6 / 0, rank 31 / - -> miss
+  wk 8 Emanuel Wilson (RB, out for good, week 8): George Holani est 12.48 (own 4.1, inferred), scored 0.9 / 0, rank 62 / - -> miss
+  wk 8 Emanuel Wilson (RB, out for good, week 8): Jacardia Wright est 3.81 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 8 RJ Harvey (RB, out for good, week 8): no free-agent lead
+  wk 8 Kaytron Allen (RB, traded from WAS, week 8): no free-agent lead
+  wk 9 Jacoby Brissett (QB, out for good, week 9): Carson Beck est 3.73 (own 0, inferred), scored 0 / 0, rank - / - -> miss
+  wk 9 Sam Darnold (QB, out for good, week 9): no free-agent lead
+  wk 9 Kyler Murray (QB, out for good, week 9): Max Brosmer est 9.85 (own 0, inferred), scored 2.3 / 0, rank 31 / - -> miss
+  wk 9 Tyler Huntley (QB, out for good, week 9): Joe Fagnano est 7.95 (own -0.1, inferred), scored -0.3 / 0, rank 35 / - -> miss
+  wk 9 George Pickens (WR, out for good, week 9): no free-agent lead
+  wk 9 Garrett Wilson (WR, out for good, week 9): Isaiah Williams est 8.93 (own 6.35, inferred), scored 0.4 / 0, rank 105 / - -> miss
+  wk 9 Jared Wayne (WR, traded from HOU, week 9): no free-agent lead
+  wk 9 Emari Demercado (RB, traded from DAL, week 9): no free-agent lead
+  wk 9 Audric Estime (RB, traded from CLE, week 9): no free-agent lead
+  wk 9 Adonai Mitchell (WR, out for good, week 9): no free-agent lead
+  wk 9 Cam Skattebo (RB, out for good, week 9): no free-agent lead
+  wk 9 Jaylin Noel (WR, out for good, week 9): Xavier Hutchinson est 9.4 (own 6.75, inferred), scored 10.4 / 0, rank 28 / - -> miss
+  leads: 28, good (top 20 at the position in that week or the next): 8
+  top pick each week: wk 3 Tyson Bagent for Caleb Williams miss; wk 4 Tyquan Thornton for Rashee Rice GOOD; wk 5 Athan Kaliakmanis for Marcus Mariota miss; wk 6 Brandin Cooks for Deebo Samuel Sr. miss; wk 7 Kyle Williams for Romeo Doubs miss; wk 8 George Holani for Emanuel Wilson miss; wk 9 Max Brosmer for Kyler Murray miss
+  top picks good: 1 of 7
+  shown to Alex (would start in his best lineup, the stash bar):
+  wk 4: Tyquan Thornton (Rice on IR, gets his targets) est 12.68, rank 4 / - -> GOOD
+  wk 4: Evan Engram (Adkins on IR, gets his targets) est 12.37, rank 53 / 17 -> GOOD
+  wk 4: Tyler Higbee (Ferguson on IR, gets his targets) est 12.55, rank 14 / 10 -> GOOD
+  wk 7: Kyle Williams (Doubs on IR, gets his targets) est 8.43, rank - / 24 -> miss
+  wk 8: Treylon Burks (McLaurin on IR, gets his targets) est 10.18, rank 31 / - -> miss
+  wk 8: George Holani (Wilson on IR, gets his carries) est 12.48, rank 62 / - -> miss
+  leads passing the bar: 6, good: 3
+  the one stash shown each week (best lead passing the bar):
+    wk 4 Tyquan Thornton (Rice on IR, gets his targets) -> GOOD
+    wk 7 Kyle Williams (Doubs on IR, gets his targets) -> miss
+    wk 8 George Holani (Wilson on IR, gets his carries) -> miss
+  shown picks good: 1 of 3
+
+B. LOOK-AHEAD (Alex, weeks 3 to 8)
+  wk 3: Braelon Allen (covers your Week 5 bye at RB), bid $2; scored 18.1, lineup +10.0 -> GOOD
+    hole wk 3 WR (injury, Nico Collins), loss 2.68
+    hole wk 5 RB (bye, Kenneth Walker III), loss 8.38
+    hole wk 5 RB (bye, Kenneth Walker III), loss 7.81
+  wk 5: Jordan Love (covers your Week 6 bye at QB), bid $3; scored 22.2, lineup +22.2 -> GOOD
+    hole wk 6 QB (bye, Joe Burrow), loss 23.08
+    hole wk 6 TE (bye, Sam LaPorta), loss 10.68
+    hole wk 8 WR (bye, Nico Collins), loss 6.13
+    hole wk 8 WR (bye, Nico Collins), loss 6.25
+    hole wk 10 RB (bye, Jonah Coleman), loss 2.19
+  holes found: 8; covers recommended: 2; good: 2
