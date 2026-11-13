@@ -78,6 +78,21 @@ export function gameLinesDiffer(stored: VegasEventRow | null | undefined, next: 
   return storedSpread !== -next.spread;
 }
 
+/**
+ * The side a stored game row lacks, when its books name both sides and one of
+ * them is the side the row has. Null when nothing is missing or the books do
+ * not agree with the row (never guessed).
+ */
+export function missingOpponent(stored: Pick<VegasEventRow, 'homeTeam' | 'awayTeam'>, teams: readonly string[]): string | null {
+  const home = stored.homeTeam?.toUpperCase() || null;
+  const away = stored.awayTeam?.toUpperCase() || null;
+  if ((home && away) || (!home && !away) || teams.length !== 2) return null;
+  const have = (home ?? away)!;
+  const sides = teams.map((t) => t.toUpperCase());
+  if (!sides.includes(have)) return null;
+  return sides.find((t) => t !== have) ?? null;
+}
+
 export class GameBooksRepo {
   private readonly settings: SettingsRepo;
   private loaded: GameBooks | null = null;
@@ -120,14 +135,19 @@ export class GameBooksRepo {
     });
     // Only a game already on file: a source with no row for it must not create
     // one, or discovery would read that team's game as known and never buy it.
-    if (stored && gameLinesDiffer(stored, combined)) {
+    //
+    // A row discovery saved with one side only (the team it asked about) cannot
+    // place a spread quoted for the other side, so that team's players get no
+    // Team points. The books name both sides: fill the missing one, once.
+    const missingSide = stored ? missingOpponent(stored, entry.teams) : null;
+    if (stored && (gameLinesDiffer(stored, combined) || missingSide)) {
       await events.upsertMany([
         {
           eventId,
           provider: stored?.provider ?? opts.provider,
           kickoff: stored?.kickoff ?? entry.kickoff,
-          homeTeam: null,
-          awayTeam: null,
+          homeTeam: stored.homeTeam ? null : missingSide,
+          awayTeam: stored.homeTeam ? missingSide : null,
           total: combined.total,
           spread: combined.spread,
           spreadTeam: combined.spreadTeam,
