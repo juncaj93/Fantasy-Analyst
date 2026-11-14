@@ -20,9 +20,11 @@ download moves from 11:45 AM to 12:15 PM (see the end).
 | Sportradar, SportsDataIO, paid live feeds | Yes | Fast | **No** | n/a | various |
 
 Confirmed from the shell on 13 November: both nflverse files and Sleeper's
-player list downloaded and parsed. Not confirmed: nflverse's exact publish
-schedule (its docs site does not open from the sandbox), and the exact minute
-Sleeper flips a status (it publishes no timestamp for that, only `news_updated`).
+player list downloaded and parsed. Confirmed from production (13 November,
+7:10 PM check): the nflverse injury file changed about twice a day from 5 to
+13 November, at about 2:00 AM and between 9:00 and 10:30 AM, never during the
+afternoon or night games. Not confirmed: the exact minute Sleeper flips a
+status (it publishes no timestamp for that, only `news_updated`).
 
 ### How fast Sleeper was, measured
 
@@ -46,8 +48,9 @@ announcement. The app just does not ask Sleeper often enough to see them.
   all weekend. It cannot catch an inactive.
 - **Sleeper player list:** downloaded once a day. 4:00 AM Monday to Saturday,
   and on Sunday once at **11:45 AM** (retries at 12:15 and 12:30 PM only if
-  11:45 failed). The worse status of the two wins.
-- So: 1 PM games are caught only if Sleeper has updated by 11:45 AM, which is
+  11:45 failed). The worse status of the two wins. (This is the clock before
+  Round 27; Sunday is 12:15 PM since #460.)
+- So, before #460: 1 PM games are caught only if Sleeper has updated by 11:45 AM, which is
   15 minutes after the 11:30 announcement and earlier than the 20 to 35 minutes
   measured above. 4 PM, Sunday night, Monday night and Thursday games are not
   caught until the next morning's download.
@@ -59,8 +62,8 @@ Skill players who were Questionable on the final report and then inactive
 
 | Player | Kickoff | When the app could first know |
 |---|---|---|
-| George Pickens (DAL WR) | Sun 1:00 PM | Sun 11:45 AM, only if Sleeper had flipped him by then; otherwise Mon 4:00 AM |
-| Kyle Monangai (CHI RB) | Sun 8:20 PM | Mon 11/9 4:00 AM (Sleeper had it at about 7:15 PM Sunday) |
+| George Pickens (DAL WR) | Sun 1:00 PM | Sun 11:45 AM if Sleeper had flipped him by then, otherwise Mon 4:00 AM. Not provable now: his stored row was overwritten on Wed 11/11 |
+| Kyle Monangai (CHI RB) | Sun 8:20 PM | Mon 11/9 4:00 AM, confirmed (his stored Sleeper row turned Out then). Sleeper had it about 7:15 PM Sunday |
 | MarShawn Lloyd (GB RB) | Sun 4:25 PM | Mon 11/9 4:00 AM |
 | Jaylen Wright (MIA RB) | Sun 1:00 PM | Sun 11:45 AM at best |
 | Jacob Saylors (DET RB) | Sun 1:00 PM | Sun 11:45 AM at best |
@@ -70,9 +73,21 @@ Skill players who were Questionable on the final report and then inactive
 Thursday 11/12: none. The three skill players inactive (Colson Yankoff, Thomas
 Fidone II, Athan Kaliakmanis) were already Out or not on the report.
 
-Who in Alex's league started them: PENDING the production check
-(`scripts/probe-round27.mjs`), which stood down at 2:44 PM because the day was
-at 51.2 percent of database reads.
+**Who in Alex's league started them: nobody.** The production check
+(`scripts/probe-round27.mjs`, Fri 11/13 7:10 PM, 144 database rows read) read
+Sleeper's matchups for weeks 9 and 10. No team started any of the 63 inactive
+skill players, and none was on Alex's roster. The three that matter were
+benched by other managers: Pickens and Monangai (one team), Lloyd (another).
+So last week cost Alex nothing; the gap is real but has not bitten yet.
+
+Two smaller facts from the same check:
+
+- The Sunday 11:45 AM download did flip some players: DeVonta Smith's stored
+  status turned Out at Sun 11:45 AM.
+- The 5-minute injury check failed 18 times in a row early Sunday 11/8
+  (3:45 to 6:40 AM) and once Monday 3:05 AM, then recovered on its own at
+  9:15 AM. Nothing was lost (the file had not changed), but it is worth a look
+  if it repeats this Sunday.
 
 ## Why nothing was built
 
