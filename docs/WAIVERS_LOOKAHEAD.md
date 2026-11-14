@@ -39,7 +39,10 @@ the role in the club's games without the starter (the last 4, or all since the
 injury if fewer: played at least half, scored 75 percent of the starter bar a
 game and 2 more than before), no other backup is offered. Joe Milton was
 offered for Jalen Hurts on 13 November while another Eagles quarterback had
-likely been starting since Week 6; this rule stops that. A backup quarterback already scoring like a
+likely been starting since Week 6; this rule stops that. A backup who has
+already played since the starter went down is judged on those games alone,
+never his own number plus a share (Milton started Week 9 with 13.2 and was
+read as 22.2; McKee started Weeks 6 to 8). A backup quarterback already scoring like a
 starter is skipped (one QB plays). The lead then has to pass the stash bar
 (`upsideStash.ts`): at that number he would start in Alex's best season
 lineup. It is still a stash: the Round 20 stash bid, $0 or $1, never into the

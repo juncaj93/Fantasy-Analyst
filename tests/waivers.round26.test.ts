@@ -198,6 +198,21 @@ describe('A. Opportunity: a free agent who inherits a starter’s role', () => {
       expect(findOpportunities(phi(weeks(0))).map((l) => l.playerId)).toEqual(['milton']);
     });
 
+    it('offers nothing on the real Eagles weeks: McKee started 6 to 8, Milton started Week 9, bye in Week 10', () => {
+      /* The season row as production holds it (13 November): Hurts last played Week 5. */
+      const real = phi([0, 0, 0, 0, 0, 14.6, 12.5, 7, 0]);
+      real.seasonPoints = new Map([...real.seasonPoints, ['hurts', [30.7, 20.2, 12.6, 17.5, 15, 0, 0, 0, 0]], ['milton', [0, 0, 0, 0, 0, 0, 0, 0, 13.2]]]);
+      real.rosteredIds = new Set(['hurts', 'aj', 'dg']);
+      expect(findOpportunities(real)).toEqual([]);
+    });
+
+    it('judges a backup who already played in the role on those games only', () => {
+      /* Milton alone, 13.2 in Week 9: never 13.2 plus a share of Hurts's points. */
+      const solo = phi(weeks(0));
+      solo.seasonPoints = new Map([...solo.seasonPoints, ['milton', [0, 0, 0, 0, 0, 0, 0, 0, 13.2]]]);
+      expect(findOpportunities(solo)).toEqual([]);
+    });
+
     it('reads only the latest four games without him', () => {
       /* McKee started weeks 3 and 4 in a short absence earlier, not since Hurts went down: the role is open. */
       const old = phi([0, 0, 15, 14, 0, 0, 0, 0, 0]);
