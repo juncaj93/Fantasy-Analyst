@@ -34,7 +34,12 @@ The backup gets:
   `core/injury/beneficiaries.ts`).
 
 He must gain at least 2 points a game, be healthy, and have played in at least
-one of his club's last two games. A backup quarterback already scoring like a
+one of his club's last two games. If another teammate has already taken over
+the role in the club's games without the starter (the last 4, or all since the
+injury if fewer: played at least half, scored 75 percent of the starter bar a
+game and 2 more than before), no other backup is offered. Joe Milton was
+offered for Jalen Hurts on 13 November while another Eagles quarterback had
+likely been starting since Week 6; this rule stops that. A backup quarterback already scoring like a
 starter is skipped (one QB plays). The lead then has to pass the stash bar
 (`upsideStash.ts`): at that number he would start in Alex's best season
 lineup. It is still a stash: the Round 20 stash bid, $0 or $1, never into the

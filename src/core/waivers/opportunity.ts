@@ -66,6 +66,10 @@ export const OPPORTUNITY = {
   movedWeeks: 6,
   /** An Out player whose return is this many weeks away or more is a long injury. */
   longWeeks: 3,
+  /** The role is taken: read over this many of his club's latest games without him (fewer if that is all there is). */
+  takenGames: 4,
+  /** ...by a teammate scoring at least this share of the starter bar a game in them. */
+  takenShare: 0.75,
 } as const;
 
 const SKILL = new Set(['QB', 'RB', 'WR', 'TE']);
@@ -147,6 +151,8 @@ export function findOpportunities(input: OpportunityInput): OpportunityLead[] {
 
   const leads = new Map<string, OpportunityLead>();
   for (const vacancy of vacancies(input, byClub, recentOf)) {
+    /* Round 26 fix: a teammate who already took the role in the games without him leaves nothing for anyone else. */
+    const taker = roleTaker(vacancy, input, byClub);
     const mates = (byClub.get(vacancy.team) ?? [])
       .filter(
         (m) =>
@@ -165,7 +171,7 @@ export function findOpportunities(input: OpportunityInput): OpportunityLead[] {
       )
       .slice(0, 2);
     mates.forEach((mate, index) => {
-      if (input.rosteredIds.has(mate.id)) return;
+      if (input.rosteredIds.has(mate.id) || (taker != null && taker !== mate.id)) return;
       const lead = leadFor(vacancy, mate, index, input, byClub, recentOf);
       if (!lead) return;
       const held = leads.get(mate.id);
@@ -293,6 +299,51 @@ function leadFor(
     basis,
     reason: opportunityReason(vacancy, input.players.find((p) => p.id === vacancy.playerId)?.lastName),
   };
+}
+
+/**
+ * Whether a teammate at his position has already taken over the role: over
+ * his club's games without him since he last played (the latest
+ * {@link OPPORTUNITY.takenGames}, or every one if fewer), the teammate
+ * played at least half of them, scored at least
+ * {@link OPPORTUNITY.takenShare} of the starter bar a game, and at least the
+ * toss-up bar more than he did with the starter. Returns that teammate, or
+ * null. A quarterback who has been starting since Week 6 has the role: no
+ * other backup inherits it. When the taker is himself a free agent, he stays
+ * a lead, judged on those games (the measured path).
+ *
+ * Injuries only: a trade's games without him are not dated here, and a
+ * benching's new starter is the lead itself.
+ */
+export function roleTaker(vacancy: Vacancy, input: OpportunityInput, byClub: ReadonlyMap<string, OpportunityPlayer[]>): string | null {
+  if (vacancy.cause === 'traded' || vacancy.cause === 'benched') return null;
+  const absent = input.seasonPoints.get(vacancy.playerId) ?? [];
+  let last = 0;
+  for (let w = input.through; w >= 1; w--) if ((absent[w - 1] ?? 0) !== 0) { last = w; break; }
+  if (last === 0) return null;
+  const club = byClub.get(vacancy.team) ?? [];
+  const pointsOf = (id: string, w: number) => input.seasonPoints.get(id)?.[w - 1] ?? 0;
+  /* His club's games since he last played: a club with no points from two players that week did not play. */
+  const without: number[] = [];
+  for (let w = input.through; w > last && without.length < OPPORTUNITY.takenGames; w--) {
+    if (input.onBye?.(vacancy.team, w)) continue;
+    const played = club.filter((m) => m.id !== vacancy.playerId && pointsOf(m.id, w) !== 0).length;
+    if (played >= BENEFICIARY.minTeammatesForMissedGame) without.push(w);
+  }
+  if (without.length === 0) return null;
+  const together: number[] = [];
+  for (let w = last; w >= 1 && together.length < OPPORTUNITY.recentGames; w--) if (pointsOf(vacancy.playerId, w) !== 0) together.push(w);
+  const bar = (OPPORTUNITY.starterPoints[vacancy.position] ?? Infinity) * OPPORTUNITY.takenShare;
+  const taker = club.find((m) => {
+    if (m.id === vacancy.playerId || m.position.toUpperCase() !== vacancy.position) return false;
+    const after = without.map((w) => pointsOf(m.id, w));
+    const games = after.filter((x) => x !== 0).length;
+    if (games * 2 < without.length) return false;
+    const avgAfter = mean(after);
+    const avgBefore = together.length ? mean(together.map((w) => pointsOf(m.id, w))) : 0;
+    return avgAfter >= bar && avgAfter - avgBefore >= OPPORTUNITY.minGain;
+  });
+  return taker?.id ?? null;
 }
 
 /**
