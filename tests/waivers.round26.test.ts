@@ -167,6 +167,44 @@ describe('A. Opportunity: a free agent who inherits a starter’s role', () => {
     expect(lead).toEqual([]);
   });
 
+  describe('a teammate who already took over the role leaves no Opportunity line (Hurts and Milton)', () => {
+    /* Hurts started weeks 1 to 5 and went on IR; Philadelphia played weeks 6 to 9 without him. */
+    const phi = (qb2: number[]) =>
+      oppInput({
+        players: [
+          player('hurts', 'Jalen Hurts', 'PHI', 'QB'),
+          player('milton', 'Joe Milton', 'PHI', 'QB'),
+          player('mckee', 'Tanner McKee', 'PHI', 'QB'),
+          player('aj', 'Philly Receiver', 'PHI', 'WR'),
+          player('dg', 'Philly Back', 'PHI', 'RB'),
+        ],
+        rosteredIds: new Set(['hurts', 'mckee', 'aj', 'dg']),
+        injuryNotes: new Map([['hurts', { status: 'IR', bodyPart: 'Knee', notes: null }]]),
+        depthOrder: new Map([['milton', 1]]),
+        seasonPoints: new Map([
+          ['hurts', [24, 22, 26, 25, 23, 0, 0, 0, 0]],
+          ['milton', weeks(0)],
+          ['mckee', qb2],
+          ['aj', weeks(12)],
+          ['dg', weeks(10)],
+        ]),
+      });
+
+    it('offers Milton nothing when McKee has started since Week 6', () => {
+      expect(findOpportunities(phi([0, 0, 0, 0, 0, 14.6, 12.5, 13.1, 12.0]))).toEqual([]);
+    });
+
+    it('still offers Milton when no quarterback has taken the job', () => {
+      expect(findOpportunities(phi(weeks(0))).map((l) => l.playerId)).toEqual(['milton']);
+    });
+
+    it('reads only the latest four games without him', () => {
+      /* McKee started weeks 3 and 4 in a short absence earlier, not since Hurts went down: the role is open. */
+      const old = phi([0, 0, 15, 14, 0, 0, 0, 0, 0]);
+      expect(findOpportunities(old).map((l) => l.playerId)).toEqual(['milton']);
+    });
+  });
+
   it('words the role by position', () => {
     expect(opportunityReason({ name: 'Bijan Robinson', position: 'RB', cause: 'ir' })).toBe('Robinson on IR, gets his carries');
     expect(opportunityReason({ name: 'Joe Burrow', position: 'QB', cause: 'long' })).toBe('Burrow out for weeks, gets his snaps');

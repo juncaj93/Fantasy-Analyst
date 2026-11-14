@@ -70,7 +70,11 @@ probeRows += after.body?.cost?.rowsReturned ?? 0;
 console.log(`status ${after.status}, ${cost(after.body)}, ${after.ms} ms, scanned ${after.body?.pool?.scanned ?? '?'}`);
 const t = after.body?.tiers ?? {};
 const lines = [];
-if (t.upsideStash) lines.push([`Stash: ${t.upsideStash.name} (${t.upsideStash.reason}), ${bid(t.upsideStash.bid)}`, room(t.upsideStash.room), t.upsideStash.path?.kind]);
+if (t.upsideStash) {
+  const p = t.upsideStash.path ?? {};
+  const why = p.kind === 'opportunity' ? `opportunity, ${p.basis}, estimate ${p.estimate} a game` : p.kind;
+  lines.push([`Stash: ${t.upsideStash.name} (${t.upsideStash.reason}), ${bid(t.upsideStash.bid)}`, room(t.upsideStash.room), why]);
+}
 for (const c of t.cover ?? []) lines.push([`Add: ${c.name} (${c.reason}), ${bid(c.bid)}`, room(c.room), `week ${c.week}, +${c.gain}`]);
 if (t.block) lines.push([`Block: ${t.block.name} (${t.block.reason}), ${bid(t.block.bid)}`, room(t.block.room), t.block.detail]);
 if (lines.length === 0) console.log('  no stash, cover or block line this week');
