@@ -273,13 +273,25 @@ function leadFor(
   const own = recentOf(mate.id).points;
   /* One quarterback plays: a backup already scoring like a starter has the job, and inherits nothing new. */
   if (vacancy.position === 'QB' && own >= (OPPORTUNITY.starterPoints['QB'] ?? Infinity)) return null;
-  const measured = vacancy.cause === 'traded' || vacancy.cause === 'benched' ? null : measuredWithout(vacancy, mate, input, byClub);
+  const injured = vacancy.cause !== 'traded' && vacancy.cause !== 'benched';
+  const measured = injured ? measuredWithout(vacancy, mate, input, byClub) : null;
+  /*
+   * Round 26 fix (Joe Milton, 13 November): a backup who has already played
+   * since the starter went down is judged on those games alone. Adding a
+   * share of the starter's points on top of games he already played in the
+   * role counts the role twice (Milton: 13.2 in Week 9, read as 22.2).
+   */
+  const since = injured && !measured ? gamesSinceOut(vacancy, mate, input) : [];
   let estimate: number;
   let share: number;
   let basis: OpportunityLead['basis'];
   if (measured) {
     estimate = measured.without;
     share = vacancy.points > 0 ? clamp01((measured.without - measured.with) / vacancy.points) : 0;
+    basis = 'measured';
+  } else if (since.length > 0) {
+    estimate = mean(since);
+    share = vacancy.points > 0 ? clamp01(estimate / vacancy.points) : 0;
     basis = 'measured';
   } else {
     share = index === 0 ? OPPORTUNITY.nextShare : OPPORTUNITY.secondShare;
@@ -299,6 +311,22 @@ function leadFor(
     basis,
     reason: opportunityReason(vacancy, input.players.find((p) => p.id === vacancy.playerId)?.lastName),
   };
+}
+
+/** The backup's points in his club's games since the starter last played (games he played; byes skipped). */
+function gamesSinceOut(vacancy: Vacancy, mate: OpportunityPlayer, input: OpportunityInput): number[] {
+  const absent = input.seasonPoints.get(vacancy.playerId) ?? [];
+  const his = input.seasonPoints.get(mate.id) ?? [];
+  let last = 0;
+  for (let w = input.through; w >= 1; w--) if ((absent[w - 1] ?? 0) !== 0) { last = w; break; }
+  if (last === 0) return [];
+  const out: number[] = [];
+  for (let w = last + 1; w <= input.through; w++) {
+    if (input.onBye?.(vacancy.team, w)) continue;
+    const pts = his[w - 1] ?? 0;
+    if (pts !== 0) out.push(pts);
+  }
+  return out;
 }
 
 /**
