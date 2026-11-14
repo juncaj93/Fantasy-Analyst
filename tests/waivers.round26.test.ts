@@ -109,7 +109,7 @@ describe('A. Opportunity: a free agent who inherits a starter’s role', () => {
     expect(lead).toMatchObject({ playerId: 'wr2', reason: 'Chase traded, gets his targets', vacancy: { cause: 'traded', team: 'CIN' } });
   });
 
-  it('reads a healthy starter listed behind a weaker teammate as benched', () => {
+  it('never reads a healthy starter listed second as benched (switched off, 13 November)', () => {
     const lead = findOpportunities(
       oppInput({
         players: [player('vet', 'Old Back', 'NYJ', 'RB'), player('kid', 'New Back', 'NYJ', 'RB')],
@@ -124,8 +124,34 @@ describe('A. Opportunity: a free agent who inherits a starter’s role', () => {
           ['kid', weeks(4)],
         ]),
       }),
-    )[0];
-    expect(lead).toMatchObject({ playerId: 'kid', reason: 'Back benched, gets his carries', vacancy: { cause: 'benched' } });
+    );
+    expect(lead).toEqual([]);
+  });
+
+  it('offers no line on the real Patriots weeks: Hollins back in Week 9, Douglas still scored 12.7', () => {
+    const lead = findOpportunities(
+      oppInput({
+        players: [
+          player('douglas', 'DeMario Douglas', 'NE', 'WR'),
+          player('hollins', 'Mack Hollins', 'NE', 'WR'),
+          player('ne-te', 'Patriots End', 'NE', 'TE'),
+          player('ne-rb', 'Patriots Back', 'NE', 'RB'),
+        ],
+        rosteredIds: new Set(['douglas', 'ne-te', 'ne-rb']),
+        injuryNotes: new Map(),
+        depthOrder: new Map([
+          ['hollins', 1],
+          ['douglas', 2],
+        ]),
+        seasonPoints: new Map([
+          ['douglas', [4.5, 1.4, 4.3, 2.5, 20.5, 16.1, 3.8, 15.1, 12.7]],
+          ['hollins', [7.1, 2.8, 11.7, 6.8, 0, 0, 0, 0, 11.1]],
+          ['ne-te', weeks(8)],
+          ['ne-rb', weeks(10)],
+        ]),
+      }),
+    );
+    expect(lead).toEqual([]);
   });
 
   it('never treats a one-week Out or a starter under the bar as an open role', () => {

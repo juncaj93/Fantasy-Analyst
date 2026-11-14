@@ -22,8 +22,7 @@ covers, then the block.
 ## A. Opportunity (`core/waivers/opportunity.ts`)
 
 When a starter loses his job for weeks (out for the season, on IR, Out with a
-return 3 or more weeks away, traded away, or benched behind a weaker
-teammate), the next player in line on his club's depth chart gets most of his
+return 3 or more weeks away, or traded away), the next player in line on his club's depth chart gets most of his
 work. The open work is the starter's points a game over his last four games.
 The backup gets:
 
@@ -42,7 +41,9 @@ offered for Jalen Hurts on 13 November while another Eagles quarterback had
 likely been starting since Week 6; this rule stops that. A backup who has
 already played since the starter went down is judged on those games alone,
 never his own number plus a share (Milton started Week 9 with 13.2 and was
-read as 22.2; McKee started Weeks 6 to 8). A backup quarterback already scoring like a
+read as 22.2; McKee started Weeks 6 to 8). A benching is not read (switched
+off 13 November): Sleeper listing a healthy starter second was Mack Hollins
+back from injury in Week 9 while DeMario Douglas still scored 12.7. A backup quarterback already scoring like a
 starter is skipped (one QB plays). The lead then has to pass the stash bar
 (`upsideStash.ts`): at that number he would start in Alex's best season
 lineup. It is still a stash: the Round 20 stash bid, $0 or $1, never into the
