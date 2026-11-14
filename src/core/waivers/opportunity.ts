@@ -2,7 +2,9 @@
  * The Opportunity finder (Round 26, upgrade A, behind `WAIVERS_LOOKAHEAD`).
  *
  * When a starter loses his job for weeks (out for the season, on IR, a long
- * injury, traded away, or benched), his work does not disappear. The next
+ * injury, or traded away), his work does not disappear. A benching is not
+ * read: a depth chart that moves a healthy starter down is as often a
+ * teammate back from injury. The next
  * player in line on his club's depth chart gets most of it. If that player is
  * a free agent, he is a pickup the projections have not caught up with yet.
  *
@@ -150,7 +152,7 @@ export function findOpportunities(input: OpportunityInput): OpportunityLead[] {
   }
 
   const leads = new Map<string, OpportunityLead>();
-  for (const vacancy of vacancies(input, byClub, recentOf)) {
+  for (const vacancy of vacancies(input, recentOf)) {
     /* Round 26 fix: a teammate who already took the role in the games without him leaves nothing for anyone else. */
     const taker = roleTaker(vacancy, input, byClub);
     const mates = (byClub.get(vacancy.team) ?? [])
@@ -189,12 +191,8 @@ export function opportunityScanIds(input: OpportunityInput, exclude: ReadonlySet
     .sort();
 }
 
-/** The open roles: long injuries, trades and benchings of real starters. */
-function vacancies(
-  input: OpportunityInput,
-  byClub: ReadonlyMap<string, OpportunityPlayer[]>,
-  recentOf: (id: string) => Recent,
-): Vacancy[] {
+/** The open roles: long injuries and trades of real starters. */
+function vacancies(input: OpportunityInput, recentOf: (id: string) => Recent): Vacancy[] {
   const out: Vacancy[] = [];
   for (const p of input.players) {
     const position = p.position.toUpperCase();
@@ -219,15 +217,12 @@ function vacancies(
       continue;
     }
 
-    /* Benched: healthy, listed behind a teammate who has been scoring less. */
-    const order = input.depthOrder.get(p.id);
-    if (!fresh || order == null || order < 2 || isOutThisWeek(designation) || designation === 'doubtful') continue;
-    const ahead = (byClub.get(p.team.toUpperCase()) ?? []).find(
-      (m) => m.id !== p.id && m.position.toUpperCase() === position && input.depthOrder.get(m.id) === 1,
-    );
-    if (ahead && recentOf(ahead.id).points + OPPORTUNITY.minGain <= recent.points) {
-      out.push({ ...base, team: p.team.toUpperCase(), cause: 'benched' });
-    }
+    /*
+     * Benched is not read (Alex, 13 November): a depth chart that lists a
+     * healthy starter second is as often a teammate back from injury (Mack
+     * Hollins back in Week 9, DeMario Douglas still scoring 12.7) as a real
+     * benching. Long injuries and trades only.
+     */
   }
   return out;
 }
