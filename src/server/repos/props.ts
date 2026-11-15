@@ -153,6 +153,17 @@ export class PropsRepo implements SnapshotStore {
    *
    * Reads the game's looks by its event index and their lines by the snapshot
    * index: about 65 to 150 rows a game.
+   *
+   * ## `+scope`, and why the plus is load-bearing (Round 28)
+   *
+   * With two or more looks in the list, SQLite (no table statistics on D1)
+   * rated `scope = 'week'` on `idx_player_props_scope` cheaper than the
+   * `snapshot_id IN (...)` seeks and walked every weekly line in the table:
+   * about 48,000 rows a call, once per game stored, 64 calls on Sunday
+   * 15 November between 6:49 and 10:49 AM ET, 62 to 82% of the app's reads on
+   * Friday to Sunday. Since Round 23 a game gains a look on every refresh, so
+   * two or more is the normal case. The ids are weekly looks already, so the
+   * term filters nothing; the plus keeps it and leaves the snapshot index.
    */
   async currentForEvent(eventId: string): Promise<StoredLine[]> {
     const snaps = await this.snapshotsForEvents([eventId]);
@@ -163,7 +174,7 @@ export class PropsRepo implements SnapshotStore {
     const rows: Record<string, unknown>[] = [];
     for (const batch of chunk(ids, MAX_BOUND_PARAMS)) {
       const { results } = await this.db
-        .prepare(`SELECT * FROM player_props WHERE snapshot_id IN (${batch.map(() => '?').join(',')}) AND scope = 'week'`)
+        .prepare(`SELECT * FROM player_props WHERE snapshot_id IN (${batch.map(() => '?').join(',')}) AND +scope = 'week'`)
         .bind(...batch)
         .all<Record<string, unknown>>();
       rows.push(...results);

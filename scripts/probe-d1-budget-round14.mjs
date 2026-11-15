@@ -37,7 +37,15 @@ const STEPS = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 );
-const want = (step) => STEPS.size === 0 || STEPS.has(step);
+/**
+ * Round 28: past the probe ceiling the Probe workflow sets CF_TOTALS_ONLY=yes
+ * and this runs only the parts that read Cloudflare's own analytics (no
+ * database rows): totals, writers, hours. The parts that read production
+ * (piles, matchup, digest) never run then, whatever STEPS asks for.
+ */
+const CF_TOTALS_ONLY = process.env.CF_TOTALS_ONLY === 'yes';
+const ANALYTICS_ONLY = new Set(['totals', 'writers', 'hours']);
+const want = (step) => (!CF_TOTALS_ONLY || ANALYTICS_ONLY.has(step)) && (STEPS.size === 0 || STEPS.has(step));
 
 const n = (x) => Number(x ?? 0).toLocaleString('en-US');
 const eastern = (d = new Date()) =>
@@ -98,6 +106,7 @@ if (TOKEN) {
 } else {
   console.log('No CLOUDFLARE_API_TOKEN: only the app-side parts (matchup reads, digest) can run.');
 }
+if (CF_TOTALS_ONLY) console.log('Cloudflare totals only (past the probe ceiling): piles, matchup and digest are not run.');
 
 /* ------------------------------------------------------------------ totals */
 
