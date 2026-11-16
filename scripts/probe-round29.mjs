@@ -18,7 +18,7 @@
  *   freshness   When each start/sit input was last fetched (indexed, few rows).
  *   forecasts   matchup_forecasts for this season (about 100 rows).
  *   screens     Each screen's own answer, as the phone reads it (GET only).
- *   snapshots   Support snapshots (lineup, matchup, waiver-plan, trade-offer).
+ *   snapshots   Support snapshots (lineup, matchup, waiver-plan; trade-offer is the old Smart Trades).
  *   gather      Saved data for the accuracy backtest (weeks 8 to 11).
  *
  * Everything gathered is printed once at the end as gzip + base64 between two
@@ -436,54 +436,77 @@ await part('screens', async () => {
   if (!leagueId) throw new Error('no selected league');
   LEAGUE_APP_ID ??= leagueId;
   const L = encodeURIComponent(leagueId);
-  const calls = [
-    ['overview', '/api/overview'],
-    ['authStatus', '/api/auth/status'],
-    ['team.lineup', `/api/leagues/${L}/lineup`],
-    ['team.roster', `/api/leagues/${L}/roster`],
-    ['team.bench', `/api/leagues/${L}/bench`],
-    ['compare.pool', `/api/leagues/${L}/compare-pool`],
-    ['matchup', `/api/leagues/${L}/matchup`],
-    ['waivers', `/api/leagues/${L}/waivers?cost=1`],
-    ['trades.offers', '/api/trades/screens/offers'],
-    ['trades.teams', '/api/trades/screens/teams'],
-    ['players.board', `/api/players/season?leagueId=${L}&cost=1`],
-    ['refresh.status', '/api/refresh/status?kind=startsit'],
-    ['dataHealth', '/api/data-health'],
-  ];
-  for (const [key, path] of calls) {
+  const call = async (key, path) => {
     const r = await getApp(path);
     bundle.screens[key] = keep(r);
-    console.log(`  ${key.padEnd(16)} HTTP ${r.status} ${String(r.ms).padStart(6)} ms ${n(r.bytes).padStart(9)} bytes${r.body?.cost ? `  cost ${JSON.stringify(r.body.cost).slice(0, 120)}` : ''}`);
-  }
-  /* Check a trade on the top offer, as its card opens it: the verdict line should match the card. */
+    console.log(`  ${key.padEnd(18)} HTTP ${r.status} ${String(r.ms).padStart(6)} ms ${n(r.bytes).padStart(9)} bytes${r.body?.cost ? `  cost ${JSON.stringify(r.body.cost).slice(0, 110)}` : ''}`);
+    return r;
+  };
+  /* The Vegas clock before and after the burst: a refresh inside it would make two screens read two slates. */
+  await call('vegas.before', '/api/vegas/status');
+  for (const [key, path] of [
+    ['overview', '/api/overview'],
+    ['authStatus', '/api/auth/status'],
+    ['team.roster', `/api/leagues/${L}/roster`],
+    ['team.lineup', `/api/leagues/${L}/lineup`],
+    ['waivers', `/api/leagues/${L}/waivers?cost=1`],
+    ['matchup', `/api/leagues/${L}/matchup`],
+  ])
+    await call(key, path);
+  const mode = encodeURIComponent(bundle.screens['team.lineup']?.body?.mode ?? 'balanced');
+  await call('compare.poolMine', `/api/leagues/${L}/compare-pool?tab=mine&position=ALL&q=&mode=${mode}`);
+  await call('compare.poolWaivers', `/api/leagues/${L}/compare-pool?tab=waivers&position=ALL&q=&mode=${mode}`);
+  await call('players.board', `/api/players/season?leagueId=${L}&cost=1`);
+  await call('trades.offers', '/api/trades/screens/offers');
+  await call('trades.teams', '/api/trades/screens/teams');
+  /* Each offer opened in Check a trade (the verdict line) and metered through the same engine (per-player rates). */
   const offers = bundle.screens['trades.offers']?.body?.offers ?? [];
+  const myRosterId =
+    (bundle.screens['trades.teams']?.body?.teams ?? []).find((t) => t.isMine)?.rosterId ??
+    (bundle.screens['players.board']?.body?.teams ?? []).find((t) => t.isMine)?.rosterId ??
+    null;
   bundle.screens.verdicts = [];
+  bundle.screens.checks = [];
   for (const o of offers.slice(0, 3)) {
     const give = (o.give ?? []).map((p) => p.playerId).join(',');
     const getIds = (o.get ?? []).map((p) => p.playerId).join(',');
     const partner = o.partner?.rosterId;
     if (partner == null || !give || !getIds) continue;
-    const r = await getApp(`/api/trades/screens/verdict?b=${partner}&give=${encodeURIComponent(give)}&get=${encodeURIComponent(getIds)}`);
-    bundle.screens.verdicts.push({ offerId: o.id ?? null, partner, give, get: getIds, ...keep(r) });
-    console.log(`  verdict for offer ${o.id ?? '?'}: HTTP ${r.status} ${r.ms} ms`);
+    const v = await getApp(`/api/trades/screens/verdict?b=${partner}&give=${encodeURIComponent(give)}&get=${encodeURIComponent(getIds)}`);
+    bundle.screens.verdicts.push({ offerId: o.id ?? null, partner, give, get: getIds, ...keep(v) });
+    if (myRosterId != null) {
+      const c = await getApp(`/api/leagues/${L}/trades/check?a=${myRosterId}&b=${partner}&give=${encodeURIComponent(give)}&get=${encodeURIComponent(getIds)}&cost=1`);
+      bundle.screens.checks.push({ offerId: o.id ?? null, partner, give, get: getIds, ...keep(c) });
+    }
+    console.log(`  offer ${o.id ?? '?'}: verdict HTTP ${v.status}; check ${myRosterId == null ? 'skipped (no roster id)' : 'read'}`);
   }
-  /* The Players card for Alex's starters and bench and the top free agents on the board (the 20 audited). */
-  const board = bundle.screens['players.board']?.body;
+  /* The 20 audited: Alex's skill players (starters, bench, IR), then the free agents the screens put forward. */
   const lineupBody = bundle.screens['team.lineup']?.body;
-  const myRoster = (board?.teams ?? []).find((t) => t.isMine)?.rosterId ?? null;
-  const boardRows = board?.rows ?? [];
-  const lineupIds = [...(lineupBody?.starters ?? []), ...(lineupBody?.bench ?? [])].map((e) => e.playerId).filter(Boolean);
-  const mineIds = lineupIds.length ? lineupIds : boardRows.filter((r) => myRoster != null && r.ownerRosterId === myRoster).map((r) => r.id);
-  const faIds = boardRows.filter((r) => r.ownerRosterId == null && ['QB', 'RB', 'WR', 'TE'].includes(r.position)).map((r) => r.id).filter(Boolean);
-  const pick = [...new Set([...mineIds.slice(0, 14), ...faIds.slice(0, 6)])].slice(0, 20);
-  bundle.screens.picked = { mine: mineIds.slice(0, 14), freeAgents: faIds.slice(0, 6) };
+  const evals = [...(lineupBody?.starters ?? []), ...(lineupBody?.bench ?? []), ...(lineupBody?.undecidable ?? [])];
+  const mineIds = evals.filter((e) => ['QB', 'RB', 'WR', 'TE'].includes(e.position)).map((e) => e.playerId).filter(Boolean);
+  const w = bundle.screens.waivers?.body ?? {};
+  const t = w.tiers ?? {};
+  const faFromWaivers = [
+    w.pickupStart?.start?.playerId,
+    ...(w.pickupStart?.consider ?? []).map((m) => m.playerId),
+    ...[...(t.doThese ?? []), ...(t.doThis ? [t.doThis] : []), ...(t.consider ?? []), ...(t.watch ?? [])].map((m) => m.playerId),
+    ...(bundle.screens['compare.poolWaivers']?.body?.rows ?? []).map((r) => r.id ?? r.playerId),
+  ].filter(Boolean);
+  const faIds = [...new Set(faFromWaivers)].filter((id) => !mineIds.includes(id));
+  const pick = [...new Set([...mineIds, ...faIds.slice(0, Math.max(6, 20 - mineIds.length))])];
+  bundle.screens.picked = { mine: mineIds, freeAgents: faIds.slice(0, Math.max(6, 20 - mineIds.length)) };
   bundle.screens.cards = {};
-  for (const id of pick) {
-    const r = await getApp(`/api/players/${encodeURIComponent(id)}/season?leagueId=${L}&cost=1`);
-    bundle.screens.cards[id] = keep(r);
-  }
-  console.log(`  Players cards read: ${Object.keys(bundle.screens.cards).length}`);
+  for (const id of pick) bundle.screens.cards[id] = keep(await getApp(`/api/players/${encodeURIComponent(id)}/season?leagueId=${L}&cost=1`));
+  console.log(`  Players cards read: ${Object.keys(bundle.screens.cards).length} (Alex ${mineIds.length}, free agents ${pick.length - mineIds.length})`);
+  for (const [key, path] of [
+    ['refresh.status', '/api/refresh/status?kind=startsit'],
+    ['dataHealth', '/api/data-health'],
+    ['vegas.after', '/api/vegas/status'],
+  ])
+    await call(key, path);
+  const before = JSON.stringify(bundle.screens['vegas.before']?.body ?? null);
+  const after = JSON.stringify(bundle.screens['vegas.after']?.body ?? null);
+  console.log(`  Vegas status ${before === after ? 'unchanged during the burst' : 'CHANGED during the burst (screens may have read two slates)'}`);
 });
 
 /* -------------------------------------------------------------- snapshots */
@@ -491,7 +514,7 @@ await part('snapshots', async () => {
   heading('Support snapshots (the inputs each decision was drawn from)');
   bundle.snapshots = {};
   const L = encodeURIComponent(LEAGUE_APP_ID);
-  for (const context of ['lineup', 'matchup', 'waiver-plan', 'trade-offer']) {
+  for (const context of ['lineup', 'matchup', 'waiver-plan']) {
     const r = await getApp(`/api/leagues/${L}/support-snapshot?context=${context}`);
     bundle.snapshots[context] = keep(r);
     console.log(`  ${context.padEnd(12)} HTTP ${r.status} ${String(r.ms).padStart(6)} ms ${n(r.bytes).padStart(9)} bytes`);
