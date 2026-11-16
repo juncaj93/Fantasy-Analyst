@@ -120,6 +120,16 @@ async function sql(label, text) {
   return result.results ?? [];
 }
 const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
+/** One query that may fail on its own without stopping the part it belongs to. */
+async function q(label, text) {
+  try {
+    return await sql(label, text);
+  } catch (err) {
+    bundle.errors[`sql ${label}`] = String(err?.message ?? err).slice(0, 300);
+    console.log(`  (${label} failed: ${String(err?.message ?? err).slice(0, 160)})`);
+    return [];
+  }
+}
 
 /* ------------------------------------------------------------------- app */
 async function getApp(path, init = {}) {
@@ -342,20 +352,20 @@ await part('tables', async () => {
   LEAGUE_APP_ID = sel?.id ?? null;
   bundle.leagues = leagues.map((l) => ({ selected: Number(l.is_selected) === 1, season: l.season, lastSyncedAt: l.last_synced_at, isThis: l.id === LEAGUE_APP_ID }));
   console.log(`  leagues stored: ${leagues.length}; selected league last synced ${sel?.last_synced_at ?? '?'}`);
-  const rosters = await sql('rosters', `SELECT roster_id, is_mine, updated_at, json_array_length(players_json) AS n FROM rosters WHERE league_id = ${lit(LEAGUE_APP_ID)}`);
+  const rosters = await q('rosters', `SELECT roster_id, is_mine, updated_at, json_array_length(players_json) AS n FROM rosters WHERE league_id = ${lit(LEAGUE_APP_ID)}`);
   bundle.rosterSync = rosters;
   console.log(`  rosters: ${rosters.length}, updated ${[...new Set(rosters.map((r) => r.updated_at))].sort().slice(-3).join(', ')}`);
-  const crons = await sql('cron_run_state', `SELECT cron, label, trigger, started_at, finished_at, outcome, last_success_at, budget_limit, budget_used, budget_remaining, steps_json, release_sha FROM cron_run_state`);
+  const crons = await q('cron_run_state', `SELECT cron, label, trigger, started_at, finished_at, outcome, last_success_at, budget_limit, budget_used, budget_remaining, steps_json, release_sha FROM cron_run_state`);
   bundle.cronRunState = crons;
   for (const c of crons) console.log(`  ${String(c.cron).padEnd(14)} ${String(c.label).padEnd(34)} ${c.outcome.padEnd(10)} started ${et(c.started_at)} last success ${c.last_success_at ? et(c.last_success_at) : '-'}`);
-  const inj = await sql('injury_source_runs', `SELECT id, source, latest_week, fetched_at, published_at, rows_returned, outcome FROM injury_source_runs ORDER BY id DESC LIMIT 60`);
+  const inj = await q('injury_source_runs', `SELECT id, source, latest_week, fetched_at, published_at, rows_returned, outcome FROM injury_source_runs ORDER BY id DESC LIMIT 60`);
   bundle.injuryRuns = inj;
   const outcomes = new Map();
   for (const r of inj) outcomes.set(r.outcome, (outcomes.get(r.outcome) ?? 0) + 1);
   console.log(`  injury runs (newest 60): ${[...outcomes].map(([k, v]) => `${k}=${v}`).join(' ')}; newest ${inj[0] ? et(inj[0].fetched_at) : '-'} published ${inj[0]?.published_at ?? '-'}`);
-  const state = await sql('injury_source_state', `SELECT * FROM injury_source_state`);
+  const state = await q('injury_source_state', `SELECT * FROM injury_source_state`);
   bundle.injuryState = state;
-  const sync = await sql('sync_log', `SELECT kind, status, started_at, finished_at, substr(detail, 1, 200) AS detail FROM sync_log WHERE id > (SELECT MAX(id) - 400 FROM sync_log)`);
+  const sync = await q('sync_log', `SELECT kind, status, started_at, finished_at, substr(detail, 1, 200) AS detail FROM sync_log WHERE id > (SELECT MAX(id) - 400 FROM sync_log)`);
   const byKind = new Map();
   for (const r of sync) {
     const v = byKind.get(r.kind) ?? { n: 0, bad: 0, last: null, lastOk: null };
@@ -373,17 +383,31 @@ await part('tables', async () => {
 await part('freshness', async () => {
   heading('When each start/sit input was last fetched (indexed or small reads)');
   const f = {};
-  f.schedule = await sql('nfl_schedule', `SELECT week, COUNT(*) AS teams, MIN(fetched_at) AS first, MAX(fetched_at) AS last, MIN(kickoff) AS firstKick, MAX(kickoff) AS lastKick FROM nfl_schedule WHERE season = '2026' AND week >= 9 AND week <= 12 GROUP BY week`);
-  f.events = await sql('vegas_events', `SELECT event_id, kickoff, home_team, away_team, seen_at FROM vegas_events WHERE kickoff >= '2026-11-10'`);
-  f.injuryWeeks = await sql('player_injury_reports', `SELECT week, COUNT(*) AS n, MAX(fetched_at) AS fetched, MAX(published_at) AS published, SUM(CASE WHEN report_status IN ('Out','Doubtful') THEN 1 ELSE 0 END) AS outs FROM player_injury_reports WHERE season = '2026' AND week >= 8 GROUP BY week`);
-  f.injuryEvents = await sql('injury_events', `SELECT player_id, week, kind, from_value, to_value, source, source_modified_at, detected_at FROM injury_events ORDER BY detected_at DESC LIMIT 300`);
-  const depth = await sql('depth_chart_entries', `SELECT MAX(captured_at) AS captured FROM depth_chart_entries WHERE season = '2026'`);
-  f.depthChart = depth[0]?.captured ? (await sql('depth_chart_entries one', `SELECT captured_at, fetched_at, source FROM depth_chart_entries WHERE season = '2026' AND captured_at = ${lit(depth[0].captured)} LIMIT 1`))[0] : null;
-  f.usageRuns = await sql('usage_source_runs', `SELECT source, week, latest_week, fetched_at, published_at, rows_returned, rows_written, outcome, substr(note, 1, 160) AS note FROM usage_source_runs ORDER BY id DESC LIMIT 15`);
-  f.nflverseRuns = await sql('nflverse_source_runs', `SELECT source, week, fetched_at, published_at, rows_returned, rows_written, outcome, substr(note, 1, 160) AS note FROM nflverse_source_runs ORDER BY id DESC LIMIT 15`);
-  f.seasonStatsRuns = await sql('player_season_stats_runs', `SELECT fetched_at, source, rows_returned, rows_matched FROM player_season_stats_runs ORDER BY id DESC LIMIT 5`);
-  f.settings = await sql('settings (keys and times only)', `SELECT key, updated_at, length(value_json) AS bytes FROM settings`);
+  f.schedule = await q('nfl_schedule', `SELECT week, COUNT(*) AS teams, MIN(fetched_at) AS first, MAX(fetched_at) AS last, MIN(kickoff) AS firstKick, MAX(kickoff) AS lastKick FROM nfl_schedule WHERE season = '2026' AND week >= 9 AND week <= 12 GROUP BY week`);
+  f.events = await q('vegas_events', `SELECT event_id, kickoff, home_team, away_team, seen_at FROM vegas_events WHERE kickoff >= '2026-11-10'`);
+  f.injuryWeeks = await q('player_injury_reports', `SELECT week, COUNT(*) AS n, MAX(fetched_at) AS fetched, MAX(published_at) AS published, SUM(CASE WHEN report_status IN ('Out','Doubtful') THEN 1 ELSE 0 END) AS outs FROM player_injury_reports WHERE season = '2026' AND week >= 8 GROUP BY week`);
+  f.injuryEvents = await q('injury_events', `SELECT player_id, week, kind, from_value, to_value, source, source_modified_at, detected_at FROM injury_events ORDER BY detected_at DESC LIMIT 300`);
+  const depth = await q('depth_chart_entries', `SELECT MAX(captured_at) AS captured FROM depth_chart_entries WHERE season = '2026'`);
+  f.depthChart = depth[0]?.captured ? (await q('depth_chart_entries one', `SELECT captured_at, fetched_at, source FROM depth_chart_entries WHERE season = '2026' AND captured_at = ${lit(depth[0].captured)} LIMIT 1`))[0] : null;
+  f.usageRuns = await q('usage_source_runs', `SELECT source, week, latest_week, fetched_at, published_at, rows_returned, rows_written, outcome, substr(note, 1, 160) AS note FROM usage_source_runs ORDER BY id DESC LIMIT 15`);
+  f.nflverseRuns = await q('nflverse_source_runs', `SELECT source, week, fetched_at, published_at, rows_returned, rows_written, outcome, substr(note, 1, 160) AS note FROM nflverse_source_runs ORDER BY id DESC LIMIT 15`);
+  f.seasonStatsRuns = await q('player_season_stats_runs', `SELECT fetched_at, source, rows_returned, rows_matched FROM player_season_stats_runs ORDER BY id DESC LIMIT 5`);
+  f.settings = await q('settings (keys and times only)', `SELECT key, updated_at, length(value_json) AS bytes FROM settings`);
+  /* The freshness map's cheap reads (settings PK, small state tables, indexed logs). */
+  f.settingsValues = await sql(
+    'settings (clock and job values)',
+    `SELECT key, updated_at, value_json FROM settings WHERE key IN ('vegas.clock','vegas.lastRefresh','vegas.lastSchedule','vegas.extraSources','props.week.stamp','props.week.freshness','refresh.job.startsit','refresh.job.waivers','sleeper.nflState','sleeper.players.lastSuccessAt')`,
+  );
+  f.vegasUsage = await q('vegas_usage', `SELECT month, entities, provider_entities, provider_limit, provider_read_at, updated_at FROM vegas_usage WHERE month IN ('2026-10','2026-11')`);
+  f.vegasUsageOutcomes = await q('vegas_usage_log by outcome', `SELECT outcome, source, COUNT(*) AS n, SUM(entities) AS entities, MIN(at) AS first, MAX(at) AS last FROM vegas_usage_log WHERE month = '2026-11' GROUP BY outcome, source`);
+  f.vegasUsageRecent = await q('vegas_usage_log newest', `SELECT at, source, event_id, entities, requests, outcome, reason FROM vegas_usage_log WHERE month = '2026-11' ORDER BY at DESC LIMIT 80`);
+  f.nflverseState = await q('nflverse_source_state', `SELECT source, checked_at, source_modified_at, ingested_at, last_outcome, consecutive_failures FROM nflverse_source_state WHERE season = '2026'`);
+  f.usageState = await q('usage_source_state', `SELECT * FROM usage_source_state WHERE season = '2026'`);
+  f.injuryBudget = await q('injury_write_budget', `SELECT * FROM injury_write_budget WHERE day >= '2026-11-12'`);
+  f.trending = await q('trending_snapshots newest', `SELECT captured_at, trend_type FROM trending_snapshots WHERE trend_type = 'add' ORDER BY captured_at DESC LIMIT 1`);
   bundle.freshness = f;
+  for (const u of f.vegasUsage) console.log(`  odds budget ${u.month}: ${u.entities} used of ${u.provider_limit ?? '?'} (provider count ${u.provider_entities ?? '?'}, read ${u.provider_read_at ?? '-'})`);
+  console.log(`  odds log this month: ${f.vegasUsageOutcomes.map((o) => `${o.outcome}/${o.source}=${o.n}`).join(', ') || 'none'}`);
   for (const w of f.schedule) console.log(`  schedule week ${w.week}: ${w.teams} teams, fetched ${et(w.last)}, kickoffs ${w.firstKick ? et(w.firstKick) : '-'} to ${w.lastKick ? et(w.lastKick) : '-'}`);
   for (const w of f.injuryWeeks) console.log(`  injury report week ${w.week}: ${w.n} players (${w.outs} Out or Doubtful), fetched ${et(w.fetched)}, published ${w.published ?? '-'}`);
   console.log(`  injury changes detected (newest 300): newest ${f.injuryEvents[0] ? et(f.injuryEvents[0].detected_at) : '-'}, oldest ${f.injuryEvents.at(-1) ? et(f.injuryEvents.at(-1).detected_at) : '-'}`);
