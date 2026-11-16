@@ -40,6 +40,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, type DataHealthView, type SourceHealth } from '../api.ts';
+import { READ_RETRY_DELAYS_MS, withCpuRetry } from '../supportRetry.ts';
 import { formatUpdated, useServerRefresh } from '../serverRefresh.ts';
 import { Loading, Notice } from './common.tsx';
 import { AlertCircleIcon, CheckCircleIcon, EmptyCircleIcon, PulseIcon } from './icons.tsx';
@@ -420,7 +421,7 @@ function useDataHealth(): { health: DataHealthView | null; reload: () => Promise
 
   const reload = useCallback(async () => {
     try {
-      setHealth(await api.get<DataHealthView>('/api/data-health', { fresh: true }));
+      setHealth(await withCpuRetry(() => api.get<DataHealthView>('/api/data-health', { fresh: true }), { delays: READ_RETRY_DELAYS_MS }));
     } catch {
       /* Left as it was; the row keeps saying whatever it last knew. */
     }
@@ -428,8 +429,7 @@ function useDataHealth(): { health: DataHealthView | null; reload: () => Promise
 
   useEffect(() => {
     let live = true;
-    api
-      .get<DataHealthView>('/api/data-health', { fresh: true })
+    withCpuRetry(() => api.get<DataHealthView>('/api/data-health', { fresh: true }), { delays: READ_RETRY_DELAYS_MS })
       .then((view) => {
         if (live) setHealth(view);
       })

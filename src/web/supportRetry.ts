@@ -21,6 +21,14 @@ import { ApiError } from './apiResponse.ts';
 /** Seconds of quiet before each retry: enough for the allowance to come back. */
 export const SNAPSHOT_RETRY_DELAYS_MS: readonly number[] = [3_000, 8_000];
 
+/**
+ * Round 34: one quick retry for the reads Cloudflare refused most in
+ * production: a Players card, Data health and Check's verdict. Its own logs
+ * show the refusal restarts the Worker and the very next request passes, so
+ * a short wait and one more try is enough. Same request, same answer.
+ */
+export const READ_RETRY_DELAYS_MS: readonly number[] = [400];
+
 export function isCpuCutOff(err: unknown): boolean {
   return err instanceof ApiError && err.status === 503;
 }

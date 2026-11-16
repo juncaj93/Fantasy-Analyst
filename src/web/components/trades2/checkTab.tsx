@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.ts';
+import { READ_RETRY_DELAYS_MS, withCpuRetry } from '../../supportRetry.ts';
 import type { ScreensTeams, ScreensVerdict } from '../../../core/trades/screensWire.ts';
 import {
   addToCheck,
@@ -65,8 +66,7 @@ export function CheckTab({ teams, query, start }: { teams: ScreensTeams | null; 
     const path =
       `/api/trades/screens/verdict?b=${partnerId}&give=${give.map(encodeURIComponent).join(',')}` +
       `&get=${get.map(encodeURIComponent).join(',')}${query ? `&${query}` : ''}`;
-    api
-      .get<ScreensVerdict>(path)
+    withCpuRetry(() => api.get<ScreensVerdict>(path), { delays: READ_RETRY_DELAYS_MS })
       .then((v) => live && setVerdict(v))
       .catch(() => live && setVerdict({ found: false, reason: 'Could not check this trade right now.' }))
       .finally(() => live && setChecking(false));

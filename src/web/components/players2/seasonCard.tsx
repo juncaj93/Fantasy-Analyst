@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../api.ts';
+import { READ_RETRY_DELAYS_MS, withCpuRetry } from '../../supportRetry.ts';
 import type { SeasonCard, SeasonRow, SeasonWeekCell } from '../../../core/players/seasonWire.ts';
 import { SLEEPER_SPOKEN, sleeperClass } from '../../sleeperFallback.ts';
 
@@ -31,8 +32,8 @@ export function SeasonCardBlock({
     let live = true;
     setCard(null);
     setFailed(false);
-    api
-      .get<SeasonCard>(`/api/players/${encodeURIComponent(row.id)}/season${leagueId ? `?leagueId=${encodeURIComponent(leagueId)}` : ''}`)
+    const path = `/api/players/${encodeURIComponent(row.id)}/season${leagueId ? `?leagueId=${encodeURIComponent(leagueId)}` : ''}`;
+    withCpuRetry(() => api.get<SeasonCard>(path), { delays: READ_RETRY_DELAYS_MS })
       .then((c) => live && setCard(c))
       .catch(() => live && setFailed(true));
     return () => {
