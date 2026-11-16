@@ -466,6 +466,15 @@ const buildWeek = (w: number, label: string): Record<string, NumberRow> => {
   }
   return out;
 };
+/*
+ * Which players had a live line in each chain, per game: the "pulled lines" test. A player with lines
+ * at Saturday noon or Sunday 11 AM and none in the last look before kickoff had his lines pulled.
+ */
+const linePresence: Record<number, Record<string, Record<string, string[]>>> = {};
+for (const p of plans) {
+  const live = [...linesOf(p.chain).keys()];
+  ((linePresence[p.week] ??= {})[p.eventId] ??= {})[p.label] = live;
+}
 for (let w = FROM_WEEK; w <= currentWeek + 1; w++) {
   numbers[w] = buildWeek(w, 'kick');
   if (AS_OF_WEEKS.has(w)) {
@@ -561,6 +570,7 @@ const data = {
   transactions,
   draftRounds,
   lookTimes,
+  linePresence,
 };
 writeFileSync(outFile, JSON.stringify(data));
 console.log(`gathered: ${Object.keys(playerOut).length} players; actual weeks ${Object.keys(actual).join(',')}; projection weeks ${Object.keys(proj).join(',')}; number weeks ${Object.keys(numbers).join(',')}`);
