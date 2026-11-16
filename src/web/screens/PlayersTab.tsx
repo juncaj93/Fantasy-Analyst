@@ -1,22 +1,20 @@
 /**
- * The Players tab: today's screen, or the in-season one when the site's
- * switch says so (Round 24, `PLAYERS_INSEASON`) and the draft is over. While a
- * draft is ahead it is always today's screen, so draft mode is untouched. The
- * in-season screen is its own chunk, fetched only when it is drawn.
+ * The Players tab: the draft-mode screen while a draft is ahead, and the
+ * in-season screen (Round 24) once it is over. Draft mode is untouched. The
+ * in-season screen is its own chunk, fetched only when it is drawn. The
+ * `PLAYERS_INSEASON` switch that kept the draft-era list in season was removed
+ * in Round 34.
  */
 
 import { lazy, Suspense } from 'react';
 import type { LeagueSummary } from '../api.ts';
-import { useFeatures } from '../features.ts';
 import { SkeletonRows } from '../components/native.tsx';
 import { PlayersScreen } from './PlayersScreen.tsx';
 
 const PlayersSeasonScreen = lazy(() => import('./PlayersSeasonScreen.tsx').then((m) => ({ default: m.PlayersSeasonScreen })));
 
 export function PlayersTab({ leagues, resetNonce, draftAhead }: { leagues: LeagueSummary[]; resetNonce: number; draftAhead: boolean }) {
-  const { playersInSeason, known } = useFeatures();
-  if (!known) return <SkeletonRows rows={8} testId="players-skeleton" />;
-  if (!playersInSeason || draftAhead) return <PlayersScreen leagues={leagues} resetNonce={resetNonce} draftAhead={draftAhead} />;
+  if (draftAhead) return <PlayersScreen leagues={leagues} resetNonce={resetNonce} />;
   return (
     <Suspense fallback={<SkeletonRows rows={8} testId="players-skeleton" />}>
       <PlayersSeasonScreen leagues={leagues} resetNonce={resetNonce} />

@@ -13,7 +13,6 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { InjuryTag } from '../src/web/components/common.tsx';
-import { injuryLetter as chipLetter } from '../src/web/components/chipPicker.tsx';
 import { injuryLetter as waiverLetter } from '../src/web/waiverCard.ts';
 import { availabilityPenalty } from '../src/core/injury/startsit.ts';
 import { availabilityConfidence } from '../src/core/startsit/availabilityConfidence.ts';
@@ -35,8 +34,6 @@ describe('Doubtful reads Out everywhere in season', () => {
   });
 
   it('the Compare and Waivers chips say OUT for Doubtful and Out alike', () => {
-    expect(chipLetter('Doubtful')).toBe('OUT');
-    expect(chipLetter('Out')).toBe('OUT');
     expect(waiverLetter('Doubtful')).toBe('OUT');
     expect(waiverLetter('Out')).toBe('OUT');
   });

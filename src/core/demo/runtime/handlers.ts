@@ -32,7 +32,6 @@ import { captureDraftSnapshot } from '../../support/draftSnapshot.ts';
 /* The one player matcher, so Demo Mode searches exactly as the product does. */
 import { rankByNormalized } from '../../search/players.ts';
 import { buildMatchupResponse } from '../../matchup/build.ts';
-import { describeQuota } from '../../health/quota.ts';
 import { myGuy } from '../../draft/decisions.ts';
 import { TALLY_WEIGHT, orderPlayers } from '../../draft/playerOrder.ts';
 import { buildLiveRoster } from '../../draft/liveRoster.ts';
@@ -127,7 +126,7 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
      * background writer in the app.
      */
     /* The screens this demo was built on, said outright (Round 30: no switches means the new ones). */
-    return ok({ unlocked: false, canUnlock: false, features: { tradesScreens: 'old', preview: null } });
+    return ok({ unlocked: false, canUnlock: false, features: { preview: null } });
   }
 
   if (path === '/api/overview') return ok(overview(data));
@@ -142,18 +141,6 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
    * revision reports `demo` so a rehearsal cannot be mistaken for production.
    */
   if (path === '/api/data-health') return ok(buildDemoDataHealth(data));
-  /*
-   * The database allowance, in the one state a rehearsal can honestly be in.
-   *
-   * A demo has no Cloudflare account behind it, so the panel says it is not
-   * connected — which is the same sentence a real deployment shows before
-   * somebody makes the token, rendered by the same function. Inventing a
-   * percentage here would be putting a fabricated platform metric on the screen
-   * whose whole subject is not doing that.
-   */
-  if (path === '/api/diagnostics/d1-quota') {
-    return ok(describeQuota({ availability: 'unconfigured' }, data.clock.now()));
-  }
   if (path === '/api/diagnostics/rollover') return ok(buildDemoRollover(data));
   if (path === '/api/setup/newsletter') return ok(buildDemoSetupStatus(data).newsletter);
   if (path === '/api/newsletter/messages') return ok({ messages: [] });

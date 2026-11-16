@@ -32,7 +32,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { centreOf, exploreMarket, inSeason, pastTheSettle, stubRefreshJob, swipeSheetAway, touchDrag } from './helpers.ts';
+import { inSeason, stubRefreshJob, swipeSheetAway } from './helpers.ts';
 
 /**
  * What every pull surface on the page did while something else was happening.
@@ -213,19 +213,6 @@ async function settled(page: Page, testId: string, tries = 20) {
   }
 }
 
-async function openTrades(page: Page): Promise<void> {
-  await page.goto('/');
-  await page.getByTestId('tab-trades').click();
-  await expect(page.getByTestId('trades-pull')).toBeVisible();
-  /*
-   * With the board open, because these specs need a `trade-row` to open a sheet
-   * from and the market inventory is folded away by default. It is also the
-   * harder case for the gesture arbitration this file is about: a long page
-   * that can actually scroll, rather than a short one that cannot.
-   */
-  await exploreMarket(page);
-}
-
 /**
  * Team, standing in the season rather than mid-draft.
  *
@@ -243,30 +230,6 @@ async function openTeam(page: Page): Promise<void> {
 }
 
 test.describe('a sheet owns the gesture that dismisses it', () => {
-  /**
-   * The reported defect, on the screen it was reported from.
-   *
-   * Both halves of this fail without the fix, and the first one is the surprise:
-   * the sheet does not dismiss even in a headless engine. The pull surface
-   * engages on the same drag and calls `setPointerCapture` on itself, which
-   * takes the pointer stream away from the sheet mid-gesture — so the reader's
-   * dismissal is not merely competed with, it is confiscated. That is the
-   * physical-iPhone symptom exactly: a sheet that will not be swiped away.
-   */
-  test('Trades: pulling a player sheet down dismisses it and leaves the board alone', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await settled(page, 'sheet-grip');
-
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-    await swipeSheetAway(page, { over: '.sheet-grip' });
-
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-    expectNothingPulled(await pullsSeen(page), requests);
-  });
-
   test('Team: pulling a player sheet down dismisses it and leaves the roster alone', async ({ page }) => {
     await openTeam(page);
     await page.locator('[data-testid="starter-row"][data-starter="true"]').first().click();
@@ -307,119 +270,9 @@ test.describe('a sheet owns the gesture that dismisses it', () => {
     expectNothingPulled(await pullsSeen(page), requests);
   });
 
-  /**
-   * A sheet scrolled away from its top still hands the drag to its content.
-   *
-   * The half of the contract the fix must not have bought: suspending the page
-   * behind says nothing about who wins *inside* the sheet, and a card that
-   * cannot be read is a worse defect than one that cannot be flicked away.
-   */
-  test('content that is not at its top keeps the drag, and still nothing pulls', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await settled(page, 'sheet-grip');
-
-    // A card with more in it than fits, scrolled into, so the drag below is the content's.
-    await page.evaluate(() => {
-      const body = document.querySelector('.sheet-body') as HTMLElement;
-      const filler = document.createElement('div');
-      filler.style.height = '1200px';
-      body.append(filler);
-      body.scrollTop = 300;
-    });
-
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-    const result = await touchDrag(page, await centreOf(page, '.sheet-body'), { dy: 320, ms: 180 });
-    expect(result.claimed, 'the sheet took a drag from content that was not at its top').toBe(false);
-
-    // A dismissal that fired would still be on screen right now. See the helper.
-    await pastTheSettle(page);
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    expectNothingPulled(await pullsSeen(page), requests);
-  });
-
-  /** A sideways swipe is not a dismissal and is not a pull either. */
-  test('a sideways swipe across an open sheet moves neither', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await settled(page, 'sheet-grip');
-
-    const box = (await page.getByTestId('player-sheet').boundingBox())!;
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-    await drag(page, { x: box.x + 24, y: box.y + 140 }, { x: box.x + box.width - 24, y: box.y + 160 });
-
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    expectNothingPulled(await pullsSeen(page), requests);
-  });
 });
 
 test.describe('and gives it straight back', () => {
-  /**
-   * The gesture this whole screen relies on, with nothing open.
-   *
-   * The control for everything above it: a pull-to-refresh that never works
-   * cannot compete with anything, so without this every "nothing pulled"
-   * assertion in the suite would pass for the wrong reason.
-   */
-  test('Trades still pulls to refresh when no sheet is open', async ({ page }) => {
-    await openTrades(page);
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-
-    await pullScreen(page, 'trades-pull');
-
-    expectPulled(await pullsSeen(page));
-    await expect.poll(async () => requests.length, {
-      message: 'the pull never reached the server on a screen with nothing over it',
-    }).toBeGreaterThan(0);
-  });
-
-  test('and pulls again the moment the sheet is dismissed by gesture', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await settled(page, 'sheet-grip');
-    await swipeSheetAway(page, { over: '.sheet-grip' });
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-    await pullScreen(page, 'trades-pull');
-
-    expectPulled(await pullsSeen(page));
-    await expect.poll(async () => requests.length, {
-      message: 'the gesture never came back after a sheet was swiped away',
-    }).toBeGreaterThan(0);
-  });
-
-  /**
-   * And by the other way out, which is a different unmount path.
-   *
-   * A suspension that is released by the gesture but not by the button would be
-   * a screen the reader can permanently disable by tapping the X — the
-   * stuck-disabled state this arbitration must not be able to reach.
-   */
-  test('and pulls again after the sheet is closed by its X', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await page.getByTestId('sheet-close').click();
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-    await pullScreen(page, 'trades-pull');
-
-    expectPulled(await pullsSeen(page));
-    await expect.poll(async () => requests.length, {
-      message: 'closing a sheet with the X left the screen unpullable',
-    }).toBeGreaterThan(0);
-  });
-
   /**
    * Team's own gesture, on the screen as the demo league actually stands.
    *
@@ -482,19 +335,4 @@ test.describe('and gives it straight back', () => {
  * evidence for that.
  */
 test.describe('under touch-typed pointers', () => {
-  test('a sheet dismissal never reaches the page behind it', async ({ page }) => {
-    await openTrades(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await settled(page, 'sheet-grip');
-
-    const requests = watchRequests(page, '/api/trades');
-    await watchPulls(page);
-
-    // Touches, with touch-typed pointer events beside them, from the middle of the card.
-    await swipeSheetAway(page, { over: '.sheet-body' });
-
-    await expect(page.getByTestId('player-sheet')).toHaveCount(0);
-    expectNothingPulled(await pullsSeen(page), requests);
-  });
 });

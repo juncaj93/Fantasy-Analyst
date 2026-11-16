@@ -36,7 +36,7 @@ const DESTINATIONS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 const SCREEN_OF: Record<(typeof DESTINATIONS)[number], string> = {
   draft: 'draft-nav',
   team: 'league-card',
-  trades: 'trades-nav',
+  trades: 't2-nav',
   players: 'players-nav',
   /*
    * Settings' first screen is its three groups, not the checklist.

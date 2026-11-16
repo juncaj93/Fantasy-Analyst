@@ -176,7 +176,6 @@ describe('only the surfaces that were argued for draw a face', () => {
     'web/screens/PlayersScreen.tsx',
     'web/screens/TeamScreen.tsx',
     'web/components/playerRow.tsx',
-    'web/components/smartTrades.tsx',
   ];
 
   const web = sources('web');

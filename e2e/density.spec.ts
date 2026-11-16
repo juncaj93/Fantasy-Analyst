@@ -14,7 +14,6 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket } from './helpers.ts';
 
 async function open(page: Page, tab: 'players' | 'trades') {
   await page.getByTestId(`tab-${tab}`).click();
@@ -144,134 +143,6 @@ test.describe('the players list is a database, not a stack of cards', () => {
   });
 });
 
-test.describe('a trade suggestion is a row', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await open(page, 'trades');
-    // The board is behind `Explore the market` now — see `exploreMarket`.
-    await exploreMarket(page);
-  });
-
-  /**
-   * Three lines, not five.
-   *
-   * The card this replaced carried a name, an injury line, a three-cell table
-   * of tally windows, a trend sentence and a confidence badge — five stacked
-   * blocks, four of which filled a phone. The same five facts are a name line,
-   * a row of windows and one sentence with the confidence at the end of it.
-   */
-  test('is a row rather than a five-line card', async ({ page }) => {
-    const rows = page.getByTestId('trade-row');
-    await expect(rows.first()).toBeVisible();
-    const heights = await rows.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
-    for (const height of heights) {
-      expect(height, `a suggestion is only ${height}px tall`).toBeGreaterThanOrEqual(44);
-      expect(height, `a suggestion has grown back to ${height}px`).toBeLessThanOrEqual(96);
-    }
-  });
-
-  /**
-   * Two windows on the row, and the rest one tap in.
-   *
-   * The row carried three: Lifetime, 30d and 7d. Which two survive has now been
-   * decided twice, and the second decision reversed the first — worth writing
-   * down, because the reasoning is the useful part.
-   *
-   * The first cut kept the two recency windows and dropped Lifetime, on the
-   * argument that this screen asks *who is moving now*. The second kept 30d and
-   * Lifetime instead, on the better argument that 30d and 7d are two readings
-   * of the same thing and the shorter is mostly the noisier — whereas "moving
-   * lately" beside "has ever been worth something" are the two halves of an
-   * actual trade question. `7d` is not gone; it is in the sheet with every
-   * other window, because density is not allowed to cost a reading.
-   */
-  test('gives the two windows that answer this screen, and keeps the rest one tap in', async ({ page }) => {
-    const first = page.getByTestId('trade-row').first();
-    await expect(first).toContainText('30d');
-    await expect(first).toContainText('Life');
-    await expect(first, 'a second recency window is the same reading twice').not.toContainText('7d');
-
-    await first.click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await expect(page.getByTestId('player-page-metrics')).toContainText('7d');
-  });
-
-  /**
-   * And the case behind it rises over the list rather than replacing it.
-   *
-   * A reader who taps a name is asking a question, and the honest shape of an
-   * answer is something that comes up over what they were reading and then goes
-   * away. Pushing a page answers it by taking the board away and making them
-   * find their place again. The case arrives as context above the same four
-   * sections every other screen opens, which is what makes a player one object
-   * across the app; the page is still there, one step further in.
-   */
-  test('opens the whole case in a sheet, over the list', async ({ page }) => {
-    await page.getByTestId('trade-row').first().click();
-    const sheet = page.getByTestId('player-sheet');
-    await expect(sheet).toBeVisible();
-    const kase = page.getByTestId('trade-case');
-    await expect(kase).toBeVisible();
-    await expect(kase).toContainText('Why');
-    // One scroll rather than four segments — see `the player dossier` below.
-    await expect(page.getByTestId('player-page-snapshot')).toBeVisible();
-    // The list was never unmounted, which is the whole reason for the sheet.
-    await expect(page.getByTestId('trade-row').first()).toBeVisible();
-
-    // The deep read is offered rather than forced.
-    await page.getByTestId('player-full-profile').click();
-    await expect(page.getByTestId('player-page')).toBeVisible();
-    await page.getByTestId('back-button').click();
-    await expect(page.getByTestId('trade-row').first()).toBeVisible();
-  });
-
-  test('never scrolls sideways', async ({ page }) => {
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(overflow, `the page overflows by ${overflow}px`).toBeLessThanOrEqual(1);
-  });
-
-  /**
-   * And it can be asked again, which until now it could not.
-   *
-   * The suggestions are a server answer computed from newsletter evidence and
-   * the league's rosters — both of which move while the reader is not looking —
-   * and the only way to re-read them was to leave the tab and come back. Team,
-   * Draft, Matchup and Waivers all take the gesture already; there is no drag,
-   * no reorder and no form on this screen to compete with it.
-   */
-  test('re-reads the board when it is pulled down', async ({ page }) => {
-    // No button for it, here or anywhere: the gesture replaced those.
-    const labels = (await page.locator('button:visible').allInnerTexts()).join(' | ').toLowerCase();
-    expect(labels).not.toContain('refresh');
-
-    let asked = 0;
-    await page.route('**/api/trades*', async (route) => {
-      asked += 1;
-      await route.continue();
-    });
-
-    await page.evaluate(() => window.scrollTo(0, 0));
-    const surface = await page.getByTestId('trades-pull').boundingBox();
-    const x = surface!.x + surface!.width / 2;
-    const y = surface!.y + 40;
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    for (const dy of [12, 60, 120, 190]) {
-      await page.mouse.move(x, y + dy);
-      await page.waitForTimeout(40);
-    }
-    await expect(page.getByTestId('trades-pull')).toHaveAttribute('data-pull-state', 'armed');
-    await page.mouse.up();
-
-    await expect.poll(() => asked, { timeout: 8000 }).toBeGreaterThan(0);
-    // The surface comes back to rest, and the board is still a board.
-    await expect(page.getByTestId('trades-pull')).toHaveAttribute('data-pull-state', 'idle');
-    await expect(page.getByTestId('trade-row').first()).toBeVisible();
-  });
-});
-
 /**
  * The player himself: one dossier, the same four sections, wherever it was
  * opened from and whichever way it is framed.
@@ -359,28 +230,6 @@ test.describe('the player dossier', () => {
 
     await page.getByTestId('back-button').click();
     await expect(page.getByTestId('player-search-row').first()).toBeVisible();
-  });
-
-  /**
-   * The metrics adapt to what the screen behind actually knows.
-   *
-   * Players deals in the draft market and hands it over; Trades does not have
-   * it and never did. A page opened from Trades used to be able to print three
-   * dashes and one reading, which is a header saying nothing four times.
-   */
-  test('shows market numbers from Players and tally windows from Trades', async ({ page }) => {
-    await page.goto('/');
-    await open(page, 'players');
-    await page.getByTestId('player-search-row').first().click();
-    await expect(page.getByTestId('player-page-metrics')).toHaveAttribute('data-mode', 'market');
-    await expect(page.getByTestId('player-page-metrics')).toContainText('ADP');
-    await page.keyboard.press('Escape');
-
-    await open(page, 'trades');
-    await exploreMarket(page);
-    await page.getByTestId('trade-row').first().click();
-    await expect(page.getByTestId('player-page-metrics')).toHaveAttribute('data-mode', 'tally');
-    await expect(page.getByTestId('player-page-metrics')).toContainText('Life');
   });
 
   /**

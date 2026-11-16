@@ -26,7 +26,6 @@ import { shouldDrawDraftScreen } from './draftGate.ts';
 import { MatchupScreen } from './screens/MatchupScreen.tsx';
 import { PlayersTab } from './screens/PlayersTab.tsx';
 import { TradesTab } from './screens/TradesTab.tsx';
-import { setFeatures, type Features } from './features.ts';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 import { type TabSource as SeasonTabSource, fromOverview, recallSeasonTabs, rememberSeasonTabs, resolveSeasonTabs } from './seasonTabs.ts';
@@ -211,12 +210,10 @@ export function App() {
 
   const checkLock = useCallback(async () => {
     try {
-      const status = await api.get<{ unlocked: boolean; canUnlock: boolean; features?: Partial<Features> }>('/api/auth/status');
-      setFeatures(status.features);
+      const status = await api.get<{ unlocked: boolean; canUnlock: boolean }>('/api/auth/status');
       setUnlocked(status.unlocked);
       setCanUnlock(status.canUnlock);
     } catch {
-      setFeatures(null);
       setUnlocked(false);
     } finally {
       setReady(true);

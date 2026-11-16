@@ -25,7 +25,7 @@
       "match": "assets/*.css",
       "excludeMatch": "assets/{trades2,players2,preview}-*.css",
       "maxGzipBytes": 20000,
-      "why": "Render-blocking, so it is worse per byte than the JavaScript. Today ~7.7KB."
+      "why": "Render-blocking, so it is worse per byte than the JavaScript. 19.3KB before Round 34 (16 November 2026) took the retired Trades screens' rules and other dead styles out; ~17.5KB after."
     },
     {
       "name": "HTML shell",
@@ -56,18 +56,18 @@
       "why": "The Draft screen and the mock draft behind it. `App.tsx` reaches them only through `lazy()`, and draws the screen only while `draftVisible` holds (see `web/draftGate.ts`), so outside the few weeks before a draft no page load fetches this at all. Split out of the entry chunk on 24 September 2026, which took ~14KB off every page load; it is budgeted here rather than excluded, for the same reason Demo Mode is. Today ~20.0KB, with the two small chunks it used to share with Demo Mode now folded into it. Anything the Draft screen shares with another screen stays in the entry chunk, which is correct: it is the other screen's cost."
     },
     {
-      "name": "Rebuilt Trades screens, fetched only when the switch is on (gzipped)",
+      "name": "Trades screens, fetched when the Trades tab is first drawn (gzipped)",
       "match": "assets/trades2-*.{js,css}",
       "excludeSuffix": ".map",
       "maxGzipBytes": 8000,
-      "why": "Round 19: Offers, Build and Check, rebuilt behind the TRADES_SCREENS switch. `TradesTab` reaches them only through `lazy()` when the switch is on, so with it off (the live site until Alex approves) no page load fetches them. Their stylesheet ships with them so the render-blocking sheet does not grow. Today ~4.9KB (JS and CSS). When the switch is flipped for good, the old Trades screens can go and their bytes come back to the main chunk's headroom."
+      "why": "Round 19: Offers, Build and Check, rebuilt behind the TRADES_SCREENS switch. `TradesTab` reaches them only through `lazy()` when the switch is on, so with it off (the live site until Alex approves) no page load fetches them. Their stylesheet ships with them so the render-blocking sheet does not grow. Today ~4.9KB (JS and CSS). Round 34 (16 November 2026) removed the old Trades screens and the TRADES_SCREENS switch: `TradesTab` now always draws these, still through `lazy()`, and the entry chunk went from 124.6KB to ~112KB."
     },
     {
-      "name": "In-season Players tab, fetched only when the switch is on (gzipped)",
+      "name": "In-season Players tab, fetched once the draft is over (gzipped)",
       "match": "assets/players2-*.{js,css}",
       "excludeSuffix": ".map",
       "maxGzipBytes": 6000,
-      "why": "Round 24: Players in season (Value sort, Trade targets and Injured filters, the fuller card), behind the PLAYERS_INSEASON switch. `PlayersTab` reaches it only through `lazy()` when the switch is on and the draft is over, so with it off no page load fetches it. Its stylesheet ships with it so the render-blocking sheet does not grow."
+      "why": "Round 24: Players in season (Value sort, Trade targets and Injured filters, the fuller card), behind the PLAYERS_INSEASON switch. `PlayersTab` reaches it only through `lazy()` when the switch is on and the draft is over, so with it off no page load fetches it. Its stylesheet ships with it so the render-blocking sheet does not grow. Round 34 removed the switch: `PlayersTab` draws it whenever no draft is ahead."
     },
     {
       "name": "Trades preview shell, built only for the preview upload (gzipped)",
@@ -158,13 +158,8 @@
       "src/core/startsit/expectedMarkets.ts",
       "src/core/startsit/projection.ts",
       "src/core/startsit/sleeperLineup.ts",
-      "src/core/startsit/tiebreak.ts",
       "src/core/startsit/weekCard.ts",
       "src/core/startsit/weekPoints.ts",
-      "src/core/trades/activity.ts",
-      "src/core/trades/builderResponse.ts",
-      "src/core/trades/category.ts",
-      "src/core/trades/seasonCheck.ts",
       "src/core/vegas/marketLabel.ts",
       "src/core/waivers/board.ts",
       "src/core/waivers/noMove.ts",
