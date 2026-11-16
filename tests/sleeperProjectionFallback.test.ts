@@ -452,8 +452,8 @@ describe('the weekly card quotes it and names it', () => {
    */
   it('shows the published figure, with the same nudges as the row, and marks it as published', () => {
     const e = { ...base, ...evaluation({ score: 3.15 }) };
-    const card = buildWeeklyCard(e, { starting: true, published: 20.98 });
     const row = decisionPoints(e, new Map([['qb1', 20.98]]))!;
+    const card = buildWeeklyCard({ ...e, decision: row }, { starting: true, published: 20.98 });
     expect(row.basis).toBe('published');
     expect(card.score).toBe(Math.max(0, Math.round(row.points * 100) / 100));
     expect(card.projectionSource).toBe('sleeper');
@@ -461,8 +461,9 @@ describe('the weekly card quotes it and names it', () => {
 
   it('prefers the market and marks it as ours', () => {
     const e = { ...base, ...evaluation({ score: 12.4, market: 13.9 }) };
-    const card = buildWeeklyCard(e, { starting: true, published: 20.98 });
-    expect(card.score).toBe(decisionPoints(e, new Map([['qb1', 20.98]]))!.points);
+    const row = decisionPoints(e, new Map([['qb1', 20.98]]))!;
+    const card = buildWeeklyCard({ ...e, decision: row }, { starting: true, published: 20.98 });
+    expect(card.score).toBe(row.points);
     expect(card.projectionSource).toBe('market');
   });
 

@@ -516,7 +516,9 @@ export async function buildMatchupResponse(
     const usageWeeks = inputById.get(player.playerId)?.usageWeeks ?? [];
     const advanced =
       usageWeeks.length === 0 ? [] : advancedLines(assessXfp(evaluation.position, usageWeeks, profile));
-    cards[player.playerId] = buildWeeklyCard(advanced.length > 0 ? { ...evaluation, advanced } : evaluation, {
+    /* The decision number the rows print (Round 31), attached so the card prints it too. */
+    const decided = { ...evaluation, decision: decisionPoints(evaluation, published) };
+    cards[player.playerId] = buildWeeklyCard(advanced.length > 0 ? { ...decided, advanced } : decided, {
       starting: player.starting,
       slot: player.slot ? labelOf(player.slot) : null,
       alreadyStarting: player.starting,

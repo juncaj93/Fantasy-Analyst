@@ -36,7 +36,7 @@
  */
 
 import { weeklyProjection, type ProjectionSource } from './projection.ts';
-import { decisionPoints, type DecisionPoints } from './decisionPoints.ts';
+import type { DecisionPoints } from './decisionPoints.ts';
 import { weekPointsBeforeStatus } from './weekPoints.ts';
 import { marketLabel } from '../vegas/marketLabel.ts';
 
@@ -141,8 +141,9 @@ export interface WeeklyEvaluationLike {
   /** The sensitivity pass, when it exists. Sentences, already written. */
   whatWouldChange?: string[];
   /**
-   * The decision number the server already made (Team's evaluations carry it).
-   * When absent the card makes it with the same function, `decisionPoints`.
+   * The decision number the server already made (`decisionPoints`): Team's
+   * evaluations carry it, and Matchup's build attaches it before making cards.
+   * Read, never recomputed here, so the browser's first download stays small.
    */
   decision?: DecisionPoints | null;
 }
@@ -359,7 +360,7 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
  * opened it printed the decision number (market plus news, usage and matchup
  * nudges), so Nico Collins read 16.2 on his row and 17.3 on his card. Both now
  * read `decisionPoints`, the one function behind Team, Compare, Matchup's rows,
- * Waivers and the Players card. A ruled-out player keeps the number before his
+ * Waivers and the Players card, as the server attached it. A ruled-out player keeps the number before his
  * status, as the row's "if he played" figure does. Only when there is no
  * decision number (a partial market with nothing published, or no market at
  * all) does the card fall back to the projection ladder, as before.
@@ -368,9 +369,7 @@ function cardNumber(
   evaluation: WeeklyEvaluationLike,
   published: number | null,
 ): { points: number | null; source: ProjectionSource | null } {
-  const decision =
-    evaluation.decision ??
-    decisionPoints(evaluation, published == null ? undefined : new Map([[evaluation.playerId, published]]));
+  const decision = evaluation.decision;
   if (decision && (decision.basis === 'market' || decision.basis === 'published')) {
     const points = evaluation.ruledOut ? (weekPointsBeforeStatus({ ...evaluation, decision }) ?? 0) : decision.points;
     return { points: Math.max(0, Math.round(points * 100) / 100), source: decision.basis === 'market' ? 'market' : 'sleeper' };
