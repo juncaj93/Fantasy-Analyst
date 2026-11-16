@@ -12,7 +12,7 @@ Files in this folder:
 
 ## What the app is like to use
 
-- **It answers the right questions fast.** Team opens on the pick with one reason, every row has a number, and Waivers, Trades and Players each lead with a recommendation. Underneath, one shared formula feeds Team, Compare, the Players card and Waivers' this-week figure, and in production they matched to the cent for every player checked.
+- **It answers the right questions fast.** Team opens on the pick with one reason, every row has a number, and Waivers, Trades and Players each lead with a recommendation. Underneath, one shared formula feeds Team, Compare, the Players card and Waivers' pickup check, and in production they matched to the cent for every player checked.
 - **It trips over itself in the details.** The card behind a row prints a different number (up to 1.1 points off) and can say "Bench this week" for the player the row says to start. Matchup's card follows Sleeper's lineup, not the app's. A Doubtful player reads "D", "OUT", "Out" or "who is Out" depending on the screen.
 - **It still talks too much.** Every player card carries a "Not known yet" line and a confidence caption; Matchup shows a model name and "4,000 simulated afternoons"; Setup has 60-plus help sentences.
 - **Game day is its weak spot.** Odds are fresh (about 12 minutes old at kickoff), but a late scratch in a 4 PM, night or Thursday game is never seen before kickoff, and at 11 AM Sunday the Sleeper injury statuses are 31 hours old.
@@ -24,7 +24,7 @@ Files in this folder:
 | # | Finding | Cost | Reward |
 |---|---|---|---|
 | 1 | Three unit tests read the calendar year; from 1 January they fail and block every deploy. Week 17 is Sunday 3 January. | 0.5 h | High (insurance) |
-| 2 | During games, Waivers' "Do this" and Team's Best move can say to drop a starter whose game is over for a later-game pickup Sleeper will refuse. Live, Sunday 11:51 PM: "add Quentin Johnston, drop Hunter Henry, +1.5", with all ten starters locked. | 1 to 2 h | High |
+| 2 | During games, Waivers' "Do this" and Team's Best move can say to drop a starter whose game is over for a later-game pickup Sleeper will refuse. Live, Sunday 11:51 PM: "add Quentin Johnston, drop Hunter Henry, +1.5", with every one of Alex's starters already played. | 1 to 2 h | High |
 | 3 | Team's bench card says "Bench this week" for the player the row and Best move say to start. | 1 to 2 h | High |
 | 4 | One failed status read silently puts Alex back on the retired Trades and Players screens for the session. | 0.5 to 1 h | Medium |
 | 5 | Say it once, plainly: Doubtful reads OUT on Matchup and four ways in all; every card carries a "Not known yet" disclaimer; developer text shows on Matchup, Data health and Review. | 1 to 2 h | Medium |
@@ -57,7 +57,7 @@ Just below the ten: tight ends are overvalued by 2.1 points a game on recent wee
 
 Production, Sunday 11:51 PM (week 10, only Monday night's game left), one burst of reads inside 12 seconds with the odds clock unchanged before and after. The 20 players: Alex's 12 starters and bench players with a number this week, and the 8 free agents Waivers and Compare put forward. Compare needs the passphrase, so its answers were rebuilt with the app's own code from the Matchup snapshot's inputs (no IR flag and Team's mode, as the live Compare route does). A second pass rebuilt Team and Compare as of 12:45 PM Sunday, before the main slate locked, to compare picks without game-lock noise.
 
-**Short answer.** The numbers agree where they are computed: one shared formula, identical to the cent on Team, Compare, the Players card and Waivers. They disagree in what Alex sees, six ways.
+**Short answer.** The numbers agree where they are computed: one shared formula, identical to the cent on Team, Compare, the Players card and Waivers' pickup check. They disagree in what Alex sees, six ways.
 
 | Player | Status | Team row | Card on tap | Compare | Players card | Matchup (live) | Waivers (week 11) | Season value: Players / Trades |
 |---|---|---|---|---|---|---|---|---|
@@ -86,7 +86,7 @@ Production, Sunday 11:51 PM (week 10, only Monday night's game left), one burst 
 
 | # | Mismatch | Screens and values | Cause |
 |---|---|---|---|
-| A1 | The card behind a row prints a different number | Team row and Matchup row vs the card each opens, all 13 priced players on Alex's roster: Collins 16.2 vs 17.3, JSN 16.4 vs 15.4, Bijan 17.0 vs 17.5, Emmett Johnson 15.3 vs 14.9; Kenneth Walker (Out) "Out (16.9 if he played)" vs 15.9 | The row prints the decision number (market plus news, usage and matchup nudges); the card prints the bare market or Rotowire figure (`core/startsit/weekCard.ts:320-337`) |
+| A1 | The card behind a row prints a different number | Team row vs the card it opens (Matchup opens the same card), all 13 priced players on Alex's roster: Collins 16.2 vs 17.3, JSN 16.4 vs 15.4, Bijan 17.0 vs 17.5, Emmett Johnson 15.3 vs 14.9; Kenneth Walker (Out) "Out (16.9 if he played)" vs 15.9 | The row prints the decision number (market plus news, usage and matchup nudges); the card prints the bare market or Rotowire figure (`core/startsit/weekCard.ts:320-337`) |
 | A2 | The top waiver move breaks the lock rule | Waivers "Do this" and Team's Best move: add Quentin Johnston (Monday night), drop Hunter Henry, "Starts this week: +1.5 pts", with all of Alex's starters locked. Rest-of-season gain of the move: +0.01 | The pickup's drop is taken out of the lineup before it is solved, even when he is a locked starter (`core/waivers/pickupStart.ts:255-257`; the drop comes from `core/waivers/assemble.ts:761-765`) |
 | A3 | The pick vs the card | Pre-kickoff, Team leans McConkey over Omar Cooper Jr. (a toss-up); McConkey's bench card says "Bench this week" | Every bench row opens its card with `starting: false` (`TeamScreen.tsx:666`) |
 | A4 | One trade, two verdicts | Offer card "Close: small gain for them" vs Check a trade "Good for you" for the same deal (give Jordan Love and Nico Collins for D'Andre Swift). The other two offers matched ("Fair" both times) | The offer label comes from the finder's close-deal labels, Check's word from `core/trades/verdict.ts` |
@@ -103,7 +103,7 @@ Data: Round 16's file for weeks 1 to 7, and this round's (`round29-data.json`) f
 
 | Decision | Weeks 8 to 10 | Round 16 | What moved |
 |---|---|---|---|
-| Start/sit: the app's lineup vs Alex's | The same lineup every week apart from 2 toss-ups: week 8, Makai Lemon over Omar Cooper Jr. (+8.7 for the app); week 10, McConkey over Cooper (Monday night). No disagreement past the toss-up bar | Weeks 3 to 7: 3 toss-up differences, all went Alex's way (-14.8) | Nothing to fix: the app and Alex agree |
+| Start/sit: the app's lineup vs Alex's | The same lineup every week apart from 2 toss-ups: week 8, Makai Lemon over Omar Cooper Jr. (the app's lean scored 8.7 more); week 10, McConkey over Cooper (Monday night). No disagreement past the toss-up bar | Weeks 3 to 7: 3 toss-up differences, all went Alex's way (-14.8) | Nothing to fix: the app and Alex agree |
 | Toss-up bar | A lead of 0 to 1 point won 52% of the time, 1 to 2: 55%, 2 to 3: 62%, 3 to 5: 67%, 5 or more: 72% (weeks 1 to 10) | 51, 55, 59, 67, 72 | Unchanged: the 2.0 bar holds |
 | Minus 1 for a number with no Vegas line | Best-fit discount 0.94 points (range 0.40 to 1.49) | 0.94 | Unchanged: Round 17's minus 1 holds |
 | Season value (75/25) | Miss 5.62 points a game against 5.58 for projection only (inside the noise); season average only +0.50, last 3 games +0.90 | 50/50 4.12; 75/25 3.86 on the same data | The blend Alex chose is as good as the best rule. Tight ends are overvalued by 2.1 a game (Round 16: 1.2); quarterbacks by 0.9 |
