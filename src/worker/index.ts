@@ -508,13 +508,23 @@ export default {
               now: new Date(event.scheduledTime ?? Date.now()),
             };
             await weekPoints.refreshRecent(weekOpts);
+            /*
+             * Round 32: the weeks the screens plan on follow the app's week
+             * (`core/season/appWeek.ts`), not Sleeper's. From Tuesday 3 AM to
+             * Wednesday evening Sleeper still says last week, so the planner's
+             * third week ahead was missing and the season row stopped a week
+             * short on waiver night. The transactions and recent points above
+             * keep Sleeper's own week: those ask Sleeper about its week.
+             */
+            const appWeekNow = (await readAppNflState(env.DB, weekOpts.now))?.week ?? weekOpts.week;
+            const planOpts = { ...weekOpts, week: appWeekNow };
             /* The waiver planner's later weeks: at most three Sleeper calls, each behind a twelve-hour gate. */
-            await weekPoints.refreshAheadWeeks(weekOpts);
+            await weekPoints.refreshAheadWeeks(planOpts);
             /*
              * The season's points, one row, for the drop score: one row read on most
              * runs, a rebuild every twelve hours, at most four missing weeks fetched.
              */
-            await weekPoints.refreshSeasonPoints(weekOpts).catch((err: unknown) => console.error('season points failed', err));
+            await weekPoints.refreshSeasonPoints(planOpts).catch((err: unknown) => console.error('season points failed', err));
             /* The rivals' earlier seasons, once, from the stored ledger: one row read on every later run. */
             await new ManagerIntelService(env.DB).ensureRivalHistory(selected.id).catch((err: unknown) => console.error('rival history failed', err));
             /* This league's draft rounds, cached once for the draft-capital protection. */

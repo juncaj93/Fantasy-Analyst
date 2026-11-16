@@ -217,7 +217,9 @@ test.describe('the tiers the deployment computes', () => {
   });
 
   test('open on "Do this", and every move says why in one line', async ({ page }) => {
-    await expect(page.getByTestId('waivers-recommended-title')).toHaveText('Do this');
+    /* Round 32: the week a claim plays, as a bare label beside the title. */
+    await expect(page.getByTestId('waivers-recommended-title')).toHaveText(/^Do this\s*Week \d+$/);
+    await expect(page.getByTestId('waivers-week')).toHaveText(/^Week \d+$/);
     const rows = page.getByTestId('waiver-tier-row');
     await expect(rows.first()).toBeVisible();
     for (const row of await rows.all()) {
