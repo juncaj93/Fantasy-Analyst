@@ -94,7 +94,7 @@ export function availabilityPenalty(state: InjuryState): AvailabilityAssessment 
       points: rule.charge,
       gate: true,
       display: describe(state),
-      note: `${label(state)} — not a playable starter.`,
+      note: `${label(state)}, not a playable starter.`,
     };
   }
 
@@ -127,9 +127,10 @@ function describe(state: InjuryState): string {
   return parts.join(' · ');
 }
 
+/* Doubtful counts as Out this week, so it reads Out (Round 30). */
 function label(state: InjuryState): string {
   return (
-    { questionable: 'Questionable', doubtful: 'Doubtful', out: 'Out', ir: 'On IR', pup: 'On PUP', suspended: 'Suspended' }[
+    { questionable: 'Questionable', doubtful: 'Out', out: 'Out', ir: 'On IR', pup: 'On PUP', suspended: 'Suspended' }[
       state.designation as 'questionable' | 'doubtful' | 'out' | 'ir' | 'pup' | 'suspended'
     ] ?? 'Designated'
   );

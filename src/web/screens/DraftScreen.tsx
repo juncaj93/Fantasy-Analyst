@@ -2309,7 +2309,7 @@ export function RecommendationRow({
           */}
           <span className="player-row-meta">
             <CompactTally net={rec.newsLifetimeNet} label="Lifetime research tally" />
-            <InjuryTag status={rec.status} />
+            <InjuryTag status={rec.status} draft />
           </span>
           {/*
             The star's slot, alone on the trailing edge — and the star itself is

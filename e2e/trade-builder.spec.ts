@@ -274,7 +274,8 @@ test.describe('build a trade: one screen', () => {
     await expect(johnson.locator('.pick-chip-team')).toHaveText('ATL');
     await expect(mine(page).filter({ hasText: 'B. Robinson' }).getByTestId('pick-chip-hurt')).toHaveText('Q');
     await expect(mine(page).filter({ hasText: 'J. Burrow' }).getByTestId('pick-chip-hurt')).toHaveText('IR');
-    await expect(mine(page).filter({ hasText: 'E. Egbuka' }).getByTestId('pick-chip-hurt')).toHaveText('D');
+    /* Doubtful counts as Out, and its chip says so (Round 30). */
+    await expect(mine(page).filter({ hasText: 'E. Egbuka' }).getByTestId('pick-chip-hurt')).toHaveText('OUT');
     /* Grouped by position: quarterbacks first. */
     await expect(mine(page).first().locator('.pick-chip-pos')).toHaveText('QB');
   });

@@ -146,7 +146,7 @@ export function describeQuota(
       state: 'unknown',
       headline: unconfigured ? 'Not connected' : 'Could not be read',
       detail: unconfigured
-        ? 'Cloudflare can report how much of the daily database allowance today has used, but this deployment has no analytics token to ask with. See docs/DATA_HEALTH.md.'
+        ? 'Cloudflare can report how much of the daily database allowance today has used, but this site is not connected to that report.'
         : (input.reason ?? 'Cloudflare did not answer, or answered in a shape this app does not recognize.'),
       percentUsed: null,
       projectedPercent: null,

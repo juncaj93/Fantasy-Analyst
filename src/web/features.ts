@@ -19,17 +19,31 @@ export interface Features {
   known: boolean;
 }
 
-let current: Features = { tradesScreens: 'old', preview: null, playersInSeason: false, known: false };
+/**
+ * The screens Alex uses today (both switches on since 12 and 13 November).
+ *
+ * Kept when `/api/auth/status` fails or answers with no switches at all
+ * (Round 30, audit C2): one failed read used to put him back on the retired
+ * Trades and Players screens for the whole session, with no message. A server
+ * that answers sets them as it says: `tradesScreens: 'old'` and an absent
+ * `playersInSeason` still mean off.
+ */
+const CURRENT_SCREENS = { tradesScreens: 'new', playersInSeason: true } as const;
+
+let current: Features = { ...CURRENT_SCREENS, preview: null, known: false };
 const listeners = new Set<() => void>();
 
-/** Record the switches. Null (no answer, or an older server): today's screens, and known. */
+/** Record the switches. Null (no answer, or no switches in it): the current screens, and known. */
 export function setFeatures(next: Partial<Features> | null | undefined): void {
-  const merged: Features = {
-    tradesScreens: next?.tradesScreens === 'new' ? 'new' : 'old',
-    preview: next?.preview === 'trades' ? 'trades' : next?.preview === 'players' ? 'players' : null,
-    playersInSeason: next?.playersInSeason === true,
-    known: true,
-  };
+  const merged: Features =
+    next == null
+      ? { ...CURRENT_SCREENS, preview: null, known: true }
+      : {
+          tradesScreens: next.tradesScreens === 'new' ? 'new' : 'old',
+          preview: next.preview === 'trades' ? 'trades' : next.preview === 'players' ? 'players' : null,
+          playersInSeason: next.playersInSeason === true,
+          known: true,
+        };
   if (
     merged.tradesScreens === current.tradesScreens &&
     merged.preview === current.preview &&
@@ -50,4 +64,9 @@ export function useFeatures(): Features {
     () => current,
     () => current,
   );
+}
+
+/** What the screens read right now (for tests and non-React callers). */
+export function currentFeatures(): Features {
+  return current;
 }

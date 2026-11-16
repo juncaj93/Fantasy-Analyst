@@ -262,6 +262,12 @@ export interface TierRequest {
    */
   startNow?: ReadonlyMap<string, StartNowCall> | undefined;
   /**
+   * Alex's players whose game this week has started or finished (Round 30).
+   * A this-week move (pick up and start, or a tie) never names one of them as
+   * its drop: Sleeper will not cut him until the week rolls over. Absent: none.
+   */
+  played?: ReadonlySet<string> | undefined;
+  /**
    * Rest of season (review round 6, W3, W4, W9). With it, `weeks` runs to the
    * end of the league's playoffs and `weights` are the season weights (a
    * playoff week 1.5), the first {@link TierSeason.near} weeks are the near
@@ -292,6 +298,12 @@ export interface StartNowCall {
   gain: number;
   /** Whom he ties or passes in that lineup. */
   displaces: string | null;
+  /**
+   * The drop the call was measured with, or null for none named (an open
+   * spot, or Alex picks). The "Do this" row uses the same one, so Team and
+   * Waivers name the same player. Absent: no constraint.
+   */
+  drop?: string | null;
 }
 
 export interface TierPreference {
@@ -969,6 +981,20 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
    */
   const candidateOf = (m: TierMove) => candidates.find((c) => c.playerId === m.playerId)!;
   const shown = [...doThese, ...consider];
+  /*
+   * A this-week move takes its drop from players who have not played yet
+   * (Round 30), and the very drop the pickup call was measured with when it
+   * named one, so the row and Team's Best move say the same thing.
+   */
+  const played = request.played ?? new Set<string>();
+  const thisWeek = (m: TierMove) => m.reasonCode === 'start_now' || m.reasonCode === 'start_tie';
+  for (const m of shown) {
+    if (!thisWeek(m)) continue;
+    const unplayed = (options.get(m.playerId) ?? []).filter((o) => o.drop == null || !played.has(o.drop.playerId));
+    const want = startNow.get(m.playerId)?.drop;
+    const named = want ? unplayed.filter((o) => o.drop?.playerId === want) : [];
+    options.set(m.playerId, named.length > 0 ? named : unplayed);
+  }
   const choice = assignDrops(
     shown.map((m) => ({
       id: m.playerId,
@@ -990,7 +1016,8 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     const list = options.get(m.playerId) ?? [];
     const option = index == null ? null : list[index];
     if (!option) return false;
-    if (option !== list[0]) {
+    /* Rebuilt whenever the option is not the one the move was first valued on (its drop differs). */
+    if ((option.drop?.playerId ?? null) !== (m.drop?.playerId ?? null) || (option.viaReserve === true) !== (m.drop?.viaReserve === true)) {
       const replaced = moveFor(candidateOf(m), option, base);
       Object.assign(m, {
         ...replaced,
@@ -1064,7 +1091,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     if ((signals && isHole(m)) || m.reasonCode === 'start_now' || m.reasonCode === 'start_tie') {
       m.drop = null;
       m.dropCost = null;
-      m.needsSpot = spotCandidates(new Set(used.keys()));
+      m.needsSpot = spotCandidates(new Set([...used.keys(), ...(thisWeek(m) ? played : [])]));
       continue;
     }
     if (m.tier === 'consider' && !isHole(m)) {
@@ -1101,7 +1128,7 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
     if (m.reasonCode === 'start_tie') {
       m.drop = null;
       m.dropCost = null;
-      m.needsSpot = spotCandidates(new Set(used.keys()));
+      m.needsSpot = spotCandidates(new Set([...used.keys(), ...played]));
       continue;
     }
     consider.splice(consider.indexOf(m), 1);
@@ -1164,7 +1191,9 @@ export function planWaiverTiers(request: TierRequest): WaiverTierPlan {
   if (signals) {
     for (const m of [...doThese, ...consider]) {
       if (m.needsSpot && m.needsSpot.length > 0) m.bestDrops = m.needsSpot;
-      else if (m.drop && !m.drop.viaReserve) m.bestDrops = [spotChoice(m.drop.playerId), ...spotCandidates(new Set(used.keys()))].slice(0, 3);
+      else if (m.drop && !m.drop.viaReserve) {
+        m.bestDrops = [spotChoice(m.drop.playerId), ...spotCandidates(new Set([...used.keys(), ...(thisWeek(m) ? played : [])]))].slice(0, 3);
+      }
     }
   }
 
@@ -1596,7 +1625,7 @@ function injuryWord(designation: string): string {
     case 'suspended':
       return 'suspended';
     case 'doubtful':
-      return 'Doubtful';
+      return 'Out';
     case 'questionable':
       return 'Questionable';
     default:

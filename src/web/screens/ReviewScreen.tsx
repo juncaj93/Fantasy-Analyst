@@ -208,7 +208,7 @@ export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onB
           <>
             <div className="btn-row" style={{ margin: '0 2px 10px' }}>
               <button className="btn btn-sm" onClick={() => void acceptAllHighConfidence()}>
-                Accept all non-mixed ≥0.6 confidence
+                Accept all clear items
               </button>
             </div>
             {evidence.map((item) => (

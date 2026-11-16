@@ -27,7 +27,7 @@
  * if they were undone.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDb } from './helpers/db.ts';
 import { countingDb } from './helpers/countingDb.ts';
 import { player } from './helpers/players.ts';
@@ -36,8 +36,19 @@ import { UsageRepo, type StoredUsageWeek } from '../src/server/repos/usage.ts';
 import { UsageService, forgetUsageDerivations } from '../src/server/services/usageService.ts';
 import { startSitInputsFor } from '../src/server/services/startSitInputs.ts';
 import type { Database } from '../src/server/db.ts';
+import { WEEK_17_EVE, seasonOn } from './helpers/season.ts';
 
-const SEASON = String(new Date().getUTCFullYear());
+/*
+ * The whole file runs on the eve of week 17. Seeding under today's calendar
+ * year broke it every 1 January, when the app still reads last year's season.
+ */
+const SEASON = seasonOn(WEEK_17_EVE);
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: WEEK_17_EVE });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 const TEAMS = ['KC', 'BUF', 'SF', 'DAL', 'PHI', 'MIA', 'BAL', 'CIN'];
 const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 

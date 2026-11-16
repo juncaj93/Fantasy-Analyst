@@ -12,6 +12,7 @@ import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { UsageRepo } from '../src/server/repos/usage.ts';
 import { LeagueRepo } from '../src/server/repos/league.ts';
 import { createTestDb } from './helpers/db.ts';
+import { WEEK_17_EVE, onDate, seasonOn } from './helpers/season.ts';
 
 function makeEnv(db: NodeSqliteDatabase, overrides: Partial<AppEnv> = {}): AppEnv {
   return {
@@ -811,7 +812,10 @@ describe('API with seeded data', () => {
     expect(after.bench.map((e) => e.playerId)).toContain(moved);
   });
 
-  it('carries expected points on the lineup once usage exists for a player', async () => {
+  it('carries expected points on the lineup once usage exists for a player', () =>
+    // Pinned to the eve of week 17: seeding under today's calendar year broke
+    // this test every 1 January, when the app still reads last year's season.
+    onDate(WEEK_17_EVE, async () => {
     /*
      * The weekly card's `advanced` slot, end to end.
      *
@@ -820,7 +824,7 @@ describe('API with seeded data', () => {
      * asserted is that the endpoint reads what is stored and attaches it, which
      * needs a player who has some.
      */
-    const season = String(new Date().getUTCFullYear());
+    const season = seasonOn(WEEK_17_EVE);
     await new UsageRepo(db).saveWeeks(
       Array.from({ length: 7 }, (_, i) => ({
         playerId: '1001',
@@ -859,7 +863,7 @@ describe('API with seeded data', () => {
     // And a player with no stored usage carries nothing rather than a zero.
     const untouched = [...body.starters, ...body.bench].find((e) => e.playerId !== '1001');
     expect(untouched?.advanced ?? []).toEqual([]);
-  });
+    }));
 
   it('serves the lineup without a session, but still refuses writes', async () => {
     // Fantasy data is public by design; nothing here should need unlocking.

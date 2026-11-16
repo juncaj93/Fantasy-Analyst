@@ -50,7 +50,7 @@ export const AVAILABILITY_POLICY: Record<Designation, { fromNow: number[]; after
   healthy: { fromNow: [], after: 1, note: null },
   unknown: { fromNow: [], after: 1, note: null },
   questionable: { fromNow: [], after: 1, note: 'Questionable this week' },
-  doubtful: { fromNow: [], after: 1, note: 'Doubtful this week' },
+  doubtful: { fromNow: [], after: 1, note: 'Out this week' },
   out: { fromNow: [0, 0.5], after: 1, note: 'Out; no return date, counted as about two weeks' },
   ir: { fromNow: [0, 0, 0, 0], after: 0.85, note: 'On injured reserve; no return date, counted out four weeks' },
   pup: { fromNow: [0, 0, 0, 0], after: 0.85, note: 'On PUP; no return date, counted out four weeks' },

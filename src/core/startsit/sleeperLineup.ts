@@ -378,6 +378,28 @@ export function verdictSubjectId(row: {
   return row.currentPlayerId ?? row.recommendedPlayerId;
 }
 
+/**
+ * The row that says to start a player Sleeper has on the bench, or null.
+ *
+ * A `swap` row names him as the man to start instead; a `fill` row puts him in
+ * a slot Sleeper left empty. The bench card reads this so it says what the row
+ * says (Round 29 audit, A3): every bench card used to open as "Bench this
+ * week", including the one for the player the QB row had just told Alex to
+ * start. No rule of its own: the rows are the decision.
+ */
+export function rowStartingFromBench<
+  T extends { verdict: SlotVerdict; currentPlayerId: string | null; recommendedPlayerId: string | null },
+>(rows: readonly T[], playerId: string): T | null {
+  return (
+    rows.find(
+      (r) =>
+        r.recommendedPlayerId === playerId &&
+        r.currentPlayerId !== playerId &&
+        (r.verdict === 'swap' || r.verdict === 'fill'),
+    ) ?? null
+  );
+}
+
 function verdictFor(
   currentPlayerId: string | null,
   recommendedPlayerId: string | null,

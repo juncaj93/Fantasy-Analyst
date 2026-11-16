@@ -98,7 +98,10 @@ export interface PickupStartRequest {
   pickup: Readonly<Record<string, PickupState>>;
   /** Free bench spots. Zero: every add needs a drop. */
   openSpots: number;
-  /** The waiver planner's drop for this add, or null when no honest drop is left. */
+  /**
+   * The waiver planner's drop for this add, or null when no honest drop is
+   * left. Never somebody whose game has kicked off: a locked drop is ignored.
+   */
   dropFor?: (playerId: string) => PickupDrop | null;
   /**
    * With a full roster and no honest drop: the planner's cheapest bench
@@ -239,6 +242,15 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
   const ownedSolvable = owned.map((p) => solvable(p, p.locked, p.locked && current.has(p.playerId)));
   const baseline = solveLineup(ownedSolvable, request.shape);
   const byId = new Map(request.roster.map((p) => [p.playerId, p] as const));
+  /*
+   * A player whose game has started or finished is never the drop for a
+   * pickup this week (Round 30): Sleeper will not cut him until the week
+   * rolls over, and taking a played starter out of the lineup before it is
+   * solved invents a gain. Live, Sunday 15 November 11:51 PM: "add Quentin
+   * Johnston, drop Hunter Henry, +1.5" with Henry's game long over. The
+   * caller passes the next-best drop who has not played; this is the guard.
+   */
+  const played = (id: string | undefined) => id != null && byId.get(id)?.locked === true;
 
   const audit: PickupStartPlan['audit'] = [];
   const moves: PickupStartMove[] = [];
@@ -252,7 +264,8 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
      * free agent's gain, whatever stops him.
      */
     const full = request.openSpots <= 0;
-    const drop = full ? (request.dropFor?.(c.playerId) ?? null) : null;
+    const named = full ? (request.dropFor?.(c.playerId) ?? null) : null;
+    const drop = named && !played(named.playerId) ? named : null;
     const pool = ownedSolvable.filter((p) => p.playerId !== drop?.playerId);
     const withHim = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c)], request.shape);
     const forced = c.points == null || c.ruledOut ? null : solveLineup([...pool, solvable(c, true)], request.shape);
@@ -286,7 +299,9 @@ export function planPickupStart(request: PickupStartRequest): PickupStartPlan {
      * picks. With nobody left to offer, no call.
      */
     const pickDrop = full && drop == null
-      ? (request.spotChoices?.(c.playerId) ?? []).filter((x) => !withHim.starterIds.has(x.playerId) && !forced.starterIds.has(x.playerId)).slice(0, 3)
+      ? (request.spotChoices?.(c.playerId) ?? [])
+          .filter((x) => !played(x.playerId) && !withHim.starterIds.has(x.playerId) && !forced.starterIds.has(x.playerId))
+          .slice(0, 3)
       : null;
     if (pickDrop != null && pickDrop.length === 0) {
       audit.push({ ...row, status: 'no_drop' });

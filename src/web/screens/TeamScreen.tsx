@@ -61,7 +61,7 @@ import { orderPositions } from '../../core/sleeper/eligibility.ts';
  */
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
 import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
-import { buildLineupVerdicts, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { buildLineupVerdicts, rowStartingFromBench, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
 import { DstLine } from '../components/dst.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
@@ -663,7 +663,14 @@ export function TeamScreen({
                   fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
                   evaluationOf={(playerId) => evaluations.get(playerId) ?? null}
                   summary={benchLine}
-                  onOpen={(playerId) => openPlayer(playerId, { starting: false })}
+                  onOpen={(playerId) => {
+                    /* The card says what the row says: a bench man a row starts reads "Start". */
+                    const row = rowStartingFromBench(verdicts, playerId);
+                    openPlayer(
+                      playerId,
+                      row ? { starting: true, slot: row.slot, alreadyStarting: false, locked: row.locked } : { starting: false },
+                    );
+                  }}
                 />
               )}
 
@@ -1192,7 +1199,8 @@ function VerdictCard({
 /** `Questionable` → `Q`, for the one place a figure carries its reason inline. */
 function injuryCode(label: string): string {
   const word = label.trim().toLowerCase();
-  if (word.startsWith('doubt')) return 'D';
+  /* Doubtful counts as Out, and reads that way (Round 30). */
+  if (word.startsWith('doubt') || word === 'out') return 'OUT';
   if (word.startsWith('question')) return 'Q';
   return label.slice(0, 1).toUpperCase();
 }
@@ -1975,7 +1983,7 @@ function PickupMoveRow({
             ...(pick.pickDrop ?? []).map((o, i) => `${i + 1}. ${o.name}${o.reason ? `: ${o.reason}` : ''}`),
           ]
         : []),
-    ...(pick.starterOut ? [`${pick.starterOut.name}, his team's starter, is out or doubtful.`] : []),
+    ...(pick.starterOut ? [`${pick.starterOut.name}, his team's starter, is out.`] : []),
   ];
   const slot = pick.slot ?? pick.position;
   const seed = [over?.playerId, pick.playerId].filter((id): id is string => id != null);

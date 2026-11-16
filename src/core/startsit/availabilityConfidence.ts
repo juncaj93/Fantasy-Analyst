@@ -92,7 +92,7 @@ export function availabilityConfidence(state: InjuryState): AvailabilityView {
       state: 'inactive',
       label: AVAILABILITY_LABEL.inactive,
       evidence,
-      detail: `${designation === 'ir' ? 'On injured reserve' : capitalise(designation)} — not a playable starter.`,
+      detail: `${designation === 'ir' ? 'On injured reserve' : capitalise(designation)}, not a playable starter.`,
       risky: false,
     };
   }
@@ -100,9 +100,10 @@ export function availabilityConfidence(state: InjuryState): AvailabilityView {
   if (designation === 'doubtful') {
     return {
       state: 'likely_inactive',
-      label: AVAILABILITY_LABEL.likely_inactive,
+      /* Doubtful counts as Out this week, and reads that way (Round 30). */
+      label: AVAILABILITY_LABEL.inactive,
       evidence,
-      detail: `Doubtful${state.practice.label ? ` and ${state.practice.label}` : ''} — treat him as unlikely to play.`,
+      detail: 'Out, not a playable starter.',
       risky: true,
     };
   }

@@ -85,7 +85,7 @@ describe('block: only this week’s opponent, only a real need', () => {
 
   it('reads a Doubtful starter as Out (the shared availability rule)', () => {
     const line = blockPickup(blockRequest({ opponent: { rosterId: 7, roster: opponentRoster({ wr1: { designation: 'doubtful' } }) } }));
-    expect(line?.detail).toBe('his WR Their wr1 is Doubtful');
+    expect(line?.detail).toBe('his WR Their wr1 is Out');
   });
 
   it('does not block when his bench covers the hole within the toss-up bar', () => {
@@ -496,7 +496,7 @@ describe('the assembly draws the block for this week’s opponent only', () => {
     const { rival } = await replay(null);
     const id = rival.playerIds[0]!;
     const doubtful = await replay({ rosterId: rival.rosterId, designations: { [id]: 'doubtful' } });
-    expect(doubtful.tiers.block?.detail).toBe('his WR Devin Okafor is Doubtful');
+    expect(doubtful.tiers.block?.detail).toBe('his WR Devin Okafor is Out');
     const healthy = await replay({ rosterId: rival.rosterId, designations: {} });
     expect(healthy.tiers.block?.detail).not.toMatch(/Doubtful|Out/);
   });

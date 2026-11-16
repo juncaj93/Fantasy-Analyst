@@ -46,7 +46,11 @@ const CORE_ROUTES: [RegExp, Route][] = [
    * View only: there is nothing a passphrase would let you change in a demo,
    * and `canUnlock: false` keeps every screen from offering to.
    */
-  [/^\/api\/auth\/status$/, () => ok({ unlocked: false, canUnlock: false })],
+  /*
+   * The demo was captured from today's Trades and Players screens, so it says
+   * so: an answer with no switches now means the new screens (Round 30).
+   */
+  [/^\/api\/auth\/status$/, () => ok({ unlocked: false, canUnlock: false, features: { tradesScreens: 'old', preview: null } })],
   [/^\/api\/overview$/, (_, d) => ok(d.overview)],
   [/^\/api\/leagues$/, (_, d) => ok(d.leagues)],
   [/^\/api\/setup\/status$/, (_, d) => ok(d.setupStatus)],

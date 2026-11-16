@@ -144,7 +144,7 @@ export function tradeInjuryContext(
 }
 
 function describe(state: InjuryState): string {
-  const code = { questionable: 'Q', doubtful: 'D', out: 'Out', ir: 'IR', pup: 'PUP', suspended: 'Suspended' }[
+  const code = { questionable: 'Q', doubtful: 'Out', out: 'Out', ir: 'IR', pup: 'PUP', suspended: 'Suspended' }[
     state.designation as 'questionable' | 'doubtful' | 'out' | 'ir' | 'pup' | 'suspended'
   ];
   return state.bodyPart ? `${code} · ${state.bodyPart.toLowerCase()}` : (code ?? 'Designated');

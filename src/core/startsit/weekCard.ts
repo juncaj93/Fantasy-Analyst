@@ -374,7 +374,7 @@ function headlineFor(
       verdict: 'start',
       label: `Start${slot}`,
       detail: locked
-        ? 'His game has kicked off — this spot is settled.'
+        ? 'His game has kicked off, so this spot is settled.'
         : context.alreadyStarting === false
           ? 'Not in your Sleeper lineup yet.'
           : null,

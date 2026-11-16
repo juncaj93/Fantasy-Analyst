@@ -40,6 +40,7 @@ export function CompactPlayerRow({
   position,
   team,
   status,
+  draft = false,
   tally,
   rank,
   action,
@@ -55,6 +56,8 @@ export function CompactPlayerRow({
   position: string | null;
   team?: string | null;
   status?: string | null;
+  /** A draft is ahead: the status tag keeps Sleeper's own letter (Doubtful reads D, not OUT). */
+  draft?: boolean;
   /**
    * The lifetime research tally, beside the name. Omitted entirely rather than
    * printed as a zero — see {@link CompactTally}, which renders nothing at 0.
@@ -180,7 +183,7 @@ export function CompactPlayerRow({
           */}
           <span className="player-row-meta">
             {tally === undefined ? null : <CompactTally net={tally} label="Lifetime research tally" />}
-            <InjuryTag status={status} />
+            <InjuryTag status={status} draft={draft} />
           </span>
           {trailing ? <span className="dense-row-aside">{trailing}</span> : null}
           {/*

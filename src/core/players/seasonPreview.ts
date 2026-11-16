@@ -27,7 +27,7 @@ const HURT: Record<string, Designation> = {
   p43: 'out', // Tobin Achebe, Kim's
 };
 
-const TEAM_WORD: Partial<Record<Designation, string>> = { doubtful: 'Doubtful', ir: 'IR', out: 'Out', questionable: 'Questionable' };
+const TEAM_WORD: Partial<Record<Designation, string>> = { doubtful: 'Out', ir: 'IR', out: 'Out', questionable: 'Questionable' };
 
 /** A small fixed number from an id, so the made-up numbers never change. */
 function fixed(id: string, spread: number): number {
