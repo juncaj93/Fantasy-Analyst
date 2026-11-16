@@ -1,0 +1,101 @@
+Round 29 database cost by source (Cloudflare's per-statement sample; it over-counts, so read the shares).
+
+last 72 hours: sampled 14,312,492 read, 34,341 written; hourly totals 7,947,360 read, 39,110 written
+top sources by rows read:
+   10,698,094  74.7%     233 calls  src/server/repos/props.ts:177  | SELECT * FROM player_props WHERE snapshot_id IN (?,?,?,?,?) AND scope = 'week'
+    2,545,450  17.8%     828 calls  src/server/repos/props.ts:250  | SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps 
+      143,965   1.0%     176 calls  src/server/repos/props.ts:524  | SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events FROM pr
+      105,234   0.7%     396 calls  src/server/repos/usage.ts:183  | SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN (?, ?, ?, ?, ?, ?, ?, ?
+       97,342   0.7%     238 calls  src/server/repos/vegasEvents.ts:168  | SELECT team, AVG(implied) AS implied, COUNT(*) AS games FROM ( SELECT home_team AS team, g
+       60,482   0.4%     341 calls  src/server/repos/nflSchedule.ts:145  | SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = 
+       56,807   0.4%      63 calls  src/server/repos/props.ts:490  | SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AN
+       54,116   0.4%     510 calls  src/server/repos/injury.ts:136  | SELECT r.* FROM player_injury_reports r WHERE r.season = ? AND r.player_id IN (?, ?, ?, ?,
+       52,644   0.4%     129 calls  src/server/repos/sleeperProjections.ts:153  | select player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json from sleeper_wee
+       50,923   0.4%     410 calls  src/server/repos/evidence.ts:712  | SELECT * FROM evidence_items WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND +r
+       48,528   0.3%      16 calls  src/server/repos/usage.ts:309  | SELECT COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT week) AS weeks, MAX(week) AS l
+       41,134   0.3%     131 calls  src/server/repos/transactions.ts:138  | SELECT payload_json FROM league_transactions WHERE league_id = ? AND season = ? ORDER BY w
+       38,171   0.3%     152 calls  src/server/repos/props.ts:426  | SELECT pp.player_id AS player_id, ps.game_start AS game_start FROM player_props pp JOIN pr
+       36,420   0.3%    2428 calls  src/server/repos/preseasonSnapshots.ts:173  | INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_
+       34,986   0.2%      17 calls  src/server/repos/evidence.ts:482  | SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, 
+       24,458   0.2%     407 calls  src/server/repos/props.ts:710  | SELECT id, event_id, fetched_at, json_extract(raw_json, '$.delta') AS delta, json_extract(
+       23,386   0.2%     351 calls  src/server/repos/players.ts:465  | SELECT * FROM players WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+       20,800   0.1%     130 calls  src/server/repos/league.ts:325  | SELECT * FROM draft_picks WHERE draft_id = ? ORDER BY pick_no
+       19,864   0.1%       6 calls  (unmatched) SELECT id, sleeper_player_id, full_name, first_name, last_na  | SELECT id, sleeper_player_id, full_name, first_name, last_name, team, position, status, ac
+       19,796   0.1%     196 calls  src/server/repos/trending.ts:68  | SELECT player_id, rank, count FROM trending_snapshots WHERE trend_type = ? AND captured_at
+       18,128   0.1%     228 calls  src/server/repos/trending.ts:57  | SELECT captured_at, lookback_hours FROM trending_snapshots WHERE trend_type = ? GROUP BY c
+       11,985   0.1%     343 calls  src/server/repos/evidence.ts:695  | SELECT * FROM player_signal_cache WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       10,461   0.1%       3 calls  src/server/repos/nflverse.ts:323  | SELECT COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT week) AS weeks, MAX(week) AS l
+       10,137   0.1%     350 calls  src/server/repos/nflSchedule.ts:169  | SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = 
+        9,786   0.1%    9786 calls  src/server/repos/players.ts:487  | INSERT INTO players ( id, sleeper_player_id, full_name, first_name, last_name, team, posit
+        9,000   0.1%     899 calls  src/server/repos/playerListCache.ts:202  | SELECT key, value_json FROM settings WHERE key IN (?,?,?)
+        8,565   0.1%      27 calls  src/server/services/trimOldRows.ts:149  | DELETE FROM player_props WHERE id IN ( SELECT pp.id FROM player_props pp JOIN prop_snapsho
+        5,623   0.0%     524 calls  src/server/repos/vegasEvents.ts:90  | SELECT * FROM vegas_events WHERE kickoff IS NOT NULL AND kickoff >= ? AND kickoff <= ? ORD
+        5,598   0.0%     942 calls  (unmatched) INSERT INTO nflverse_identity (gsis_id, season, sleeper_id,   | INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, tea
+        5,160   0.0%      30 calls  src/server/repos/playerDetail.ts:158  | SELECT season, fetched_at, source, rows_returned, rows_matched, rows_unmatched, rank_disag
+top sources by rows written:
+     14,568  42.4%    2428 calls  src/server/repos/preseasonSnapshots.ts:173  | INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_
+      7,224  21.0%     301 calls  (unmatched) INSERT INTO depth_chart_entries (season, captured_at, gsis_i  | INSERT INTO depth_chart_entries (season, captured_at, gsis_id, team, player_name, position
+      2,400   7.0%    9786 calls  src/server/repos/players.ts:487  | INSERT INTO players ( id, sleeper_player_id, full_name, first_name, last_name, team, posit
+      1,686   4.9%      27 calls  src/server/services/trimOldRows.ts:149  | DELETE FROM player_props WHERE id IN ( SELECT pp.id FROM player_props pp JOIN prop_snapsho
+      1,555   4.5%    1555 calls  src/server/repos/sleeperProjections.ts:120  | insert into sleeper_weekly_projections (season, week, player_id, pts_std, pts_half_ppr, pt
+      1,180   3.4%      28 calls  src/server/repos/injury.ts:336  | INSERT INTO injury_events (event_key, player_id, season, week, kind, from_value, to_value,
+      1,176   3.4%     294 calls  src/server/repos/trending.ts:35  | INSERT INTO trending_snapshots (captured_at, trend_type, lookback_hours, player_id, rank, 
+        816   2.4%     816 calls  (unmatched) INSERT INTO injury_source_state (source, season, etag, last_  | INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_m
+        786   2.3%     131 calls  src/server/repos/props.ts:82  | INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) V
+        456   1.3%     228 calls  src/server/repos/vegasEvents.ts:56  | INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at, game
+        450   1.3%     411 calls  src/server/repos/evidence.ts:449  | INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDA
+        407   1.2%      37 calls  (unmatched) INSERT INTO nfl_schedule (season, week, team, opponent, home  | INSERT INTO nfl_schedule (season, week, team, opponent, home, kickoff, roof, fetched_at) V
+        192   0.6%       8 calls  (unmatched) INSERT INTO player_snap_weeks (player_id, season, week, game  | INSERT INTO player_snap_weeks (player_id, season, week, game_type, team, opponent, positio
+        189   0.6%     942 calls  (unmatched) INSERT INTO nflverse_identity (gsis_id, season, sleeper_id,   | INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, tea
+        160   0.5%      16 calls  src/server/repos/league.ts:105  | DELETE FROM rosters WHERE league_id = ?
+        156   0.5%      52 calls  src/server/repos/settings.ts:55  | INSERT INTO sync_log (kind, status, detail, started_at, finished_at) VALUES (?,?,?,?,?)
+        142   0.4%      71 calls  src/server/repos/transactions.ts:57  | INSERT INTO league_transactions ( league_id, transaction_id, season, week, txn_type, statu
+        140   0.4%      70 calls  src/server/repos/league.ts:111  | INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_js
+        128   0.4%      14 calls  (unmatched) INSERT INTO player_injury_reports (player_id, season, week,   | INSERT INTO player_injury_reports (player_id, season, week, team, report_status, primary_i
+         88   0.3%      88 calls  src/server/repos/vegasUsage.ts:178  | INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, pro
+
+since the Round 28 deploy: sampled 109,585 read, 2,600 written; hourly totals 762,581 read, 3,224 written
+top sources by rows read:
+       27,959  25.5%      31 calls  src/server/repos/props.ts:490  | SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AN
+       23,952  21.9%      16 calls  src/server/repos/props.ts:250  | SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps 
+       16,464  15.0%       8 calls  src/server/repos/evidence.ts:482  | SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, 
+        9,085   8.3%      60 calls  src/server/repos/nflSchedule.ts:145  | SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = 
+        8,717   8.0%      10 calls  src/server/repos/props.ts:524  | SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events FROM pr
+        5,488   5.0%       8 calls  src/server/repos/props.ts:177  | SELECT * FROM player_props WHERE snapshot_id IN (1020,1017,1015,1012,1011,1009,1006,1002,9
+        4,890   4.5%     326 calls  src/server/repos/preseasonSnapshots.ts:173  | INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_
+        1,624   1.5%       8 calls  src/server/repos/vegasUsage.ts:217  | SELECT source, SUM(entities) AS entities FROM vegas_usage_log WHERE month IN (?, ?) AND at
+        1,530   1.4%      30 calls  src/server/repos/trending.ts:57  | SELECT captured_at, lookback_hours FROM trending_snapshots WHERE trend_type = ? GROUP BY c
+        1,515   1.4%      15 calls  src/server/repos/trending.ts:68  | SELECT player_id, rank, count FROM trending_snapshots WHERE trend_type = ? AND captured_at
+          849   0.8%      33 calls  src/server/repos/evidence.ts:695  | SELECT * FROM player_signal_cache WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          840   0.8%      12 calls  src/server/repos/players.ts:465  | SELECT * FROM players WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+          828   0.8%     138 calls  (unmatched) INSERT INTO nflverse_identity (gsis_id, season, sleeper_id,   | INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, tea
+          756   0.7%       6 calls  src/server/repos/evidence.ts:712  | SELECT * FROM evidence_items WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND 
+          714   0.7%     119 calls  src/server/repos/playerListCache.ts:202  | SELECT key, value_json FROM settings WHERE key IN (?,?,?)
+          512   0.5%     128 calls  src/server/repos/propsFreshness.ts:106  | SELECT key, value_json AS props_freshness FROM settings WHERE key IN (?, ?)
+          498   0.5%      18 calls  src/server/repos/nflSchedule.ts:169  | SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = 
+          390   0.4%      91 calls  src/server/repos/vegasEvents.ts:90  | SELECT * FROM vegas_events WHERE kickoff IS NOT NULL AND kickoff >= ? AND kickoff <= ? ORD
+          312   0.3%      24 calls  src/server/repos/props.ts:82  | INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) V
+          285   0.3%      57 calls  src/server/repos/vegasUsage.ts:97  | SELECT provider_entities, provider_limit, provider_read_at FROM vegas_usage WHERE provider
+          252   0.2%       6 calls  src/server/repos/preseasonProjections.ts:256  | SELECT player_id, points FROM preseason_projections WHERE snapshot_id = ? AND player_id IN
+          237   0.2%       3 calls  src/server/repos/props.ts:710  | SELECT id, event_id, fetched_at, json_extract(raw_json, '$.delta') AS delta, json_extract(
+          234   0.2%     234 calls  (unmatched) SELECT * FROM injury_source_state WHERE source = ? AND seaso  | SELECT * FROM injury_source_state WHERE source = ? AND season = ?
+          211   0.2%     211 calls  src/server/repos/evidence.ts:460  | SELECT value_json FROM settings WHERE key = ?
+          163   0.1%     163 calls  (unmatched) UPDATE injury_source_state SET consecutive_failures = 0, fai  | UPDATE injury_source_state SET consecutive_failures = 0, failing_since = NULL, caught_up_t
+          137   0.1%     137 calls  src/server/repos/league.ts:84  | SELECT * FROM leagues WHERE is_selected = 1 LIMIT ?
+          126   0.1%      21 calls  src/server/repos/props.ts:42  | SELECT provider, event_id, game_start, fetched_at, json_remove(raw_json, '$.raw') AS raw_j
+          115   0.1%     115 calls  (unmatched) SELECT * FROM nflverse_source_state WHERE source = ? AND sea  | SELECT * FROM nflverse_source_state WHERE source = ? AND season = ?
+          109   0.1%     109 calls  (unmatched) INSERT INTO injury_source_state (source, season, etag, last_  | INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_m
+          105   0.1%     105 calls  src/server/repos/injuryHistory.ts:190  | SELECT * FROM injury_backfill_progress WHERE source = ? AND season = ?
+top sources by rows written:
+      1,956  75.2%     326 calls  src/server/repos/preseasonSnapshots.ts:173  | INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_
+        144   5.5%      24 calls  src/server/repos/props.ts:82  | INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) V
+        109   4.2%     109 calls  (unmatched) INSERT INTO injury_source_state (source, season, etag, last_  | INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_m
+         99   3.8%     138 calls  (unmatched) INSERT INTO nflverse_identity (gsis_id, season, sleeper_id,   | INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, tea
+         66   2.5%      33 calls  src/server/repos/vegasEvents.ts:56  | INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at, game
+         61   2.3%      61 calls  src/server/repos/evidence.ts:449  | INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDA
+         48   1.8%      48 calls  src/server/repos/vegasUsage.ts:151  | INSERT INTO vegas_usage (month, entities, requests, updated_at) VALUES (?,?,?,?) ON CONFLI
+         44   1.7%      22 calls  src/server/repos/transactions.ts:57  | INSERT INTO league_transactions ( league_id, transaction_id, season, week, txn_type, statu
+         31   1.2%      31 calls  src/server/repos/vegasUsage.ts:178  | INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, pro
+         24   0.9%       8 calls  src/server/repos/settings.ts:55  | INSERT INTO sync_log (kind, status, detail, started_at, finished_at) VALUES (?,?,?,?,?)
+         12   0.5%       6 calls  src/server/repos/league.ts:111  | INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_js
+          6   0.2%       2 calls  src/server/repos/nflverse.ts:614  | INSERT INTO nflverse_source_runs (source, season, week, fetched_at, published_at, rows_ret

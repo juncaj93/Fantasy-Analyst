@@ -4,7 +4,7 @@ import json, sys
 old = json.load(open(sys.argv[1])); new = json.load(open(sys.argv[2]))
 first = min(int(w) for w in new['numbers']) if new['numbers'] else 8
 out = dict(new)
-out['players'] = {**{k: v[:3] for k, v in old['players'].items()}, **{k: v[:3] for k, v in new['players'].items()}}
+out['players'] = {**{k: v[:3] for k, v in old['players'].items()}, **{k: list(v) for k, v in new['players'].items()}}
 out['proj'] = {**{w: v for w, v in old['proj'].items() if int(w) < first}, **new['proj']}
 out['numbers'] = {**{w: v for w, v in old['numbers'].items() if int(w) < first}, **new['numbers']}
 # Actual points: the stored copy for every week; for a week still being played, the live Sleeper points fill the rostered players.

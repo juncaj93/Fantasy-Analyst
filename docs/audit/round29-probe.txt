@@ -1,0 +1,383 @@
+101,804 of 5,000,000 rows read today (2%).
+Ceiling for this run is 50%. Proceeding.
+Round 29 full-audit probe, started Sun, 11/15, 11:50 PM ET
+database fantasy_analyst: found
+
+## Production
+  live revision 101ad32793c0cd61d53f085c44cac663e6658461 (HTTP 200, 148 ms)
+  (sha: 0.1 s)
+
+## Rows per UTC day (resets 7:00 PM ET). Caps: 5,000,000 read, 100,000 written
+  date        account read  (%)   account written (%)   app read    app written  app queries r/w   databases
+  2026-11-06    2,339,422  46.8        67,609  67.6   1,519,171      41,830    9,810/6,248  4
+  2026-11-07    2,694,997  53.9        80,736  80.7   1,330,849      48,201   11,016/7,693  4
+  2026-11-08    3,134,922  62.7        93,116  93.1   1,573,820      51,760   12,477/8,761  5
+  2026-11-09    1,964,657  39.3        22,514  22.5     878,611      15,759   10,628/2,153  4
+  2026-11-10      718,062  14.4        12,358  12.4     328,684      12,141    7,439/1,700  4
+  2026-11-11    2,521,847  50.4        26,465  26.5   1,610,976      19,801   17,703/4,012  4
+  2026-11-12    3,129,459  62.6        22,453  22.5   2,774,267      18,077   18,479/3,272  4
+  2026-11-13    3,427,820  68.6        18,491  18.5   3,123,525      15,330   11,167/2,740  4
+  2026-11-14    2,408,045  48.2        12,167  12.2   2,038,680       9,358   10,482/2,265  5
+  2026-11-15    3,370,873  67.4        16,243  16.2   3,063,476      14,490    9,236/3,124  4
+  2026-11-16      101,804   2.0         1,478   1.5      81,053         366      681/165    4
+  (totals: 0.3 s)
+
+## App rows per hour, last 80 hours (Eastern)
+  Thu, 11/12, 3:00 PM  read    276,617  written   2,966  queries  1,251  other sites read     3,751
+  Thu, 11/12, 4:00 PM  read    165,702  written     341  queries  1,074  other sites read    15,913
+  Thu, 11/12, 5:00 PM  read    334,723  written     124  queries  1,260  other sites read     3,751
+  Thu, 11/12, 6:00 PM  read    309,256  written     134  queries    935  other sites read     3,563
+  Thu, 11/12, 7:00 PM  read    216,080  written     368  queries    360  other sites read     1,848
+  Thu, 11/12, 8:00 PM  read     11,598  written      19  queries    185  other sites read     2,821
+  Thu, 11/12, 9:00 PM  read    130,573  written      13  queries    360  other sites read    15,151
+  Thu, 11/12, 10:00 PM read      1,123  written      34  queries    127  other sites read    19,911
+  Thu, 11/12, 11:00 PM read    532,519  written   1,690  queries    557  other sites read    36,230
+  Fri, 11/13, 12:00 AM read      1,009  written      13  queries     97  other sites read     3,798
+  Fri, 11/13, 1:00 AM  read      1,139  written      32  queries    115  other sites read     5,967
+  Fri, 11/13, 2:00 AM  read      2,092  written     126  queries    110  other sites read     1,842
+  Fri, 11/13, 3:00 AM  read      1,814  written      14  queries     98  other sites read     1,842
+  Fri, 11/13, 4:00 AM  read     50,034  written   6,496  queries  3,402  other sites read     1,842
+  Fri, 11/13, 5:00 AM  read        984  written      13  queries     97  other sites read     1,842
+  Fri, 11/13, 6:00 AM  read        984  written      13  queries     97  other sites read     1,842
+  Fri, 11/13, 7:00 AM  read      1,185  written      41  queries    133  other sites read    13,084
+  Fri, 11/13, 8:00 AM  read      1,764  written      14  queries     98  other sites read    20,659
+  Fri, 11/13, 9:00 AM  read    481,587  written   3,123  queries    205  other sites read    17,862
+  Fri, 11/13, 10:00 AM read      2,201  written     132  queries    127  other sites read     7,796
+  Fri, 11/13, 11:00 AM read    110,895  written      63  queries    639  other sites read    13,622
+  Fri, 11/13, 12:00 PM read      1,859  written      16  queries    105  other sites read     6,849
+  Fri, 11/13, 1:00 PM  read    368,360  written   2,028  queries    275  other sites read    40,808
+  Fri, 11/13, 2:00 PM  read    425,650  written      26  queries  1,379  other sites read     1,866
+  Fri, 11/13, 3:00 PM  read    197,620  written      18  queries    839  other sites read     1,866
+  Fri, 11/13, 4:00 PM  read    580,173  written     991  queries  1,511  other sites read    45,419
+  Fri, 11/13, 5:00 PM  read      1,187  written      29  queries    135  other sites read     1,866
+  Fri, 11/13, 6:00 PM  read      1,095  written      18  queries    116  other sites read    37,662
+  Fri, 11/13, 7:00 PM  read     95,526  written      30  queries    378  other sites read    24,407
+  Fri, 11/13, 8:00 PM  read    528,995  written      23  queries  1,848  other sites read     1,878
+  Fri, 11/13, 9:00 PM  read     82,298  written      23  queries    321  other sites read    37,376
+  Fri, 11/13, 10:00 PM read    297,801  written      32  queries  1,080  other sites read    16,212
+  Fri, 11/13, 11:00 PM read      1,095  written      18  queries    116  other sites read     1,854
+  Sat, 11/14, 12:00 AM read      1,094  written      16  queries    116  other sites read    49,571
+  Sat, 11/14, 1:00 AM  read      1,247  written      54  queries    147  other sites read    38,096
+  Sat, 11/14, 2:00 AM  read      3,162  written     610  queries    130  other sites read    22,963
+  Sat, 11/14, 3:00 AM  read      1,094  written      16  queries    116  other sites read     1,854
+  Sat, 11/14, 4:00 AM  read     32,384  written   4,355  queries  3,428  other sites read     1,854
+  Sat, 11/14, 5:00 AM  read      1,099  written      26  queries    116  other sites read     1,854
+  Sat, 11/14, 6:00 AM  read      1,094  written      16  queries    116  other sites read     1,854
+  Sat, 11/14, 7:00 AM  read      1,931  written      32  queries    128  other sites read     1,866
+  Sat, 11/14, 8:00 AM  read      1,094  written      16  queries    116  other sites read     1,866
+  Sat, 11/14, 9:00 AM  read    247,497  written     775  queries    213  other sites read     1,866
+  Sat, 11/14, 10:00 AM read      1,137  written      35  queries    127  other sites read     1,866
+  Sat, 11/14, 11:00 AM read      1,711  written     567  queries    123  other sites read    27,118
+  Sat, 11/14, 12:00 PM read      1,907  written      19  queries    117  other sites read    42,572
+  Sat, 11/14, 1:00 PM  read    548,714  written   1,842  queries    836  other sites read    56,724
+  Sat, 11/14, 2:00 PM  read      1,108  written      20  queries    116  other sites read    14,910
+  Sat, 11/14, 3:00 PM  read      1,921  written      19  queries    117  other sites read     3,141
+  Sat, 11/14, 4:00 PM  read    167,617  written     393  queries    401  other sites read    10,474
+  Sat, 11/14, 5:00 PM  read      1,184  written      20  queries    122  other sites read     3,540
+  Sat, 11/14, 6:00 PM  read     15,970  written     401  queries    154  other sites read     3,649
+  Sat, 11/14, 7:00 PM  read      1,147  written      37  queries    127  other sites read     6,351
+  Sat, 11/14, 8:00 PM  read     69,548  written     163  queries    213  other sites read     1,878
+  Sat, 11/14, 9:00 PM  read      1,931  written      23  queries    117  other sites read     1,878
+  Sat, 11/14, 10:00 PM read      1,148  written      35  queries    127  other sites read     1,878
+  Sat, 11/14, 11:00 PM read      1,111  written      18  queries    116  other sites read    31,906
+  Sun, 11/15, 12:00 AM read    593,863  written   2,219  queries    832  other sites read     7,110
+  Sun, 11/15, 1:00 AM  read      1,277  written      58  queries    147  other sites read     1,866
+  Sun, 11/15, 2:00 AM  read      2,358  written      79  queries    129  other sites read     3,042
+  Sun, 11/15, 3:00 AM  read     63,150  written     131  queries    170  other sites read     5,393
+  Sun, 11/15, 4:00 AM  read     18,222  written   3,551  queries    347  other sites read     1,868
+  Sun, 11/15, 5:00 AM  read      1,122  written      16  queries    116  other sites read     1,868
+  Sun, 11/15, 6:00 AM  read     63,351  written     129  queries    170  other sites read     1,868
+  Sun, 11/15, 7:00 AM  read    306,620  written     985  queries    206  other sites read     1,880
+  Sun, 11/15, 8:00 AM  read     64,008  written     173  queries    170  other sites read    10,255
+  Sun, 11/15, 9:00 AM  read     65,446  written     226  queries    199  other sites read    14,128
+  Sun, 11/15, 10:00 AM read    496,420  written   1,518  queries    354  other sites read    15,646
+  Sun, 11/15, 11:00 AM read    308,126  written     644  queries    194  other sites read   110,231
+  Sun, 11/15, 12:00 PM read    323,100  written   1,627  queries  3,254  other sites read     1,880
+  Sun, 11/15, 1:00 PM  read    535,316  written     697  queries    923  other sites read    34,224
+  Sun, 11/15, 2:00 PM  read     28,750  written     976  queries    327  other sites read     3,075
+  Sun, 11/15, 3:00 PM  read     20,257  written     976  queries    258  other sites read    14,162
+  Sun, 11/15, 4:00 PM  read      2,774  written     144  queries    245  other sites read    18,756
+  Sun, 11/15, 5:00 PM  read     88,439  written      44  queries    345  other sites read     6,615
+  Sun, 11/15, 6:00 PM  read      5,992  written      21  queries    150  other sites read     9,639
+  Sun, 11/15, 7:00 PM  read     69,938  written      74  queries    208  other sites read     1,881
+  Sun, 11/15, 8:00 PM  read      6,780  written     218  queries    159  other sites read    10,329
+  Sun, 11/15, 9:00 PM  read      2,028  written      19  queries    107  other sites read     1,881
+  Sun, 11/15, 10:00 PM read      1,190  written      39  queries    117  other sites read     1,881
+  Sun, 11/15, 11:00 PM read      1,117  written      16  queries     90  other sites read     4,779
+  (hours: 0.4 s)
+
+## Statements, last 72 hours (sampled by Cloudflare; compared with the hourly totals)
+  200 statements; sampled sum read 14,312,492, written 34,341; hourly totals for the same hours read 7,947,360, written 39,110
+  top readers:
+     4,291,932 rows     90 calls   47,688/call  SELECT * FROM player_props WHERE snapshot_id IN (?,?,?,?,?) AND scope = 'week'
+     3,092,992 rows     64 calls   48,328/call  SELECT * FROM player_props WHERE snapshot_id IN (?,?,?,?,?,?,?,?) AND scope = 'week'
+     2,977,856 rows     64 calls   46,529/call  SELECT * FROM player_props WHERE snapshot_id IN (?,?,?) AND scope = 'week'
+       532,038 rows     66 calls    8,061/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+       442,150 rows    254 calls    1,741/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope = 'week' AND 
+       352,308 rows    110 calls    3,203/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope = 'week' AN
+       329,826 rows      7 calls   47,118/call  SELECT * FROM player_props WHERE snapshot_id IN (?,?,?,?) AND scope = 'week'
+       310,024 rows     52 calls    5,962/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+       222,192 rows     72 calls    3,086/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+       159,192 rows     24 calls    6,633/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+       143,965 rows    176 calls      818/call  SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events FROM prop_snapshots WHERE scope = 'week'
+       137,496 rows     68 calls    2,022/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope = 'week' AND ps.g
+       115,773 rows     21 calls    5,513/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?) AND ps.scope = 'week'
+        97,342 rows    238 calls      409/call  SELECT team, AVG(implied) AS implied, COUNT(*) AS games FROM ( SELECT home_team AS team, game_total / 2.0 - (CASE WHEN spread_team = home_team THEN spread ELSE -spread END) / 2.0 AS implied FROM vegas
+        84,807 rows     27 calls    3,141/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        78,900 rows     60 calls    1,315/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope = 'week' AND ps.gam
+        70,605 rows     27 calls    2,615/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope
+        52,644 rows    129 calls      408/call  select player_id, pts_std, pts_half_ppr, pts_ppr, publisher, defense_json from sleeper_weekly_projections where season = ? and week = ?
+        48,528 rows     16 calls    3,033/call  SELECT COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT week) AS weeks, MAX(week) AS latest_week, COUNT(*) AS rows_stored FROM player_usage_weeks WHERE season = ?
+        41,134 rows    131 calls      314/call  SELECT payload_json FROM league_transactions WHERE league_id = ? AND season = ? ORDER BY week DESC
+        40,464 rows     72 calls      562/call  SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+        36,420 rows   2428 calls       15/call  INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_price, under_price, book_count, books_json, consensus_method, implied_probability, raw_json, scope ) VALUES (?
+        34,986 rows     17 calls    2,058/call  SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, polarity
+        33,845 rows    146 calls      232/call  SELECT pp.player_id AS player_id, ps.game_start AS game_start FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?) AND ps.scope = 'week' AND ps.game_start 
+        33,480 rows    216 calls      155/call  SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY player_id, week
+        31,445 rows    159 calls      198/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week >= ? AND week <= ? AND team IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDE
+        27,625 rows    221 calls      125/call  SELECT * FROM evidence_items WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND +review_status IN ('auto_applied','accepted','corrected')
+        24,645 rows    271 calls       91/call  SELECT r.* FROM player_injury_reports r WHERE r.season = ? AND r.player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AND r.week = (SELECT MAX(r2.week) FROM player_injury_reports r2 WHERE 
+        22,823 rows    255 calls       90/call  SELECT id, event_id, fetched_at, json_extract(raw_json, '$.delta') AS delta, json_extract(raw_json, '$.gameLines.total') AS total, json_extract(raw_json, '$.gameLines.spread') AS spread, json_extract(
+        21,488 rows     24 calls      895/call  SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AND event_id IN (?,?,?,?,?,?,?,?,?,?,?) AND json_extract(raw_json, '$.topUp') IS NULL GROUP BY event_id
+        20,800 rows    130 calls      160/call  SELECT * FROM draft_picks WHERE draft_id = ? ORDER BY pick_no
+        19,864 rows      6 calls    3,311/call  SELECT id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json, draft_rank, jersey_number, height_inches, weight_pound
+        19,796 rows    196 calls      101/call  SELECT player_id, rank, count FROM trending_snapshots WHERE trend_type = ? AND captured_at = ? ORDER BY rank ASC
+        19,415 rows      5 calls    3,883/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) 
+        19,089 rows     21 calls      909/call  SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AND event_id IN (?,?,?,?,?,?) AND json_extract(raw_json, '$.topUp') IS NULL GROUP BY event_id
+        18,128 rows    228 calls       80/call  SELECT captured_at, lookback_hours FROM trending_snapshots WHERE trend_type = ? GROUP BY captured_at ORDER BY captured_at DESC LIMIT ? OFFSET ?
+        18,060 rows     60 calls      301/call  SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY player_id, week
+        17,176 rows     76 calls      226/call  SELECT * FROM evidence_items WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND +review_status IN ('auto_applied','accepted','corrected')
+        12,160 rows     40 calls      304/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week >= ? AND week <= ? AND team IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        11,398 rows     30 calls      380/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?) AND ps.scope = 'week' AND ps.game_start >= ? AND ps.game
+        10,608 rows     34 calls      312/call  SELECT * FROM player_usage_weeks WHERE season = ? AND player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY player_id, week
+        10,461 rows      3 calls    3,487/call  SELECT COUNT(DISTINCT player_id) AS players, COUNT(DISTINCT week) AS weeks, MAX(week) AS latest_week, COUNT(*) AS rows_stored FROM player_snap_weeks WHERE season = ? AND game_type = 'REG'
+        10,450 rows    110 calls       95/call  SELECT r.* FROM player_injury_reports r WHERE r.season = ? AND r.player_id IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AND r.week = (SELECT MAX(r2.week) FROM player_injury_reports r2 WHE
+        10,137 rows    350 calls       29/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week = ? ORDER BY team
+         9,786 rows   9786 calls        1/call  INSERT INTO players ( id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json, draft_rank, jersey_number, height_inche
+  top writers:
+      14,568 written   2428 calls  INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_price, under_price, book_count, books_json, consensus_method, implied_probability, raw_json, scope ) VALUES (?
+       7,224 written    301 calls  INSERT INTO depth_chart_entries (season, captured_at, gsis_id, team, player_name, position, pos_group, pos_slot, pos_rank, starter_slots, schema_version, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?, 
+       2,400 written   9786 calls  INSERT INTO players ( id, sleeper_player_id, full_name, first_name, last_name, team, position, status, active, normalized_name, aliases_json, external_ids_json, draft_rank, jersey_number, height_inche
+       1,686 written     27 calls  DELETE FROM player_props WHERE id IN ( SELECT pp.id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.snapshot_id = ? AND ps.scope = 'week' AND ps.fetched_at < ? AND EXIST
+       1,555 written   1555 calls  insert into sleeper_weekly_projections (season, week, player_id, pts_std, pts_half_ppr, pts_ppr, publisher, fetched_at, defense_json) values (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(season, week, playe
+       1,176 written    294 calls  INSERT INTO trending_snapshots (captured_at, trend_type, lookback_hours, player_id, rank, count) VALUES (?,?,?,?,?,?) ON CONFLICT(captured_at, trend_type, player_id) DO NOTHING
+         900 written     20 calls  INSERT INTO injury_events (event_key, player_id, season, week, kind, from_value, to_value, source, source_modified_at, detected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         816 written    816 calls  INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_modified_at, ingested_at, last_outcome, last_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, seaso
+         786 written    131 calls  INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) VALUES (?,?,?,?,?,'week') ON CONFLICT(provider, event_id, fetched_at) DO NOTHING
+         456 written    228 calls  INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at, game_total, spread, spread_team, lines_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET p
+         407 written     37 calls  INSERT INTO nfl_schedule (season, week, team, opponent, home, kickoff, roof, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), 
+         372 written    372 calls  INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+         280 written      8 calls  INSERT INTO injury_events (event_key, player_id, season, week, kind, from_value, to_value, source, source_modified_at, detected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         192 written      8 calls  INSERT INTO player_snap_weeks (player_id, season, week, game_type, team, opponent, position, offense_snaps, offense_share, pfr_id, gsis_id, source, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?, 
+         189 written    915 calls  INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, team, position, full_name, status, source, as_of, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?,
+         160 written     16 calls  DELETE FROM rosters WHERE league_id = ?
+         156 written     52 calls  INSERT INTO sync_log (kind, status, detail, started_at, finished_at) VALUES (?,?,?,?,?)
+         142 written     71 calls  INSERT INTO league_transactions ( league_id, transaction_id, season, week, txn_type, status, created_at_ms, waiver_bid, faab_traded, draft_picks_moved, roster_ids_json, adds_json, drops_json, creator,
+         140 written     70 calls  INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, starter_slots_json, reserve_json, is_mine, settings_json, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         128 written     14 calls  INSERT INTO player_injury_reports (player_id, season, week, team, report_status, primary_injury, secondary_injury, practice_status, practice_raw, gsis_id, source, published_at, fetched_at) VALUES (?, 
+          88 written     88 calls  INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, provider_read_at, updated_at) VALUES (?,0,0,?,?,?,?) ON CONFLICT(month) DO UPDATE SET provider_entities = exclude
+          78 written     39 calls  INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?)
+          72 written     72 calls  DELETE FROM prop_snapshots WHERE id IN ( SELECT ps.id FROM prop_snapshots ps WHERE ps.id = ? AND ps.scope = 'week' AND ps.fetched_at < ? AND NOT EXISTS (SELECT 1 FROM player_props WHERE snapshot_id = 
+          69 written     23 calls  INSERT INTO vegas_usage_log (month, at, source, event_id, entities, requests, outcome, reason) VALUES (?,?,?,?,?,?,?,?)
+          68 written     68 calls  INSERT INTO vegas_usage (month, entities, requests, updated_at) VALUES (?,?,?,?) ON CONFLICT(month) DO UPDATE SET entities = entities + excluded.entities, requests = requests + excluded.requests, upda
+
+## Statements, since the Round 28 deploy (sampled by Cloudflare; compared with the hourly totals)
+  54 statements; sampled sum read 109,585, written 2,600; hourly totals for the same hours read 762,581, written 3,224
+  top readers:
+        20,652 rows      6 calls    3,442/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND ps.scope = 'week' AN
+        19,089 rows     21 calls      909/call  SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AND event_id IN (?,?,?,?,?,?) AND json_extract(raw_json, '$.topUp') IS NULL GROUP BY event_id
+        16,464 rows      8 calls    2,058/call  SELECT review_status, polarity, COUNT(*) AS n FROM evidence_items GROUP BY review_status, polarity
+         8,870 rows     10 calls      887/call  SELECT event_id, MAX(fetched_at) AS fetched_at FROM prop_snapshots WHERE scope = 'week' AND event_id IN (?,?,?,?) AND json_extract(raw_json, '$.topUp') IS NULL GROUP BY event_id
+         8,717 rows     10 calls      872/call  SELECT provider, MAX(fetched_at) AS fetched_at, COUNT(DISTINCT event_id) AS events FROM prop_snapshots WHERE scope = 'week'
+         7,959 rows     21 calls      379/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week >= ? AND week <= ? AND team IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER B
+         5,488 rows      8 calls      686/call  SELECT * FROM player_props WHERE snapshot_id IN (1020,1017,1015,1012,1011,1009,1006,1002,996,987,979,967,956,939,933,920,906,894) AND +scope = 'week'
+         4,890 rows    326 calls       15/call  INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_price, under_price, book_count, books_json, consensus_method, implied_probability, raw_json, scope ) VALUES (?
+         3,300 rows     10 calls      330/call  SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_props pp JOIN prop_snapshots ps ON ps.id = pp.snapshot_id WHERE pp.player_id IN (?,?) AND ps.scope = 'week'
+         1,624 rows      8 calls      203/call  SELECT source, SUM(entities) AS entities FROM vegas_usage_log WHERE month IN (?, ?) AND at >= ? AND at < ? AND outcome = 'fetched' GROUP BY source
+         1,530 rows     30 calls       51/call  SELECT captured_at, lookback_hours FROM trending_snapshots WHERE trend_type = ? GROUP BY captured_at ORDER BY captured_at DESC LIMIT ? OFFSET ?
+         1,515 rows     15 calls      101/call  SELECT player_id, rank, count FROM trending_snapshots WHERE trend_type = ? AND captured_at = ? ORDER BY rank ASC
+         1,010 rows     10 calls      101/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week >= ? AND week <= ? AND team IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) O
+           849 rows     33 calls       26/call  SELECT * FROM player_signal_cache WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           840 rows     12 calls       70/call  SELECT * FROM players WHERE id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           828 rows    138 calls        6/call  INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, team, position, full_name, status, source, as_of, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?,
+           756 rows      6 calls      126/call  SELECT * FROM evidence_items WHERE player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND +review_status IN ('auto_applied','accepted','corrected')
+           714 rows    119 calls        6/call  SELECT key, value_json FROM settings WHERE key IN (?,?,?)
+           512 rows    128 calls        4/call  SELECT key, value_json AS props_freshness FROM settings WHERE key IN (?, ?)
+           498 rows     18 calls       28/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week = ? ORDER BY team
+           390 rows     91 calls        4/call  SELECT * FROM vegas_events WHERE kickoff IS NOT NULL AND kickoff >= ? AND kickoff <= ? ORDER BY kickoff
+           312 rows     24 calls       13/call  INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) VALUES (?,?,?,?,?,'week') ON CONFLICT(provider, event_id, fetched_at) DO NOTHING
+           285 rows     57 calls        5/call  SELECT provider_entities, provider_limit, provider_read_at FROM vegas_usage WHERE provider_entities IS NOT NULL AND provider_read_at >= ? AND provider_read_at < ? ORDER BY provider_read_at DESC LIMIT 
+           252 rows      6 calls       42/call  SELECT player_id, points FROM preseason_projections WHERE snapshot_id = ? AND player_id IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           237 rows      3 calls       79/call  SELECT id, event_id, fetched_at, json_extract(raw_json, '$.delta') AS delta, json_extract(raw_json, '$.gameLines.total') AS total, json_extract(raw_json, '$.gameLines.spread') AS spread, json_extract(
+           234 rows    234 calls        1/call  SELECT * FROM injury_source_state WHERE source = ? AND season = ?
+           211 rows    211 calls        1/call  SELECT value_json FROM settings WHERE key = ?
+           163 rows    163 calls        1/call  UPDATE injury_source_state SET consecutive_failures = 0, failing_since = NULL, caught_up_through = COALESCE(?, caught_up_through) WHERE source = ? AND season = ? -- Round 14 (D1 budget): only when the
+           137 rows    137 calls        1/call  SELECT * FROM leagues WHERE is_selected = 1 LIMIT ?
+           126 rows     21 calls        6/call  SELECT provider, event_id, game_start, fetched_at, json_remove(raw_json, '$.raw') AS raw_json FROM prop_snapshots WHERE event_id = ? AND scope = 'week' AND json_extract(raw_json, '$.topUp') IS NULL OR
+           116 rows     29 calls        4/call  SELECT season, week, team, opponent, home, kickoff, roof FROM nfl_schedule WHERE season = ? AND week >= ? AND week <= ? AND team IN (?) ORDER BY team, week
+           115 rows    115 calls        1/call  SELECT * FROM nflverse_source_state WHERE source = ? AND season = ?
+           109 rows    109 calls        1/call  INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_modified_at, ingested_at, last_outcome, last_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, seaso
+           105 rows    105 calls        1/call  SELECT * FROM injury_backfill_progress WHERE source = ? AND season = ?
+           100 rows     10 calls       10/call  SELECT roster_id, owner_id, owner_name, players_json, starters_json, starter_slots_json, reserve_json, is_mine, settings_json FROM rosters WHERE league_id = ?
+            99 rows     99 calls        1/call  SELECT latest_fingerprint AS fingerprint, latest_win_probability AS win, latest_forecast_at AS at, opponent_roster_id AS opponent FROM matchup_forecasts WHERE league_id = ? AND season = ? AND week = ?
+            80 rows      8 calls       10/call  SELECT * FROM league_transaction_weeks WHERE league_id = ? AND season = ? ORDER BY week ASC
+            61 rows     61 calls        1/call  INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+            50 rows      5 calls       10/call  SELECT key, value_json FROM settings WHERE key >= ? AND key < ?
+            48 rows     48 calls        1/call  INSERT INTO vegas_usage (month, entities, requests, updated_at) VALUES (?,?,?,?) ON CONFLICT(month) DO UPDATE SET entities = entities + excluded.entities, requests = requests + excluded.requests, upda
+            34 rows      2 calls       17/call  INSERT INTO nflverse_source_runs (source, season, week, fetched_at, published_at, rows_returned, matched, unmatched, rows_written, outcome, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            33 rows     33 calls        1/call  INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at, game_total, spread, spread_team, lines_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET p
+            31 rows     31 calls        1/call  INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, provider_read_at, updated_at) VALUES (?,0,0,?,?,?,?) ON CONFLICT(month) DO UPDATE SET provider_entities = exclude
+            31 rows     31 calls        1/call  SELECT * FROM vegas_events WHERE event_id IN (?)
+            24 rows     24 calls        1/call  SELECT * FROM leagues WHERE id = ?
+  top writers:
+       1,956 written    326 calls  INSERT INTO player_props ( snapshot_id, player_id, source_player_name, market, line, over_price, under_price, book_count, books_json, consensus_method, implied_probability, raw_json, scope ) VALUES (?
+         144 written     24 calls  INSERT INTO prop_snapshots (provider, event_id, game_start, fetched_at, raw_json, scope) VALUES (?,?,?,?,?,'week') ON CONFLICT(provider, event_id, fetched_at) DO NOTHING
+         109 written    109 calls  INSERT INTO injury_source_state (source, season, etag, last_modified, checked_at, source_modified_at, ingested_at, last_outcome, last_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source, seaso
+          99 written    138 calls  INSERT INTO nflverse_identity (gsis_id, season, sleeper_id, pfr_id, espn_id, yahoo_id, team, position, full_name, status, source, as_of, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?,
+          66 written     33 calls  INSERT INTO vegas_events (event_id, provider, kickoff, home_team, away_team, seen_at, game_total, spread, spread_team, lines_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET p
+          61 written     61 calls  INSERT INTO settings (key, value_json, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+          48 written     48 calls  INSERT INTO vegas_usage (month, entities, requests, updated_at) VALUES (?,?,?,?) ON CONFLICT(month) DO UPDATE SET entities = entities + excluded.entities, requests = requests + excluded.requests, upda
+          44 written     22 calls  INSERT INTO league_transactions ( league_id, transaction_id, season, week, txn_type, status, created_at_ms, waiver_bid, faab_traded, draft_picks_moved, roster_ids_json, adds_json, drops_json, creator,
+          31 written     31 calls  INSERT INTO vegas_usage (month, entities, requests, provider_entities, provider_limit, provider_read_at, updated_at) VALUES (?,0,0,?,?,?,?) ON CONFLICT(month) DO UPDATE SET provider_entities = exclude
+          24 written      8 calls  INSERT INTO sync_log (kind, status, detail, started_at, finished_at) VALUES (?,?,?,?,?)
+          12 written      6 calls  INSERT INTO rosters (league_id, roster_id, owner_id, owner_name, players_json, starters_json, starter_slots_json, reserve_json, is_mine, settings_json, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           6 written      2 calls  INSERT INTO nflverse_source_runs (source, season, week, fetched_at, published_at, rows_returned, matched, unmatched, rows_written, outcome, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  (statements: 1.1 s)
+
+## Scheduled runs, last 72 hours, by cron and status
+  0 scheduled runs, 0 not "success"
+
+## Fetch requests by day and status, last 4 days
+  2026-11-12 success                requests     996 errors     0 subrequests     616
+  2026-11-12 clientDisconnected     requests      27 errors     0 subrequests       0
+  2026-11-13 success                requests     582 errors     0 subrequests     760
+  2026-11-13 clientDisconnected     requests       5 errors     0 subrequests       0
+  2026-11-13 exceededResources      requests       1 errors     1 subrequests       0
+  2026-11-14 success                requests     524 errors     0 subrequests     754
+  2026-11-14 clientDisconnected     requests       6 errors     0 subrequests       0
+  2026-11-15 success                requests     392 errors     0 subrequests     814
+  2026-11-15 clientDisconnected     requests       5 errors     0 subrequests       0
+  2026-11-16 success                requests      61 errors     0 subrequests     146
+  (crons: 1.7 s)
+
+## Run state and sync times (small tables)
+  leagues stored: 2; selected league last synced 2026-11-16T03:15:07.227Z
+  rosters: 10, updated 2026-11-16T00:15:08.230Z
+  0 9 * * *      Daily refresh                      succeeded  started Sun, 11/15, 4:00 AM last success Sun, 11/15, 4:00 AM
+  0 23 * * SAT   Saturday evening refresh           succeeded  started Sat, 11/14, 6:00 PM last success Sat, 11/14, 6:00 PM
+  0 15 * * SUN   Sunday pregame refresh             succeeded  started Sun, 11/15, 10:00 AM last success Sun, 11/15, 10:00 AM
+  injury runs (newest 60): ok=27 failed=33; newest Sun, 11/15, 9:45 AM published 2026-11-15T14:40:31.000Z
+  sync league                        363 runs, 0 not ok, newest Sun, 11/15, 10:15 PM
+  sync players                        37 runs, 0 not ok, newest Sun, 11/15, 12:15 PM
+  (tables: 0.6 s)
+
+## When each start/sit input was last fetched (indexed or small reads)
+  odds budget 2026-10: 605 used of 2500 (provider count 12, read 2026-11-12T23:45:08.943Z)
+  odds budget 2026-11: 108 used of 2500 (provider count 120, read 2026-11-16T01:15:14.292Z)
+  odds log this month: fetched/manual=79, fetched/schedule=24, fetched/weekly=183, refused/manual=1
+  schedule week 9: 31 teams, fetched Sun, 11/15, 12:54 AM, kickoffs Thu, 11/5, 8:15 PM to Mon, 11/9, 8:15 PM
+  schedule week 10: 29 teams, fetched Sun, 11/15, 12:54 AM, kickoffs Thu, 11/12, 8:15 PM to Mon, 11/16, 8:15 PM
+  schedule week 11: 26 teams, fetched Sun, 11/15, 12:54 AM, kickoffs Thu, 11/19, 8:15 PM to Mon, 11/23, 8:15 PM
+  schedule week 12: 33 teams, fetched Sun, 11/15, 12:54 AM, kickoffs Wed, 11/25, 8:00 PM to Mon, 11/30, 8:15 PM
+  injury report week 8: 86 players (0 Out or Doubtful), fetched Fri, 10/30, 2:05 AM, published 2026-10-30T06:02:44.000Z
+  injury report week 9: 120 players (29 Out or Doubtful), fetched Sun, 11/8, 2:05 AM, published 2026-11-08T07:01:17.000Z
+  injury report week 10: 116 players (27 Out or Doubtful), fetched Sun, 11/15, 2:05 AM, published 2026-11-15T07:01:22.000Z
+  injury changes detected (newest 300): newest Sun, 11/15, 2:05 AM, oldest Fri, 10/30, 2:05 AM
+  depth chart captured 2026-11-15T07:01:39Z (fetched 2026-11-15T09:35:05.850Z)
+  usage runs newest Sun, 11/15, 4:00 AM ok; nflverse newest Sun, 11/15, 4:35 PM ok
+  settings rows: 90
+  (freshness: 1.4 s)
+
+## Matchup forecasts this season (win probability, projected and final)
+  20 rows, 18 settled; weeks 1,2,3,4,5,6,7,8,9,10
+  (forecasts: 0.1 s)
+
+## Saved data for the accuracy backtest (scripts/probe-round29-gather.ts)
+  Sleeper: season 2026, NFL week 10 (regular)
+  league stored; Alex's roster id 1
+  gathered: 624 players; actual weeks 1,2,3,4,5,6,7,8,9,10; projection weeks 8,9,10; number weeks 8,9,10,11
+  lines: 392 looks across 43 games; 185 looks read; 7686 line rows
+    week 8:kick: 12 games, 269 players priced
+    week 9:kick: 14 games, 319 players priced
+    week 9:tue9pm: 4 games, 14 players priced
+    week 9:sat12pm: 13 games, 313 players priced
+    week 9:sun11am: 12 games, 318 players priced
+    week 10:kick: 13 games, 372 players priced
+    week 10:tue9pm: 1 games, 25 players priced
+    week 10:sat12pm: 12 games, 366 players priced
+    week 10:sun11am: 11 games, 375 players priced
+    week 11:kick: 3 games, 0 players priced
+  D1: 23 statements, 15,728 rows read
+    league and roster: 11 rows
+    weekly league points: 20 rows
+    weekly projections: 1,277 rows
+    usage weeks: 3,033 rows
+    fixture list: 561 rows
+    injury reports: 968 rows
+    looks (every weekly look, weeks 8 on): 435 rows
+    lines for those looks: 8,049 rows
+    players: 1,371 rows
+    quarterback lines (inside the projections read): 3 rows
+  
+  (gather: 5.3 s)
+
+## Each screen as the phone reads it (GET only; reads are public)
+  vegas.before       HTTP 200     76 ms       210 bytes
+  overview           HTTP 200    116 ms       980 bytes
+  authStatus         HTTP 200     15 ms       145 bytes
+  team.roster        HTTP 200    233 ms     8,325 bytes
+  team.lineup        HTTP 200    474 ms    78,914 bytes
+  waivers            HTTP 200   1236 ms    55,830 bytes  cost {"statements":77,"rowsReturned":6305,"top":[{"sql":"SELECT pp.*, ps.event_id AS snapshot_event_id FROM player_
+  matchup            HTTP 200    421 ms    57,800 bytes
+  compare.poolMine   HTTP 200    302 ms     4,647 bytes
+  compare.poolWaivers HTTP 200    272 ms     7,384 bytes
+  players.board      HTTP 200   1338 ms    74,751 bytes  cost {"statements":75,"rowsReturned":12888,"top":[{"sql":"SELECT pp.*, ps.event_id AS snapshot_event_id FROM player
+  trades.offers      HTTP 200   1285 ms     3,007 bytes
+  trades.teams       HTTP 200    139 ms    12,602 bytes
+  offer 3:11635+13276>5967: verdict HTTP 200; check read
+  offer 2:9758>12545+8130: verdict HTTP 200; check read
+  offer 4:6804+7569>6790: verdict HTTP 200; check read
+  Players cards read: 20 (Alex 12, free agents 8)
+  refresh.status     HTTP 200     27 ms       906 bytes
+  dataHealth         HTTP 503     96 ms     4,700 bytes
+  vegas.after        HTTP 200     45 ms       210 bytes
+  Vegas status unchanged during the burst
+  (screens: 11.9 s)
+
+## Support snapshots (the inputs each decision was drawn from)
+  lineup       HTTP 503    160 ms     4,700 bytes
+  matchup      HTTP 200    828 ms   468,500 bytes
+  waiver-plan  HTTP 503    187 ms     4,700 bytes
+  (snapshots: 1.2 s)
+
+## This probe
+  rows read by this probe's own SQL and the gather: 17,800 (screen loads are counted by the app and show in the totals)
+   leagues                           2 rows read, 2 back
+   rosters                          10 rows read, 10 back
+   cron_run_state                    3 rows read, 3 back
+   injury_source_runs               60 rows read, 60 back
+   injury_source_state               2 rows read, 2 back
+   sync_log                        401 rows read, 400 back
+   nfl_schedule                    120 rows read, 4 back
+   vegas_events                     17 rows read, 17 back
+   player_injury_reports           322 rows read, 3 back
+   injury_events                   300 rows read, 300 back
+   depth_chart_entries               1 rows read, 1 back
+   depth_chart_entries one           1 rows read, 1 back
+   usage_source_runs                15 rows read, 15 back
+   nflverse_source_runs             15 rows read, 15 back
+   player_season_stats_runs          5 rows read, 5 back
+   settings (keys and times only)       90 rows read, 90 back
+   settings (clock and job values)       20 rows read, 10 back
+   vegas_usage                       4 rows read, 2 back
+   vegas_usage_log by outcome      574 rows read, 4 back
+   vegas_usage_log newest           80 rows read, 80 back
+   nflverse_source_state             4 rows read, 4 back
+   usage_source_state                1 rows read, 1 back
+   injury_write_budget               4 rows read, 4 back
+   trending_snapshots newest         1 rows read, 1 back
+   matchup_forecasts                20 rows read, 20 back
+  bundle: 1,422,303 bytes, gzip+base64 263,612, sha256 0e3d7df6009937cb62229951c5bdd082fcb16116b78f8e32d9839e4a770f012e
+[packed data omitted here; decoded into round29-data.json]
+  finished Sun, 11/15, 11:51 PM ET
+http.https://github.com/.extraheader

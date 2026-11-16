@@ -20,13 +20,16 @@ const s = B.screens ?? {};
 const body = (k: string) => s[k]?.body ?? null;
 const write = (dir: string, name: string, v: unknown) => v != null && writeFileSync(join(dir, name), JSON.stringify(v));
 
-const snap = B.snapshots?.lineup?.body;
+/* The lineup snapshot when it was captured; else the matchup snapshot, whose start/sit inputs carry no IR flag, as Compare's do. */
+const lineupSnap = B.snapshots?.lineup?.status === 200 ? B.snapshots.lineup.body : null;
+const snap = lineupSnap ?? B.snapshots?.matchup?.body;
 const inputs = snap?.decision?.inputs;
-if (!inputs) throw new Error('no lineup snapshot inputs in the bundle');
+if (!inputs) throw new Error('no snapshot inputs in the bundle');
+console.log(`inputs from the ${lineupSnap ? 'lineup' : 'matchup'} snapshot, captured ${snap.capturedAt}`);
 const { shape, profile } = rehydrateLeagueRules(inputs.rules);
 const startSit = rehydrateStartSitInputs(inputs.startSit);
 const published = new Map(Object.entries(inputs.published as Record<string, number>));
-const mode = inputs.mode ?? 'balanced';
+const mode = inputs.mode ?? B.screens?.['team.lineup']?.body?.mode ?? 'balanced';
 
 for (const [label, now] of [['now', snap.capturedAt], ...(preKick ? [['prekick', preKick]] : [])] as [string, string][]) {
   const dir = join(out, label);
@@ -41,7 +44,10 @@ for (const [label, now] of [['now', snap.capturedAt], ...(preKick ? [['prekick',
   for (const [id, r] of Object.entries<any>(s.cards ?? {})) write(dir, `players-card-${id}.json`, r.body);
   for (const c of s.checks ?? []) write(dir, `trades-check-${c.give}-${c.get}.json`, c.body);
   /* Team: live at "now"; rebuilt from the snapshot at "prekick". */
-  const shifted = startSit.map((i: any) => (label === 'now' ? i : { ...i, now }));
+  /* Alex's players only: the matchup snapshot carries both rosters. */
+  const rosterBody = B.screens?.['team.roster']?.body ?? {};
+  const mineIds = new Set<string>([...(rosterBody.starters ?? []), ...(rosterBody.bench ?? [])].map((r: any) => String(r.playerId)));
+  const shifted = startSit.filter((i: any) => mineIds.size === 0 || mineIds.has(String(i.player.id))).map((i: any) => (label === 'now' ? i : { ...i, now }));
   const lineup =
     label === 'now'
       ? body('team.lineup')
@@ -49,7 +55,7 @@ for (const [label, now] of [['now', snap.capturedAt], ...(preKick ? [['prekick',
           inputs: shifted,
           shape,
           profile,
-          currentStarterIds: inputs.currentStarterIds,
+          currentStarterIds: inputs.currentStarterIds ?? (B.screens?.['team.roster']?.body?.starters ?? []).map((r: any) => r.playerId),
           ...(inputs.currentSlots ? { currentSlotOf: new Map(Object.entries(inputs.currentSlots)) } : {}),
           mode,
           published,

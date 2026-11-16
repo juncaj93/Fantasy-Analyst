@@ -83,7 +83,7 @@ Quoted app text is exact, so it keeps the app's own em-dashes; the rest of this 
 4. **A standing disclaimer on every player card.** Every card carries "Not known yet: role trend, opponent tendency, expected points from usage." (weekly.tsx:186, words from core/startsit/weekCard.ts:179-260). Every card also carries a "high/low confidence" caption (common.tsx:666). This is exactly the kind of line Alex dislikes, shown on every tap.
 5. **Two numbers for one player-week.** Marcus Vance shows 16.3 on the Team row, on Matchup and on the Players card, but "Proj 15.8" and "Market 15.8 pts" on the weekly card. The card prints the projection; the rows print decision points (core/startsit/weekCard.ts:320-337).
    - Evidence: `number-row-vs-card.png`.
-6. **A waiver card's number never appears on the sheet it opens.** The card says "+66.2" with no unit (a 3-week gain). The sheet opens on "This week" and shows 22.1 against "—". The 66.2 appears only after tapping "3 weeks", as "Total".
+6. **A waiver card's number never appears on the sheet it opens.** The card says "+66.2" with no unit (a 3-week gain). The sheet opens on "This week" and shows 22.1 against "-". The 66.2 appears only after tapping "3 weeks", as "Total".
    - Evidence: `waiver-card-vs-sheet.png`.
 7. **The bid's one reason is cut off.** "Bid $9: Two or more other managers are likely to bid, so $9 to win about 3 times in 4" is a single nowrap line (`white-space:nowrap`, ellipsis). It is 515px of text in a 388px box, so the phone shows "...so $9…".
    - Evidence: `waivers-bids-sheet.png`.
@@ -175,9 +175,9 @@ Pure labels (column heads, button names, position pills) are left out unless the
 |---|---|---|---|---|
 | 1 | "high confidence" / "low confidence" | common.tsx:666 | static + server level | Seen |
 | 2 | Verdict "Start at RB", "Bench this week", "Not playable" + detail ("Doubtful", "In your IR slot.", "On IR · knee · has not practiced · sources disagree") | core/startsit/weekCard.ts:360-398 | server | Seen |
-| 3 | Line "Availability · Not playing · On injured reserve — not a playable starter." / "Unlikely to play · Doubtful — treat him as unlikely to play." | core/startsit/availabilityConfidence.ts:40, 95 | server | Seen |
-| 4 | Drivers "Doubtful — treat him as unlikely to play." | weekly.tsx:154 | server | Seen |
-| 5 | "Sources disagree — sleeper: IR · nflverse: Out" | weekly.tsx:164 + core/startsit/weekCard.ts:317 | server | Seen |
+| 3 | Line "Availability · Not playing · On injured reserve - not a playable starter." / "Unlikely to play · Doubtful - treat him as unlikely to play." | core/startsit/availabilityConfidence.ts:40, 95 | server | Seen |
+| 4 | Drivers "Doubtful - treat him as unlikely to play." | weekly.tsx:154 | server | Seen |
+| 5 | "Sources disagree - sleeper: IR · nflverse: Out" | weekly.tsx:164 + core/startsit/weekCard.ts:317 | server | Seen |
 | 6 | "Not known yet: role trend, opponent tendency, Vegas expectation, expected points from usage." (on every card) | weekly.tsx:186 + core/startsit/weekCard.ts:179, 206, 233, 260 | static + server | Seen |
 | 7 | "More on Marcus Vance" | weekly.tsx:239 | static | Seen |
 | 8 | Inside More: Insight text "Named the starter: first-team reps all week and the goal-line back." | playerDetail.tsx:159-166 (text from newsletter via server) | server | Seen |
@@ -185,7 +185,7 @@ Pure labels (column heads, button names, position pills) are left out unless the
 | 10 | "Rotowire projection" | weekly.tsx:102 | static | Cond |
 | 11 | "What would change this" + list | weekly.tsx:175 + server | static + server | Cond |
 | 12 | "Not enough data to rank him" / "He is left out of the comparison rather than assumed bad." | core/startsit/weekCard.ts:388-389 | server | Cond |
-| 13 | "His game has kicked off — this spot is settled." / "Not in your Sleeper lineup yet." / "His game has kicked off." | core/startsit/weekCard.ts:377-397 | server | Cond |
+| 13 | "His game has kicked off - this spot is settled." / "Not in your Sleeper lineup yet." / "His game has kicked off." | core/startsit/weekCard.ts:377-397 | server | Cond |
 | 14 | "Looking it up…" | playerDetail.tsx:281 | static | Cond |
 | 15 | Last-season line "2025 · 17 GP · RB1 half-PPR" | playerDetail.tsx:366 (LastSeasonLine) | static + server | Cond (seen once) |
 
@@ -216,7 +216,7 @@ The main Matchup screen carries no sentences. The explanations live in `title` t
 
 | # | Text | Source | Kind | |
 |---|---|---|---|---|
-| 1 | "Projected final 79.5 — 54.1" | MatchupScreen.tsx:289-291 | static | Seen |
+| 1 | "Projected final 79.5 - 54.1" | MatchupScreen.tsx:289-291 | static | Seen |
 | 2 | "90% · 4,000 simulated afternoons" | MatchupScreen.tsx:292-294 | static | Seen |
 | 3 | "Confidence medium · 2 starters not projected · 2 availability unresolved" | MatchupScreen.tsx:297-298 + core/matchup/model.ts:658-659 | server | Seen |
 | 4 | "Live insight" + "You remain a strong favorite · 90% win odds" | matchup.tsx:344 + core/matchup/insights.ts:475 | server | Seen |
@@ -294,8 +294,8 @@ The main Matchup screen carries no sentences. The explanations live in `title` t
   - "Insight" + newsletter text (server).
   - "No 2026 outlook published for him." (server), or a long Rotowire outlook paragraph (Julian Reyes, about 6 lines, server).
   - "Major injury history: ACL" (core/draft/injury.ts:122).
-  - "knee · has not practiced — sleeper status · practice via nflverse · undated" (playerDetail.tsx injury block + server).
-  - "Sources disagree — sleeper: Out · nflverse: Doubtful" (playerDetail.tsx:530/543).
+  - "knee · has not practiced - sleeper status · practice via nflverse · undated" (playerDetail.tsx injury block + server).
+  - "Sources disagree - sleeper: Out · nflverse: Doubtful" (playerDetail.tsx:530/543).
   - "View full profile" (playerPage.tsx:275).
 - Cond: "Looking it up…" and "No outlook published for him." (playerDetail.tsx:281, 291).
 
@@ -313,21 +313,21 @@ The main Matchup screen carries no sentences. The explanations live in `title` t
 - **Data group rows (Seen).** Each summary below is a server sentence, mostly server/services/setupService.ts, unless a web file is given:
   - "Connected as Demo Manager" (setupService.ts:279)
   - "Demo Dynasty (Half PPR)"
-  - "Demo Sleeper ADP — 19 of 19 players matched" (:307)
+  - "Demo Sleeper ADP - 19 of 19 players matched" (:307)
   - "“Camp Report: Week 2” is waiting to be scored" (:582)
   - "Camp Report: Week 2 · Nov 16"
   - "Paste the issue into your weekly ChatGPT thread, then bring its tally back here." (static, SetupScreen.tsx:2550)
-  - "Using practice data — real betting lines are not connected yet" (setupService.ts:491)
+  - "Using practice data - real betting lines are not connected yet" (setupService.ts:491)
   - "3 items need attention" / "Nothing waiting for you" (static, SetupScreen.tsx:578-580)
-  - "1 player name needs matching — +1 net tally is not being counted" (core/identity/repair.ts:182-183)
+  - "1 player name needs matching - +1 net tally is not being counted" (core/identity/repair.ts:182-183)
   - "4 inputs need attention" (core/health/model.ts)
   - "The last recommendation you looked at." (static, SetupScreen.tsx:855)
-  - "Not known — Setup was opened directly rather than from a recommendation." (static, SetupScreen.tsx:854; Cond)
+  - "Not known - Setup was opened directly rather than from a recommendation." (static, SetupScreen.tsx:854; Cond)
 - **Player card data disclosure (14 sentences, Seen):**
   - "19 players covered, from 19 rows. Updated 17m ago." (SetupScreen.tsx:2825)
-  - "Source: Sleeper — /stats/nfl/regular. The positional finish is half-PPR — … which is what you asked for and is a different number in…" (2836)
+  - "Source: Sleeper - /stats/nfl/regular. The positional finish is half-PPR - … which is what you asked for and is a different number in…" (2836)
   - "4 stored, 15 players confirmed to have none. Newest fetched 17m ago." (2868)
-  - "Source: Sleeper — get_player_outlook (written by Rotowire). Fetched one player at a time…" (server/services/playerDetailService.ts:930)
+  - "Source: Sleeper - get_player_outlook (written by Rotowire). Fetched one player at a time…" (server/services/playerDetailService.ts:930)
   - "Sleeper publishes no roster percentage. It is not in the player dictionary and there is no field for it in the GraphQL schema, so the app shows none rather than a number it would have to invent." (playerDetailService.ts:947)
   - "Week 12 of 2026: 3 players carry a report, 100% of the source mapped (0 unmatched)." (server/services/injuryService.ts:1022)
   - "Designation comes from sleeper, which is the league host and the authority on whether a player is Questionable. …" (SetupScreen.tsx:3062)
@@ -337,21 +337,21 @@ The main Matchup screen carries no sentences. The explanations live in `title` t
   - "It is checked every five minutes, all day, because a player is ruled out ninety minutes before kickoff …" (3125)
   - "The report carries one practice status per week, not one per practice day, …" (3132)
   - "Recent changes: practice limited → full" (3143)
-  - The usage block: "No per-game usage yet — the 2026 weekly stats have not been ingested." (server/services/usageService.ts:847); "Targets, carries, receptions and target share come from nflverse’s published weekly player stats …" (2941); "Checked not yet · …" (2960); "Nothing has been ingested yet, so the role detector has no series to read." (usageService.ts:884); "A role change is only reported once a player has 6 games — …" (2978); "It is checked once a day, not every five minutes like the injury report. …" (2984)
-- **Preseason market projection (2):** "Nothing imported for Half PPR · 4pt pass TD. The Draft board shows PTS — until a snapshot is pasted here, …" (1287); "Copy the whole StartWho table and paste it below. Nothing is fetched or scraped; …" (1333).
+  - The usage block: "No per-game usage yet - the 2026 weekly stats have not been ingested." (server/services/usageService.ts:847); "Targets, carries, receptions and target share come from nflverse’s published weekly player stats …" (2941); "Checked not yet · …" (2960); "Nothing has been ingested yet, so the role detector has no series to read." (usageService.ts:884); "A role change is only reported once a player has 6 games - …" (2978); "It is checked once a day, not every five minutes like the injury report. …" (2984)
+- **Preseason market projection (2):** "Nothing imported for Half PPR · 4pt pass TD. The Draft board shows PTS - until a snapshot is pasted here, …" (1287); "Copy the whole StartWho table and paste it below. Nothing is fetched or scraped; …" (1333).
 - **Draft board weighting (1):** "How this board has always ranked: the market prices a player and your own research argues with the price. Leave it here unless you have a reason not to." (1040).
 - **Install on iPhone (7):** install.tsx:100, 104, 25-30 (3 steps), 154, plus diagnostics.ts:121-131 (table rows such as "17px, the gap it floats by (correct)").
 - **Demo Mode (1):** "Week 6 of a twelve-team half-PPR league, … Draft and Trades are not part of the demo." (core/demo/placeholder/index.ts:42).
 - **Areas (pushed pages, Seen):**
   - Sleeper: "The player list is how Fantasy Analyst recognizes names in your newsletter. Update it once before your draft, and occasionally during the season. Currently 25 players." (1668)
-  - League: "Teams this room drafts early" (1758) and "Comma-separated NFL codes. This lowers Next% for those players — …" (1795), both draft-only, still shown in season
-  - Draft order: "Sleeper does not publish average draft position, …" (1836); "Without one, the draft board still ranks by news and roster need — …" (1840); "Captured Nov 16 · 19 of 19 players matched" (1850)
+  - League: "Teams this room drafts early" (1758) and "Comma-separated NFL codes. This lowers Next% for those players - …" (1795), both draft-only, still shown in season
+  - Draft order: "Sleeper does not publish average draft position, …" (1836); "Without one, the draft board still ranks by news and roster need - …" (1840); "Captured Nov 16 · 19 of 19 players matched" (1850)
   - Newsletter: 1990, 2000, 2018, 2061 (4 help paragraphs); "Last issue: Received and stored. Score it with ChatGPT to move any player tallies." (2210 + server/services/newsletterService.ts:399)
   - Vegas lines: "Practice data only. Start/sit advice will say when a real line is missing rather than guessing." (setupService.ts:493); "Nothing to do here yet. Real betting lines are switched on later, …" (3185); 3191, 3202, 3218, 3233, 3249, 3258; "The reset day (the 13th) is assumed from the signup date, …" (core/vegas/billingPeriod.ts:41)
   - Help my scores: "These names appeared in your newsletters but could not be matched to a Sleeper player, … Pick who each one is." (1533); "Or search for the right player" (1578)
 - **Data health page (components/dataHealth.tsx).** The subtitle "Refresh problem · refreshed 13 min ago" (dataHealth.tsx:409 + core/health/model.ts:273). Source notes, all server, server/services/dataHealthService.ts unless a file is given:
   - "Demo Dynasty has never been read from Sleeper." (:320)
-  - "Practice data only — real betting lines are not connected." (:370)
+  - "Practice data only - real betting lines are not connected." (:370)
   - "Nothing published for week 10 yet." (:486)
   - "No 2026 schedule stored." (:588)
   - "No trending capture stored yet." (:635)

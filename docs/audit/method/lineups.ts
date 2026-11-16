@@ -32,10 +32,15 @@ const actual = (id: string, w: number): number | null => {
 const unfinished = new Set<string>();
 if (PARTIAL != null && D.fixtures) {
   const gathered = Date.parse(D.meta.generatedAt);
-  for (const [w, t, , kick] of D.fixtures) if (w === PARTIAL && kick && Date.parse(kick) + 3.6 * 3_600_000 > gathered) unfinished.add(t);
+  for (const [w, t, , kick] of D.fixtures) if (w === PARTIAL && kick && Date.parse(kick) + 3.3 * 3_600_000 > gathered) unfinished.add(t);
 }
 const status = (id: string, w: number) => String(D.injuries?.[String(w)]?.[id] ?? '').toLowerCase();
-const out = (id: string, w: number) => ['out', 'doubtful', 'ir', 'injured reserve'].includes(status(id, w));
+/* The current week also reads Sleeper's status now (the app takes the worse of the two); earlier weeks have only the report. */
+const CURRENT = Number(D.meta.currentWeek);
+const sleeperNow = (id: string) => String(D.players[id]?.[3] ?? '').toLowerCase();
+const out = (id: string, w: number) =>
+  ['out', 'doubtful', 'ir', 'injured reserve'].includes(status(id, w)) ||
+  (w === CURRENT && ['out', 'doubtful', 'ir', 'pup', 'sus', 'injured reserve'].includes(sleeperNow(id)));
 const num = (id: string, w: number): { r: number; borrowed: boolean } | null => {
   const n = D.numbers?.[String(w)]?.[id];
   if (!n) return null;
