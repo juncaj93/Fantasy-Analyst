@@ -24,46 +24,7 @@
  * colourblind reader and a bright phone screen in sunlight.
  */
 
-import type { ReactNode } from 'react';
 import type { MyGuyFlag } from '../api.ts';
-
-/**
- * Drop lines that have already been said.
- *
- * Presentation only: the underlying reason data is untouched and the full set
- * is always still reachable. This exists because the same fact legitimately
- * arrives as a badge, as the wait detail and as a Why bullet, and reading it
- * three times in a row costs a live drafter time for no new information.
- */
-export function withoutRepeats(lines: string[], alreadySaid: (string | null | undefined)[] = []): string[] {
-  const seen = new Set(alreadySaid.filter((s): s is string => !!s).map(normalise));
-  const out: string[] = [];
-  for (const line of lines) {
-    const key = normalise(line);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(line);
-  }
-  return out;
-}
-
-function normalise(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-/** A short bulleted list. Used for Why and for Counterpoints, so they match. */
-export function ReasonList({ items, muted = false }: { items: ReactNode[]; muted?: boolean }) {
-  return (
-    <ul className={muted ? 'reason-list counterpoints' : 'reason-list'}>
-      {items.map((item, i) => (
-        <li key={i}>{item}</li>
-      ))}
-    </ul>
-  );
-}
 
 /**
  * ♡ → ♥ → ♥♥ → ♥♥♥ → ♡, on the players list.

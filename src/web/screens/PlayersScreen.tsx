@@ -38,7 +38,6 @@ import {
   ALL_FILTER,
   ownerButtonLabel,
   ownerFilterOptions,
-  ownerPillLabel,
   playerFilterChips,
   playersEmptyLine,
   teamLabel,
@@ -122,74 +121,8 @@ const PAGE_SIZE = 100;
  */
 const LOAD_MORE_MARGIN = '600px';
 
-/**
- * Who holds him, where the heart used to be.
- *
- * ## Why the heart left
- *
- * `MyGuyControl` sat in this slot — ♡ → ♥ → ♥♥ → ♥♥♥, an opinion that nudges
- * a player up the **draft board**. That was the right control for August. The
- * draft is months behind this league now, and a control whose only effect is
- * on a board nobody will open again is a thumb-sized target on the busiest
- * corner of the card, doing nothing, next to the X.
- *
- * What a reader actually asks of a player's card in October is the question
- * this replaces it with: *can I have him?* The answer is one word and it is
- * already on the wire — the ownership filter on the list behind this card is
- * computed from the same map — so this is a display of a fact the response
- * already carried rather than a new question asked of the server.
- *
- * ## What did not change
- *
- * The heart's **data** is untouched. `/api/players/:id/my-guy` still exists,
- * the stored levels are still stored, `myGuy` still rides on every row of the
- * list, and the control itself is still on the list row — see
- * `CompactPlayerRow`'s `action`. Nothing was migrated and nothing was dropped,
- * so a future draft finds its board exactly as this one left it. This is a
- * screen putting a better answer in a scarce place, not a feature being
- * removed.
- *
- * ## Why it is not a button
- *
- * Ownership is not the reader's to change from here — this app never acts on
- * Alex's behalf, and a tappable owner would imply it could. It is a `span`
- * with no handler and no focus stop, which is also what keeps the header's
- * tab order down to Back and the X.
- */
-function OwnerPill({ label }: { label: string | null }) {
-  /*
-   * No league, no pill. See `ownerPillLabel`: an empty pill in that state
-   * would read as "owned by nobody", which is `Available`, which is a claim
-   * this app cannot make without a league to make it about.
-   */
-  if (!label) return null;
-  return (
-    <span
-      className={label === 'Available' ? 'tag tag-take' : 'tag'}
-      data-testid="owner-pill"
-      data-owner={label}
-      title={label === 'Available' ? 'No manager in this league holds him' : `Rostered by ${label}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-export function PlayersScreen({
-  leagues,
-  resetNonce,
-  draftAhead = false,
-}: {
-  leagues: LeagueSummary[];
-  resetNonce: number;
-  /**
-   * Whether this league still has a draft to hold: `season.draftVisible`, the
-   * same answer that puts Draft in the bar, decided on the server from Sleeper's
-   * own draft status. It decides what the card's corner holds — see
-   * {@link cardCorner}.
-   */
-  draftAhead?: boolean;
-}) {
+/** Players while a draft is ahead (`PlayersTab` draws the in-season screen after it). */
+export function PlayersScreen({ leagues, resetNonce }: { leagues: LeagueSummary[]; resetNonce: number }) {
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState(ALL_FILTER);
   /**
@@ -473,24 +406,17 @@ export function PlayersScreen({
   const open = openId == null ? null : (players.find((p) => p.id === openId) ?? null);
 
   /**
-   * The card's top corner, beside the X: the heart while a draft is ahead, the
-   * owner once it is over.
-   *
-   * The heart only ever moved the draft board, so it belongs here exactly as
-   * long as there is a board to move. Gated on `draftAhead` rather than removed,
-   * so a league heading into its next draft gets the control back on its own,
-   * and the stored levels are never touched either way.
+   * The card's top corner, beside the X: the heart. This screen is drawn only
+   * while a draft is ahead (Round 34); after the draft, Players is the
+   * in-season screen. The stored levels are never touched.
    */
-  const cardCorner = (player: PlayerListItem) =>
-    draftAhead ? (
-      <MyGuyControl
-        myGuy={player.myGuy ?? EMPTY_MY_GUY}
-        busy={flagging === player.id}
-        onChange={(level) => void setMyGuy(player.id, level)}
-      />
-    ) : (
-      <OwnerPill label={ownerPillLabel(player.ownerRosterId, teams)} />
-    );
+  const cardCorner = (player: PlayerListItem) => (
+    <MyGuyControl
+      myGuy={player.myGuy ?? EMPTY_MY_GUY}
+      busy={flagging === player.id}
+      onChange={(level) => void setMyGuy(player.id, level)}
+    />
+  );
 
   /*
    * The player's page, on top of the list rather than instead of it.
@@ -648,8 +574,6 @@ export function PlayersScreen({
                 key={p.id}
                 player={p}
                 busy={flagging === p.id}
-                draftAhead={draftAhead}
-                teams={teams}
                 onOpen={() => setOpenId(p.id)}
                 onMyGuy={(level) => void setMyGuy(p.id, level)}
               />
@@ -801,16 +725,11 @@ function LoadMore({
 function PlayerRow({
   player,
   busy,
-  draftAhead,
-  teams,
   onOpen,
   onMyGuy,
 }: {
   player: PlayerListItem;
   busy: boolean;
-  /** Whether a draft is still to be held. See `PlayersScreen`'s `draftAhead`. */
-  draftAhead: boolean;
-  teams: readonly OwnerTeam[];
   onOpen: () => void;
   onMyGuy: (level: 0 | 1 | 2 | 3) => void;
 }) {
@@ -824,7 +743,7 @@ function PlayerRow({
         position={player.position}
         team={player.team}
         status={player.status}
-        draft={draftAhead}
+        draft
         tally={lifetime}
         rank={player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
         /*
@@ -836,15 +755,7 @@ function PlayerRow({
           actions, two buttons, two tab stops, and a target the size of a thumb
           on each. See `CompactPlayerRow`'s `action` and `.row-action`.
         */
-        /*
-          Only while a draft is ahead. Once it is over the heart has nothing
-          left to move, and the row says who holds him instead, in the same
-          words and from the same lookup as the card's corner (`OwnerPill`,
-          `ownerPillLabel`). The stored levels are untouched either way.
-        */
-        {...(draftAhead
-          ? { action: <MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} /> }
-          : { trailing: <OwnerPill label={ownerPillLabel(player.ownerRosterId, teams)} /> })}
+        action={<MyGuyControl myGuy={player.myGuy ?? EMPTY_MY_GUY} busy={busy} onChange={onMyGuy} />}
         onOpen={onOpen}
         testId="player-search-row"
         cluster
@@ -895,36 +806,18 @@ function PlayerRow({
           */
           { label: '7d', value: <SignedValue net={player.signal?.last7.net ?? 0} /> },
           { label: '30d', value: <SignedValue net={player.signal?.last30.net ?? 0} /> },
-          /*
-            Where the market has him while a draft is ahead, and where this
-            league's draft actually took him once it is over: `Pick 1.04`.
-            A player the draft never reached (a waiver pickup, a rookie added
-            later) shows a quiet dash, the same mark an unranked ADP uses.
-          */
-          draftAhead
-            ? {
-                label: 'ADP',
-                testId: 'players-adp',
-                value:
-                  player.draftRank != null ? (
-                    player.draftRank
-                  ) : (
-                    <span className="faint" title="Sleeper does not rank him">
-                      —
-                    </span>
-                  ),
-              }
-            : {
-                label: 'Pick',
-                testId: 'players-pick',
-                value: player.draftPick ? (
-                  player.draftPick
-                ) : (
-                  <span className="faint" title="Not drafted in this league">
-                    —
-                  </span>
-                ),
-              },
+          {
+            label: 'ADP',
+            testId: 'players-adp',
+            value:
+              player.draftRank != null ? (
+                player.draftRank
+              ) : (
+                <span className="faint" title="Sleeper does not rank him">
+                  —
+                </span>
+              ),
+          },
         ]}
       />
     </div>

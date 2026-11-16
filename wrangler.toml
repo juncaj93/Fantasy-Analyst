@@ -61,29 +61,10 @@ VEGAS_PROVIDER = "sportsgameodds"
 # You can also set/override it inside the app under Setup -> Newsletter.
 NEWSLETTER_ADDRESS = "fantasy-news@juncaj.net"
 
-# The Cloudflare account this Worker is deployed into.
-#
-# An identifier, not a credential — it is in the dashboard URL — and useless on
-# its own. With CLOUDFLARE_ANALYTICS_TOKEN beside it, Setup -> Data Health can
-# show how much of today's 5,000,000-row D1 allowance is gone and whether the
-# day is on pace to run out of it. Leave it empty and that panel says it is not
-# connected, which is true and is better than a number nobody measured.
-#
-# Find it with `wrangler whoami`, or in the URL of any dashboard page.
-CLOUDFLARE_ACCOUNT_ID = ""
 # The 4 AM trim of old odds lines and injury-feed log rows (Round 15): at most
 # 2,000 rows a day, weekdays only, never newer than 3 weeks (odds) or 30 days
 # (injury log). Set to "off" and deploy to stop it.
 TRIM_OLD_ROWS = "on"
-# Which Trades screens the site draws (Round 19): "new" since Alex's review of
-# the preview (Offers, Build, Check); "old" brings back the earlier screens.
-# Change and deploy.
-TRADES_SCREENS = "new"
-# The in-season Players tab (Round 24): "on" draws it once the draft is over
-# (sorted by rest-of-season value over a free agent, Trade targets and Injured
-# filters, a fuller card). On since Alex's go, 12 November 2026. To go back to
-# today's tab, set this to "off" and deploy; draft mode is never affected.
-PLAYERS_INSEASON = "on"
 # Waivers looks ahead (Round 26): "on" adds the Opportunity finder to the stash
 # line (a free agent who inherits a starter's role), cover pickups for holes in
 # the next three weeks, and the block said in the opponent's terms. On since
@@ -98,15 +79,6 @@ WAIVERS_LOOKAHEAD = "on"
 #   SPORTSGAMEODDS_API_KEY  when VEGAS_PROVIDER = "sportsgameodds" (the Deploy
 #                    workflow publishes this from the repository secret of the
 #                    same name, so it does not need putting by hand)
-#   CLOUDFLARE_ANALYTICS_TOKEN  read-only API token with Account Analytics:
-#                    Read and NOTHING else, so the app can ask Cloudflare how
-#                    much of today's D1 row allowance is gone. Deliberately not
-#                    the deploy token: this one lives inside a Worker that
-#                    answers HTTP, so it is scoped to the single metrics
-#                    dataset it needs and could not read a row of data, change
-#                    a setting or deploy anything if it ever leaked. Optional —
-#                    without it the allowance panel says so. See
-#                    docs/DATA_HEALTH.md.
 
 [triggers]
 # The five-minute injury check is back on, and the record of why it was ever

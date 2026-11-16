@@ -109,33 +109,11 @@ export interface WorkerEnv {
    */
   RELEASE_SHA?: string;
   /**
-   * The Cloudflare account this Worker is deployed into, so the app can ask
-   * Cloudflare's own analytics how much of today's D1 row allowance is gone.
-   *
-   * A plain var: an account tag is an identifier, not a credential, and it is
-   * useless without the token beside it. Absent means the quota panel on Data
-   * Health says it is not connected, which is a true statement about a
-   * deployment nobody has set this up on.
-   */
-  CLOUDFLARE_ACCOUNT_ID?: string;
-  /**
    * The kill switch for the 4 AM trim of old rows (Round 15). `"off"` stops
    * it; anything else, or nothing, leaves it on. A plain var in
    * `wrangler.toml`, so turning it off is a one-line change and a deploy.
    */
   TRIM_OLD_ROWS?: string;
-  /**
-   * Which Trades screens the site draws (Round 19): `"new"` for the rebuilt
-   * screens, anything else for today's. The switch Alex flips once he has
-   * reviewed the preview.
-   */
-  TRADES_SCREENS?: string;
-  /**
-   * The in-season Players tab (Round 24): `"on"` draws it once the draft is
-   * over; anything else, or nothing, keeps today's tab. Off in code and in
-   * `wrangler.toml` until Alex has looked at the preview and says go.
-   */
-  PLAYERS_INSEASON?: string;
   /**
    * Round 26: Waivers looks ahead (the Opportunity finder, cover pickups for
    * the next three weeks, the block in the opponent's terms). `"on"` turns it
@@ -148,16 +126,6 @@ export interface WorkerEnv {
    * PIN. Never set on the live site.
    */
   PREVIEW?: string;
-  /**
-   * A read-only Cloudflare API token with **Account Analytics: Read** and
-   * nothing else.
-   *
-   * A secret, set with `wrangler secret put`. Deliberately not the deploy
-   * token: this one is inside a Worker that answers HTTP, so it is scoped to
-   * the one metrics dataset it needs, and cannot read a row of anybody's data,
-   * change a setting or deploy anything if it ever leaked.
-   */
-  CLOUDFLARE_ANALYTICS_TOKEN?: string;
 }
 
 const app = createApp();
@@ -218,11 +186,7 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     SESSION_SECRET: env.SESSION_SECRET,
     inboundAddress: env.NEWSLETTER_ADDRESS ?? null,
     releaseSha: env.RELEASE_SHA ?? null,
-    cloudflareAccountId: env.CLOUDFLARE_ACCOUNT_ID ?? null,
-    cloudflareAnalyticsToken: env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
-    tradesScreens: env.TRADES_SCREENS === 'new' ? 'new' : 'old',
     preview: env.PREVIEW === 'trades' ? 'trades' : env.PREVIEW === 'players' ? 'players' : null,
-    playersInSeason: env.PLAYERS_INSEASON === 'on',
     waiversLookahead: env.WAIVERS_LOOKAHEAD === 'on',
   };
 }

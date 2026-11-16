@@ -1893,34 +1893,6 @@ body,
 }
 
 /*
- * A status line, not a banner.
- *
- * `Notice` was a filled, bordered, padded block — the right shape for something
- * that interrupts, and the wrong one for the things that actually use it, which
- * are statements of fact about what the screen could not work out. One line, a
- * mark to say what kind of line it is, and the page's own ground under it.
- */
-.notice-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-1) var(--sp-2);
-  font-size: 0.82rem;
-  color: var(--text-dim);
-}
-
-.notice-row-mark {
-  flex: none;
-  font-size: 0.9rem;
-  line-height: 1;
-  color: var(--warn);
-}
-
-.notice-row-error .notice-row-mark {
-  color: var(--neg);
-}
-
-/*
  * A metric block, not a tile.
  *
  * These were four filled boxes across the top of the player page, each with its
@@ -3400,18 +3372,6 @@ body,
 }
 
 /*
- * The count beside a section's name, and nothing else on the line.
- *
- * `Targets 6` rather than `Targets (6)`: the parentheses were punctuation doing
- * a job that weight and colour already do.
- */
-.section-count {
-  font-weight: 600;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-/*
  * A section heading with something to say on its right-hand end: how many rows
  * are under it, and — when every one of them agrees — how sure the app is about
  * all of them at once.
@@ -3809,27 +3769,6 @@ body,
   padding-left: 16px;
 }
 
-/*
- * The waiver sheet's reasons are rows, not bullets.
- *
- * Each one leads with a pill — `Market rising`, `Role increasing` — and a
- * bullet in front of a pill is two markers doing one marker's job. The pill is
- * the thing the eye lands on, so it starts the line.
- */
-[data-testid='waiver-reasons'] {
-  list-style: none;
-  padding-left: 0;
-  margin-top: var(--sp-1);
-}
-
-[data-testid='waiver-reasons'] li {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-1);
-  margin-bottom: var(--sp-1);
-  line-height: 1.35;
-}
-
 .reason-list li {
   font-size: 0.82rem;
   margin-bottom: 2px;
@@ -3837,10 +3776,6 @@ body,
 }
 
 .reason-list li::marker {
-  color: var(--text-faint);
-}
-
-.counterpoints li {
   color: var(--text-faint);
 }
 
@@ -3960,26 +3895,6 @@ body,
 }
 
 /*
- * The verdict, and how sure the app is of it, on one line.
- *
- * `Sell high` and `low confidence` are a claim and its qualifier, and putting
- * them on one line is what stops the qualifier reading as a second claim.
- */
-.trade-case-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-1);
-}
-
-.trade-case-verdict {
-  font-weight: 650;
-  font-size: 0.95rem;
-  letter-spacing: -0.01em;
-}
-
-/*
  * Confidence, on a row rather than on a card.
  *
  * It qualifies the sentence beside it and must not compete with it: the badge
@@ -4072,17 +3987,15 @@ button.btn-primary {
  * Every button reaches the 44px tap floor, whatever it is drawn at
  * (October 2026 audit). The box keeps its size so no row moves; a transparent
  * ::after extends what a finger can hit: 4px above and below a 36px .btn,
- * 6px for a 32px .btn-sm, a text link and the round info button. :where()
- * keeps `position: relative` from overriding any class that already places
- * the button.
+ * 6px for a 32px .btn-sm and a text link. :where() keeps `position: relative`
+ * from overriding any class that already places the button.
  */
-:where(button.btn, button.link-button, button.info-line-button) {
+:where(button.btn, button.link-button) {
   position: relative;
 }
 
 button.btn::after,
-button.link-button::after,
-button.info-line-button::after {
+button.link-button::after {
   content: '';
   position: absolute;
   inset: -4px 0;
@@ -4091,10 +4004,6 @@ button.info-line-button::after {
 button.btn-sm::after,
 button.link-button::after {
   inset: -6px 0;
-}
-
-button.info-line-button::after {
-  inset: -6px;
 }
 
 button.btn-sm {
@@ -5084,8 +4993,6 @@ table.compact th {
 table.compact tr:last-child td {
   border-bottom: none;
 }
-
-
 
 .tag {
   display: inline-flex;
@@ -8896,248 +8803,6 @@ div.matchup-result {
 }
 
 /*
-  Smart Bilateral Trades.
-
-  Three lines and a tap target, sitting above the discovery board on Trades.
-  The whole design constraint is that five of these have to fit on a 360-point
-  phone next to a board that was already full — so nothing here has a card, a
-  border of its own, or a second copy of a fact the line above already carried.
-
-  It is a `<button>` rather than a row with a handler because the entire object
-  is one target: there is no secondary action inside it, which is what lets the
-  whole surface be tappable without nesting controls.
-*/
-.smart-trade {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: var(--surface);
-  border: 0;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-1);
-  padding: var(--sp-2) var(--sp-3);
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  min-height: var(--tap);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.smart-trade:active {
-  background: var(--pressed);
-}
-
-/*
-  Give → Get, on one line that wraps rather than scrolls.
-
-  `minmax(0, 1fr)` on the sides is what actually enforces this: without it a
-  long name sets the column's minimum to its own intrinsic width and the row
-  pushes the page sideways, which is the one thing §22's UI list forbids
-  outright. The names wrap inside their half instead.
-*/
-.smart-trade-line {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: var(--sp-2);
-  font-weight: 600;
-  font-size: 0.92rem;
-  letter-spacing: -0.01em;
-}
-
-.smart-trade-side {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/*
-  `Give` and `Get`, small and above the names.
-
-  Uppercase micro-labels rather than a sentence, because the two halves are
-  otherwise indistinguishable at a glance and an arrow alone does not say which
-  direction is which for a reader coming to the screen cold.
-*/
-.smart-trade-label {
-  display: block;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.smart-trade-arrow {
-  color: var(--text-faint);
-  font-size: 0.9rem;
-  align-self: center;
-}
-
-.smart-trade-meta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin-top: 3px;
-  font-size: 0.8rem;
-}
-
-.smart-trade-gain {
-  font-variant-numeric: tabular-nums;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.smart-trade-partner {
-  flex: 0 0 auto;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.smart-trade-why {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  margin-top: 2px;
-  font-size: 0.8rem;
-  color: var(--text-faint);
-  line-height: 1.35;
-}
-
-.smart-trade-why > span:first-child {
-  min-width: 0;
-}
-
-/* Check a trade's verdict on the same idea (T3). Quiet, like the cue. */
-.smart-trade-season {
-  margin-top: 2px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-faint);
-}
-.smart-trade-season[data-kind='favors_a'],
-.smart-trade-season[data-kind='leans_a'] {
-  color: var(--pos);
-}
-
-/*
-  The manager cue.
-
-  Deliberately the quietest thing on the row and deliberately often absent —
-  behaviour is subordinate to the roster case above it, and a cue that appeared
-  on every idea would be read as part of the recommendation rather than as a
-  qualifier on it. `effectively_inactive` is the one value that gets a warmer
-  colour, because it is the one that changes what a reader does next.
-*/
-.smart-trade-cue {
-  flex: 0 0 auto;
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-tint);
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-.smart-trade-cue[data-activity='effectively_inactive'],
-.smart-trade-cue[data-activity='low_activity'] {
-  background: var(--status-neutral);
-  color: var(--on-status-neutral);
-}
-
-/*
-  The category tag on a buy-low or sell-high row.
-
-  Sits above the give/get line rather than beside the manager cue, because it
-  qualifies the whole idea and the cue qualifies one clause of it. Uppercase and
-  tracked out at a small size so it reads as a section marker rather than as
-  another sentence competing with the two below it — the row already carries
-  three lines of prose and a fourth voice would be one too many.
-
-  Colour is never the only carrier: the word is the signal and the tint is the
-  reinforcement, which is the same rule the position palette keeps. Buy-low
-  borrows the positive hue and sell-high the warning one — not because selling
-  is bad, but because "act before this regresses" is the urgent half of the pair
-  and warm is how this app has always said urgent.
-*/
-.smart-trade-kind {
-  align-self: flex-start;
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 4px;
-  margin-bottom: 2px;
-  background: var(--status-neutral);
-  color: var(--on-status-neutral);
-  white-space: nowrap;
-}
-
-.smart-trade-kind[data-category='buy_low'] {
-  background: var(--pos-tint);
-  color: var(--pos);
-}
-
-.smart-trade-kind[data-category='sell_high'],
-.smart-trade-kind[data-category='close'] {
-  background: var(--warn-tint);
-  color: var(--warn);
-}
-
-.smart-trade-kind[data-category='fair'] {
-  background: var(--pos-tint);
-  color: var(--pos);
-}
-
-/* The trade finder's label is a short sentence, so it reads as one and wraps. */
-.smart-trade-kind[data-category='fair'],
-.smart-trade-kind[data-category='close'] {
-  font-size: 0.72rem;
-  letter-spacing: 0;
-  text-transform: none;
-  white-space: normal;
-}
-
-/*
-  The arbitrage case inside the sheet.
-
-  A headline sentence and its evidence, set apart from the roster reasoning
-  below it by a rule on the leading edge rather than by a box — the sheet is
-  already a stack of labelled blocks and a second border style inside one would
-  read as a nested card.
-*/
-.smart-trade-arb {
-  border-inline-start: 2px solid var(--status-neutral);
-  padding-inline-start: var(--sp-2);
-  margin-bottom: var(--sp-2);
-}
-
-.smart-trade-arb[data-kind='buy_low'] {
-  border-inline-start-color: var(--pos);
-}
-
-.smart-trade-arb[data-kind='sell_high'] {
-  border-inline-start-color: var(--warn);
-}
-
-.smart-trade-arb-headline {
-  margin: 0 0 4px;
-  font-size: 0.86rem;
-  line-height: 1.4;
-  color: var(--text);
-}
-
-.smart-trade-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
-}
-
-/*
  * The defence line: one tappable row, three parts, and it fits at 360.
  *
  * The identity cluster and the state tag are fixed columns; the sentence
@@ -9291,10 +8956,6 @@ div.matchup-result {
   line-height: 1.35;
   color: var(--text-dim);
 }
-
-
-
-
 
 .waiver-notes-warn {
   color: var(--warn);
@@ -9486,8 +9147,6 @@ div.matchup-result {
   line-height: 1.35;
   color: var(--text-faint);
 }
-
-
 
 .mock-team-slot {
   padding: var(--sp-2) var(--sp-3);
@@ -9744,23 +9403,6 @@ div.matchup-result {
 /* A long team name wraps inside the label column instead of pushing past it. */
 .weekly-line dt {
   overflow-wrap: anywhere;
-}
-
-/*
- * A team name on a result row stays whole. A username is one long word, and
- * "anywhere" above splits it mid-word ("zackstephens5" / "4"). Here the label
- * column is 120px, enough for a 14-character name, and anything longer is cut
- * with an ellipsis; the full name is in the headline and the tooltip.
- */
-.weekly-line-team {
-  grid-template-columns: 120px minmax(0, 1fr);
-}
-
-.weekly-line-team dt {
-  overflow: hidden;
-  overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ============================================= Best move and Compare, Oct 2026 */
@@ -10113,529 +9755,6 @@ div.matchup-result {
 .cmp-busy {
   opacity: 0.6;
   transition: opacity var(--dur-fast) var(--ease);
-}
-
-
-
-
-
-
-
-/*
- * Build a trade, compact (Alex, 15 October 2026): wrapped chips instead of
- * two-line rows, one-line banners, a sticky Find trades, short cards and a
- * short sheet. Names in normal weight, stats and labels muted, chips that
- * never wrap their own text.
- */
-.chip-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin: 1px 0 4px;
-}
-
-.pick-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-height: 30px;
-  max-width: 100%;
-  padding: 0 6px;
-  border: 1px solid var(--separator);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.74rem;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  white-space: nowrap;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Anything brought into view lands above the sticky Find trades bar, never under it. */
-.pick-chip,
-.chip-picker {
-  scroll-margin-bottom: calc(var(--toolbar-height) + var(--toolbar-gap) + 72px);
-}
-
-/* Up to 375: the padded card leaves 24 px less, so the chips tighten to keep six rows. */
-@media (max-width: 380px) {
-  .chip-picker {
-    gap: 2px;
-  }
-  .pick-chip {
-    gap: 2px;
-    padding: 0 4px;
-    font-size: 0.7rem;
-  }
-  .pick-chip-team {
-    font-size: 0.6rem;
-  }
-}
-
-.pick-chip:disabled {
-  opacity: 0.45;
-}
-
-.pick-chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.pick-chip-pos {
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-.pos-text-QB { color: var(--pos-QB-line); }
-.pos-text-RB { color: var(--pos-RB-line); }
-.pos-text-WR { color: var(--pos-WR-line); }
-.pos-text-TE { color: var(--pos-TE-line); }
-.pos-text-K { color: var(--pos-K-line); }
-.pos-text-DEF { color: var(--pos-DEF-line); }
-
-.pick-chip-name {
-  font-weight: 450;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pick-chip-team {
-  color: var(--text-dim);
-  font-size: 0.64rem;
-}
-
-.pick-chip-hurt {
-  padding: 1px 3px;
-  border-radius: 3px;
-  background: var(--neg-tint);
-  color: var(--neg);
-  font-size: 0.6rem;
-  font-weight: 800;
-}
-
-.pick-chip-tag {
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 0.6rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.pick-chip[data-on='yes'][data-kind='sell'] {
-  border-color: var(--warn);
-  background: var(--warn-tint);
-}
-.pick-chip[data-on='yes'][data-kind='sell'] .pick-chip-tag {
-  background: var(--warn);
-  color: var(--surface);
-}
-
-.pick-chip[data-on='yes'][data-kind='want'],
-.pick-chip[data-on='yes'][data-kind='pick'] {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-}
-.pick-chip[data-on='yes'][data-kind='want'] .pick-chip-tag,
-.pick-chip[data-on='yes'][data-kind='pick'] .pick-chip-tag {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-/* One line, an info button, and the rest on tap. */
-.info-line {
-  margin: 2px 0 6px;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
-.info-line-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.info-line-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.info-line-button {
-  flex: 0 0 auto;
-  min-width: 32px;
-  min-height: 32px;
-  border: 0;
-  background: none;
-  color: var(--accent-text);
-  font: inherit;
-  font-size: 0.95rem;
-}
-
-.info-line-detail {
-  padding: 4px 0 2px;
-  line-height: 1.4;
-}
-
-.mark-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 650;
-  line-height: 1.3;
-  white-space: nowrap;
-  background: var(--surface-sunken);
-  color: var(--text-dim);
-}
-
-.mark-chip[data-on='yes'] {
-  background: var(--accent-tint);
-  color: var(--accent-text);
-}
-
-.tb-label {
-  margin-top: 2px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.tb-hint {
-  margin-left: 4px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.tb-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin: 2px 0;
-}
-
-/* Where the fold scrolls to when it opens: just under the navigation bar. */
-.trade-builder-top {
-  scroll-margin-top: calc(var(--safe-top, 0px) + 64px);
-}
-
-/*
- * The team dropdown gives way to the pill: it shrinks to a sensible minimum
- * and truncates a long team name, so `+ unmarked on` always fits whole inside
- * the card's padding (Alex, 15 October 2026: clipped at 390).
- */
-.tb-select {
-  flex: 1 1 auto;
-  min-width: 112px;
-  max-width: 240px;
-  margin-bottom: 0;
-}
-
-.tb-select select {
-  width: 100%;
-  min-height: 36px;
-  padding-top: 0;
-  padding-bottom: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.tb-toggle {
-  position: relative;
-  flex: 0 0 auto;
-  margin-left: auto;
-  white-space: nowrap;
-  min-height: 36px;
-  border: 0;
-  font: inherit;
-  font-size: 0.74rem;
-  font-weight: 650;
-}
-
-/* Drawn at 36px, reached at 44 (round 13), the same transparent extension `.btn` uses. */
-.tb-toggle::after {
-  content: '';
-  position: absolute;
-  inset: -4px 0;
-}
-
-/* Find trades stays in reach, just above the tab bar. */
-.tb-sticky {
-  position: sticky;
-  bottom: calc(var(--toolbar-height) + var(--toolbar-gap) + 4px);
-  z-index: 5;
-  display: flex;
-  gap: var(--sp-2);
-  margin: 4px 0;
-  padding: 4px 0;
-  background: var(--surface);
-}
-
-.tb-sticky > .btn {
-  min-height: 44px;
-}
-
-.tb-sticky > .btn-primary {
-  flex: 1 1 auto;
-}
-
-.tb-sticky > .btn:not(.btn-primary) {
-  flex: 0 0 auto;
-}
-
-.tb-progress {
-  margin: 2px 0 6px;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.tb-retry {
-  border: 0;
-  background: none;
-  color: var(--accent-text);
-  font: inherit;
-  font-weight: 650;
-  min-height: 32px;
-}
-
-/* The card: chips and team, Give, Get, one row of numbers, one phrase. */
-.builder-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.builder-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.builder-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.builder-status {
-  flex: 0 0 auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  white-space: nowrap;
-  background: var(--surface-sunken);
-  color: var(--text-dim);
-}
-
-.builder-status[data-status='likely'] {
-  background: var(--pos-tint);
-  color: var(--pos);
-}
-
-.builder-status[data-status='maybe'] {
-  background: var(--accent-tint);
-  color: var(--accent-text);
-}
-
-.builder-status[data-status='long_shot'] {
-  background: var(--warn-tint);
-  color: var(--warn);
-}
-
-.builder-costs {
-  background: var(--neg-tint);
-  color: var(--neg);
-}
-
-.builder-partner {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-}
-
-.builder-line {
-  display: grid;
-  grid-template-columns: 2.6em minmax(0, 1fr);
-  gap: var(--sp-2);
-  align-items: baseline;
-  font-size: 0.85rem;
-}
-
-.builder-label {
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.builder-one {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 450;
-}
-
-.builder-nums {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.builder-num {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.builder-num-label {
-  font-size: 0.64rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.builder-num-value {
-  font-size: 0.86rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.builder-need {
-  font-size: 0.74rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The sheet: status and one reason, a small table, two reasons, More. */
-.builder-sheet-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.builder-sheet-reason {
-  font-size: 0.82rem;
-  color: var(--text-dim);
-}
-
-.builder-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 6px;
-}
-
-.builder-table th,
-.builder-table td {
-  padding: 4px 2px;
-  text-align: right;
-  border-bottom: 1px solid var(--separator-soft);
-  white-space: nowrap;
-}
-
-.builder-table thead th {
-  font-size: 0.66rem;
-  font-weight: 600;
-  color: var(--text-dim);
-}
-
-.builder-table tbody th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--text-dim);
-}
-
-.builder-table-text {
-  text-align: left !important;
-  white-space: normal !important;
-}
-
-.builder-table-dim {
-  color: var(--text-faint);
-}
-
-.builder-sheet-line {
-  margin: 4px 0;
-  font-size: 0.82rem;
-}
-
-.builder-sheet-actions {
-  display: flex;
-  gap: var(--sp-2);
-}
-
-.builder-sheet-actions > .btn {
-  min-height: 44px;
-}
-
-.builder-sheet-actions > .btn-primary {
-  flex: 1 1 auto;
-}
-
-.builder-pitch {
-  margin: 4px 0 8px;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius);
-  background: var(--surface-inset);
-  font-size: 0.84rem;
-  line-height: 1.45;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-/*
- * `.fold` clips with `overflow: hidden`, which also makes it the frame a sticky
- * child sticks inside, so Find trades stuck to the fold's own bottom and sat
- * over the Want chips. `clip` clips the same corners without becoming a
- * scroll frame, so the bar sticks to the screen, above the tab bar.
- */
-.fold[data-testid='trade-builder'] {
-  overflow: clip;
-}
-
-/*
- * Build a trade and Check a trade hold controls, not rows: their bodies take
- * the card header's inset (and the Team cards' 12 px), so the labels, chips,
- * dropdowns, pill and buttons line up with the title and nothing touches the
- * card's edge (Alex, 15 October 2026).
- */
-.fold[data-testid='trade-builder'] > [data-testid='trade-builder-body'],
-.fold[data-testid='trade-check'] > [data-testid='trade-check-body'] {
-  padding: 0 var(--sp-3) var(--sp-2);
-}
-
-/* The market fold's section titles take the same inset as its header, not 4 px. */
-.fold[data-testid='market-fold'] .section-title {
-  margin-left: var(--sp-3);
-  margin-right: var(--sp-3);
 }
 
 /* `Beta` beside a fold's title: small, quiet, never mistaken for a count. */

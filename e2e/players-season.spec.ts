@@ -65,16 +65,6 @@ async function expectTapTargets(page: Page, selector: string) {
 const names = (page: Page) => page.getByTestId('player-search-row').locator('.player-name').allInnerTexts();
 
 test.describe('the in-season Players tab', () => {
-  test('switch off: today’s screen, and the new route is never asked', async ({ page }) => {
-    const asked = await setup(page, { on: false, draftAhead: false });
-    await openPlayers(page);
-    await expect(page.getByTestId('players-season')).toHaveCount(0);
-    await expect(page.getByTestId('p2-controls')).toHaveCount(0);
-    await expect(page.getByTestId('players-rank-head')).toContainText('Sleeper’s draft order, moved by your research');
-    await expect(page.getByTestId('players-pick').first()).toBeVisible();
-    expect(asked).toEqual([]);
-  });
-
   test('switch on while a draft is ahead: the draft screen, untouched', async ({ page }) => {
     const asked = await setup(page, { on: true, draftAhead: true });
     await openPlayers(page);

@@ -21,7 +21,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { clearMyGuys, emptyQueue, exploreMarket, inSeason } from './helpers.ts';
+import { clearMyGuys, emptyQueue, inSeason } from './helpers.ts';
 
 async function openDraft(page: Page) {
   await page.goto('/');
@@ -145,23 +145,6 @@ test.describe('the identity cluster', () => {
     await page.getByTestId('tab-players').click();
     await expect(page.locator('[data-testid="player-search-row"]').first()).toBeVisible();
     await identityReadsLeftToRight(page, 'player-search-row');
-  });
-
-  /*
-   * Three rather than five, and only here.
-   *
-   * Trades lists players the newsletter has an opinion about, so how many rows
-   * exist is a property of the evidence rather than of the layout — the seed
-   * carries three. Skipping when the fixture is small would be a test that
-   * quietly stops running; asking for what the fixture actually has is a test
-   * that keeps working.
-   */
-  test('and on Trades', async ({ page }) => {
-    await page.goto('/');
-    await page.getByTestId('tab-trades').click();
-    await exploreMarket(page);
-    await expect(page.locator('[data-testid="trade-row"]').first()).toBeVisible();
-    await identityReadsLeftToRight(page, 'trade-row', 3);
   });
 
   /**

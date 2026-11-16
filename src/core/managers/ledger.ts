@@ -301,7 +301,7 @@ export function toLedgerTransaction(opts: {
 export function sourceHash(parts: readonly (string | number | null | undefined)[]): string {
   let hash = 0x811c9dc5;
   for (const part of parts) {
-    const text = part == null ? ' ' : String(part);
+    const text = part == null ? '\u0000' : String(part);
     for (let i = 0; i < text.length; i++) {
       hash ^= text.charCodeAt(i);
       hash = Math.imul(hash, 0x01000193) >>> 0;

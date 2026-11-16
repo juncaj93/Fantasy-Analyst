@@ -212,14 +212,6 @@ describe('2. a starter is protected from the drop by the toss-up bar, 2.0', () =
 
 // --------------------------------------------------------------- item 3 ---
 
-describe('3. Build a trade no longer says "Built mostly on Sleeper\'s projection, not Vegas"', () => {
-  it('the sheet has no such line', () => {
-    const source = readFileSync('src/web/components/tradeBuilder.tsx', 'utf8');
-    expect(source).not.toMatch(/Built mostly on Sleeper/);
-    expect(source).not.toMatch(/data-testid="builder-basis"/);
-  });
-});
-
 // --------------------------------------------------------------- item 4 ---
 
 describe('4. Matchup refreshes once a minute while live', () => {

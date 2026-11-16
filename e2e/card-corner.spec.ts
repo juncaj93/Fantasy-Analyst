@@ -113,32 +113,6 @@ async function numbersStayTogether(page: Page, playerId: string): Promise<void> 
   );
 }
 
-test.describe('the list row once the draft is over', () => {
-  test.beforeEach(async ({ page }) => {
-    await draftAhead(page, false);
-    await openPlayers(page);
-  });
-
-  test('names the owner, prints the pick and draws no heart', async ({ page }) => {
-    const rival = row(page, RIVAL);
-    await expect(rival.getByTestId('owner-pill')).toHaveText('Rival');
-    await expect(rival.getByTestId('players-pick')).toHaveText(/Pick\s*1\.02/);
-    await expect(rival.getByTestId('players-adp')).toHaveCount(0);
-    await expect(rival.getByTestId('my-guy-control')).toHaveCount(0);
-    await expect(row(page, MINE).getByTestId('owner-pill')).toHaveText('You');
-    await numbersStayTogether(page, RIVAL);
-  });
-
-  test('gives an undrafted free agent a dash for a pick', async ({ page }) => {
-    const free = page
-      .getByTestId('player-search-row')
-      .filter({ has: page.locator('[data-testid="owner-pill"][data-owner="Available"]') })
-      .first();
-    await expect(free).toBeVisible();
-    await expect(free.getByTestId('players-pick')).toHaveText(/Pick\s*—/);
-  });
-});
-
 test.describe('the list row while a draft is ahead', () => {
   test('keeps the heart and ADP', async ({ page }) => {
     await draftAhead(page, true);

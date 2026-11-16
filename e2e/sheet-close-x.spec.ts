@@ -86,11 +86,3 @@ test('the waiver move sheet closes with the X', async ({ page }) => {
   await page.getByTestId('waiver-tier-row').first().click();
   await closesWithTheX(page, page.getByTestId('tier-detail'));
 });
-
-test('a Trades player sheet closes with the X', async ({ page }) => {
-  await page.goto('/');
-  await page.getByTestId('tab-trades').click();
-  await expect(page.getByTestId('trades-nav')).toBeVisible();
-  await page.getByTestId('trade-row').first().click();
-  await closesWithTheX(page, page.getByTestId('player-sheet'));
-});

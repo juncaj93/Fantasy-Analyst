@@ -39,7 +39,6 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket } from './helpers.ts';
 
 /** A snapshot the demo seed does not carry, injected the way a deployment would. */
 const PROJECTION = {
@@ -76,14 +75,6 @@ async function openPlayer(page: Page, playerId: string): Promise<void> {
   const row = page.locator(`[data-testid="player-search-row"][data-player-id="${playerId}"]`);
   await row.scrollIntoViewIfNeeded();
   await row.click();
-  await expect(page.getByTestId('player-sheet')).toBeVisible();
-  await expect(page.getByTestId('player-page-metrics')).toBeVisible();
-}
-
-async function openFirstTrade(page: Page): Promise<void> {
-  // The board is behind `Explore the market` — see `exploreMarket`.
-  await exploreMarket(page);
-  await page.getByTestId('trade-row').first().click();
   await expect(page.getByTestId('player-sheet')).toBeVisible();
   await expect(page.getByTestId('player-page-metrics')).toBeVisible();
 }
@@ -550,163 +541,6 @@ test.describe('the expanded player, opened from Players', () => {
     await expect(ledger.getByTestId('evidence-item').first()).toBeVisible();
     await expect(ledger).toContainText(/mag \d/);
     await expect(ledger).toContainText(/confidence: /);
-  });
-});
-
-test.describe('the same expanded player, opened from Trades', () => {
-  /**
-   * The same grammar, the same readings in the same order, the same card.
-   *
-   * Players adds the two columns it alone knows in front of the shared six;
-   * everything after that has to match, or a reader who learned the card on one
-   * screen has to learn it again on the other. Both surfaces are opened in one
-   * test because comparing them *is* the assertion.
-   */
-  test('reads the same way, in the same order, minus the two Players alone has', async ({ page }) => {
-    await patchDetail(page, { preseasonProjection: PROJECTION });
-    await page.goto('/');
-    await openTab(page, 'players');
-    await openPlayer(page, '1002');
-    const fromPlayers = await bandLabels(page);
-    await page.keyboard.press('Escape');
-
-    await openTab(page, 'trades');
-    await exploreMarket(page);
-    await page.locator('[data-testid="trade-row"]', { hasText: 'Devin Okafor' }).first().click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await expect(page.getByTestId('metric-preseason-pts')).toBeVisible();
-
-    await expectRowGrammar(page, ['position', 'club', 'name']);
-    const fromTrades = await bandLabels(page);
-    expect(fromTrades.slice(0, 4)).toEqual(['7d', '30d', 'life', 'pts']);
-    expect(fromPlayers.slice(0, 2)).toEqual(['rank', 'adp']);
-    expect(fromPlayers.slice(2), 'the two surfaces have drifted apart again').toEqual(fromTrades);
-
-    await expectNotAConsole(page);
-    // The trade case is Trades' own advisory content, and it stays.
-    await expect(page.getByTestId('trade-case')).toContainText('Why');
-    await expectNoSidewaysScroll(page, 'trades');
-  });
-
-  /**
-   * One name per number, across the two screens that share it.
-   *
-   * Players' row said `21d` and Trades' said `30d` for the same field — and one
-   * of the two was simply false: `RECENCY_WINDOWS.last30` has been thirty days
-   * since the window was widened, and the label never followed. `Life` had the
-   * same problem in the other direction, spelled out as `Lifetime` in the
-   * window grid a few hundred pixels under a band that called it `Life`.
-   *
-   * Asserted as vocabulary rather than as arithmetic, because the arithmetic
-   * did not change: `tests/evidence.test.ts` owns what the window counts, and
-   * this owns what it is called.
-   */
-  test('calls the same window the same thing on Players and on Trades', async ({ page }) => {
-    await page.goto('/');
-    await openTab(page, 'players');
-    const row = page.getByTestId('player-search-row').first();
-    await expect(row).toBeVisible();
-    await expect(row).toContainText('30d');
-    await expect(row, 'the stale twenty-one-day label is back').not.toContainText('21d');
-    const text = (await row.textContent()) ?? '';
-    expect(text.indexOf('7d'), 'the row reads this week before the month').toBeGreaterThanOrEqual(0);
-    expect(text.indexOf('7d')).toBeLessThan(text.indexOf('30d'));
-
-    await openTab(page, 'trades');
-    await exploreMarket(page);
-    const trade = page.getByTestId('trade-row').first();
-    await expect(trade).toBeVisible();
-    await expect(trade).toContainText('30d');
-    await expect(trade).toContainText('Life');
-
-    // And the page behind either of them names its windows the same way.
-    await trade.click();
-    await expect(page.getByTestId('player-sheet')).toBeVisible();
-    await page.getByTestId('player-full-profile').click();
-    const windows = page.getByTestId('player-page-windows');
-    await expect(windows).toBeVisible();
-    // Lower-cased on the way out: the stylesheet upper-cases these, and the
-    // claim is the vocabulary rather than the type treatment.
-    const labels = await windows.locator('.window-label').allInnerTexts();
-    expect(labels.map((l) => l.trim().toLowerCase())).toEqual(['7d', '30d', 'season', 'life']);
-  });
-
-  /**
-   * The pill appears on Trades, which never had one to pass — and both lists
-   * are still exactly their API's answer.
-   *
-   * Players hands over Sleeper's own `status` with the row. A trade suggestion
-   * carries a trade-shaped injury category and no designation, so the same
-   * player showed `OUT` on one screen and nothing on the other; the detail
-   * payload both screens already fetch is the fallback. The designation is
-   * forced onto that response rather than found on the board, because which
-   * players the demo world suggests is the trade engine's business and is
-   * deliberately not this file's to depend on.
-   *
-   * The ordering assertions ride along on the same page load. Presentation work
-   * is exactly the kind that can quietly re-sort a list — a `map` that became a
-   * `sort`, a memo keyed on the wrong thing — and neither ranking is this
-   * workstream's to touch. For Trades that includes which section a suggestion
-   * landed in, because Trade Target versus Emerging is a classification rather
-   * than an ordering.
-   */
-  test('carries the availability pill, over a board still in the API’s own order', async ({ page }) => {
-    await patchDetail(page, {
-      injury: {
-        designation: 'out',
-        label: 'Out',
-        line: 'OUT · hamstring',
-        bodyPart: 'hamstring',
-        practice: null,
-        provenance: 'sleeper status · current',
-        freshness: 'fresh',
-        confidence: 'high',
-        conflict: null,
-      },
-    });
-    await page.goto('/');
-
-    await openTab(page, 'players');
-    await expect(page.getByTestId('player-search-row').first()).toBeVisible();
-    const listed = await page
-      .getByTestId('player-search-row')
-      .evaluateAll((rows) => rows.map((r) => r.getAttribute('data-player-id')));
-    const ranked = await page.evaluate(async () => {
-      const res = await (await fetch('/api/players?q=&limit=100&offset=0')).json();
-      return res.players.map((p: { id: string }) => p.id);
-    });
-    expect(listed, 'Players is no longer the order its API returned').toEqual(ranked.slice(0, listed.length));
-
-    await openTab(page, 'trades');
-    await exploreMarket(page);
-    await expect(page.getByTestId('trade-row').first()).toBeVisible();
-    const onScreen = await page.evaluate(() =>
-      [...document.querySelectorAll('[role="list"][aria-label]')].map((group) => ({
-        label: group.getAttribute('aria-label'),
-        players: [...group.querySelectorAll('[data-testid="trade-row"]')].map((r) =>
-          (r.querySelector('.player-name')?.textContent ?? '').trim(),
-        ),
-      })),
-    );
-    const fromApi = await page.evaluate(async () => {
-      const board = await (await fetch('/api/trades')).json();
-      return board.sections.map((s: { label: string; players: { name: string }[] }) => ({
-        label: s.label,
-        players: s.players.map((p) => p.name),
-      }));
-    });
-    expect(onScreen, 'a suggestion moved section or place').toEqual(fromApi);
-
-    await openFirstTrade(page);
-    const tag = page.locator('.sheet-player-title [data-testid="injury-tag"]');
-    await expect(tag).toHaveAttribute('data-status', 'OUT');
-    // The meaning, not just the letters, for anyone listening rather than looking.
-    await expect(tag).toHaveAttribute('aria-label', 'Out');
-    await expectRowGrammar(page, ['position', 'club', 'name', 'status']);
-
-    const injury = page.getByTestId('injury-current');
-    await expect(injury).toContainText('hamstring');
-    await expect(injury, 'the designation is on the card twice').not.toContainText('OUT');
   });
 });
 

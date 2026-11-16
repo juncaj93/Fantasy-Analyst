@@ -72,11 +72,6 @@ describe('the preview upload', () => {
     expect(get.offers.length).toBeGreaterThan(0);
     for (const o of get.offers) expect(o.get.map((p) => p.playerId)).toContain('p28');
   });
-
-  it('reports the switch and the preview to the screens', async () => {
-    const status = (await (await createApp()(new Request('http://x/api/auth/status'), env())).json()) as { features: { tradesScreens: string; preview: string | null } };
-    expect(status.features).toEqual({ tradesScreens: 'new', preview: 'trades' });
-  });
 });
 
 describe('the live site', () => {
@@ -84,13 +79,6 @@ describe('the live site', () => {
   beforeEach(async () => {
     db = (await createTestDb()) as NodeSqliteDatabase;
     await seed(db, { fairDeal: true });
-  });
-
-  it('keeps today’s screens unless the switch says otherwise', async () => {
-    const status = (await (await createApp()(new Request('http://x/api/auth/status'), envFor(db, forbiddenSleeper().client))).json()) as {
-      features: { tradesScreens: string; preview: string | null };
-    };
-    expect(status.features).toEqual({ tradesScreens: 'old', preview: null });
   });
 
   it('answers the new screens from the real league, with no Sleeper request, and ignores the preview week', async () => {

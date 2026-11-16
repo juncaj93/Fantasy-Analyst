@@ -6,8 +6,6 @@
  * existing Players tests, which this round leaves untouched.
  */
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type AppEnv } from '../src/server/app.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
@@ -314,33 +312,5 @@ describe('the routes', () => {
     await seed(db);
     const res = await createApp()(new Request('http://x/api/players/nobody/season'), envFor(db, forbiddenSleeper().client));
     expect(res.status).toBe(404);
-  });
-});
-
-describe('the switch', () => {
-  it('is off unless the site says on, so today’s tab is drawn', async () => {
-    const app = createApp();
-    const off = (await (await app(new Request('http://x/api/auth/status'), envFor(NO_DB, forbiddenSleeper().client))).json()) as { features: { playersInSeason?: boolean } };
-    expect(off.features.playersInSeason).toBeUndefined();
-    const on = (await (await app(new Request('http://x/api/auth/status'), { ...envFor(NO_DB, forbiddenSleeper().client), playersInSeason: true })).json()) as { features: { playersInSeason: boolean } };
-    expect(on.features.playersInSeason).toBe(true);
-  });
-
-});
-
-describe('the switch on the live site and on the preview', () => {
-  const read = (path: string) => readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
-
-  it('is on on the live site since Alex said go, one line to set back to off', () => {
-    expect(read('wrangler.toml')).toMatch(/^PLAYERS_INSEASON = "on"$/m);
-    expect(read('wrangler.toml')).not.toMatch(/^PREVIEW = /m);
-  });
-
-  it('the preview turns it on, on the made-up league, and leaves every other switch as the live site has it', () => {
-    const workflow = read('.github/workflows/preview.yml');
-    expect(workflow).toContain("if: ${{ inputs.mode == 'players' }}");
-    expect(workflow).toContain('PLAYERS_INSEASON = \\"on\\"\\nPREVIEW = \\"players\\"');
-    /* Only the Players line is rewritten in players mode; TRADES_SCREENS stays "new" from wrangler.toml. */
-    expect(read('wrangler.toml')).toMatch(/^TRADES_SCREENS = "new"$/m);
   });
 });

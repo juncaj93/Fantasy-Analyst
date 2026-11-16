@@ -19,7 +19,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { emptyQueue, exploreMarket, openSetupGroup, tapAboveCard } from './helpers.ts';
+import { emptyQueue, openSetupGroup } from './helpers.ts';
 
 async function open(page: Page, tab: string) {
   await page.getByTestId(`tab-${tab}`).click();
@@ -127,72 +127,6 @@ test.describe('a retap returns the screen home', () => {
     await expect.poll(async () => page.evaluate(() => Math.round(window.scrollY))).toBeGreaterThan(100);
     await retap(page, 'players');
     expect(await page.evaluate(() => Math.round(window.scrollY))).toBeLessThan(20);
-  });
-
-  /**
-   * A sheet is modal, and covers the bar — which is why it is not dismissed
-   * from there.
-   *
-   * The retap ladder does close any sheet the screen is holding, and that rung
-   * is real: it fires whenever the tab is tapped. It is simply not *reachable*
-   * while the sheet is up, because an iOS sheet presented over a tab bar covers
-   * it, exactly as this one does. That is the native behaviour and it is worth
-   * pinning down rather than discovering later as a bug report, so this asserts
-   * both halves: the bar is genuinely covered, and the sheet has its own two
-   * ways out — the backdrop and a swipe or key — which is what a modal owes the
-   * reader instead.
-   */
-  test('Trades: a sheet covers the bar, and closes on its own terms', async ({ page }) => {
-    await page.goto('/');
-    await open(page, 'trades');
-    await exploreMarket(page);
-    const rows = page.getByTestId('trade-row');
-    test.skip((await rows.count()) === 0, 'no trade suggestions on this seed');
-
-    await rows.first().click();
-    const sheet = page.getByTestId('player-sheet');
-    await expect(sheet).toBeVisible();
-
-    /*
-     * The bar is under the modal: what is on top at the tab's own centre is not
-     * the button.
-     *
-     * *Which* layer is on top is not the claim and must not be asserted as one.
-     * The sheet is `bottom: 0` with a content-driven height, so whether the tab
-     * bar's centre lands on the sheet itself or on the backdrop above which it
-     * sits depends on how tall this particular sheet's content is — which
-     * differs between engines, and did: this read the sheet specifically and
-     * passed in Chromium at every width while failing in WebKit at every width.
-     * Both layers are modal and both intercept the tap, which is the whole
-     * point.
-     */
-    const overBar = await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="tab-trades"]')!.getBoundingClientRect();
-      const hit = document.elementFromPoint(tab.left + tab.width / 2, tab.top + tab.height / 2);
-      return {
-        isTab: hit?.closest('[data-testid="tab-trades"]') != null,
-        isModal: hit?.closest('[data-testid="player-sheet"], [data-testid="sheet-backdrop"]') != null,
-      };
-    });
-    expect(overBar.isTab, 'the tab bar is tappable through an open sheet').toBe(false);
-    expect(overBar.isModal, 'something that is neither the sheet nor its backdrop is over the bar').toBe(true);
-
-    // …and it goes away without one, by the backdrop.
-    // The see-through zone above the card, which is what a tap outside lands on
-    // now that the backdrop is colour and the scroller covers it.
-    await tapAboveCard(page);
-    await expect(sheet).toHaveCount(0);
-
-    /*
-     * Once it is gone the bar is the bar again, and the ladder applies.
-     *
-     * The market fold is still open across the retap, which is deliberate: a
-     * tab tap unwinds what the app put over the screen, and an inventory the
-     * reader chose to open is a view they set rather than an overlay they are
-     * stuck under. See `unwindOne` in `TradesScreen`.
-     */
-    await retap(page, 'trades');
-    await expect(page.getByTestId('trade-row').first()).toBeVisible();
   });
 
   test('Setup: comes back out to the root of Settings, one step at a time', async ({ page }) => {

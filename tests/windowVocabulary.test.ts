@@ -72,13 +72,6 @@ describe('the recent-window label says what the window is', () => {
     expect(row.indexOf(seven)).toBeLessThan(row.indexOf(thirty));
   });
 
-  /** The Trades row, which has always had this right and must keep it. */
-  it('labels the Trades row from last30, and the lifetime one Life', () => {
-    const row = source('src/web/screens/TradesScreen.tsx');
-    expect(row).toContain(`{ label: '${RECENT}', value: <SignedValue net={w.last30} /> }`);
-    expect(row).toContain(`{ label: '${LIFETIME}', value: <SignedValue net={w.lifetime} /> }`);
-  });
-
   /**
    * The player page, which prints both readings twice — once in the band at the
    * top and once in the window grid further down. Two places on one page is

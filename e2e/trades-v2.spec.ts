@@ -271,10 +271,3 @@ test.describe('the player picker (Round 19 review)', () => {
     await expect(marked.first().getByTestId('t2-numbers-them')).toContainText('this week');
   });
 });
-
-test('with the switch off, today’s Trades screen is drawn', async ({ page }) => {
-  await page.goto('/');
-  await page.getByTestId('tab-trades').click();
-  await expect(page.getByTestId('trades-nav')).toBeVisible();
-  await expect(page.getByTestId('t2-nav')).toHaveCount(0);
-});

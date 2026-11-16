@@ -32,6 +32,7 @@ const ok = (body: unknown): DemoResponse => ({ status: 200, body });
 const fail = (message: string, status = 400): DemoResponse => ({ status, body: { error: message } });
 
 const LEAGUE = '/api/leagues/[^/]+';
+const NOT_IN_DEMO = 'This part of the app is not in the demo. Leave Demo Mode to use it with your league.';
 
 /**
  * The shell and the screens the placeholder shows.
@@ -50,7 +51,7 @@ const CORE_ROUTES: [RegExp, Route][] = [
    * The demo was captured from today's Trades and Players screens, so it says
    * so: an answer with no switches now means the new screens (Round 30).
    */
-  [/^\/api\/auth\/status$/, () => ok({ unlocked: false, canUnlock: false, features: { tradesScreens: 'old', preview: null } })],
+  [/^\/api\/auth\/status$/, () => ok({ unlocked: false, canUnlock: false, features: { preview: null } })],
   [/^\/api\/overview$/, (_, d) => ok(d.overview)],
   [/^\/api\/leagues$/, (_, d) => ok(d.leagues)],
   [/^\/api\/setup\/status$/, (_, d) => ok(d.setupStatus)],
@@ -69,6 +70,16 @@ const CORE_ROUTES: [RegExp, Route][] = [
       return detail ? ok(detail) : fail('This player’s card is not part of the demo.', 404);
     },
   ],
+  /*
+   * Round 34: Players after the draft is always the in-season screen, so the
+   * demo answers its board from the same captured page (no values: the demo
+   * has no engine), and Trades (Offers, Build, Check) says it is not in the
+   * demo in the screen's own note line.
+   */
+  [/^\/api\/players\/season$/, (_, d) => ok(seasonBoard(d))],
+  [/^\/api\/players\/[^/]+\/season$/, () => fail(NOT_IN_DEMO, 404)],
+  [/^\/api\/trades\/screens\/offers$/, () => ok({ league: null, status: 'none', note: NOT_IN_DEMO, offers: [], deadline: null })],
+  [/^\/api\/trades\/screens\/teams$/, () => ok({ league: null, teams: [], reason: NOT_IN_DEMO })],
 ];
 
 /**
@@ -110,7 +121,7 @@ export class DemoRuntime {
       const match = pattern.exec(parsed.pathname);
       if (match) return route({ params: parsed.searchParams, match }, this.data);
     }
-    return fail('This part of the app is not in the demo. Leave Demo Mode to use it with your league.', 404);
+    return fail(NOT_IN_DEMO, 404);
   }
 }
 
@@ -138,6 +149,34 @@ function playerPage(data: Responses, params: URLSearchParams) {
     total: filtered.length,
     ...(params.get('leagueId') ? { teams: data.players.teams } : {}),
     players: page,
+  };
+}
+
+/** The in-season Players board, from the captured draft-list page (Round 34). */
+function seasonBoard(data: Responses) {
+  return {
+    league: null,
+    week: null,
+    tradeOpen: false,
+    teams: data.players.teams,
+    rows: data.players.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      team: p.team,
+      status: p.status,
+      ownerRosterId: p.ownerRosterId ?? null,
+      value: null,
+      overFreeAgent: null,
+      injury: null,
+      trade: null,
+      draftRank: p.draftRank ?? null,
+      adjustedRank: p.adjustedRank ?? null,
+      draftPick: null,
+      last7: p.signal?.last7.net ?? 0,
+      last30: p.signal?.last30.net ?? 0,
+      lifetime: p.signal?.raw.net ?? 0,
+    })),
   };
 }
 

@@ -136,19 +136,9 @@ const env = {
    * the deployed site. See docs/RELEASE.md.
    */
   releaseSha: process.env.FA_RELEASE_SHA ?? null,
-  // Round 19: the Trades switch and the preview's made-up league, as the Worker reads them.
-  tradesScreens: process.env.TRADES_SCREENS === 'new' ? 'new' : 'old',
+  // Round 19: the preview's made-up league, as the Worker reads it.
   preview: process.env.PREVIEW === 'trades' ? 'trades' : process.env.PREVIEW === 'players' ? 'players' : null,
-  // Round 24: the in-season Players tab.
-  playersInSeason: process.env.PLAYERS_INSEASON === 'on',
   waiversLookahead: process.env.WAIVERS_LOOKAHEAD === 'on',
-  /*
-   * Unset locally too, so the allowance panel says "not connected" rather than
-   * reporting a real account's usage from a laptop. Settable for anyone who
-   * wants to see the connected state before deploying it.
-   */
-  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? null,
-  cloudflareAnalyticsToken: process.env.CLOUDFLARE_ANALYTICS_TOKEN ?? null,
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,

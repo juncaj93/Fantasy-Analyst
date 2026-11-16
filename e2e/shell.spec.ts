@@ -14,7 +14,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { exploreMarket, openSetupGroup } from './helpers.ts';
+import { openSetupGroup } from './helpers.ts';
 
 const TABS = ['draft', 'team', 'trades', 'players', 'setup'] as const;
 
@@ -378,11 +378,9 @@ test.describe('the two themes are one design', () => {
    */
   test('and no other screen tints a row', async ({ page }) => {
     await page.goto('/');
-    for (const tab of ['players', 'trades'] as const) {
+    for (const tab of ['players'] as const) {
       await open(page, tab);
-      // The trade board is folded away until it is asked for.
-      if (tab === 'trades') await exploreMarket(page);
-      const testId = tab === 'players' ? 'player-search-row' : 'trade-row';
+      const testId = 'player-search-row';
       await expect(page.getByTestId(testId).first()).toBeVisible();
       const painted = await backgrounds(page, `[data-testid="${testId}"]`);
       const distinct = new Set(painted.map((c) => c.join(',')));
