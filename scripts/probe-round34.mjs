@@ -39,15 +39,25 @@ async function getApp(path) {
 }
 
 const groups = new Map();
+/* The reads the phone retries once on a refusal, 400 ms later (Round 34 follow-up). */
+const PHONE_RETRIES = new Set(['card', 'dataHealth', 'verdict']);
 async function call(group, label, path) {
-  const r = await getApp(path);
-  const g = groups.get(group) ?? { ok: 0, refused: 0, other: 0, ms: [] };
+  let r = await getApp(path);
+  const g = groups.get(group) ?? { ok: 0, refused: 0, other: 0, afterRetry: 0, ms: [] };
   if (r.status >= 200 && r.status < 300) g.ok += 1;
   else if (r.status === 503) g.refused += 1;
   else g.other += 1;
   g.ms.push(r.ms);
+  let note = '';
+  if (r.status === 503 && PHONE_RETRIES.has(group)) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const again = await getApp(path);
+    if (again.status >= 200 && again.status < 300) g.afterRetry += 1;
+    note = `  retry HTTP ${again.status}`;
+    if (again.status >= 200 && again.status < 300) r = again;
+  }
   groups.set(group, g);
-  console.log(`  ${label.padEnd(26)} HTTP ${r.status} ${String(r.ms).padStart(6)} ms`);
+  console.log(`  ${label.padEnd(26)} HTTP ${r.status === 200 && note ? 503 : r.status} ${String(g.ms.at(-1)).padStart(6)} ms${note}`);
   return r;
 }
 
@@ -118,7 +128,7 @@ for (const [group, g] of groups) {
   const sorted = [...g.ms].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
   console.log(
-    `  ${group.padEnd(11)} answered ${g.ok} of ${total}, refused ${g.refused}, other ${g.other}, median ${median} ms${audit[group] ? `   (Round 29 audit: answered ${audit[group]})` : ''}`,
+    `  ${group.padEnd(11)} answered ${g.ok} of ${total}, refused ${g.refused}, other ${g.other}${PHONE_RETRIES.has(group) ? `, with the phone's one retry ${g.ok + g.afterRetry} of ${total}` : ''}, median ${median} ms${audit[group] ? `   (Round 29 audit: answered ${audit[group]})` : ''}`,
   );
 }
 

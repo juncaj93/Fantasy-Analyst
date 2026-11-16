@@ -65,6 +65,8 @@ import { resolveWeek } from '../core/matchup/build.ts';
 import { trimEnabled, trimOldRows } from '../server/services/trimOldRows.ts';
 import type { NflState } from '../core/sleeper/phase.ts';
 import { readAppNflState } from '../server/services/appWeek.ts';
+import { HeavyReadLimiter, isHeavyRead, tooManyHeavyReads } from '../server/http/rateLimit.ts';
+import { verifySession } from '../server/http/auth.ts';
 
 /**
  * What one step of a scheduled run reports about itself.
@@ -129,6 +131,9 @@ export interface WorkerEnv {
 }
 
 const app = createApp();
+
+/** Round 34: the brake on heavy public reads, one per Worker instance. See `server/http/rateLimit.ts`. */
+const heavyReads = new HeavyReadLimiter();
 
 function buildVegasProvider(env: WorkerEnv, fetchImpl?: FetchLike, opts: { quick?: boolean } = {}): VegasProvider {
   if (env.VEGAS_PROVIDER === 'sportsgameodds') {
@@ -225,6 +230,13 @@ export default {
        * reading the source. What is *not* included is anything from `env`.
        */
       try {
+        /* Over the heavy-read limit: only a logged-in phone goes on (checked only then, so normal reads pay nothing). */
+        if (
+          isHeavyRead(request.method, url.pathname) &&
+          !heavyReads.allow(request.headers.get('cf-connecting-ip') ?? 'unknown', Date.now()) &&
+          !(await verifySession(request, env))
+        )
+          return tooManyHeavyReads();
         return await app(request, toAppEnv(env, undefined, ctx));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
