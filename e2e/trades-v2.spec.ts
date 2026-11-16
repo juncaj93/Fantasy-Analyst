@@ -20,7 +20,7 @@ import { TradeScreensService } from '../src/server/services/tradeScreensService.
 
 const service = (week: 'normal' | 'quiet') => new TradeScreensService(null as never, null as never, week);
 
-async function openNewTrades(page: Page, week: 'normal' | 'quiet' = 'normal') {
+async function openNewTrades(page: Page, week: 'normal' | 'quiet' = 'normal', deadline?: { weeksLeft: number; closes: string }) {
   await page.route('**/api/auth/status', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -31,7 +31,10 @@ async function openNewTrades(page: Page, week: 'normal' | 'quiet' = 'normal') {
     const s = service(week);
     const body =
       url.pathname.endsWith('/offers')
-        ? await s.offers(url.searchParams.get('sell') || url.searchParams.get('get') ? { sell: url.searchParams.get('sell'), get: url.searchParams.get('get') } : null)
+        ? await s.offers(url.searchParams.get('sell') || url.searchParams.get('get') ? { sell: url.searchParams.get('sell'), get: url.searchParams.get('get') } : null).then((o) =>
+            /* The live answer carries the deadline week's last kickoff (Round 32); the preview league has no schedule. */
+            deadline ? { ...o, deadline: { week: 11, ...deadline } } : o,
+          )
         : url.pathname.endsWith('/teams')
           ? await s.teams()
           : await s.verdict({
@@ -120,6 +123,79 @@ test.describe('the rebuilt Trades screens', () => {
     await expect(page.getByTestId('t2-check-better-you')).toContainText('TE');
     await expectTapTargets(page, '[data-testid="t2-check-team"], [data-testid="t2-check-give-player"], [data-testid="t2-check-get-add"]');
     expect(await horizontalOverflow(page)).toBe(0);
+  });
+});
+
+/**
+ * Round 32 (audit finding 10): a received offer checks in four taps or fewer.
+ * Typing is not a tap; each click below is one. Opening the app is not counted
+ * (it lands on Team), the Trades tab is.
+ */
+test.describe('Check by typed names (Round 32)', () => {
+  for (const scheme of ['light', 'dark'] as const) test(`a received 1-for-1 checks in four taps: Trades, Check, one name, the other (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    let taps = 0;
+    await openNewTrades(page); // tap 1: the Trades tab
+    taps += 1;
+    await page.getByTestId('t2-tab-check').click(); // tap 2
+    taps += 1;
+    /* The keyboard is already in the name field. */
+    await expect(page.getByTestId('t2-check-search')).toBeFocused();
+    await page.keyboard.type('ashworth');
+    await expect(page.getByTestId('t2-check-match').first()).toContainText('Bo Ashworth');
+    await expect(page.getByTestId('t2-check-match').first()).toContainText('yours');
+    await expectTapTargets(page, '[data-testid="t2-check-match"], [data-testid="t2-check-search"]');
+    await page.getByTestId('t2-check-match').first().click(); // tap 3
+    taps += 1;
+    /* The field keeps the keyboard for the next name. */
+    await expect(page.getByTestId('t2-check-search')).toBeFocused();
+    await page.keyboard.type('sotelo');
+    await expect(page.getByTestId('t2-check-match').first()).toContainText('Dermot');
+    await page.getByTestId('t2-check-match').first().click(); // tap 4
+    taps += 1;
+    await expect(page.getByTestId('t2-check-word')).toHaveText(/^(Good for you|Fair|Bad for you)$/);
+    await expect(page.getByTestId('t2-check-team')).toHaveValue(/\d+/);
+    await expect(page.getByTestId('t2-check-give-player')).toHaveText(/Bo Ashworth/);
+    await expect(page.getByTestId('t2-check-get-player')).toHaveText(/Andre Sotelo/);
+    expect(taps).toBeLessThanOrEqual(4);
+    expect(await horizontalOverflow(page)).toBe(0);
+    expect(await page.getByTestId('t2-check').innerText()).not.toContain('—');
+  });
+
+  test('"Check this offer" opens Check with both sides filled and the card’s own verdict', async ({ page }) => {
+    await openNewTrades(page);
+    const card = page.getByTestId('t2-offer-card').first();
+    const label = await card.getByTestId('t2-label').innerText();
+    const give = (await card.getByTestId('t2-give').innerText()).replace(/^Give\s*/, '').split(' + ');
+    const get = (await card.getByTestId('t2-get').innerText()).replace(/^Get\s*/, '').split(' + ');
+    await expectTapTargets(page, '[data-testid="t2-check-this"]');
+    await card.getByTestId('t2-check-this').click();
+    await expect(page.getByTestId('t2-check')).toBeVisible();
+    await expect(page.getByTestId('t2-check-give-player')).toHaveCount(give.length);
+    await expect(page.getByTestId('t2-check-get-player')).toHaveCount(get.length);
+    for (const name of give) await expect(page.getByTestId('t2-check-give').getByText(name.trim(), { exact: true })).toBeVisible();
+    for (const name of get) await expect(page.getByTestId('t2-check-get').getByText(name.trim(), { exact: true })).toBeVisible();
+    await expect(page.getByTestId('t2-check-word')).toHaveText(label);
+    /* The card still opens its comparison on a tap. */
+    await page.getByTestId('t2-tab-offers').click();
+    await page.getByTestId('t2-offer').first().click();
+    await expect(page.getByTestId('t2-offer-sheet-body')).toBeVisible();
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('a quiet deadline chip beside the title while trades are open, gone once they close', async ({ page }) => {
+    await openNewTrades(page, 'normal', { weeksLeft: 1, closes: '2026-11-24T01:15:00.000Z' });
+    await expect(page.getByTestId('t2-deadline')).toHaveText('Deadline Mon Nov 23');
+    const title = (await page.getByTestId('t2-nav').locator('.nav-title').boundingBox())!;
+    const chip = (await page.getByTestId('t2-deadline').boundingBox())!;
+    expect(chip.y + chip.height).toBeLessThanOrEqual(title.y + title.height + 1);
+    expect(await horizontalOverflow(page)).toBe(0);
+  });
+
+  test('no chip once trades are closed', async ({ page }) => {
+    await openNewTrades(page, 'normal', { weeksLeft: 0, closes: '2026-11-24T01:15:00.000Z' });
+    await expect(page.getByTestId('t2-offer').first()).toBeVisible();
+    await expect(page.getByTestId('t2-deadline')).toHaveCount(0);
   });
 });
 

@@ -24,10 +24,13 @@ export function BuildTab({
   teams,
   query,
   onOpenOffer,
+  onCheckOffer,
 }: {
   teams: ScreensTeams | null;
   query: string;
   onOpenOffer: (offer: FoundOffer) => void;
+  /** Round 32: "Check this offer" on each card. */
+  onCheckOffer?: (offer: FoundOffer) => void;
 }) {
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<Pick | null>(null);
@@ -121,7 +124,7 @@ export function BuildTab({
             ) : null}
             <div data-testid="t2-build-offers">
               {result.offers.map((o) => (
-                <OfferCard key={o.id} offer={o} onOpen={() => onOpenOffer(o)} />
+                <OfferCard key={o.id} offer={o} onOpen={() => onOpenOffer(o)} onCheck={onCheckOffer ? () => onCheckOffer(o) : undefined} />
               ))}
             </div>
           </>

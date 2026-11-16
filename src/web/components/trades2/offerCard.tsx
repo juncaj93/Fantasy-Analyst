@@ -21,9 +21,25 @@ export function names(players: readonly { name: string }[]): string {
   return players.map((p) => p.name).join(' + ');
 }
 
-export function OfferCard({ offer, onOpen }: { offer: FoundOffer; onOpen: () => void }) {
+/**
+ * The card. With `onCheck` (Round 32) it carries one more line, "Check this
+ * offer", which opens Check with both sides filled in: one tap from the card.
+ */
+export function OfferCard({ offer, onOpen, onCheck }: { offer: FoundOffer; onOpen: () => void; onCheck?: (() => void) | undefined }) {
+  if (!onCheck) return <OfferButton offer={offer} onOpen={onOpen} className="card t2-offer" />;
   return (
-    <button type="button" className="card t2-offer" data-testid="t2-offer" data-kind={offer.kind} onClick={onOpen}>
+    <div className="card t2-offer-card" data-testid="t2-offer-card">
+      <OfferButton offer={offer} onOpen={onOpen} className="t2-offer" />
+      <button type="button" className="t2-check-this" data-testid="t2-check-this" onClick={onCheck}>
+        Check this offer
+      </button>
+    </div>
+  );
+}
+
+function OfferButton({ offer, onOpen, className }: { offer: FoundOffer; onOpen: () => void; className: string }) {
+  return (
+    <button type="button" className={className} data-testid="t2-offer" data-kind={offer.kind} onClick={onOpen}>
       <span className="t2-offer-head">
         <span className="t2-chips">
           <span className="t2-label" data-testid="t2-label" data-kind={offer.kind} data-verdict={offer.verdict}>

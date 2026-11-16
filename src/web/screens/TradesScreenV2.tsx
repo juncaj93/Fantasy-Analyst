@@ -9,12 +9,15 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { api } from '../api.ts';
 import type { FoundOffer, ScreensOffers, ScreensTeams } from '../../core/trades/screensWire.ts';
 import { NavBar, PullToRefresh, SegmentedControl, SkeletonRows } from '../components/native.tsx';
 import { OfferCard, OfferSheet } from '../components/trades2/offerCard.tsx';
 import { BuildTab } from '../components/trades2/buildTab.tsx';
-import { CheckTab } from '../components/trades2/checkTab.tsx';
+import { CheckTab, focusCheckSearch } from '../components/trades2/checkTab.tsx';
+import { checkFromOffer, type CheckState } from '../components/trades2/checkSearch.ts';
+import { deadlineChip } from '../components/trades2/deadline.ts';
 import { unwindOne } from '../tabReset.ts';
 import '../components/trades2/trades2.css';
 
@@ -26,6 +29,8 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
   const [offersFailed, setOffersFailed] = useState(false);
   const [teams, setTeams] = useState<ScreensTeams | null>(null);
   const [open, setOpen] = useState<FoundOffer | null>(null);
+  /* Round 32: an offer card's "Check this offer" opens Check with both sides filled. */
+  const [checkStart, setCheckStart] = useState<{ state: CheckState; n: number } | null>(null);
   const suffix = query ? `?${query}` : '';
 
   useEffect(() => {
@@ -63,9 +68,17 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
     };
   }, [tab, teams, suffix]);
 
+  const checkOffer = (offer: FoundOffer) => {
+    setOpen(null);
+    setCheckStart((was) => ({ state: checkFromOffer(offer), n: (was?.n ?? 0) + 1 }));
+    setTab('check');
+  };
+
   const deadline = offers?.deadline;
-  const subtitle =
-    deadline?.week != null
+  const chip = deadlineChip(deadline);
+  const subtitle = chip
+    ? (offers?.league?.name ?? '')
+    : deadline?.week != null
       ? deadline.weeksLeft != null && deadline.weeksLeft <= 0
         ? 'Trades are closed'
         : `Trades close after week ${deadline.week}`
@@ -73,12 +86,37 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
 
   return (
     <PullToRefresh onRefresh={load} label="Trades" testId="t2-pull">
-      <NavBar testId="t2-nav" title="Trades" subtitle={subtitle} />
+      <NavBar
+        testId="t2-nav"
+        title={
+          chip ? (
+            <>
+              Trades{' '}
+              <span className="t2-deadline" data-testid="t2-deadline">
+                {chip}
+              </span>
+            </>
+          ) : (
+            'Trades'
+          )
+        }
+        subtitle={subtitle}
+      />
       <div className="t2-tabs">
         <SegmentedControl<TradesTabId>
           label="Trades"
           value={tab}
-          onChange={setTab}
+          onChange={(next) => {
+            if (next !== 'check') return setTab(next);
+            /*
+             * Check opens with the keyboard up in its name field. Rendered and
+             * focused inside the tap itself, which is what lets iPhone Safari
+             * show the keyboard: Trades, Check, a name, the other name.
+             */
+            setCheckStart(null);
+            flushSync(() => setTab('check'));
+            focusCheckSearch();
+          }}
           testId="t2-tabs"
           segments={[
             { id: 'offers', label: 'Offers', testId: 't2-tab-offers' },
@@ -105,16 +143,17 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
                 </div>
               ) : null}
               {offers.offers.map((o) => (
-                <OfferCard key={o.id} offer={o} onOpen={() => setOpen(o)} />
+                <OfferCard key={o.id} offer={o} onOpen={() => setOpen(o)} onCheck={() => checkOffer(o)} />
               ))}
             </>
           ) : null}
         </div>
       ) : null}
-      {tab === 'build' ? <BuildTab teams={teams} query={query} onOpenOffer={setOpen} /> : null}
-      {tab === 'check' ? <CheckTab teams={teams} query={query} /> : null}
+      {tab === 'build' ? <BuildTab teams={teams} query={query} onOpenOffer={setOpen} onCheckOffer={checkOffer} /> : null}
+      {tab === 'check' ? <CheckTab key={checkStart?.n ?? 0} teams={teams} query={query} start={checkStart?.state ?? null} /> : null}
 
       {open ? <OfferSheet offer={open} onClose={() => setOpen(null)} /> : null}
     </PullToRefresh>
   );
 }
+
