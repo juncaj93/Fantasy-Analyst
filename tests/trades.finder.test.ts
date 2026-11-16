@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { round16League, type Round16League } from './helpers/round16League.ts';
 import { FINDER, fastLineups, findTrades, lineupSolver, type FinderInput, type FinderRoster } from '../src/core/trades/finder.ts';
 import { evaluateTrade, type TradeSide } from '../src/core/tradeValue/evaluate.ts';
-import { verdictOfEvaluation, tradeVerdict, VERDICT_WORDS } from '../src/core/trades/verdict.ts';
+import { checkSummary, verdictOfEvaluation, tradeVerdict, VERDICT_WORDS } from '../src/core/trades/verdict.ts';
 import { bestLineup, slotsOf, type LineupCandidate } from '../src/core/tradeValue/lineup.ts';
 import { tradeHorizon } from '../src/core/tradeValue/weeks.ts';
 import type { ActivityClass } from '../src/core/trades/activity.ts';
@@ -113,9 +113,13 @@ describe('when nothing is fully fair', () => {
     expect(result.note).toMatch(/closest/i);
     for (const offer of result.offers) {
       expect(offer.kind).toBe('close');
-      expect(offer.label).toMatch(/^Close: /);
+      /* Never plain "Fair"; the same word Check a trade gives the deal (Round 31). */
+      expect(offer.label).not.toBe('Fair');
+      expect(offer.label).toMatch(/^(Close: |Good for you$)/);
       expect(Number.isInteger(offer.edgePercent)).toBe(true);
-      const reading = verdictOfEvaluation(checkDirectly(L, offer.partner.rosterId, offer.give.map((p) => p.playerId), offer.get.map((p) => p.playerId)))!;
+      const checked = checkDirectly(L, offer.partner.rosterId, offer.give.map((p) => p.playerId), offer.get.map((p) => p.playerId));
+      expect(offer.label).toBe(checkSummary(checked)!.word);
+      const reading = verdictOfEvaluation(checked)!;
       expect(reading.fairToBoth).toBe(false);
       expect(reading.verdict).not.toBe('bad');
       expect(offer.you.restOfSeason).toBeGreaterThan(0);
@@ -236,9 +240,12 @@ describe('fair first, then the closest, labelled', () => {
       expect(firstClose).toBeGreaterThan(0);
       expect(kinds.slice(firstClose).every((k) => k === 'close')).toBe(true);
       for (const o of result.offers.filter((x) => x.kind === 'close')) {
-        expect(o.label).toMatch(/^Close: /);
+        expect(o.label).not.toBe('Fair');
+        expect(o.label).toMatch(/^(Close: |Good for you$)/);
         expect(Number.isInteger(o.edgePercent)).toBe(true);
-        const reading = verdictOfEvaluation(checkDirectly(L, o.partner.rosterId, o.give.map((p) => p.playerId), o.get.map((p) => p.playerId)))!;
+        const checked = checkDirectly(L, o.partner.rosterId, o.give.map((p) => p.playerId), o.get.map((p) => p.playerId));
+        expect(o.label).toBe(checkSummary(checked)!.word);
+        const reading = verdictOfEvaluation(checked)!;
         expect(reading.fairToBoth).toBe(false);
       }
       const ids = result.offers.flatMap((o) => [...o.give, ...o.get].map((p) => p.playerId));

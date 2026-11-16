@@ -34,6 +34,7 @@ import {
 import { recommendLineup } from '../src/core/startsit/lineup.ts';
 import { recommendWaiverUpgrades } from '../src/core/startsit/waivers.ts';
 import { buildWeeklyCard } from '../src/core/startsit/weekCard.ts';
+import { decisionPoints } from '../src/core/startsit/decisionPoints.ts';
 import { buildMatchupResponse, type MatchupSources } from '../src/core/matchup/build.ts';
 import { buildRosterShape, buildScoringProfile } from '../src/core/sleeper/scoring.ts';
 import { DST_SCORING_UNSUPPORTED } from '../src/core/sleeper/dstScoring.ts';
@@ -445,18 +446,24 @@ describe('the weekly card quotes it and names it', () => {
     ruledOut: false,
   };
 
-  it('shows the published figure and marks it as published', () => {
-    const card = buildWeeklyCard({ ...base, ...evaluation({ score: 3.15 }) }, { starting: true, published: 20.98 });
-    expect(card.score).toBe(20.98);
+  /*
+   * Round 31 (audit A1): the card prints the row's number, the decision number
+   * (`decisionPoints`), not the bare figure under it, and still names its source.
+   */
+  it('shows the published figure, with the same nudges as the row, and marks it as published', () => {
+    const e = { ...base, ...evaluation({ score: 3.15 }) };
+    const row = decisionPoints(e, new Map([['qb1', 20.98]]))!;
+    const card = buildWeeklyCard({ ...e, decision: row }, { starting: true, published: 20.98 });
+    expect(row.basis).toBe('published');
+    expect(card.score).toBe(Math.max(0, Math.round(row.points * 100) / 100));
     expect(card.projectionSource).toBe('sleeper');
   });
 
   it('prefers the market and marks it as ours', () => {
-    const card = buildWeeklyCard(
-      { ...base, ...evaluation({ score: 12.4, market: 13.9 }) },
-      { starting: true, published: 20.98 },
-    );
-    expect(card.score).toBe(13.9);
+    const e = { ...base, ...evaluation({ score: 12.4, market: 13.9 }) };
+    const row = decisionPoints(e, new Map([['qb1', 20.98]]))!;
+    const card = buildWeeklyCard({ ...e, decision: row }, { starting: true, published: 20.98 });
+    expect(card.score).toBe(row.points);
     expect(card.projectionSource).toBe('market');
   });
 
@@ -700,7 +707,10 @@ describe('the matchup forecast may borrow, and says which players it borrowed fo
   it('does change the cards, so the comparison above is not vacuous', async () => {
     const withIt = await buildMatchupResponse(sources(PUBLISHED), 'l1');
     const without = await buildMatchupResponse(sources(null), 'l1');
-    expect(withIt.cards['qb1']!.score).toBe(PUBLISHED.get('qb1'));
+    /* Round 31: the card prints what the row prints (the decision number on Sleeper's week). */
+    const row = [...withIt.forecast!.slots.map((s) => s.mine), ...withIt.forecast!.bench.mine].find((p) => p?.playerId === 'qb1');
+    expect(withIt.cards['qb1']!.score).toBe(row!.projectedFinal);
+    expect(withIt.cards['qb1']!.score).not.toBe(without.cards['qb1']!.score);
     expect(withIt.cards['qb1']!.projectionSource).toBe('sleeper');
     expect(without.cards['qb1']!.score).toBeNull();
     expect(without.cards['qb1']!.projectionSource).toBeNull();

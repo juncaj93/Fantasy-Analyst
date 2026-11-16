@@ -192,7 +192,8 @@ describe("the card's data", () => {
     });
     expect(cells).toEqual([
       { week: 10, bye: false, points: 14.2, sleeper: false, out: false },
-      { week: 11, bye: false, points: 13, sleeper: true, out: false },
+      /* Kept to the cent, as Waivers keeps it, so both print the same tenth (Round 31). */
+      { week: 11, bye: false, points: 13.04, sleeper: true, out: false },
       { week: 12, bye: true, points: null, sleeper: false, out: false },
       { week: 13, bye: false, points: 12, sleeper: true, out: false },
     ]);

@@ -400,6 +400,29 @@ export function rowStartingFromBench<
   );
 }
 
+/**
+ * What a player's weekly card should say, read off the lineup rows (Round 31).
+ *
+ * The one place a card's headline is chosen for a player of Alex's, so Team's
+ * bench card and Matchup's card for his own players say what Team's rows say:
+ *
+ *  - a man Sleeper starts and the app keeps: "Start at <slot>";
+ *  - a man Sleeper starts and a row swaps out: "Bench this week";
+ *  - a bench man a row starts (`rowStartingFromBench`): "Start at <slot>",
+ *    with the existing "Not in your Sleeper lineup yet" line;
+ *  - anybody else: "Bench this week".
+ *
+ * No rule of its own: the rows are the decision.
+ */
+export function weeklyContextFor<
+  T extends { slot: string; verdict: SlotVerdict; currentPlayerId: string | null; recommendedPlayerId: string | null; locked: boolean },
+>(rows: readonly T[], playerId: string): { starting: boolean; slot?: string; alreadyStarting?: boolean; locked?: boolean } {
+  const held = rows.find((r) => r.currentPlayerId === playerId);
+  if (held && held.verdict !== 'swap') return { starting: true, slot: held.slot, alreadyStarting: true, locked: held.locked };
+  const row = rowStartingFromBench(rows, playerId);
+  return row ? { starting: true, slot: row.slot, alreadyStarting: false, locked: row.locked } : { starting: false };
+}
+
 function verdictFor(
   currentPlayerId: string | null,
   recommendedPlayerId: string | null,

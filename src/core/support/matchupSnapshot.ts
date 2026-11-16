@@ -168,9 +168,9 @@ export function recordMatchupSources(
     },
     matchups: async (league, week) => (seen.matchups = await inner.matchups(league, week)),
     nflState: async () => (seen.nflState = await inner.nflState()),
-    startSitInputs: async (playerIds) => {
+    startSitInputs: async (playerIds, opts) => {
       seen.startSitRequested = [...playerIds];
-      return (seen.startSitInputs = await inner.startSitInputs(playerIds));
+      return (seen.startSitInputs = await inner.startSitInputs(playerIds, opts));
     },
     previousForecast: async (opts) => {
       const previous = await inner.previousForecast(opts);

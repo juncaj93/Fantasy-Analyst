@@ -38,6 +38,14 @@ export const SOURCES_SPLIT = 'm_bn2';
  */
 export const DOUBTFUL_STAR = 'm_dstar';
 
+/**
+ * Round 31, `readEveryScreen({ wide: true })` only: a backup quarterback
+ * Sleeper starts while the app starts `m_qb` (Matchup's card said "Start at
+ * QB" for him), and a Questionable receiver in Alex's IR slot.
+ */
+export const BACKUP_QB = 'm_qb2';
+export const IR_PLAYER = 'm_ir';
+
 export interface ScreenNumbers {
   team: number | null;
   matchup: number | null;
@@ -57,9 +65,14 @@ export interface CrossScreen {
   compare: Json;
   /** A Compare of exactly these players, the sheet's own request, in a mode when given. */
   compareOf(playerIds: string[], mode?: string): Promise<Json>;
+  /** Any GET, as the app makes it. */
+  get(path: string): Promise<Json>;
+  /** `/roster`, as Team and Matchup read it. */
+  roster: Json;
 }
 
-export async function readEveryScreen(): Promise<CrossScreen> {
+export async function readEveryScreen(opts: { wide?: boolean } = {}): Promise<CrossScreen> {
+  const wide = opts.wide === true;
   const db = await createTestDb();
   await seed(db);
   await new PlayerRepo(db).upsertMany([
@@ -68,6 +81,12 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     player({ id: SLEEPER_ONLY, fullName: 'M_SL', position: 'WR', team: 'KC' }),
     player({ id: SOURCES_SPLIT, fullName: 'M_BN2', position: 'RB', team: 'NE', status: 'Questionable' }),
     player({ id: DOUBTFUL_STAR, fullName: 'M_DSTAR', position: 'WR', team: 'KC', status: 'Doubtful' }),
+    ...(wide
+      ? [
+          player({ id: BACKUP_QB, fullName: 'M_QB2', position: 'QB', team: 'KC' }),
+          player({ id: IR_PLAYER, fullName: 'M_IR', position: 'WR', team: 'KC', status: 'Questionable' }),
+        ]
+      : []),
   ]);
   /* This week's report, published now: Out. The worse word stands on every screen. */
   await db
@@ -78,12 +97,14 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     )
     .bind(SOURCES_SPLIT, injurySeason(), new Date().toISOString(), new Date().toISOString())
     .run();
-  const ids = [...MINE.map((p) => p[0]), SLEEPER_ONLY, DOUBTFUL_STAR];
-  /* Sleeper starts the Doubtful star at WR in place of m_wr3's slot neighbour m_wr4. */
-  const mineStarters = MINE.slice(0, 9).map((p) => (p[0] === 'm_wr4' ? DOUBTFUL_STAR : p[0]));
+  const ids = [...MINE.map((p) => p[0]), SLEEPER_ONLY, DOUBTFUL_STAR, ...(wide ? [BACKUP_QB, IR_PLAYER] : [])];
+  /* Sleeper starts the Doubtful star at WR in place of m_wr3's slot neighbour m_wr4 (and, wide, the backup QB). */
+  const mineStarters = MINE.slice(0, 9).map((p) =>
+    p[0] === 'm_wr4' ? DOUBTFUL_STAR : wide && p[0] === 'm_qb' ? BACKUP_QB : p[0],
+  );
   const theirStarters = THEIRS.slice(0, 9).map((p) => p[0]);
   await new LeagueRepo(db).replaceRosters(LEAGUE, [
-    { leagueId: LEAGUE, rosterId: 1, ownerId: 'me', ownerName: 'Alex', playerIds: ids, starterIds: mineStarters, reserveIds: [], isMine: true, settings: null },
+    { leagueId: LEAGUE, rosterId: 1, ownerId: 'me', ownerName: 'Alex', playerIds: ids, starterIds: mineStarters, reserveIds: wide ? [IR_PLAYER] : [], isMine: true, settings: null },
     { leagueId: LEAGUE, rosterId: 2, ownerId: 'dermot', ownerName: 'Dermot', playerIds: THEIRS.map((p) => p[0]), starterIds: theirStarters, reserveIds: [], isMine: false, settings: null },
   ]);
   /* One touchdown line posted, so his market is a fragment and Sleeper's week is his number. */
@@ -99,6 +120,7 @@ export async function readEveryScreen(): Promise<CrossScreen> {
   const snapshot = await props.snapshotId('test', 'evt-2', FETCHED_AT);
   await props.saveConsensus(snapshot!, [
     ...boardFor(DOUBTFUL_STAR, 'WR', 24),
+    ...(wide ? [...boardFor(BACKUP_QB, 'QB', 12), ...boardFor(IR_PLAYER, 'WR', 17)] : []),
     { playerId: SLEEPER_ONLY, sourcePlayerName: 'M_SL', market: 'anytime_td', line: null, overPrice: -110, underPrice: -110, bookCount: 3, consensusMethod: 'median', books: ['a', 'b', 'c'], impliedProbability: 0.3 },
   ]);
   await new SleeperProjectionsRepo(db).save(
@@ -165,6 +187,8 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     ...matchup.forecast.bench.theirs,
   ];
 
+  const roster = await get(`/api/leagues/${LEAGUE}/roster`);
+
   return {
     lineup,
     matchup,
@@ -172,6 +196,8 @@ export async function readEveryScreen(): Promise<CrossScreen> {
     trade,
     compare,
     compareOf,
+    get,
+    roster,
     numbers(playerId) {
       /* Team: the row's figure, exactly as the row draws it (`rowFigure`). */
       const e = teamEvaluations.find((x) => x.playerId === playerId);

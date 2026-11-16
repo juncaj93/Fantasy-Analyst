@@ -36,6 +36,8 @@
  */
 
 import { weeklyProjection, type ProjectionSource } from './projection.ts';
+import type { DecisionPoints } from './decisionPoints.ts';
+import { weekPointsBeforeStatus } from './weekPoints.ts';
 import { marketLabel } from '../vegas/marketLabel.ts';
 
 /** A labelled line of the card. The value is already formatted for reading. */
@@ -138,6 +140,12 @@ export interface WeeklyEvaluationLike {
   advanced?: { key: string; label: string; value: string; detail?: string | null }[];
   /** The sensitivity pass, when it exists. Sentences, already written. */
   whatWouldChange?: string[];
+  /**
+   * The decision number the server already made (`decisionPoints`): Team's
+   * evaluations carry it, and Matchup's build attaches it before making cards.
+   * Read, never recomputed here, so the browser's first download stays small.
+   */
+  decision?: DecisionPoints | null;
 }
 
 /** Where the lineup put this player, which is what the card reports. */
@@ -324,7 +332,7 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
    * can be perfectly rankable against his own bench while nobody has published
    * a market that would make a projection of him honest.
    */
-  const projected = weeklyProjection(evaluation, context.published ?? null);
+  const projected = cardNumber(evaluation, context.published ?? null);
 
   return {
     playerId: evaluation.playerId,
@@ -343,6 +351,30 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
     changes: evaluation.whatWouldChange ?? [],
     pending,
   };
+}
+
+/**
+ * The number the card prints: the row's number (Round 31, audit A1).
+ *
+ * The card printed the bare market or Rotowire figure while the row that
+ * opened it printed the decision number (market plus news, usage and matchup
+ * nudges), so Nico Collins read 16.2 on his row and 17.3 on his card. Both now
+ * read `decisionPoints`, the one function behind Team, Compare, Matchup's rows,
+ * Waivers and the Players card, as the server attached it. A ruled-out player keeps the number before his
+ * status, as the row's "if he played" figure does. Only when there is no
+ * decision number (a partial market with nothing published, or no market at
+ * all) does the card fall back to the projection ladder, as before.
+ */
+function cardNumber(
+  evaluation: WeeklyEvaluationLike,
+  published: number | null,
+): { points: number | null; source: ProjectionSource | null } {
+  const decision = evaluation.decision;
+  if (decision && (decision.basis === 'market' || decision.basis === 'published')) {
+    const points = evaluation.ruledOut ? (weekPointsBeforeStatus({ ...evaluation, decision }) ?? 0) : decision.points;
+    return { points: Math.max(0, Math.round(points * 100) / 100), source: decision.basis === 'market' ? 'market' : 'sleeper' };
+  }
+  return weeklyProjection(evaluation, published);
 }
 
 /**

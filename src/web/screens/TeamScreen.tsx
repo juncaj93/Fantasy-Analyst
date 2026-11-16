@@ -60,8 +60,9 @@ import { orderPositions } from '../../core/sleeper/eligibility.ts';
  * detail and Trades so the three cannot disagree about which round pick 40 was.
  */
 import { rosterRowLabel } from '../../core/draft/provenance.ts';
-import { buildWeeklyCard, type WeeklyContext } from '../../core/startsit/weekCard.ts';
-import { buildLineupVerdicts, rowStartingFromBench, verdictSubjectId, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { type WeeklyContext } from '../../core/startsit/weekCard.ts';
+import { verdictSubjectId, weeklyContextFor, type LineupVerdictRow } from '../../core/startsit/sleeperLineup.ts';
+import { lineupEvaluations, rosterById, teamVerdicts, teamWeeklyCard, type OpenSlot, type RosterResponse } from '../teamCard.ts';
 import { DstLine } from '../components/dst.tsx';
 import type { DstPlan } from '../../core/dst/planner.ts';
 import { buildWaiverBoard, type WaiverBoard, type WaiverBoardRow } from '../../core/waivers/board.ts';
@@ -72,45 +73,6 @@ import { rowFigure, rowNote, spokenRowFigure, type RowFigure, type RowFigureEval
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
-
-interface OpenSlot {
-  slot: string;
-  count: number;
-  accepts: string[];
-}
-
-interface RosterResponse {
-  league: { id: string; name: string; scoringLabel: string; notes: string[] };
-  /**
-   * The league's starting slots in Sleeper's own order, and who is in each.
-   *
-   * `starters` below is the same lineup as a set and is what the older parts of
-   * this screen read. These two are what let the lineup be drawn as slots with
-   * a verdict on each — the order the reader sees in Sleeper, and the player
-   * he has in each one.
-   *
-   * `starterSlotIds` is absent on a roster synced before migration 0039, which
-   * is read as "the order is not known" rather than as an empty lineup: the
-   * same starters are then placed by eligibility. Both are optional so an older
-   * server degrades to the set-based view instead of drawing a blank lineup.
-   */
-  rosterPositions?: string[];
-  starterSlotIds?: (string | null)[];
-  starters: RosterPlayer[];
-  bench: RosterPlayer[];
-  /** True while the draft is running: `drafted` is the current truth, not `starters`. */
-  live: boolean;
-  drafted: (RosterPlayer & { pickNo: number | null })[];
-  counts: Record<string, number>;
-  filled: number;
-  remaining: number;
-  openStarters: OpenSlot[];
-  picksMade: number;
-  /** One line of draft advice, derived server-side from roster need. */
-  bestMove?: { text: string; positions: string[]; kind: string } | null;
-  found: boolean;
-}
-
 
 export function TeamScreen({
   leagues,
@@ -246,12 +208,7 @@ export function TeamScreen({
   }, [serverRefresh.start]);
 
   /** Every player on the roster, however Sleeper currently has them arranged. */
-  const byId = useMemo(() => {
-    const map = new Map<string, RosterPlayer>();
-    for (const p of roster?.starters ?? []) map.set(p.playerId, p);
-    for (const p of roster?.bench ?? []) map.set(p.playerId, p);
-    return map;
-  }, [roster]);
+  const byId = useMemo(() => rosterById(roster), [roster]);
 
   const startingIds = useMemo(
     () => new Set((lineup?.slots ?? []).map((s) => s.playerId).filter((id): id is string => id != null)),
@@ -265,26 +222,7 @@ export function TeamScreen({
    * halves already arrived, one on the roster and one on the recommendation —
    * so it cannot disagree with either, and it costs a request from neither.
    */
-  const verdicts = useMemo<LineupVerdictRow[]>(() => {
-    if (!roster || !lineup?.slots?.length) return [];
-    return buildLineupVerdicts({
-      rosterPositions: roster.rosterPositions ?? [],
-      starterIds: (roster.starters ?? []).map((p) => p.playerId),
-      ...(roster.starterSlotIds ? { starterSlotIds: roster.starterSlotIds } : {}),
-      slots: lineup.slots,
-      /*
-       * The changes the optimiser would actually stand behind, and only those.
-       * Without this the rows would propose swaps the card above them declines
-       * to make — one screen answering to two rules.
-       *
-       * Passed as pairs rather than as incoming ids: the rows need to know who
-       * each change is *instead of*, or `→ Start X instead` prints on whichever
-       * row the slot ordering put it beside.
-       */
-      suggestedSwaps: lineup.swaps ?? [],
-      positionOf: (id) => byId.get(id)?.position ?? null,
-    });
-  }, [roster, lineup, byId]);
+  const verdicts = useMemo<LineupVerdictRow[]>(() => teamVerdicts(roster, lineup, byId), [roster, lineup, byId]);
 
   /*
    * The bench: who Sleeper is not starting.
@@ -336,13 +274,7 @@ export function TeamScreen({
    * second opinion waiting to disagree with the row that opened it. It also
    * means the sheet opens instantly, which is most of why it is worth having.
    */
-  const evaluations = useMemo(() => {
-    const map = new Map<string, StartSitEvaluation>();
-    for (const e of [...(lineup?.starters ?? []), ...(lineup?.bench ?? []), ...(lineup?.undecidable ?? [])]) {
-      map.set(e.playerId, e);
-    }
-    return map;
-  }, [lineup]);
+  const evaluations = useMemo(() => lineupEvaluations(lineup), [lineup]);
 
   /** The waiver advice, turned from slot-shaped comparisons into decisions. */
   const waiverBoard = useMemo(() => (waivers?.found ? buildWaiverBoard(waivers) : null), [waivers]);
@@ -360,20 +292,8 @@ export function TeamScreen({
 
   const weeklyCard = useMemo(() => {
     if (!weekly) return null;
-    const evaluation = evaluations.get(weekly.playerId);
-    /*
-     * The sheet is handed the same published figure the row was.
-     *
-     * The card recomputes the projection from the evaluation rather than reading
-     * the row's answer, which is right — one function owns the word — but it
-     * means the fallback has to reach it too, or a row showing 20.9 would open a
-     * sheet showing nothing. The server already told us which of the two this
-     * number is, so where it said `sleeper` we hand the number straight back as
-     * the published figure; `weeklyProjection` still prefers a market over it
-     * and would ignore it if one existed.
-     */
-    const published = evaluation?.projectionSource === 'sleeper' ? (evaluation.projection ?? null) : null;
-    return evaluation ? buildWeeklyCard(evaluation, { ...weekly.context, published }) : null;
+    /* The same card Matchup opens for this player (`teamCard.ts`). */
+    return teamWeeklyCard(evaluations.get(weekly.playerId), weekly.context);
   }, [weekly, evaluations]);
 
   /**
@@ -663,14 +583,8 @@ export function TeamScreen({
                   fixtureOf={(playerId) => evaluations.get(playerId)?.fixture ?? null}
                   evaluationOf={(playerId) => evaluations.get(playerId) ?? null}
                   summary={benchLine}
-                  onOpen={(playerId) => {
-                    /* The card says what the row says: a bench man a row starts reads "Start". */
-                    const row = rowStartingFromBench(verdicts, playerId);
-                    openPlayer(
-                      playerId,
-                      row ? { starting: true, slot: row.slot, alreadyStarting: false, locked: row.locked } : { starting: false },
-                    );
-                  }}
+                  /* The card says what the row says (`weeklyContextFor`, shared with Matchup). */
+                  onOpen={(playerId) => openPlayer(playerId, weeklyContextFor(verdicts, playerId))}
                 />
               )}
 
