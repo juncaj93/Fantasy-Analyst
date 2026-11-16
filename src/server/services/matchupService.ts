@@ -139,7 +139,7 @@ export class MatchupService {
         this.deps.sleeper.getMatchups(league.sleeperLeagueId, week) as Promise<SleeperMatchup[]>,
       /* The app's week (Round 18, `core/season/appWeek.ts`), the same one Team, Compare, Waivers and Trades show. */
       nflState: () => readAppNflState(this.db, this.now()),
-      startSitInputs: (playerIds) => startSitInputsFor(this.db, playerIds),
+      startSitInputs: (playerIds, opts) => startSitInputsFor(this.db, playerIds, opts?.reserveIds ? { reserveIds: opts.reserveIds } : {}),
       /*
        * Read from the database only. The fetch runs on the crons, so a matchup
        * request — which on a Sunday is one every thirty seconds — never waits on

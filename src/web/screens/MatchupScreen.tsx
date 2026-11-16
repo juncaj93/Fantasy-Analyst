@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type LeagueSummary, type MatchupResponse, type MatchupPlayerView } from '../api.ts';
+import { api, type LeagueSummary, type LineupRecommendation, type MatchupResponse, type MatchupPlayerView } from '../api.ts';
 import { Empty, Notice } from '../components/common.tsx';
 import { NavBar, PullToRefresh, Sheet, SkeletonRows } from '../components/native.tsx';
 import {
@@ -33,6 +33,7 @@ import {
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { unwindOne } from '../tabReset.ts';
 import { useServerRefresh } from '../serverRefresh.ts';
+import { teamCardFor, type RosterResponse } from '../teamCard.ts';
 
 /**
  * How often the scoreboard is re-read while games are running.
@@ -56,6 +57,16 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [error, setError] = useState<string | null>(null);
   const [openPlayer, setOpenPlayer] = useState<string | null>(null);
   const [oddsOpen, setOddsOpen] = useState(false);
+  /*
+   * Team's roster and lineup, read only when one of Alex's own players is
+   * tapped (Round 31). His card here is Team's card: the app's pick and the
+   * app's number. The rows above stay Sleeper's lineup, because that is what
+   * this screen scores. Both reads usually come straight from the cache Team
+   * filled, since the app opens on Team.
+   */
+  const [team, setTeam] = useState<{ roster: RosterResponse; lineup: LineupRecommendation } | null>(null);
+  const [teamFailed, setTeamFailed] = useState(false);
+  const teamAsked = useRef(false);
   /*
    * Tapping Matchup while already on Matchup.
    *
@@ -97,6 +108,33 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     void load();
   }, [load]);
 
+  const loadTeam = useCallback(async () => {
+    if (!selected || teamAsked.current) return;
+    teamAsked.current = true;
+    try {
+      const [roster, lineup] = await Promise.all([
+        api.get<RosterResponse>(`/api/leagues/${selected.id}/roster`, {
+          onFresh: (r) => setTeam((t) => (t ? { ...t, roster: r } : t)),
+        }),
+        api.get<LineupRecommendation>(`/api/leagues/${selected.id}/lineup`, {
+          onFresh: (l) => setTeam((t) => (t ? { ...t, lineup: l } : t)),
+        }),
+      ]);
+      setTeam({ roster, lineup });
+    } catch {
+      /* His card falls back to this screen's own. */
+      setTeamFailed(true);
+    }
+  }, [selected]);
+
+  /* A new league, or a pull that changed the lineup: ask again on the next tap. */
+  const forgetTeam = useCallback(() => {
+    teamAsked.current = false;
+    setTeam(null);
+    setTeamFailed(false);
+  }, []);
+  useEffect(() => forgetTeam(), [selected?.id, forgetTeam]);
+
   /*
    * A pull runs Team's refresh (Round 22, `serverRefresh.ts`): roster, injury
    * report, Vegas lines and kickoffs, finished on the server even if the phone
@@ -105,9 +143,10 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
    */
   const serverRefresh = useServerRefresh('startsit', { onFinished: load, enabled: selected != null });
   const pull = useCallback(async () => {
+    forgetTeam();
     const reloaded = await serverRefresh.start();
     if (!reloaded) await load();
-  }, [serverRefresh.start, load]);
+  }, [serverRefresh.start, load, forgetTeam]);
 
   /*
    * The poll, and what switches it off.
@@ -161,7 +200,27 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     return map;
   }, [forecast]);
 
-  const card = openPlayer ? (data?.cards[openPlayer] ?? null) : null;
+  /** Alex's own players: the ones whose card is Team's. */
+  const mineIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!forecast) return ids;
+    for (const row of forecast.slots) if (row.mine) ids.add(row.mine.playerId);
+    for (const player of forecast.bench.mine) ids.add(player.playerId);
+    return ids;
+  }, [forecast]);
+  const openIsMine = openPlayer != null && mineIds.has(openPlayer);
+  useEffect(() => {
+    if (openIsMine) void loadTeam();
+  }, [openIsMine, loadTeam]);
+
+  const card = useMemo(() => {
+    if (!openPlayer) return null;
+    const own = data?.cards[openPlayer] ?? null;
+    if (!openIsMine) return own;
+    /* Team's card when Team's lineup has him; while it loads, nothing; if it fails, this screen's own. */
+    if (team) return teamCardFor(team.roster, team.lineup, openPlayer) ?? own;
+    return teamFailed ? own : null;
+  }, [openPlayer, openIsMine, data, team, teamFailed]);
   /*
    * A card exists for everybody the engine could score, which is nearly
    * everybody and not quite. A player Sleeper rosters that the dictionary has

@@ -47,7 +47,7 @@ import type { TradeHorizon } from '../tradeValue/weeks.ts';
 import type { RosterShape } from '../sleeper/rosterShape.ts';
 import { seasonWeights } from '../value/restOfSeason.ts';
 import { FAIR_TO_BOTH, gainBars, valueEdge, wholePercent, type UnfairReason } from './fairToBoth.ts';
-import { CLOSE_LABELS, VERDICT_WORDS, verdictOfEvaluation, type TradeVerdict } from './verdict.ts';
+import { checkSummary, verdictOfEvaluation, type TradeVerdict } from './verdict.ts';
 import { isRareTrader, type ActivityClass } from './activity.ts';
 
 export const FINDER = {
@@ -592,8 +592,6 @@ function offerOf(args: {
   const a = evaluation.a!;
   const b = evaluation.b!;
   const weekly = (a.weekly ?? []).map((w) => w.lineupAfter + w.depthAfter - (w.lineupBefore + w.depthBefore));
-  const theirWeek = b.weekly?.[0];
-  const themWeek = theirWeek ? theirWeek.lineupAfter + theirWeek.depthAfter - (theirWeek.lineupBefore + theirWeek.depthBefore) : 0;
   const playoffWeeks = new Set(horizon.playoffWeeks);
   const thisWeek = round1(weekly[0] ?? 0);
   const playoffs = round1(weekly.reduce((s, d, i) => (playoffWeeks.has(horizon.weeks[i]!) ? s + d : s), 0));
@@ -635,20 +633,24 @@ function offerOf(args: {
     R.extraPlayer * Math.max(0, deal.give.length + deal.get.length - 2);
 
   const kind: FoundOffer['kind'] = reading.fairToBoth ? 'fair' : 'close';
-  const label = kind === 'fair' ? VERDICT_WORDS[reading.verdict === 'bad' ? 'fair' : reading.verdict] : CLOSE_LABELS[reading.unfair!];
+  /*
+   * The word and the gain numbers are Check a trade's own (`checkSummary`), so
+   * an offer reads exactly what checking the same deal reads (Round 31).
+   */
+  const summary = checkSummary(evaluation)!;
   return {
     id: deal.key,
     partner: { rosterId: deal.partner.rosterId, label: deal.partner.label, activity: activity?.line ?? null },
     give,
     get,
     kind,
-    label,
+    label: summary.word,
     verdict: reading.verdict,
     closeReason: kind === 'close' ? reading.unfair : null,
     check: { kind: evaluation.verdict?.kind ?? null, headline: evaluation.verdict?.headline ?? null, confidence: evaluation.confidence },
     edgePercent: reading.edgePercent,
-    you: { thisWeek, restOfSeason: round1(a.net), playoffs },
-    them: { thisWeek: round1(themWeek), restOfSeason: round1(b.net) },
+    you: { thisWeek: summary.you.thisWeek, restOfSeason: summary.you.restOfSeason, playoffs },
+    them: { thisWeek: summary.them.thisWeek, restOfSeason: summary.them.restOfSeason },
     better: { you: youBetter, them: themBetter },
     drop: a.mustDrop?.name ?? null,
     tags,

@@ -3589,8 +3589,10 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
      * 2026, `spread.ts`): Balanced leans to the higher number and reads nothing more.
      */
     const seasonPoints = mode === 'balanced' ? null : await readSeasonPoints(db, league.season);
+    /* Alex's IR slot, as Team passes it, so an IR player reads Out here too (Round 31). */
+    const reserveIds = (await leagueRepo.listRosters(league.id).catch(() => [])).find((r) => r.isMine)?.reserveIds ?? [];
     const [inputs, freshness] = await Promise.all([
-      startSitInputsFor(db, requested, { mode, seasonPoints }),
+      startSitInputsFor(db, requested, { mode, seasonPoints, reserveIds }),
       new PropsRepo(db).freshness(),
     ]);
 

@@ -185,7 +185,17 @@ export class PlayersSeasonService {
     const later = horizon.weeks.slice(1, 4);
     const team = (player.team ?? '').toUpperCase();
     const [inputs, published, stored, fixtures] = await Promise.all([
-      startSitInputsFor(this.db, [playerId], { mode: 'balanced', now: this.now() }),
+      /* Alex's IR slot, as Team passes it, so a player he has on IR reads Out here too (Round 31). */
+      leagues
+        .listRosters(league.id)
+        .catch(() => [])
+        .then((rosters) =>
+          startSitInputsFor(this.db, [playerId], {
+            mode: 'balanced',
+            now: this.now(),
+            reserveIds: rosters.find((r) => r.isMine)?.reserveIds ?? [],
+          }),
+        ),
       new SleeperProjectionService(this.db, this.sleeper)
         .publishedFor({ season: league.season, week, playerIds: [playerId], profile, positionOf: () => player.position, narrow: true })
         .catch((): Map<string, number> => new Map()),
@@ -199,7 +209,12 @@ export class PlayersSeasonService {
     const input = inputs[0];
     const reading = input ? weekPoints(evaluatePlayer({ ...input, mode: 'balanced', now: this.now() }, profile), published) : null;
     const thisWeek = {
-      points: reading?.points == null ? null : Math.round(reading.points * 10) / 10,
+      /*
+       * To the cent, as every other screen keeps it, so the card's `toFixed(1)`
+       * prints what Team prints (Round 31, audit A5: 15.35 read 15.4 on Team
+       * and 15.5 here, about one value in 25).
+       */
+      points: reading?.points == null ? null : Math.round(reading.points * 100) / 100,
       sleeper: reading != null && !reading.out && reading.points != null && reading.basis === 'published',
       out: reading?.out === true,
     };

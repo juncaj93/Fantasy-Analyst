@@ -118,7 +118,8 @@ export interface MatchupSources {
   /** Sleeper's own matchup rows for the week. The scoreboard, never recomputed. */
   matchups(league: LeagueRecord, week: number): Promise<SleeperMatchup[]>;
   nflState(): Promise<NflState | null>;
-  startSitInputs(playerIds: string[]): Promise<StartSitInput[]>;
+  /** `reserveIds`: Alex's IR slot, as Team passes it (Round 31). */
+  startSitInputs(playerIds: string[], opts?: { reserveIds?: readonly string[] }): Promise<StartSitInput[]>;
   /** What the last forecast said, so "changed since you looked" is answerable. */
   previousForecast(opts: {
     leagueId: string;
@@ -303,7 +304,7 @@ export async function buildMatchupResponse(
    * part of the request to save nothing.
    */
   const allIds = [...new Set([...(mineRow.players ?? []), ...(theirsRow.players ?? [])])];
-  const inputs = await sources.startSitInputs(allIds);
+  const inputs = await sources.startSitInputs(allIds, { reserveIds: mine.reserveIds ?? [] });
   const evaluations = new Map<string, StartSitEvaluation>();
   for (const input of inputs) evaluations.set(input.player.id, evaluatePlayer(input, profile));
 

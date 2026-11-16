@@ -187,7 +187,8 @@ export function nextWeeks(args: {
     if (week === args.byeWeek) return { week, bye: true, points: null, sleeper: false, out: false };
     if (i === 0) return { week, bye: false, ...args.thisWeek };
     const points = args.ahead.get(week);
-    return { week, bye: false, points: points == null ? null : round1(points), sleeper: points != null, out: false };
+    /* To the cent, as Waivers keeps the same stored week, so both print the same tenth (Round 31). */
+    return { week, bye: false, points: points == null ? null : Math.round(points * 100) / 100, sleeper: points != null, out: false };
   });
 }
 

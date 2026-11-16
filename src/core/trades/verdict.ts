@@ -42,6 +42,22 @@ export const CLOSE_LABELS: Record<UnfairReason, string> = {
   partner_gain: 'Close: small gain for them',
 };
 
+/**
+ * The one word a trade reads under, on its offer card and in Check a trade
+ * (Round 31, audit A4). The offer card used to take a close label while Check
+ * took the verdict word, so one deal read "Close: small gain for them" on its
+ * card and "Good for you" in Check.
+ *
+ *  - Good for you and Bad for you are the verdict, as before.
+ *  - Fair only when it is fair to both sides by Alex's rule.
+ *  - A deal that reads fair but breaks the rule keeps its close label, so a
+ *    close deal is never labelled plain "Fair" (Round 19).
+ */
+export function tradeWord(reading: Pick<VerdictReading, 'verdict' | 'fairToBoth' | 'unfair'>): string {
+  if (reading.verdict !== 'fair' || reading.fairToBoth || reading.unfair == null) return VERDICT_WORDS[reading.verdict];
+  return CLOSE_LABELS[reading.unfair];
+}
+
 export interface VerdictInput {
   /** Alex's rest-of-season lineup change (depth and his preferences included), the number Check a trade prints. */
   you: number;
@@ -137,7 +153,7 @@ function signed(n: number): string {
 /** What Check a trade's one line needs, from Alex's side (side A). */
 export interface CheckSummary {
   verdict: TradeVerdict;
-  /** "Good for you", "Fair" or "Bad for you". */
+  /** `tradeWord`: "Good for you", "Fair", "Bad for you" or a close label, as the offer card reads. */
   word: string;
   reason: string;
   fairToBoth: boolean;
@@ -189,7 +205,7 @@ export function checkSummary(evaluation: {
   };
   return {
     verdict: reading.verdict,
-    word: VERDICT_WORDS[reading.verdict],
+    word: tradeWord(reading),
     reason: reading.reason,
     fairToBoth: reading.fairToBoth,
     edgePercent: reading.edgePercent,
