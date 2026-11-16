@@ -238,8 +238,18 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
                 tiers below it are scored by what each move adds to your best
                 lineup over the next three weeks. See core/waivers/tiers.ts.
               */}
-              <div className="section-title" data-testid="waivers-recommended-title">
+              {/*
+                Round 32: which week a claim plays. From Sunday's games to
+                Tuesday 3 AM that is next week, ahead of Team; the label says
+                so and nothing more.
+              */}
+              <div className="section-title section-title-row" data-testid="waivers-recommended-title">
                 Do this
+                {waiverWeekLabel(tiers) ? (
+                  <span className="section-title-meta" data-testid="waivers-week">
+                    {waiverWeekLabel(tiers)}
+                  </span>
+                ) : null}
               </div>
               <section data-testid="waivers-recommended">
                 {/* Numbered lines only when one claim depends on another; a lone claim is its own card. */}
@@ -352,6 +362,12 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
       {open && selected ? <WaiverSheet model={boardSheet(open)} leagueId={selected.id} onClose={() => setOpen(null)} /> : null}
     </PullToRefresh>
   );
+}
+
+/** "Week 12": the first week a claim made now plays (the planner's window). Null when unknown. */
+export function waiverWeekLabel(tiers: Pick<WaiverTiersView, 'window'> | null | undefined): string | null {
+  const first = tiers?.window?.weeks?.[0];
+  return typeof first === 'number' && Number.isInteger(first) && first > 0 ? `Week ${first}` : null;
 }
 
 /** The empty "Do this", said as an answer: what else the tiers hold. */

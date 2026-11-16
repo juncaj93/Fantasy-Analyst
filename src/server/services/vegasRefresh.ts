@@ -36,6 +36,7 @@ import { SettingsRepo, SETTING_KEYS } from '../repos/settings.ts';
 import { VegasEventsRepo, type VegasEventRow } from '../repos/vegasEvents.ts';
 import { VegasUsageRepo } from '../repos/vegasUsage.ts';
 import { MatchupRepo } from '../repos/matchup.ts';
+import { readAppNflState } from './appWeek.ts';
 import { TrendingRepo } from '../repos/trending.ts';
 import type { LeagueRecord, RosterRecord } from '../../core/sleeper/types.ts';
 import type { NflState } from '../../core/sleeper/phase.ts';
@@ -1004,7 +1005,7 @@ export class VegasRefreshService {
      * outcome and needs no separate refusal.
      */
     const [opponentIds, waiverIds] = await Promise.all([
-      this.opponentPlayerIds(league, mine, rosters),
+      this.opponentPlayerIds(league, mine, rosters, now),
       this.waiverCandidateIds(),
     ]);
 
@@ -1067,8 +1068,14 @@ export class VegasRefreshService {
     league: LeagueRecord,
     mine: RosterRecord,
     rosters: RosterRecord[],
+    now: number,
   ): Promise<string[]> {
-    const state = await new SettingsRepo(this.db).get<NflState | null>(SETTING_KEYS.nflState, null);
+    /*
+     * Round 32: the app's week, the one Matchup writes its row for. Sleeper's
+     * own week lags from Tuesday 3 AM to Wednesday evening, and on waiver
+     * night it priced last week's opponent.
+     */
+    const state = await readAppNflState(this.db, new Date(now));
     const week = state?.week ?? null;
     if (week == null || !Number.isFinite(week) || week < 1) return [];
 
