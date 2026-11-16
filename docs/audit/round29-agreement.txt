@@ -1,0 +1,108 @@
+Round 29 agreement. Production Sunday 15 November 2026, 11:51 PM Eastern (week 10). 'now' = the screens as read; 'prekick' = Team and Compare rebuilt from the same inputs as of 12:45 PM Sunday.
+
+## Twenty players, as in the report
+| Player | Status | Team row | Card on tap | Compare | Players card | Matchup (live) | Waivers (week 11) | Season value: Players / Trades |
+|---|---|---|---|---|---|---|---|---|
+| C.J. Stroud | healthy | 32.2 | 32.3 | 32.2 | 32.2 | 26.4 | 22.9 | 56.5 / 56.5 |
+| Emmett Johnson | healthy | 15.3 | 14.9 | 15.3 | 15.4 | 32.1 | 9.1 | 24.8 / - |
+| Bijan Robinson | healthy | 17.0 | 17.5 | 17.0 | failed (503) | 15.7 | BYE | 106.6 / - |
+| Nico Collins | healthy | 16.2 | 17.3 | 16.2 | 16.2 | 19.9 | 13.8 | 76.4 / 76.4 |
+| Omar Cooper Jr. | healthy | 7.0 | 6.9 | 7.0 | failed (503) | 0.0 | 8.6 | 29.9 / 29.9 |
+| KC Concepcion Jr. | healthy | 8.8 | 8.4 | 8.8 | failed (503) | 10.2 | BYE | 22.8 / - |
+| Hunter Henry | healthy | 8.3 | 8.1 | 8.3 | 8.3 | 3.2 | BYE | 0.0 / - |
+| Sam LaPorta | healthy | 10.0 | 9.7 | 10.0 | 10.0 | 2.1 | 10.2 | 26.5 / - |
+| Jaxon Smith-Njigba | healthy | 16.4 | 15.4 | 16.4 | failed (503) | 27.1 | BYE | 121.6 / - |
+| Ladd McConkey | questionable | 9.8 | 9.7 | 9.8 | failed (503) | 9.8 | 10.0 | 29.6 / 29.6 |
+| Makai Lemon | healthy | - | - | - | failed (503) | 0.0 | 4.4 | 0.0 / - |
+| Jonah Coleman | healthy | - | - | - | - | 0.0 | 15.2 | 62.9 / - |
+| Quentin Johnston | healthy | n/a | ? | ? | 6.1 | ? | 6.4 | 0.4 / - |
+| Aaron Rodgers | healthy | n/a | ? | 21.5 | failed (503) | ? | ? | 8.6 / - |
+| Deshaun Watson | healthy | n/a | ? | 20.3 | 20.3 | ? | ? | - / - |
+| Kirk Cousins | healthy | n/a | ? | 18.6 | failed (503) | ? | ? | - / - |
+| Jacoby Brissett | healthy | n/a | ? | 18.4 | 18.5 | ? | ? | - / - |
+| Drew Lock | healthy | n/a | ? | 18.1 | failed (503) | ? | ? | 1.0 / - |
+| Geno Smith | healthy | n/a | ? | 17.9 | 18.0 | ? | ? | - / - |
+| J.J. McCarthy | healthy | n/a | ? | 17.7 | failed (503) | ? | ? | - / - |
+
+## Line-up table, now (every screen's own answer; Compare rebuilt)
+player | pos | sleeperChip | merged | basis | lock | TeamRow | TeamCard | BestMove | Pool | Compare | MatchupRow | MatchupChip | MatchupCard | WaiverWk0 | PlayersCard | TradeRate | TradeRate*wk0 | rosValue | P.value | P.overFA | P.injury
+C.J. Stroud (9758) | QB | Active | healthy | market | locked | 32.2 | 32.3 | 32.2 | 32.2 | ? | 26.4 |  | 32.3 | 22.9 | 32.2 | ? | ? | ? | 24.1 | 56.5 | 
+Emmett Johnson (13337) | RB | Active | healthy | published | locked | 15.3 | 14.9 | 15.3 | 15.3 | 15.3 | 32.1 |  | 14.9 | 9.1 | 15.4 | ? | ? | ? | 8.3 | 24.8 | 
+Bijan Robinson (9509) | RB | Active | healthy | market | locked | 17.0 | 17.5 | 17.0 | 17.0 | 17.0 | 15.7 |  | 17.5 | BYE | ? | ? | ? | ? | 16.4 | 106.6 | 
+Nico Collins (7569) | WR | Active | healthy | market | locked | 16.2 | 17.3 | 16.2 | 16.2 | 16.2 | 19.9 |  | 17.3 | 13.8 | 16.2 | ? | ? | ? | 14.0 | 76.4 | 
+Omar Cooper Jr. (13276) | WR | Active | healthy | market | locked | 7.0 | 6.9 | 7.0 | 7.0 | 7.0 | 0.0 |  | 6.9 | 8.6 | ? | ? | ? | ? | 8.5 | 29.9 | 
+KC Concepcion Jr. (13298) | WR | Active | healthy | published | locked | 8.8 | 8.4 | 8.8 | 8.8 | 8.8 | 10.2 |  | 8.4 | BYE | ? | ? | ? | ? | 7.8 | 22.8 | 
+Hunter Henry (3214) | TE | Active | healthy | published | locked | 8.3 | 8.1 | 8.3 | 8.3 | 8.3 | 3.2 |  | 8.1 | BYE | 8.3 | ? | ? | ? | 6.5 | 0.0 | 
+Sam LaPorta (10859) | TE | Active | healthy | published | locked | 10.0 | 9.7 | 10.0 | 10.0 | 10.0 | 2.1 |  | 9.7 | 10.2 | 10.0 | ? | ? | ? | 10.1 | 26.5 | 
+Jaxon Smith-Njigba (9488) | WR | Active | healthy | market | locked | 16.4 | 15.4 | 16.4 | 16.4 | 16.4 | 27.1 |  | 15.4 | BYE | ? | ? | ? | ? | 18.2 | 121.6 | 
+Braelon Allen (11576) | RB | Active | ? | ? |  | ? | ? | ? | 7.0 | ? | 5.1 |  | 6.8 | 8.1 | ? | ? | ? | ? | 7.5 | 22.6 | 
+Ladd McConkey (11635) | WR | Questionable | questionable | published |  | 9.8 | 9.7 | 9.8 | 9.8 | 9.8 | 9.8 | Q | 9.7 | 10.0 | ? | ? | ? | ? | 9.1 | 29.6 | 
+Makai Lemon (13294) | WR | Active | healthy | unpriced |  | - | - | - | - | ? | 0.0 |  | - | 4.4 | ? | ? | ? | ? | 5.3 | 0.0 | 
+Antonio Williams (13301) | WR | Active | ? | ? |  | ? | ? | ? | 6.4 | ? | 11.2 |  | 6.4 | 6.5 | ? | ? | ? | ? | 6.4 | 3.5 | 
+Jonah Coleman (13345) | RB | Active | healthy | unpriced |  | - | - | - | - | ? | 0.0 |  | - | 15.2 | - | ? | ? | ? | 11.8 | 62.9 | 
+Jordan Love (6804) | QB | Active | ? | ? |  | ? | ? | ? | 18.6 | ? | 12.8 |  | 19.5 | BYE | ? | ? | ? | ? | 19.4 | 30.4 | 
+Kenneth Walker III (8151) | RB | Out | ? | ? |  | ? | ? | ? | Out | ? | 0.0 | OUT | 15.9 | 17.3 | ? | ? | ? | ? | 15.9 | 105.6 | out, back wk11
+Brian Robinson Jr. (8154) | RB | IR | ? | ? |  | ? | ? | ? | Out | ? | 0.0 | OUT | - | BYE | ? | ? | ? | ? | 3.1 | 2.9 | out, back wk14
+Quentin Johnston (9754) |  | Active | ? | ? |  | ? | ? | ? | ? | ? | ? | ? | ? | 6.4 | 6.1 | ? | ? | ? | 6.0 | 0.4 | 
+Aaron Rodgers (96) | QB | Active | ? | ? |  | ? | ? | ? | 21.5 | ? | ? | ? | ? | ? | ? | ? | ? | ? | 19.0 | 8.6 | 
+Deshaun Watson (4017) | QB | Active | ? | ? |  | ? | ? | ? | 20.3 | ? | ? | ? | ? | ? | 20.3 | ? | ? | ? | ? | ? | ?
+Kirk Cousins (1166) | QB | Active | ? | ? |  | ? | ? | ? | 18.6 | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ?
+Jacoby Brissett (3257) | QB | Active | ? | ? |  | ? | ? | ? | 18.4 | ? | ? | ? | ? | ? | 18.5 | ? | ? | ? | ? | ? | ?
+Drew Lock (5854) | QB | Active | ? | ? |  | ? | ? | ? | 18.1 | ? | ? | ? | ? | ? | ? | ? | ? | ? | 16.3 | 1.0 | 
+Geno Smith (1373) | QB | Active | ? | ? |  | ? | ? | ? | 17.9 | ? | ? | ? | ? | ? | 18.0 | ? | ? | ? | ? | ? | ?
+J.J. McCarthy (11565) | QB | Active | ? | ? |  | ? | ? | ? | 17.7 | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ?
+
+Picks:
+  Pick up and start: Quentin Johnston 6.11 +1.490000000000009
+  Compare Sam LaPorta vs Ladd McConkey [mode balanced, slot FLEX comparable true]: Toss-up, lean Sam LaPorta
+  Compare Ladd McConkey vs Omar Cooper Jr. [mode balanced, slot WR comparable true]: Toss-up, lean Ladd McConkey
+  Compare Ladd McConkey vs KC Concepcion Jr. [mode balanced, slot WR comparable true]: Toss-up, lean Ladd McConkey
+  Compare Emmett Johnson vs Ladd McConkey [mode balanced, slot FLEX comparable true]: Start Emmett Johnson
+  Compare Ladd McConkey vs Hunter Henry [mode balanced, slot FLEX comparable true]: Toss-up, lean Ladd McConkey
+  Compare Nico Collins vs Ladd McConkey [mode balanced, slot WR comparable true]: Start Nico Collins
+  Compare Jaxon Smith-Njigba vs Ladd McConkey [mode balanced, slot WR comparable true]: Start Jaxon Smith-Njigba
+  Compare Bijan Robinson vs Ladd McConkey [mode balanced, slot FLEX comparable true]: Start Bijan Robinson
+  Waivers do_this: Quentin Johnston +0.01 (start_now)
+
+## Line-up table, rebuilt as of 12:45 PM Sunday
+player | pos | sleeperChip | merged | basis | lock | TeamRow | TeamCard | BestMove | Pool | Compare | MatchupRow | MatchupChip | MatchupCard | WaiverWk0 | PlayersCard | TradeRate | TradeRate*wk0 | rosValue | P.value | P.overFA | P.injury
+C.J. Stroud (9758) | QB | Active | healthy | market |  | 32.2 | 32.3 | 32.2 | 32.2 | 32.2 | 26.4 |  | 32.3 | 22.9 | 32.2 | ? | ? | ? | 24.1 | 56.5 | 
+Emmett Johnson (13337) | RB | Active | healthy | published |  | 15.3 | 14.9 | 15.3 | 15.3 | 15.3 | 32.1 |  | 14.9 | 9.1 | 15.4 | ? | ? | ? | 8.3 | 24.8 | 
+Bijan Robinson (9509) | RB | Active | healthy | market |  | 17.0 | 17.5 | 17.0 | 17.0 | 17.0 | 15.7 |  | 17.5 | BYE | ? | ? | ? | ? | 16.4 | 106.6 | 
+Nico Collins (7569) | WR | Active | healthy | market |  | 16.2 | 17.3 | 16.2 | 16.2 | 16.2 | 19.9 |  | 17.3 | 13.8 | 16.2 | ? | ? | ? | 14.0 | 76.4 | 
+Omar Cooper Jr. (13276) | WR | Active | healthy | market |  | 7.0 | 6.9 | 7.0 | 7.0 | 7.0 | 0.0 |  | 6.9 | 8.6 | ? | ? | ? | ? | 8.5 | 29.9 | 
+KC Concepcion Jr. (13298) | WR | Active | healthy | published |  | 8.8 | 8.4 | 8.8 | 8.8 | 8.8 | 10.2 |  | 8.4 | BYE | ? | ? | ? | ? | 7.8 | 22.8 | 
+Hunter Henry (3214) | TE | Active | healthy | published | locked | 8.3 | 8.1 | 8.3 | 8.3 | 8.3 | 3.2 |  | 8.1 | BYE | 8.3 | ? | ? | ? | 6.5 | 0.0 | 
+Sam LaPorta (10859) | TE | Active | healthy | published | locked | 10.0 | 9.7 | 10.0 | 10.0 | 10.0 | 2.1 |  | 9.7 | 10.2 | 10.0 | ? | ? | ? | 10.1 | 26.5 | 
+Jaxon Smith-Njigba (9488) | WR | Active | healthy | market |  | 16.4 | 15.4 | 16.4 | 16.4 | 16.4 | 27.1 |  | 15.4 | BYE | ? | ? | ? | ? | 18.2 | 121.6 | 
+Braelon Allen (11576) | RB | Active | healthy | market |  | 7.0 | 6.8 | 7.0 | 7.0 | ? | 5.1 |  | 6.8 | 8.1 | ? | ? | ? | ? | 7.5 | 22.6 | 
+Ladd McConkey (11635) | WR | Questionable | questionable | published |  | 9.8 | 9.7 | 9.8 | 9.8 | 9.8 | 9.8 | Q | 9.7 | 10.0 | ? | ? | ? | ? | 9.1 | 29.6 | 
+Makai Lemon (13294) | WR | Active | healthy | unpriced |  | - | - | - | - | ? | 0.0 |  | - | 4.4 | ? | ? | ? | ? | 5.3 | 0.0 | 
+Antonio Williams (13301) | WR | Active | ? | ? |  | ? | ? | ? | 6.4 | ? | 11.2 |  | 6.4 | 6.5 | ? | ? | ? | ? | 6.4 | 3.5 | 
+Jonah Coleman (13345) | RB | Active | healthy | unpriced |  | - | - | - | - | ? | 0.0 |  | - | 15.2 | - | ? | ? | ? | 11.8 | 62.9 | 
+Jordan Love (6804) | QB | Active | healthy | market |  | 18.6 | 19.5 | 18.6 | 18.6 | 18.6 | 12.8 |  | 19.5 | BYE | ? | ? | ? | ? | 19.4 | 30.4 | 
+Kenneth Walker III (8151) | RB | Out | out | market |  | Out(16.9) | 15.9 | Out | Out | ? | 0.0 | OUT | 15.9 | 17.3 | ? | ? | ? | ? | 15.9 | 105.6 | out, back wk11
+Brian Robinson Jr. (8154) | RB | IR | ir | unpriced |  | On IR(-) | - | Out | Out | ? | 0.0 | OUT | - | BYE | ? | ? | ? | ? | 3.1 | 2.9 | out, back wk14
+Quentin Johnston (9754) |  | Active | ? | ? |  | ? | ? | ? | ? | ? | ? | ? | ? | 6.4 | 6.1 | ? | ? | ? | 6.0 | 0.4 | 
+Aaron Rodgers (96) | QB | Active | ? | ? |  | ? | ? | ? | 21.5 | ? | ? | ? | ? | ? | ? | ? | ? | ? | 19.0 | 8.6 | 
+Deshaun Watson (4017) | QB | Active | ? | ? |  | ? | ? | ? | 20.3 | ? | ? | ? | ? | ? | 20.3 | ? | ? | ? | ? | ? | ?
+Kirk Cousins (1166) | QB | Active | ? | ? |  | ? | ? | ? | 18.6 | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ?
+Jacoby Brissett (3257) | QB | Active | ? | ? |  | ? | ? | ? | 18.4 | ? | ? | ? | ? | ? | 18.5 | ? | ? | ? | ? | ? | ?
+Drew Lock (5854) | QB | Active | ? | ? |  | ? | ? | ? | 18.1 | ? | ? | ? | ? | ? | ? | ? | ? | ? | 16.3 | 1.0 | 
+Geno Smith (1373) | QB | Active | ? | ? |  | ? | ? | ? | 17.9 | ? | ? | ? | ? | ? | 18.0 | ? | ? | ? | ? | ? | ?
+J.J. McCarthy (11565) | QB | Active | ? | ? |  | ? | ? | ? | 17.7 | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ? | ?
+
+Picks:
+  Team toss-up FLEX: lean Ladd McConkey over Omar Cooper Jr.
+  Pick up and start: Quentin Johnston 6.11 +1.490000000000009
+  Compare Ladd McConkey vs Omar Cooper Jr. [mode balanced, slot FLEX comparable true]: Toss-up, lean Ladd McConkey
+  Compare Sam LaPorta vs Omar Cooper Jr. [mode balanced, slot FLEX comparable true]: Toss-up, lean Sam LaPorta
+  Compare Ladd McConkey vs Omar Cooper Jr. [mode balanced, slot WR comparable true]: Toss-up, lean Ladd McConkey
+  Compare KC Concepcion Jr. vs Omar Cooper Jr. [mode balanced, slot WR comparable true]: Toss-up, lean KC Concepcion Jr.
+  Compare Emmett Johnson vs Omar Cooper Jr. [mode balanced, slot FLEX comparable true]: Start Emmett Johnson
+  Compare Hunter Henry vs Omar Cooper Jr. [mode balanced, slot FLEX comparable true]: Toss-up, lean Hunter Henry
+  Compare Nico Collins vs Omar Cooper Jr. [mode balanced, slot WR comparable true]: Start Nico Collins
+  Compare Jaxon Smith-Njigba vs Omar Cooper Jr. [mode balanced, slot WR comparable true]: Start Jaxon Smith-Njigba
+  Compare Bijan Robinson vs Omar Cooper Jr. [mode balanced, slot FLEX comparable true]: Start Bijan Robinson
+  Compare C.J. Stroud vs Jordan Love [mode balanced, slot QB comparable true]: Start C.J. Stroud
+  Waivers do_this: Quentin Johnston +0.01 (start_now)
