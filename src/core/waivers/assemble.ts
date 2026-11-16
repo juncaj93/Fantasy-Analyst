@@ -68,8 +68,8 @@ import { pickupStateFor, type PickupState, type WaiverRules } from './clearWindo
 import { assembleDstPlan, type DstPlanSources } from '../dst/assemble.ts';
 import { buildTierInputs } from './tierInputs.ts';
 import type { AheadNumbers } from './aheadWeeks.ts';
-import { planWaiverTiers, type StartNowCall, type WaiverTierPlan } from './tiers.ts';
-import { hideSeasonLosingTies, planPickupStart, starterOutReader, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
+import { planWaiverTiers, type StartNowCall, type TierMove, type WaiverTierPlan } from './tiers.ts';
+import { hideSeasonLosingTies, planPickupStart, starterOutReader, type PickupDrop, type PickupPlayer, type PickupStartPlan } from './pickupStart.ts';
 import { evaluatePlayer } from '../startsit/engine.ts';
 import { decisionPoints } from '../startsit/decisionPoints.ts';
 import { buildTiersView, tierClaimPlan, type TierWeekFigure, type WaiverTiersView } from './tierPlan.ts';
@@ -741,6 +741,8 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
    * tiers fail.
    */
   const startNowInput = pickupStartInputs(request, openSpots, pickup);
+  /* Alex's players whose game this week has kicked off: never the drop in a this-week move. */
+  const played: ReadonlySet<string> = new Set(startNowInput.roster.filter((p) => p.locked).map((p) => p.playerId));
   let pickupStart: PickupStartPlan | null = null;
   const decidePickup = (plan: WaiverTierPlan | null): PickupStartPlan | null => {
     try {
@@ -758,11 +760,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       const choices = scored.length > 0 ? scored : (plan?.dropReady ?? []).map((d) => ({ playerId: d.playerId, name: d.name, reason: d.reason }));
       const decided = planPickupStart({
         ...startNowInput,
-        dropFor: (id) => {
-          const move = moves.get(id);
-          if (!move?.drop || move.needsSpot) return null;
-          return { playerId: move.drop.playerId, name: move.drop.name, ...(move.drop.viaReserve ? { viaReserve: true } : {}) };
-        },
+        dropFor: (id) => pickupDropFor(moves.get(id), choices, played),
         spotChoices: () => choices,
       });
       /*
@@ -852,7 +850,7 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
       pickupStart = decidePickup(first);
       const startNow = startNowCalls(pickupStart);
       /* Planned again only when the call changes a tier, with the call in it. */
-      const plan = startNow.size > 0 ? planWaiverTiers({ ...inputs.request, startNow }) : first;
+      const plan = startNow.size > 0 ? planWaiverTiers({ ...inputs.request, startNow, played }) : first;
       /* "Pick your drop": the same few names the tier row lists, when the planner made that list. */
       for (const m of pickupStart ? [...(pickupStart.start ? [pickupStart.start] : []), ...pickupStart.consider] : []) {
         const spot = [...plan.doThese, ...plan.consider].find((x) => x.playerId === m.playerId)?.needsSpot;
@@ -966,11 +964,32 @@ export async function assembleWaiverPlan(request: WaiverAssemblyRequest): Promis
 }
 
 /** The tiers' reading of the pickup call: a "Do this" for the headline, Worth considering for a tie. */
+/**
+ * The drop for this week's pickup call: the planner's own, unless his game
+ * has started or finished (Round 30). Sleeper will not cut a player who has
+ * played until the week rolls over, so the call takes the next-best drop who
+ * has not played: the cheapest honest one on the planner's list (dead spots
+ * first, then the lowest drop score, nobody protected). None left: null, and
+ * the call says "Pick your drop".
+ */
+export function pickupDropFor(
+  move: Pick<TierMove, 'drop' | 'needsSpot'> | undefined,
+  choices: readonly { playerId: string; name: string }[],
+  played: ReadonlySet<string>,
+): PickupDrop | null {
+  if (!move?.drop || move.needsSpot) return null;
+  if (!played.has(move.drop.playerId)) {
+    return { playerId: move.drop.playerId, name: move.drop.name, ...(move.drop.viaReserve ? { viaReserve: true } : {}) };
+  }
+  const next = choices.find((x) => x.playerId !== move.drop!.playerId && !played.has(x.playerId));
+  return next ? { playerId: next.playerId, name: next.name } : null;
+}
+
 function startNowCalls(plan: PickupStartPlan | null): Map<string, StartNowCall> {
   const out = new Map<string, StartNowCall>();
   if (!plan) return out;
   for (const m of [...(plan.start ? [plan.start] : []), ...plan.consider]) {
-    out.set(m.playerId, { verdict: m.verdict, gain: m.gain, displaces: m.displaces?.name ?? null });
+    out.set(m.playerId, { verdict: m.verdict, gain: m.gain, displaces: m.displaces?.name ?? null, drop: m.drop?.playerId ?? null });
   }
   return out;
 }

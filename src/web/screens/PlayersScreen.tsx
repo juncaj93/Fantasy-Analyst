@@ -824,6 +824,7 @@ function PlayerRow({
         position={player.position}
         team={player.team}
         status={player.status}
+        draft={draftAhead}
         tally={lifetime}
         rank={player.adjustedRank == null ? '—' : Math.round(player.adjustedRank)}
         /*

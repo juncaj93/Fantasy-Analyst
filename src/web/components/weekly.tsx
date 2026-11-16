@@ -181,11 +181,7 @@ export function WeeklyCardSheet({
           </div>
         ) : null}
 
-        {card.pending.length > 0 ? (
-          <div className="faint" data-testid="weekly-pending">
-            Not known yet: {card.pending.join(', ')}.
-          </div>
-        ) : null}
+        {/* No standing list of what is missing (Round 30): the card says what it knows. */}
 
         {/*
           Everything about the player that is not about *this* week.

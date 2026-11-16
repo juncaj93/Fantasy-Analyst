@@ -180,7 +180,7 @@ const WORD: Record<string, string> = {
   ir: 'on IR',
   pup: 'on PUP',
   suspended: 'suspended',
-  doubtful: 'Doubtful',
+  doubtful: 'Out',
   questionable: 'Questionable',
 };
 

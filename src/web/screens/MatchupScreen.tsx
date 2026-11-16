@@ -287,11 +287,10 @@ function OddsSheet({
   return (
     <Sheet title="Behind the odds" onClose={onClose} testId="odds-sheet">
       <DetailRow label="Projected final">
-        {forecast.teams.mine.projectedFinal?.toFixed(1) ?? '—'} — {forecast.teams.theirs.projectedFinal?.toFixed(1) ?? '—'}
+        {forecast.teams.mine.projectedFinal?.toFixed(1) ?? '—'} to {forecast.teams.theirs.projectedFinal?.toFixed(1) ?? '—'}
       </DetailRow>
       <DetailRow label="Win probability">
-        {Math.round((forecast.teams.mine.winProbability ?? 0) * 100)}% · {forecast.draws.toLocaleString()} simulated
-        afternoons
+        {Math.round((forecast.teams.mine.winProbability ?? 0) * 100)}%
       </DetailRow>
       {forecast.freshness.detail ? (
         <DetailRow label="Confidence">
@@ -342,10 +341,6 @@ function OddsSheet({
           </div>
         </>
       ) : null}
-
-      <div className="faint" style={{ margin: '10px 2px 0' }}>
-        Model {forecast.modelVersion}
-      </div>
     </Sheet>
   );
 }

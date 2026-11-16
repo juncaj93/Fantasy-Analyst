@@ -454,7 +454,7 @@ export const DESIGNATION_CODE: Record<Designation, string | null> = {
   healthy: null,
   unknown: null,
   questionable: 'Q',
-  doubtful: 'D',
+  doubtful: 'OUT',
   out: 'OUT',
   ir: 'IR',
   pup: 'PUP',
@@ -465,7 +465,8 @@ export const DESIGNATION_LABEL: Record<Designation, string> = {
   healthy: 'No designation',
   unknown: 'Status unknown',
   questionable: 'Questionable',
-  doubtful: 'Doubtful',
+  /* Counts as Out this week, and reads that way (Round 30). */
+  doubtful: 'Out',
   out: 'Out',
   ir: 'Injured reserve',
   pup: 'Physically unable to perform',

@@ -47,7 +47,8 @@ describe('one number per player across Team, Matchup, Waivers, Trades and Compar
     expect(moved).toContain(DOUBTFUL_STAR);
     expect((screens.lineup.tossUps ?? []).map((t: { outPlayerId: string }) => t.outPlayerId)).not.toContain(DOUBTFUL_STAR);
     const team = [...screens.lineup.starters, ...screens.lineup.bench].find((e: { playerId: string }) => e.playerId === DOUBTFUL_STAR);
-    expect(team.statusFlag).toMatch(/^Doubtful/);
+    /* Round 30: Doubtful counts as Out and reads that way on every screen. */
+    expect(team.statusFlag).toMatch(/^Out/);
   });
 
   it('a nudged player shows the adjusted number everywhere, Matchup card included', () => {

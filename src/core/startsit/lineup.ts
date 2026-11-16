@@ -986,7 +986,9 @@ function unscorableReason(
     return { reason: 'is in your IR slot, so he is not a playable starter', detail: null, kind: 'unavailable' };
   }
   if (evaluation.ruledOut) {
-    const designation = evaluation.injury.designation === 'ir' ? 'on injured reserve' : evaluation.injury.designation;
+    /* Doubtful counts as Out, and reads that way (Round 30). */
+    const raw = evaluation.injury.designation;
+    const designation = raw === 'ir' ? 'on injured reserve' : raw === 'doubtful' ? 'out' : raw;
     return { reason: `is ${designation}, so he is not a playable starter`, detail: null, kind: 'unavailable' };
   }
   if (locked) return { reason: 'has already kicked off', detail: null, kind: 'locked' };

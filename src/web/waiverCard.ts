@@ -212,12 +212,11 @@ export function byGain<T extends Pick<TierRow, 'gain'>>(rows: readonly T[]): T[]
     .map(({ row }) => row);
 }
 
-/** `Questionable` → `Q`, `Out` → `O`, `IR` → `IR`. Anything else stays off the chip and on the sheet. */
+/** `Questionable` → `Q`, `Doubtful` and `Out` → `OUT` (Doubtful counts as Out), `IR` → `IR`. Anything else stays off the chip and on the sheet. */
 export function injuryLetter(flag: string | null | undefined): string | null {
   const word = (flag ?? '').trim().split(/[\s·,]+/)[0]?.toLowerCase() ?? '';
   if (word === 'questionable') return 'Q';
-  if (word === 'doubtful') return 'D';
-  if (word === 'out') return 'O';
+  if (word === 'doubtful' || word === 'out') return 'OUT';
   if (word === 'ir' || word === 'injured') return 'IR';
   if (word === 'pup') return 'PUP';
   if (word === 'suspended' || word === 'sus') return 'SUS';

@@ -35,13 +35,12 @@ export function shortName(name: string, position: string, team: string): string 
   return `${parts[0]!.charAt(0)}. ${parts.slice(1).join(' ')}`;
 }
 
-/** Q, D, O, IR, PUP or SUS from Sleeper's status, or nothing for a healthy player. */
+/** Q, OUT, IR, PUP or SUS from Sleeper's status, or nothing for a healthy player. Doubtful counts as Out (Round 30). */
 export function injuryLetter(status: string | null | undefined, reserve = false): string | null {
   const s = (status ?? '').trim().toLowerCase();
   if (reserve || s === 'ir' || s.startsWith('injured reserve')) return 'IR';
   if (s.startsWith('quest')) return 'Q';
-  if (s.startsWith('doubt')) return 'D';
-  if (s === 'out') return 'O';
+  if (s.startsWith('doubt') || s === 'out') return 'OUT';
   if (s === 'pup') return 'PUP';
   if (s.startsWith('sus')) return 'SUS';
   return null;

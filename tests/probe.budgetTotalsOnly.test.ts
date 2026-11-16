@@ -41,3 +41,12 @@ describe('the budget probe past the ceiling', () => {
     expect(branch).toMatch(/else[\s\S]*Standing down[\s\S]*exit 0/);
   });
 });
+
+describe('the usage-hours probe gets the Cloudflare token (Round 30)', () => {
+  it('is on the list that hands CLOUDFLARE_API_TOKEN on, not only the unguarded list', () => {
+    const yml = readFileSync('.github/workflows/probe.yml', 'utf8');
+    const handOn = yml.split('\n').find((line) => line.includes('probe-d1-top-readers.mjs|probe-cleanup-d1.mjs') || line.includes('probe-d1-usage-hours.mjs|probe-cleanup-d1.mjs'));
+    expect(handOn, 'the token hand-on list').toBeDefined();
+    expect(handOn).toContain('probe-d1-usage-hours.mjs');
+  });
+});

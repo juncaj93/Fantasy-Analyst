@@ -73,8 +73,13 @@ export function Disclose({ open, children }: { open: boolean; children: ReactNod
  * badge — it is the absence of one — and a board where every row carries a
  * badge is a board where the badge means nothing.
  */
-export function InjuryTag({ status }: { status: string | null | undefined }) {
-  const tag = injuryStatusTag(status);
+export function InjuryTag({ status, draft = false }: { status: string | null | undefined; draft?: boolean }) {
+  /*
+   * In season, Doubtful reads OUT, as it counts (Round 30): one word for one
+   * player on every screen. The draft board keeps Sleeper's own letter.
+   */
+  const raw = injuryStatusTag(status);
+  const tag = raw && !draft && raw.code === 'D' ? (injuryStatusTag('Out') ?? raw) : raw;
   if (!tag) return null;
   return (
     <span

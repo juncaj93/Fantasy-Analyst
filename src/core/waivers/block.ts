@@ -246,7 +246,7 @@ function designationWord(d: Designation): string {
     case 'pup':
       return 'on PUP';
     case 'doubtful':
-      return 'Doubtful';
+      return 'Out';
     case 'suspended':
       return 'suspended';
     default:

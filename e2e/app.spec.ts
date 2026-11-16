@@ -951,7 +951,7 @@ test.describe('draft room', () => {
     await openSetupGroup(page, 'data');
     const panel = page.getByTestId('panel-player-detail');
     await panel.locator('summary').click();
-    await expect(panel.getByTestId('roster-percent-health')).toContainText(/publishes no roster percentage/i);
+    await expect(panel.getByTestId('roster-percent-health')).toContainText(/does not publish one/i);
     // …and the two feeds that do exist report what landed.
     await expect(panel.getByTestId('stats-health')).toContainText(/player/);
     await expect(panel.getByTestId('outlook-health')).toContainText(/stored/);

@@ -621,7 +621,7 @@ function statusFlagFor(player: MatchupPlayerInput): string | null {
     case 'questionable':
       return 'Q';
     case 'doubtful':
-      return 'D';
+      return 'OUT';
     case 'out':
     case 'ir':
     case 'pup':

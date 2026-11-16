@@ -29,6 +29,7 @@ import {
 } from '../src/server/services/matchupService.ts';
 import type { NodeSqliteDatabase } from '../src/server/adapters/nodeSqlite.ts';
 import { createTestDb } from './helpers/db.ts';
+import { WEEK_17_EVE, onDate, seasonOn } from './helpers/season.ts';
 import { UsageRepo } from '../src/server/repos/usage.ts';
 
 /** The demo league starts QB, RB, RB, WR, WR, TE, FLEX. */
@@ -206,10 +207,13 @@ describe('GET /api/leagues/:id/matchup', () => {
    * `weeklyIntelligence`; these are built on a different path, and the only
    * thing stopping the two from drifting is that both ask `assessXfp`.
    */
-  it('carries the expected-points line the Team screen’s cards carry', async () => {
+  it('carries the expected-points line the Team screen’s cards carry', () =>
+    // Pinned to the eve of week 17 so the seeded season matches the app's on
+    // any day CI runs, 1 January included.
+    onDate(WEEK_17_EVE, async () => {
     // Seeded here for the same reason the lineup test seeds it: usage arrives
     // from nflverse in production and the demo league predates it.
-    const season = String(new Date().getUTCFullYear());
+    const season = seasonOn(WEEK_17_EVE);
     await new UsageRepo(db).saveWeeks(
       Array.from({ length: 7 }, (_, i) => ({
         playerId: '1001',
@@ -242,7 +246,7 @@ describe('GET /api/leagues/:id/matchup', () => {
     // A player with no stored usage says so rather than printing a zero.
     expect(cards['1002']!.lines.some((l) => l.key === 'xfp')).toBe(false);
     expect(cards['1002']!.pending).toContain('expected points from usage');
-  });
+    }));
 
   /**
    * The mode suggestion is the app's existing one, carried rather than remade.

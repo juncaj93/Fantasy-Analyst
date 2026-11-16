@@ -943,9 +943,7 @@ export class PlayerDetailService {
        */
       rosterPercent: {
         available: false,
-        note:
-          'Sleeper publishes no roster percentage. It is not in the player dictionary and there is no field for ' +
-          'it in the GraphQL schema, so the app shows none rather than a number it would have to invent.',
+        note: 'Sleeper does not publish one, so the app shows none.',
       },
     };
   }
