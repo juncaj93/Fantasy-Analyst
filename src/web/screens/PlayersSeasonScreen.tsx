@@ -26,6 +26,7 @@ import { ListGroup, ListRow, NavBar, SearchField, SegmentedControl, Sheet, Skele
 import { CompactPlayerRow } from '../components/playerRow.tsx';
 import { PlayerPage, PlayerSheet, type PlayerSummary } from '../components/playerPage.tsx';
 import { SeasonCardBlock } from '../components/players2/seasonCard.tsx';
+import { CompareSheet } from '../components/compareSheet.tsx';
 import { pageScrollTop } from '../overlay.ts';
 import { unwindOne } from '../tabReset.ts';
 import '../components/players2/players2.css';
@@ -215,7 +216,35 @@ export function PlayersSeasonScreen({
   const open = openId == null ? null : ([...(board?.rows ?? []), ...extra].find((r) => r.id === openId) ?? null);
   const summary = (r: SeasonRow): PlayerSummary => ({ id: r.id, name: r.name, position: r.position, team: r.team, status: r.status, draftRank: r.draftRank, adjustedRank: r.adjustedRank });
   const pill = (r: SeasonRow) => <OwnerPill label={ownerPillLabel(r.ownerRosterId, teams)} />;
-  const context = (r: SeasonRow) => <SeasonCardBlock row={r} leagueId={leagueId} />;
+  const [compare, setCompare] = useState<SeasonRow | null>(null);
+  const context = (r: SeasonRow) => (
+    <SeasonCardBlock
+      row={r}
+      leagueId={leagueId}
+      onCompare={
+        r.ownerRosterId == null && selected
+          ? () => {
+              setFull(false);
+              setOpenId(null);
+              setCompare(r);
+            }
+          : undefined
+      }
+    />
+  );
+  const compareSheet =
+    compare && selected ? (
+      <CompareSheet
+        leagueId={selected.id}
+        rosterPositions={selected.rosterPositions}
+        slot={null}
+        seed={[compare.id]}
+        nameOf={(id) => (id === compare.id ? compare.name : id)}
+        mode={null}
+        pairWith={compare.position}
+        onClose={() => setCompare(null)}
+      />
+    ) : null;
 
   if (open && full) {
     return <PlayerPage player={summary(open)} backLabel="Players" onBack={() => setFull(false)} trailing={pill(open)} context={context(open)} />;
@@ -407,6 +436,7 @@ export function PlayersSeasonScreen({
           ) : null}
         </>
       )}
+      {compareSheet}
     </div>
   );
 }

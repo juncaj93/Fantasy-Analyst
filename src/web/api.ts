@@ -1261,6 +1261,8 @@ export interface StartSitEvaluation {
     practice: { trend: string; label: string | null; latest: string };
   };
   lock: { locked: boolean; kickoff: string | null; reason: string };
+  /** Round 33: the books pulled every prop he had, inside 3 hours of kickoff. A warning only. */
+  checkStatus?: { pulledAt: string };
   movement: {
     significant: { market: string; direction: string; from: number; to: number; display: string }[];
     direction: string;

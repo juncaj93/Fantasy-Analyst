@@ -38,7 +38,9 @@ import type { WeekPoints } from '../../core/startsit/weekPoints.ts';
 import { weekPointsOf } from '../../core/startsit/weekPoints.ts';
 import { compareTable } from '../compareTable.ts';
 import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.ts';
-import { NO_LINE_YET, noLineYet } from '../rowFigure.ts';
+import { NO_LINE_YET, liveCheckStatus, noLineYet } from '../rowFigure.ts';
+import { CHECK_STATUS_LABEL, checkStatusReason } from '../../core/startsit/checkStatus.ts';
+import { pairFor, swapOptions } from '../comparePair.ts';
 
 /** Up to four fit a 360px phone side by side. Matched by the server. */
 export const MAX_COMPARE = 4;
@@ -95,6 +97,7 @@ export function CompareSheet({
   nameOf,
   mode,
   note,
+  pairWith = null,
   onClose,
 }: {
   leagueId: string;
@@ -109,13 +112,21 @@ export function CompareSheet({
    * or a free agent who ties. Drawn as the sheet's existing notice, one per line.
    */
   note?: readonly string[] | null;
+  /**
+   * Round 33: opened from a free agent's row, with his position. The sheet
+   * picks the roster player he would most likely replace (`comparePair.ts`)
+   * and offers the rest of that position as one-tap swaps.
+   */
+  pairWith?: string | null;
   onClose: () => void;
 }) {
   const [ids, setIds] = useState<string[]>(() => [...new Set(seed)].slice(0, MAX_COMPARE));
   const [names, setNames] = useState<Record<string, string>>(() => Object.fromEntries(seed.map((id) => [id, nameOf(id)])));
-  const [pickerOpen, setPickerOpen] = useState(() => new Set(seed).size < 2);
+  const [pickerOpen, setPickerOpen] = useState(() => !pairWith && new Set(seed).size < 2);
   const [tab, setTab] = useState<PoolTab>('mine');
-  const [position, setPosition] = useState<string>(ALL);
+  const [position, setPosition] = useState<string>(pairWith ?? ALL);
+  /* Round 33: his position on My team, kept from the first list so a later tab change cannot lose the swaps. */
+  const [partners, setPartners] = useState<PoolRow[] | null>(null);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<PoolRow[] | null>(null);
   const [comparison, setComparison] = useState<StartSitComparison | null>(null);
@@ -151,6 +162,25 @@ export function CompareSheet({
       window.clearTimeout(handle);
     };
   }, [leagueId, tab, position, query, mode]);
+
+  /* Round 33: the first My team list picks his partner; with nobody at his position, the list opens. */
+  useEffect(() => {
+    if (!pairWith || partners || rows == null || tab !== 'mine') return;
+    setPartners(rows);
+    const { pick } = pairFor(rows);
+    if (!pick) {
+      setPickerOpen(true);
+      return;
+    }
+    setNames((n) => ({ ...n, [pick.id]: pick.name }));
+    setIds((current) => (current.length === 1 ? [...current, pick.id] : current));
+  }, [pairWith, partners, rows, tab]);
+
+  const swap = (row: PoolRow) => {
+    setNames((n) => ({ ...n, [row.id]: row.name }));
+    setIds((current) => [...current.filter((id) => !partners?.some((p) => p.id === id)), row.id]);
+  };
+  const swaps = pairWith && partners && !pickerOpen ? swapOptions(partners, ids) : [];
 
   /* The comparison, as soon as two are chosen. The latest request wins. */
   const request = useRef(0);
@@ -295,6 +325,24 @@ export function CompareSheet({
           ))}
         </ul>
       </div>
+
+      {swaps.length > 0 ? (
+        <div className="cmp2-swaps" data-testid="compare-swaps">
+          {swaps.map((row) => (
+            <button
+              key={row.id}
+              type="button"
+              className="cmp2-add"
+              data-testid="compare-swap"
+              data-player-id={row.id}
+              aria-label={`Compare with ${row.name} instead`}
+              onClick={() => swap(row)}
+            >
+              {lastName(row.name)}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {note && note.length > 0
         ? note.map((line) => (
@@ -535,18 +583,40 @@ export function Verdict({
                   </span>
                 ) : !sleeper && e.pill ? (
                   <PillChip pill={e.pill} />
-                ) : noLineYet(e) ? (
+                ) : noLineYet(e) && !liveCheckStatus(e) ? (
                   <span className="cmp2-lean" data-testid="compare-no-line">
                     {NO_LINE_YET}
                   </span>
                 ) : null}
                 {isSecond ? <span className="sr-only">second choice, Sleeper projection only</span> : null}
               </span>
+              <CheckStatusChip evaluation={e} />
             </li>
           );
         })}
       </ul>
     </section>
+  );
+}
+
+/**
+ * Round 33: "Check status" when the books pulled every prop he had inside 3
+ * hours of kickoff. A tap says when. It changes no number and no pick.
+ */
+export function CheckStatusChip({ evaluation }: { evaluation: StartSitEvaluation }) {
+  const [open, setOpen] = useState(false);
+  const status = liveCheckStatus(evaluation);
+  if (!status) return null;
+  return (
+    <button
+      type="button"
+      className="check-chip"
+      data-testid="check-status"
+      aria-expanded={open}
+      onClick={() => setOpen((v) => !v)}
+    >
+      {open ? checkStatusReason(status) : CHECK_STATUS_LABEL}
+    </button>
   );
 }
 

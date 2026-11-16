@@ -14,7 +14,16 @@ import { SLEEPER_SPOKEN, sleeperClass } from '../../sleeperFallback.ts';
 
 const pts = (v: number) => v.toFixed(1);
 
-export function SeasonCardBlock({ row, leagueId }: { row: SeasonRow; leagueId: string | null }) {
+export function SeasonCardBlock({
+  row,
+  leagueId,
+  onCompare,
+}: {
+  row: SeasonRow;
+  leagueId: string | null;
+  /** Round 33: a free agent's card opens Compare with him and your likeliest roster player in. */
+  onCompare?: (() => void) | undefined;
+}) {
   const [card, setCard] = useState<SeasonCard | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -70,6 +79,11 @@ export function SeasonCardBlock({ row, leagueId }: { row: SeasonRow; leagueId: s
         ) : (
           <span className="p2-big faint">{failed ? '—' : '…'}</span>
         )}
+        {onCompare ? (
+          <button type="button" className="cmp2-add" data-testid="p2-compare" onClick={onCompare}>
+            Compare
+          </button>
+        ) : null}
         {row.value != null ? (
           <span className="p2-season" data-testid="p2-season-value">
             Season <strong>{pts(row.value)}</strong> a week

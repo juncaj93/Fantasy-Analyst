@@ -22,6 +22,7 @@ import {
   type StoredFreshnessOutcome,
 } from './propsFreshness.ts';
 import type { SlateWindow } from '../../core/nfl/slateWindow.ts';
+import { pulledPlayers } from '../../core/vegas/pulledProps.ts';
 
 export class PropsRepo implements SnapshotStore {
   constructor(private readonly db: Database) {}
@@ -236,9 +237,10 @@ export class PropsRepo implements SnapshotStore {
     playerIds: string[],
     window: SlateWindow | undefined,
     previous: boolean,
-  ): Promise<Map<string, PlayerProp[]>> {
+  ): Promise<{ lines: Map<string, PlayerProp[]>; pulled: Map<string, string> }> {
     const out = new Map<string, PlayerProp[]>();
-    if (playerIds.length === 0) return out;
+    const pulled = new Map<string, string>();
+    if (playerIds.length === 0) return { lines: out, pulled };
     // The slate's looks need nothing from the lines, so they are asked for at the same time.
     const inWindow = window ? this.snapshotsInWindow(window) : null;
     inWindow?.catch(() => undefined);
@@ -258,7 +260,7 @@ export class PropsRepo implements SnapshotStore {
         .all<Record<string, unknown>>();
       rows.push(...results);
     }
-    if (rows.length === 0) return out;
+    if (rows.length === 0) return { lines: out, pulled };
     const snaps = window ? await inWindow! : new Map<string, SnapshotRef[]>();
     // A game whose looks are not all in the window (a flexed kickoff), or no window at all.
     const missing = [...new Set(rows.map((r) => String(r['snapshot_event_id'])))].filter((id) => !snaps.has(id));
@@ -278,6 +280,27 @@ export class PropsRepo implements SnapshotStore {
       const held = newest.get(k);
       if (!held || isNewer(r, held.row, p.order)) newest.set(k, { row: r, asOf: p.asOf });
     }
+    /*
+     * Round 33: whose lines are all gone at this look. The gone markers were
+     * already in hand (read, then left out below), so this costs no read.
+     */
+    const lookTime = new Map<number, string>();
+    const looks = new Map<string, { fetchedAt: string; lines: number | null }[]>();
+    for (const [eventId, list] of snaps) {
+      for (const s of list) lookTime.set(s.id, s.fetchedAt);
+      looks.set(eventId, list.map((s) => ({ fetchedAt: s.fetchedAt, lines: s.lines })));
+    }
+    for (const [id, at] of pulledPlayers(
+      [...newest.values()].map(({ row }) => ({
+        playerId: String(row['player_id']),
+        eventId: String(row['snapshot_event_id']),
+        gone: String(row['consensus_method'] ?? '') === 'none',
+        fetchedAt: lookTime.get(Number(row['snapshot_id'])) ?? '',
+      })),
+      looks,
+    )) {
+      pulled.set(id, at);
+    }
     for (const { row, asOf } of newest.values()) {
       if (String(row['consensus_method'] ?? '') === 'none') continue;
       const pid = String(row['player_id']);
@@ -292,7 +315,7 @@ export class PropsRepo implements SnapshotStore {
       if (list) list.push(prop);
       else out.set(pid, [prop]);
     }
-    return out;
+    return { lines: out, pulled };
   }
 
   /**
@@ -338,6 +361,18 @@ export class PropsRepo implements SnapshotStore {
    * allowance alert. See `scripts/probe-props-reads.mjs`.
    */
   async latestForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
+    return (await this.linesAsOf(playerIds, window, false)).lines;
+  }
+
+  /**
+   * {@link latestForPlayers}, plus when each player's props were pulled: every
+   * line he had in his game is a "gone" marker at the newest look (Round 33,
+   * `core/startsit/checkStatus.ts`). The same rows, read once.
+   */
+  async latestWithPulled(
+    playerIds: string[],
+    window: SlateWindow,
+  ): Promise<{ lines: Map<string, PlayerProp[]>; pulled: Map<string, string> }> {
     return this.linesAsOf(playerIds, window, false);
   }
 
@@ -448,7 +483,7 @@ export class PropsRepo implements SnapshotStore {
    * once has no previous lines, and no movement is claimed for them.
    */
   async previousForPlayers(playerIds: string[], window?: SlateWindow): Promise<Map<string, PlayerProp[]>> {
-    return this.linesAsOf(playerIds, window, true);
+    return (await this.linesAsOf(playerIds, window, true)).lines;
   }
 
   /**
@@ -670,6 +705,8 @@ interface SnapshotRef {
   total: number | null;
   spread: number | null;
   spreadTeam: string | null;
+  /** How many player lines the game had after this look (Round 33); null on looks that do not say. */
+  lines: number | null;
 }
 
 /**
@@ -711,7 +748,8 @@ const SNAPSHOT_REF_SELECT = `SELECT id, event_id, fetched_at,
         json_extract(raw_json, '$.delta') AS delta,
         json_extract(raw_json, '$.gameLines.total') AS total,
         json_extract(raw_json, '$.gameLines.spread') AS spread,
-        json_extract(raw_json, '$.gameLines.spreadTeam') AS spread_team
+        json_extract(raw_json, '$.gameLines.spreadTeam') AS spread_team,
+        CASE WHEN json_type(raw_json, '$.quotes') = 'array' THEN json_array_length(raw_json, '$.quotes') END AS line_count
    FROM prop_snapshots`;
 
 function addSnapshotRefs(out: Map<string, SnapshotRef[]>, results: Record<string, unknown>[]): Map<string, SnapshotRef[]> {
@@ -724,6 +762,7 @@ function addSnapshotRefs(out: Map<string, SnapshotRef[]>, results: Record<string
       total: r['total'] == null ? null : Number(r['total']),
       spread: r['spread'] == null ? null : Number(r['spread']),
       spreadTeam: r['spread_team'] == null ? null : String(r['spread_team']),
+      lines: r['line_count'] == null ? null : Number(r['line_count']),
     };
     const list = out.get(ref.eventId) ?? [];
     list.push(ref);

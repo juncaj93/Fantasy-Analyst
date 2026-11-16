@@ -49,6 +49,7 @@ import { readSpread, type SpreadReading } from './spread.ts';
 import { playedWeeksOf } from '../value/restOfSeason.ts';
 import { isQuestionable, isRealHole, isTossUp, tossUpLean, TOSSUP_POINTS, waitsOnLine, type LeanTag } from './tossup.ts';
 import { pickOrder, type SleeperOnlyNote } from './pickOrder.ts';
+import { checkStatusFor, type CheckStatus } from './checkStatus.ts';
 
 export interface StartSitInput {
   player: CanonicalPlayer;
@@ -179,6 +180,12 @@ export interface StartSitInput {
    * player projects zero instead of a preseason estimate.
    */
   onBye?: boolean;
+  /**
+   * When the books pulled the last of his props this week (Round 33), from the
+   * props read's "gone" markers. Read only by `checkStatus.ts`, which turns it
+   * into a warning chip; never by his number.
+   */
+  propsPulledAt?: string | null;
 }
 
 export interface StartSitComponent {
@@ -247,6 +254,11 @@ export interface StartSitEvaluation {
   onBye?: true;
   /** Whether this player's game has already kicked off. */
   lock: LockState;
+  /**
+   * Present when the books pulled every prop he had, inside 3 hours of his
+   * kickoff (Round 33, `checkStatus.ts`). A warning only: never in the score.
+   */
+  checkStatus?: CheckStatus;
   /** The defence he faces, when the schedule is known. */
   opponent: string | null;
   /**
@@ -722,6 +734,7 @@ export function evaluatePlayer(
     /* Round 18: from the fixture list only (`isOnBye`), so Team can say "Bye" rather than a bare dash. */
     ...(input.onBye === true ? { onBye: true as const } : {}),
     lock: lockState(input.kickoff, input.now ?? new Date()),
+    ...checkStatusField(input, availability.gate || input.onReserve === true),
     opponent: input.opponent ?? null,
     home: input.home ?? null,
     movement,
@@ -1398,4 +1411,13 @@ function clamp(v: number, lo: number, hi: number): number {
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+/** Round 33: the "Check status" warning, as an optional field (absent on everybody it does not fit). */
+function checkStatusField(input: StartSitInput, ruledOut: boolean): { checkStatus?: CheckStatus } {
+  const status = checkStatusFor(
+    { propsPulledAt: input.propsPulledAt ?? null, kickoff: input.kickoff ?? null, ruledOut, onBye: input.onBye === true },
+    input.now ?? new Date(),
+  );
+  return status ? { checkStatus: status } : {};
 }

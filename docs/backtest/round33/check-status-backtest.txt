@@ -1,0 +1,13 @@
+week 10 Sun:
+   Skyler Bell                kick Sun 1:00 PM   report -            TRUE (did not play)
+   KC Concepcion Jr.          kick Sun 1:00 PM   report -            FALSE ALARM (played)  [Alex starter]
+   Jaleel McLaughlin          kick Sun 1:00 PM   report -            TRUE (did not play)
+   Emmett Johnson             kick Sun 1:00 PM   report -            FALSE ALARM (played)  [Alex starter]
+   Cyrus Allen                kick Sun 1:00 PM   report -            FALSE ALARM (played)
+   Barion Brown               kick Sun 1:00 PM   report -            TRUE (did not play)
+   CJ Williams                kick Sun 1:00 PM   report -            TRUE (did not play)
+   Emanuel Wilson             kick Sun 4:05 PM   report -            TRUE (did not play)
+   Brandin Cooks              kick Sun 4:25 PM   report -            TRUE (did not play)
+flags shown: (true, false alarms) {'wk10 Sun': [6, 3]}
+week 9 Thursday games with saved looks: 1 [['kick', 'tue9pm']]
+week 10 Thursday games with saved looks: 1 [['kick', 'tue9pm']]

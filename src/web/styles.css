@@ -10753,3 +10753,8 @@ div.matchup-result {
   line-height: 1.25;
   font-size: 0.94rem;
 }
+
+/* Round 33: "Check status" (props pulled near kickoff). A warning colour, nothing louder. */
+.proj-was[data-check], .weekly-line[data-line="check-status"] { color: var(--warn); font-weight: 600; }
+.check-chip { min-height: 44px; margin: 0 auto; padding: 0 8px; border: 0; background: none; color: var(--warn); font: inherit; font-size: 12px; font-weight: 600; }
+.cmp2-swaps { display: flex; flex-wrap: wrap; gap: 4px; }
