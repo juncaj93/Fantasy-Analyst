@@ -35,6 +35,7 @@
 import { bestLineup, slotsOf, type LineupCandidate, type LineupSlotSpec } from '../tradeValue/lineup.ts';
 import {
   evaluateTrade,
+  rosterValueMemo,
   seasonValueOver,
   type ReplacementLevels,
   type TradeConfidence,
@@ -395,6 +396,8 @@ export function findTrades(input: FinderInput): FinderResult {
   const fair: FoundOffer[] = [];
   const close: FoundOffer[] = [];
   const checkedDeals: NonNullable<FinderResult['checkedDeals']> = [];
+  /* Each roster's value before a deal, solved once for all the deals checked (Round 34). */
+  const memo = rosterValueMemo();
   for (const deal of toCheck) {
     funnel.checked += 1;
     const evaluation = evaluateTrade({
@@ -406,6 +409,7 @@ export function findTrades(input: FinderInput): FinderResult {
       rosterLimit: input.rosterLimit,
       aSends: deal.give,
       bSends: deal.get,
+      memo,
     });
     const reading = verdictOfEvaluation(evaluation);
     if (!reading || !evaluation.a || !evaluation.b) {
@@ -814,6 +818,8 @@ export function fastLineups(args: {
       best[i] = v;
     }
   };
+  /* Scratch space for one position's values while a deal is applied; see `totals`. */
+  const list: number[] = [];
   const totals = (weeksBase: readonly WeekBase[], out: readonly string[] = [], inn: readonly string[] = []): number[] => {
     const outs = out.map(valuesOf).filter((x): x is NonNullable<typeof x> => x != null);
     const ins = inn.map(valuesOf).filter((x): x is NonNullable<typeof x> => x != null);
@@ -830,17 +836,35 @@ export function fastLineups(args: {
         for (let i = 0; i < rest.length; i++) offer(rest[i]!);
       }
       for (const position of touched) {
-        const list = (week.lists.get(position) ?? []).slice();
+        /*
+         * The position's values with the deal applied, edited in one reused
+         * array rather than a copy per position per week per deal (Round 34).
+         * The same removals (first equal value), insertions and sums, in the
+         * same order.
+         */
+        const source = week.lists.get(position);
+        let length = 0;
+        if (source) for (let i = 0; i < source.length; i++) list[length++] = source[i]!;
         for (const o of outs) {
           if (o.position !== position) continue;
-          const at = list.indexOf(o.values[w]!);
-          if (at >= 0) list.splice(at, 1);
+          const v = o.values[w]!;
+          let at = -1;
+          for (let i = 0; i < length; i++) {
+            if (list[i] === v) {
+              at = i;
+              break;
+            }
+          }
+          if (at >= 0) {
+            for (let i = at; i < length - 1; i++) list[i] = list[i + 1]!;
+            length--;
+          }
         }
         for (const x of ins) {
           if (x.position !== position) continue;
           const v = x.values[w]!;
-          let i = list.length;
-          list.push(v);
+          let i = length;
+          list[length++] = v;
           while (i > 0 && list[i - 1]! < v) {
             list[i] = list[i - 1]!;
             i--;
@@ -849,9 +873,9 @@ export function fastLineups(args: {
         }
         const n = fixed.get(position) ?? 0;
         let sum = 0;
-        for (let i = 0; i < Math.min(n, list.length); i++) sum += list[i]!;
+        for (let i = 0; i < Math.min(n, length); i++) sum += list[i]!;
         total += sum - (week.fixedSum.get(position) ?? 0);
-        if (flexEligible.has(position)) for (let i = n; i < Math.min(list.length, n + flexCount); i++) offer(list[i]!);
+        if (flexEligible.has(position)) for (let i = n; i < Math.min(length, n + flexCount); i++) offer(list[i]!);
       }
       for (let i = 0; i < bestSize; i++) total += best[i]!;
       result[w] = total;

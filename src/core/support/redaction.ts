@@ -26,6 +26,8 @@
  * as well as the first.
  */
 
+import { pathOf, type PathRef } from './lazyPath.ts';
+
 /**
  * Keys that may never appear in a snapshot, at any depth.
  *
@@ -74,8 +76,9 @@ const FORBIDDEN_KEYS = [
  * check that cries wolf is a check that gets deleted — so this is limited to
  * two shapes that are unambiguous and that this app genuinely handles.
  */
-const FORBIDDEN_VALUE_PATTERNS: { name: string; pattern: RegExp }[] = [
-  { name: 'email address', pattern: /[\w.+-]+@[\w-]+\.[\w.-]+/ },
+const FORBIDDEN_VALUE_PATTERNS: { name: string; pattern: RegExp; needs?: string }[] = [
+  /* `needs`: a character the pattern cannot match without, checked first (Round 34). */
+  { name: 'email address', pattern: /[\w.+-]+@[\w-]+\.[\w.-]+/, needs: '@' },
   { name: 'bearer token', pattern: /\bBearer\s+[A-Za-z0-9._~+/-]{8,}/i },
 ];
 
@@ -87,6 +90,21 @@ export interface RedactionViolation {
 }
 
 const normaliseKey = (key: string): string => key.toLowerCase().replace(/[^a-z]/g, '');
+
+/*
+ * Whether a key is forbidden, remembered per key: a snapshot repeats the same
+ * few hundred keys tens of thousands of times (Round 34). Bounded.
+ */
+const FORBIDDEN_KEY_SEEN = new Map<string, boolean>();
+function isForbiddenKey(key: string): boolean {
+  let hit = FORBIDDEN_KEY_SEEN.get(key);
+  if (hit === undefined) {
+    if (FORBIDDEN_KEY_SEEN.size >= 4096) FORBIDDEN_KEY_SEEN.clear();
+    hit = FORBIDDEN_KEYS.includes(normaliseKey(key));
+    FORBIDDEN_KEY_SEEN.set(key, hit);
+  }
+  return hit;
+}
 
 /**
  * Walk a value and report everything that must not be in a snapshot.
@@ -100,12 +118,13 @@ export function findRedactionViolations(value: unknown, path = ''): RedactionVio
   const found: RedactionViolation[] = [];
   const seen = new Set<object>();
 
-  const walk = (node: unknown, at: string): void => {
+  const walk = (node: unknown, at: PathRef): void => {
     if (node == null) return;
 
     if (typeof node === 'string') {
-      for (const { name, pattern } of FORBIDDEN_VALUE_PATTERNS) {
-        if (pattern.test(node)) found.push({ path: at, reason: `looks like ${'aeiou'.includes(name[0]!) ? 'an' : 'a'} ${name}` });
+      for (const { name, pattern, needs } of FORBIDDEN_VALUE_PATTERNS) {
+        if (needs != null && !node.includes(needs)) continue;
+        if (pattern.test(node)) found.push({ path: pathOf(at), reason: `looks like ${'aeiou'.includes(name[0]!) ? 'an' : 'a'} ${name}` });
       }
       return;
     }
@@ -115,14 +134,14 @@ export function findRedactionViolations(value: unknown, path = ''): RedactionVio
     seen.add(node);
 
     if (Array.isArray(node)) {
-      node.forEach((item, i) => walk(item, `${at}[${i}]`));
+      node.forEach((item, i) => walk(item, { up: at, index: i }));
       return;
     }
 
     for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
-      const here = at === '' ? key : `${at}.${key}`;
-      if (FORBIDDEN_KEYS.includes(normaliseKey(key))) {
-        found.push({ path: here, reason: `\`${key}\` is a forbidden field in a support snapshot` });
+      const here: PathRef = { up: at, key };
+      if (isForbiddenKey(key)) {
+        found.push({ path: pathOf(here), reason: `\`${key}\` is a forbidden field in a support snapshot` });
         // Still walk it: a forbidden key holding an object of further forbidden
         // keys should report all of them, so one pass fixes the whole branch.
       }
@@ -326,28 +345,34 @@ export class SnapshotAliases {
   leaks(value: unknown): RedactionViolation[] {
     const patterns = [...this.byId.keys(), ...this.byScope.keys()]
       .filter((real) => real.length >= MIN_LEAK_CHECK_LENGTH)
-      .map((real) => boundedPattern(real));
+      .map((real) => ({ real, pattern: boundedPattern(real) }));
     if (patterns.length === 0) return [];
+    /*
+     * A pattern matches only where its literal occurs, so a string that does
+     * not contain the literal is skipped without running the pattern (Round
+     * 34: the waiver snapshot walks about forty thousand strings).
+     */
     const hit = (text: string): boolean =>
-      patterns.some((pattern) => {
+      patterns.some(({ real, pattern }) => {
+        if (!text.includes(real)) return false;
         pattern.lastIndex = 0;
         return pattern.test(text);
       });
 
     const found: RedactionViolation[] = [];
-    const walk = (node: unknown, at: string): void => {
+    const walk = (node: unknown, at: PathRef): void => {
       if (typeof node === 'string') {
-        if (hit(node)) found.push({ path: at, reason: 'carries a real Sleeper id the snapshot aliased everywhere else' });
+        if (hit(node)) found.push({ path: pathOf(at), reason: 'carries a real Sleeper id the snapshot aliased everywhere else' });
         return;
       }
       if (node == null || typeof node !== 'object') return;
       if (Array.isArray(node)) {
-        node.forEach((item, i) => walk(item, `${at}[${i}]`));
+        node.forEach((item, i) => walk(item, { up: at, index: i }));
         return;
       }
       for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
-        const here = at === '' ? key : `${at}.${key}`;
-        if (hit(key)) found.push({ path: here, reason: 'is keyed by a real Sleeper id' });
+        const here: PathRef = { up: at, key };
+        if (hit(key)) found.push({ path: pathOf(here), reason: 'is keyed by a real Sleeper id' });
         walk(child, here);
       }
     };
@@ -355,10 +380,20 @@ export class SnapshotAliases {
     return found;
   }
 
+  /*
+   * Round 34: a string that does not contain an identifier cannot match its
+   * pattern, so it is checked with `includes` first, and a pattern is built
+   * once per identifier rather than once per string. Building one per string
+   * was most of the CPU a waiver-plan snapshot spent (about forty thousand
+   * strings, each against every identifier). Same replacements, same order.
+   */
   private replaceIn(text: string, sources: ReadonlyMap<string, string>[]): string {
     let out = text;
     for (const source of sources) {
-      for (const [real, alias] of source) out = out.replace(boundedPattern(real), alias);
+      for (const [real, alias] of source) {
+        if (!out.includes(real)) continue;
+        out = out.replace(cachedBoundedPattern(real), alias);
+      }
     }
     return out;
   }
@@ -415,6 +450,23 @@ export const MIN_LEAK_CHECK_LENGTH = 8;
  * boundary there would mean never replacing it. Lookbehind is supported
  * everywhere this runs — Workers, Node 22 and every browser the app targets.
  */
+/*
+ * One global pattern per identifier, reused across strings. `replace` with a
+ * global pattern starts from `lastIndex` 0 and leaves it at 0, so sharing one
+ * cannot carry state from one string to the next. Bounded so a long-lived
+ * Worker cannot grow it without limit.
+ */
+const BOUNDED = new Map<string, RegExp>();
+function cachedBoundedPattern(literal: string): RegExp {
+  let pattern = BOUNDED.get(literal);
+  if (!pattern) {
+    if (BOUNDED.size >= 512) BOUNDED.clear();
+    pattern = boundedPattern(literal);
+    BOUNDED.set(literal, pattern);
+  }
+  return pattern;
+}
+
 function boundedPattern(literal: string): RegExp {
   const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const before = /^[\p{L}\p{N}_]/u.test(literal) ? '(?<![\\p{L}\\p{N}_])' : '';

@@ -38,7 +38,7 @@ interface PlayerRow {
   years_exp: number | null;
 }
 
-function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer {
+function toPlayer(row: PlayerRow, extraAliases: string[] = [], parsed?: ParsedRowJson): CanonicalPlayer {
   return {
     id: row.id,
     sleeperPlayerId: row.sleeper_player_id,
@@ -50,8 +50,8 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     status: row.status,
     active: row.active === 1,
     normalizedName: row.normalized_name,
-    aliases: [...parseJson<string[]>(row.aliases_json, []), ...extraAliases],
-    externalIds: parseJson<Record<string, string>>(row.external_ids_json, {}),
+    aliases: [...(parsed ? parsed.aliases : parseJson<string[]>(row.aliases_json, [])), ...extraAliases],
+    externalIds: parsed ? { ...parsed.externalIds } : parseJson<Record<string, string>>(row.external_ids_json, {}),
     searchRank: row.draft_rank ?? null,
     jerseyNumber: row.jersey_number ?? null,
     heightInches: row.height_inches ?? null,
@@ -59,6 +59,41 @@ function toPlayer(row: PlayerRow, extraAliases: string[] = []): CanonicalPlayer 
     age: row.age ?? null,
     yearsExp: row.years_exp ?? null,
   };
+}
+
+/**
+ * A remembered row's two JSON columns, parsed once (Round 34).
+ *
+ * The dictionary keeps its rows for an hour and `listAll` maps all of them on
+ * every call, which parsed two JSON columns for each of about two thousand
+ * players on every Trades, Waivers and Players read. The parse is kept per row
+ * object and every call still builds new objects from it: a new alias list and
+ * a new id map, so no caller can see another's changes. Only a flat id map (a
+ * plain object of strings) and a list of strings are kept; anything else is
+ * parsed per call as before.
+ */
+interface ParsedRowJson {
+  aliases: readonly string[];
+  externalIds: Readonly<Record<string, string>>;
+}
+const ROW_JSON = new WeakMap<PlayerRow, ParsedRowJson | null>();
+
+function parsedRowJson(row: PlayerRow): ParsedRowJson | undefined {
+  let hit = ROW_JSON.get(row);
+  if (hit === undefined) {
+    const aliases = parseJson<unknown>(row.aliases_json, []);
+    const externalIds = parseJson<unknown>(row.external_ids_json, {});
+    const flatAliases = Array.isArray(aliases) && aliases.every((a) => typeof a === 'string');
+    const flatIds =
+      externalIds != null &&
+      typeof externalIds === 'object' &&
+      !Array.isArray(externalIds) &&
+      Object.getPrototypeOf(externalIds) === Object.prototype &&
+      Object.values(externalIds).every((v) => typeof v === 'string');
+    hit = flatAliases && flatIds ? { aliases: aliases as string[], externalIds: externalIds as Record<string, string> } : null;
+    ROW_JSON.set(row, hit);
+  }
+  return hit ?? undefined;
 }
 
 /** Positions the app refuses to carry, as SQL. */
@@ -340,7 +375,7 @@ export class PlayerRepo {
       if (list) list.push(a.alias);
       else aliasesByPlayer.set(a.player_id, [a.alias]);
     }
-    return players.map((r) => toPlayer(r, aliasesByPlayer.get(r.id) ?? []));
+    return players.map((r) => toPlayer(r, aliasesByPlayer.get(r.id) ?? [], parsedRowJson(r)));
   }
 
   async buildIndex(): Promise<PlayerIndex> {

@@ -39,6 +39,8 @@
  * entry array and puts it back at replay. See `inseason.ts` for the two that do.
  */
 
+import { pathOf, type PathRef } from './lazyPath.ts';
+
 /** One value that would not survive the wire, with enough path to find it. */
 export interface LossyValue {
   /** `decision.output.cards.qb1.byPosition` */
@@ -63,11 +65,11 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
   const found: LossyValue[] = [];
   const seen = new Set<object>();
 
-  const walk = (node: unknown, at: string): void => {
+  const walk = (node: unknown, at: PathRef): void => {
     if (node == null) return;
 
     if (typeof node === 'function') {
-      found.push({ path: at, kind: 'function' });
+      found.push({ path: pathOf(at), kind: 'function' });
       return;
     }
     if (typeof node === 'number' && !Number.isFinite(node)) {
@@ -86,7 +88,7 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
        * from. See `inseason.ts`, which carries a league's published settings and
        * rebuilds the profile.
        */
-      found.push({ path: at, kind: Number.isNaN(node) ? 'NaN' : 'Infinity' });
+      found.push({ path: pathOf(at), kind: Number.isNaN(node) ? 'NaN' : 'Infinity' });
       return;
     }
     if (typeof node === 'bigint') {
@@ -95,7 +97,7 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
        * it. Reported here anyway so the refusal names the field rather than
        * arriving as a `TypeError` from somewhere inside the serialiser.
        */
-      found.push({ path: at, kind: 'bigint' });
+      found.push({ path: pathOf(at), kind: 'bigint' });
       return;
     }
     if (typeof node !== 'object') return;
@@ -103,11 +105,11 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
     seen.add(node);
 
     if (node instanceof Map) {
-      found.push({ path: at, kind: 'Map' });
+      found.push({ path: pathOf(at), kind: 'Map' });
       return;
     }
     if (node instanceof Set) {
-      found.push({ path: at, kind: 'Set' });
+      found.push({ path: pathOf(at), kind: 'Set' });
       return;
     }
     /*
@@ -120,12 +122,12 @@ export function findLossyValues(value: unknown, path = ''): LossyValue[] {
     if (node instanceof Date) return;
 
     if (Array.isArray(node)) {
-      node.forEach((item, i) => walk(item, `${at}[${i}]`));
+      node.forEach((item, i) => walk(item, { up: at, index: i }));
       return;
     }
 
     for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
-      walk(child, at === '' ? key : `${at}.${key}`);
+      walk(child, { up: at, key });
     }
   };
 

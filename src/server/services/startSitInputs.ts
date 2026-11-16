@@ -96,10 +96,10 @@ export async function startSitInputsFor(
    * it belonged to.
    */
   const slate = slateWindow(opts.now ?? new Date());
-  const [players, { lines: propsByPlayer, pulled }, previousProps, signals] = await Promise.all([
+  /* The newest and the previous lines come from one read of the same rows (Round 34). */
+  const [players, { lines: propsByPlayer, pulled, previous: previousProps }, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
-    propsRepo.latestWithPulled(playerIds, slate),
-    propsRepo.previousForPlayers(playerIds, slate),
+    propsRepo.latestAndPrevious(playerIds, slate),
     new EvidenceRepo(db).getSignals(playerIds),
   ]);
 

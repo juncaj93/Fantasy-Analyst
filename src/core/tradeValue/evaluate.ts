@@ -251,6 +251,39 @@ interface RosterValue {
   byWeek: { week: number; lineup: number; depth: number }[];
 }
 
+/**
+ * Each roster's value before a trade, kept across the evaluations of one
+ * preparation (Round 34).
+ *
+ * The trade finder checks up to twenty deals against the same two-dozen
+ * rosters, and every check re-solved the unchanged roster's lineup for every
+ * week before solving the one after the deal. The roster before a trade is the
+ * same players at the same rates, so its value is the same; this keeps it.
+ * A hit needs the same rate objects in the same order, the same horizon and
+ * replacement levels and the same weights, so it can only hand back what
+ * {@link valueRoster} would have computed. Read-only to its users.
+ */
+export interface RosterValueMemo {
+  /* By roster id; a side with none is still checked player by player before a hit. */
+  readonly held: Map<number | null, {
+    players: readonly PlayerRate[];
+    horizon: TradeHorizon;
+    replacement: ReplacementLevels;
+    weights: readonly number[];
+    value: RosterValue;
+  }>;
+}
+
+export function rosterValueMemo(): RosterValueMemo {
+  return { held: new Map() };
+}
+
+function sameList<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function valueRoster(opts: {
   players: readonly PlayerRate[];
   slots: readonly LineupSlotSpec[];
@@ -402,6 +435,8 @@ export function evaluateTrade(input: {
    * playoff week 1.5 times (`seasonWeights`), the trade tools' one scale.
    */
   weights?: readonly number[];
+  /** Rosters already valued before a trade, for a caller checking many deals ({@link RosterValueMemo}). */
+  memo?: RosterValueMemo;
 }): TradeEvaluation {
   const { horizon, shape, replacement, a, b } = input;
   const weights = input.weights ?? seasonWeights(horizon);
@@ -456,6 +491,17 @@ export function evaluateTrade(input: {
     );
   }
 
+  const valueBefore = (side: TradeSide): RosterValue => {
+    const memo = input.memo;
+    const held = memo?.held.get(side.rosterId);
+    if (held && held.horizon === horizon && held.replacement === replacement && sameList(held.weights, weights) && sameList(held.players, side.roster)) {
+      return held.value;
+    }
+    const value = valueRoster({ players: side.roster, slots, replacement, horizon, weights });
+    memo?.held.set(side.rosterId, { players: [...side.roster], horizon, replacement, weights: [...weights], value });
+    return value;
+  };
+
   const sideResult = (side: TradeSide, out: PlayerRate[], inn: PlayerRate[]): SideResult => {
     const afterIds = new Set(side.roster.map((p) => p.playerId));
     for (const p of out) afterIds.delete(p.playerId);
@@ -479,7 +525,7 @@ export function evaluateTrade(input: {
       after = after.filter((p) => p.playerId !== cut.playerId);
     }
 
-    const before = valueRoster({ players: side.roster, slots, replacement, horizon, weights });
+    const before = valueBefore(side);
     const post = valueRoster({ players: after, slots, replacement, horizon, weights });
 
     const lineupChange = post.lineup - before.lineup;
