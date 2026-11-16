@@ -33,7 +33,8 @@ import { unwindOne } from '../tabReset.ts';
 import { RefreshIcon } from '../components/icons.tsx';
 import { TierRowButton, TierSections } from '../components/waiverTiers.tsx';
 import { WaiverSheet } from '../components/waiverSheet.tsx';
-import { boardSheet, tierSheet } from '../waiverCard.ts';
+import { boardSheet, tierSheet, type WaiverSheetModel } from '../waiverCard.ts';
+import { CompareSheet } from '../components/compareSheet.tsx';
 import { FoldedGroup, WaiverRowGroup } from '../components/waiverCard.tsx';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import type { NoMoveSummary } from '../../core/waivers/noMove.ts';
@@ -48,6 +49,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [open, setOpen] = useState<WaiverBoardRow | null>(null);
   const [openTier, setOpenTier] = useState<TierRow | null>(null);
+  const [compare, setCompare] = useState<WaiverSheetModel | null>(null);
 
   /*
    * Tapping Waivers while already on Waivers.
@@ -62,6 +64,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     unwindOne([
       { when: open != null, undo: () => setOpen(null) },
       { when: openTier != null, undo: () => setOpenTier(null) },
+      { when: compare != null, undo: () => setCompare(null) },
       { when: filter !== ALL_FILTER, undo: () => setFilter(ALL_FILTER) },
     ]);
   }, [resetNonce]);
@@ -356,10 +359,36 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
           leagueId={selected.id}
           figures={tiers.weekFigures ?? null}
           window={tiers.window}
+          onCompare={() => {
+            setCompare(tierSheet(openTier, tiers, advice?.found ? advice.pickupStart : null));
+            setOpenTier(null);
+          }}
           onClose={() => setOpenTier(null)}
         />
       ) : null}
-      {open && selected ? <WaiverSheet model={boardSheet(open)} leagueId={selected.id} onClose={() => setOpen(null)} /> : null}
+      {open && selected ? (
+        <WaiverSheet
+          model={boardSheet(open)}
+          leagueId={selected.id}
+          onCompare={() => {
+            setCompare(boardSheet(open));
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      ) : null}
+      {compare && selected ? (
+        <CompareSheet
+          leagueId={selected.id}
+          rosterPositions={selected.rosterPositions}
+          slot={null}
+          seed={compare.partner ? [compare.playerId, compare.partner.playerId] : [compare.playerId]}
+          nameOf={(id) => (id === compare.playerId ? compare.name : id === compare.partner?.playerId ? compare.partner.name : id)}
+          mode={null}
+          pairWith={compare.position}
+          onClose={() => setCompare(null)}
+        />
+      ) : null}
     </PullToRefresh>
   );
 }

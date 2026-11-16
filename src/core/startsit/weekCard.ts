@@ -39,6 +39,7 @@ import { weeklyProjection, type ProjectionSource } from './projection.ts';
 import type { DecisionPoints } from './decisionPoints.ts';
 import { weekPointsBeforeStatus } from './weekPoints.ts';
 import { marketLabel } from '../vegas/marketLabel.ts';
+import { CHECK_STATUS_LABEL, checkStatusReason } from './checkStatus.ts';
 
 /** A labelled line of the card. The value is already formatted for reading. */
 export interface WeeklyLine {
@@ -127,6 +128,8 @@ export interface WeeklyEvaluationLike {
   usage?: { display: string; unknown: boolean };
   matchup?: { display: string; unknown: boolean; rating: string };
   availability?: { label: string; detail: string | null; risky: boolean };
+  /** Round 33: props pulled near kickoff (`checkStatus.ts`). */
+  checkStatus?: { pulledAt: string } | null;
   injury?: { conflictNote?: string | null };
   lock?: { locked: boolean };
   movement?: { headline: string | null; direction: string };
@@ -277,6 +280,10 @@ export function buildWeeklyCard(evaluation: WeeklyEvaluationLike, context: Weekl
    * `Questionable · hamstring · did not practise` is not, and both of them are
    * "Questionable" to anything reading the status alone.
    */
+  /* Round 33: the books pulled his props near kickoff. Said first, and only as a warning. */
+  if (evaluation.checkStatus) {
+    lines.unshift({ key: 'check-status', label: CHECK_STATUS_LABEL, value: checkStatusReason(evaluation.checkStatus), detail: null });
+  }
   const availabilityLine = evaluation.availability?.detail ?? evaluation.statusFlag;
   if (availabilityLine) {
     lines.push({

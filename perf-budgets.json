@@ -154,6 +154,7 @@
       "src/core/sleeper/eligibility.ts",
       "src/core/sleeper/rosterShape.ts",
       "src/core/startsit/availabilityChip.ts",
+      "src/core/startsit/checkStatus.ts",
       "src/core/startsit/expectedMarkets.ts",
       "src/core/startsit/projection.ts",
       "src/core/startsit/sleeperLineup.ts",

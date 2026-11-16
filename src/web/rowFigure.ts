@@ -23,6 +23,8 @@
  * row and the score cannot disagree about what a designation costs.
  */
 
+import { CHECK_STATUS_LABEL } from '../core/startsit/checkStatus.ts';
+
 export interface RowFigureEvaluation {
   ruledOut?: boolean;
   statusFlag?: string | null;
@@ -35,6 +37,22 @@ export interface RowFigureEvaluation {
   decision?: { basis: string } | null;
   /** His game's clock. */
   lock?: { locked: boolean; kickoff: string | null };
+  /** Round 33: the books pulled every prop he had, inside 3 hours of kickoff. */
+  checkStatus?: { pulledAt: string } | null;
+}
+
+/**
+ * The "Check status" warning, while it still applies (Round 33).
+ *
+ * The server sets it only inside 3 hours of kickoff; a screen left open past
+ * kickoff drops it here. A warning only: it changes no number and no pick.
+ */
+export function liveCheckStatus(evaluation: RowFigureEvaluation | null | undefined, now: number = Date.now()): { pulledAt: string } | null {
+  const status = evaluation?.checkStatus;
+  if (!status || evaluation?.ruledOut || evaluation?.lock?.locked) return null;
+  const kickoff = evaluation?.lock?.kickoff ? Date.parse(evaluation.lock.kickoff) : Number.NaN;
+  if (Number.isFinite(kickoff) && kickoff <= now) return null;
+  return status;
 }
 
 /** The phrase for a number with no Vegas line behind it yet (Round 18). */
@@ -77,6 +95,8 @@ export function rowNote(
     if (evaluation?.onBye) return 'Bye';
     return 'No projection';
   }
+  /* Round 33: pulled props say more than "No line yet", which is what he would otherwise read. */
+  if (figure.kind !== 'out' && liveCheckStatus(evaluation, now)) return CHECK_STATUS_LABEL;
   if (figure.kind === 'plain' && noLineYet(evaluation, now)) return NO_LINE_YET;
   return null;
 }

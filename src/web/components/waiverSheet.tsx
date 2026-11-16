@@ -40,9 +40,12 @@ export function WaiverSheet({
   leagueId,
   figures,
   window,
+  onCompare,
   onClose,
 }: {
   model: WaiverSheetModel;
+  /** Round 33: open Compare with him and his partner in, to change who he is measured against. */
+  onCompare?: (() => void) | undefined;
   leagueId: string;
   /** The tiers' window figures; absent for a board row, which then shows this week only. */
   figures?: Figures | null;
@@ -71,6 +74,13 @@ export function WaiverSheet({
       accessibleLabel={model.name}
       onClose={onClose}
       testId="tier-detail"
+      headerAction={
+        onCompare ? (
+          <button type="button" className="cmp2-add" data-testid="wsheet-compare-open" onClick={onCompare}>
+            Compare
+          </button>
+        ) : undefined
+      }
     >
       <div className="wsheet" data-testid="tier-detail-body" data-player-id={model.playerId} data-partner-id={model.partner?.playerId ?? ''} data-period={period}>
         {model.chips.length > 0 ? (

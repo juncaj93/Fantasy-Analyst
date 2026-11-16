@@ -71,6 +71,7 @@ import { unwindOne } from '../tabReset.ts';
 import { benchSummary } from '../benchSummary.ts';
 import { rowFigure, rowNote, spokenRowFigure, type RowFigure, type RowFigureEvaluation } from '../rowFigure.ts';
 import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
+import { CHECK_STATUS_LABEL } from '../../core/startsit/checkStatus.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
 
@@ -1150,7 +1151,7 @@ function RowFigureValue({
   return (
     <span className="proj-stack" data-figure-note={note}>
       {inner}
-      <span className="proj-was" data-testid={`${testId}-note`}>
+      <span className="proj-was" data-testid={`${testId}-note`} data-check={note === CHECK_STATUS_LABEL ? 'true' : undefined}>
         {note}
       </span>
     </span>

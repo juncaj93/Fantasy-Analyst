@@ -96,9 +96,9 @@ export async function startSitInputsFor(
    * it belonged to.
    */
   const slate = slateWindow(opts.now ?? new Date());
-  const [players, propsByPlayer, previousProps, signals] = await Promise.all([
+  const [players, { lines: propsByPlayer, pulled }, previousProps, signals] = await Promise.all([
     new PlayerRepo(db).listByIds(playerIds),
-    propsRepo.latestForPlayers(playerIds, slate),
+    propsRepo.latestWithPulled(playerIds, slate),
     propsRepo.previousForPlayers(playerIds, slate),
     new EvidenceRepo(db).getSignals(playerIds),
   ]);
@@ -272,6 +272,8 @@ export async function startSitInputsFor(
        */
       ...(isOnBye(player.team, context.playing) ? { onBye: true as const } : {}),
       propsStale: false,
+      /* Round 33: every line he had this week was pulled; only ever a warning (`checkStatus.ts`). */
+      ...(pulled.has(id) ? { propsPulledAt: pulled.get(id)! } : {}),
     });
   }
   return inputs;
