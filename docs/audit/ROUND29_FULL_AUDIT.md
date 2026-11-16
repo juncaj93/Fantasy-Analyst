@@ -76,7 +76,31 @@ Worst three: check a received offer (10 to 11 taps), playoff outlook (not possib
 <!-- PART 1 -->
 <!-- PART 2 -->
 <!-- PART 3 -->
-<!-- PART 5 -->
+## 5. Cost and health
+
+### Database rows per day (Cloudflare's own totals; caps 5,000,000 read, 100,000 written; the day resets at 7 PM)
+
+<!-- TOTALS -->
+
+### By source
+
+<!-- SOURCES -->
+
+### Heavy-Sunday risk
+
+<!-- SUNDAY -->
+
+### Jobs and checks
+
+<!-- JOBS -->
+
+### Stale pull requests
+
+| PR | What it is | Recommendation |
+|---|---|---|
+| #421 | The November expert review register (docs only, 3 November). Rounds 1 to 17 worked through its findings, and this audit supersedes it. | Close. Its file stays readable on its branch. |
+| #261 | Wires the in-app database meter (fills `CLOUDFLARE_ACCOUNT_ID`, publishes a read-only analytics token). Opened 9 September, never merged; the meter still says "not connected". | Close. If Alex wants the meter, redo it as a fresh small change; a two-month-old workflow change is riskier to rebase than to rewrite. |
+| #212 | A status note about the August sheet fix (docs only, 28 August). | Close. Nothing in it is current. |
 
 ## 6. Code health (light: only what affects Alex)
 
