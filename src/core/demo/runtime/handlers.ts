@@ -126,7 +126,8 @@ export async function handleDemoRequest(data: ScenarioData, request: DemoRequest
      * also stops the draft screen starting its sync loop, which is the one
      * background writer in the app.
      */
-    return ok({ unlocked: false, canUnlock: false });
+    /* The screens this demo was built on, said outright (Round 30: no switches means the new ones). */
+    return ok({ unlocked: false, canUnlock: false, features: { tradesScreens: 'old', preview: null } });
   }
 
   if (path === '/api/overview') return ok(overview(data));
