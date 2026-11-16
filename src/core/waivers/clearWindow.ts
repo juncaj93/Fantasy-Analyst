@@ -103,10 +103,12 @@ export function waiverRulesOf(settings: Record<string, unknown> | null | undefin
 }
 
 /** Hours Los Angeles is behind UTC at this instant: 7 in summer, 8 in winter. */
+/* One formatter, built on first use (Round 34): building one per call was the cost. */
+let PACIFIC_HOUR: Intl.DateTimeFormat | null = null;
+
 function pacificOffsetHours(at: Date): number {
-  const hour = Number(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(at),
-  );
+  PACIFIC_HOUR ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' });
+  const hour = Number(PACIFIC_HOUR.format(at));
   const diff = (at.getUTCHours() - hour + 24) % 24;
   return diff === 7 || diff === 8 ? diff : 7;
 }

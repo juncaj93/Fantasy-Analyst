@@ -238,9 +238,34 @@ export class PropsRepo implements SnapshotStore {
     window: SlateWindow | undefined,
     previous: boolean,
   ): Promise<{ lines: Map<string, PlayerProp[]>; pulled: Map<string, string> }> {
-    const out = new Map<string, PlayerProp[]>();
-    const pulled = new Map<string, string>();
-    if (playerIds.length === 0) return { lines: out, pulled };
+    const read = await this.readLines(playerIds, window);
+    return read ? linesFrom(read.rows, read.snaps, previous) : { lines: new Map(), pulled: new Map() };
+  }
+
+  /**
+   * The newest lines and the lines at the look before, from one read (Round 34).
+   *
+   * Every start/sit assembly wants both, and asked for them as two calls to
+   * {@link linesAsOf}, each reading the same rows and the same looks: twice the
+   * statements and twice the rows for one answer. The two answers are computed
+   * from the one read exactly as the two calls computed them.
+   */
+  async latestAndPrevious(
+    playerIds: string[],
+    window: SlateWindow,
+  ): Promise<{ lines: Map<string, PlayerProp[]>; pulled: Map<string, string>; previous: Map<string, PlayerProp[]> }> {
+    const read = await this.readLines(playerIds, window);
+    if (!read) return { lines: new Map(), pulled: new Map(), previous: new Map() };
+    const latest = linesFrom(read.rows, read.snaps, false);
+    return { ...latest, previous: linesFrom(read.rows, read.snaps, true).lines };
+  }
+
+  /** The stored line rows for these players in the window, and the looks of their games. Null when there are none. */
+  private async readLines(
+    playerIds: string[],
+    window: SlateWindow | undefined,
+  ): Promise<{ rows: Record<string, unknown>[]; snaps: Map<string, SnapshotRef[]> } | null> {
+    if (playerIds.length === 0) return null;
     // The slate's looks need nothing from the lines, so they are asked for at the same time.
     const inWindow = window ? this.snapshotsInWindow(window) : null;
     inWindow?.catch(() => undefined);
@@ -260,62 +285,12 @@ export class PropsRepo implements SnapshotStore {
         .all<Record<string, unknown>>();
       rows.push(...results);
     }
-    if (rows.length === 0) return { lines: out, pulled };
+    if (rows.length === 0) return null;
     const snaps = window ? await inWindow! : new Map<string, SnapshotRef[]>();
     // A game whose looks are not all in the window (a flexed kickoff), or no window at all.
     const missing = [...new Set(rows.map((r) => String(r['snapshot_event_id'])))].filter((id) => !snaps.has(id));
     if (missing.length > 0) for (const [id, list] of await this.snapshotsForEvents(missing)) snaps.set(id, list);
-
-    const newest = new Map<string, { row: Record<string, unknown>; asOf: SnapshotRef }>();
-    const plan = new Map<string, { asOf: SnapshotRef; order: Map<number, number> } | null>();
-    for (const r of rows) {
-      const eventId = String(r['snapshot_event_id']);
-      if (!plan.has(eventId)) {
-        const eligible = eligibleSnapshots(snaps.get(eventId) ?? [], previous);
-        plan.set(eventId, eligible.length === 0 ? null : { asOf: eligible[0]!, order: new Map(eligible.map((s, i) => [s.id, i])) });
-      }
-      const p = plan.get(eventId);
-      if (!p || !p.order.has(Number(r['snapshot_id']))) continue;
-      const k = `${String(r['player_id'])}|${eventId}|${String(r['market'])}`;
-      const held = newest.get(k);
-      if (!held || isNewer(r, held.row, p.order)) newest.set(k, { row: r, asOf: p.asOf });
-    }
-    /*
-     * Round 33: whose lines are all gone at this look. The gone markers were
-     * already in hand (read, then left out below), so this costs no read.
-     */
-    const lookTime = new Map<number, string>();
-    const looks = new Map<string, { fetchedAt: string; lines: number | null }[]>();
-    for (const [eventId, list] of snaps) {
-      for (const s of list) lookTime.set(s.id, s.fetchedAt);
-      looks.set(eventId, list.map((s) => ({ fetchedAt: s.fetchedAt, lines: s.lines })));
-    }
-    for (const [id, at] of pulledPlayers(
-      [...newest.values()].map(({ row }) => ({
-        playerId: String(row['player_id']),
-        eventId: String(row['snapshot_event_id']),
-        gone: String(row['consensus_method'] ?? '') === 'none',
-        fetchedAt: lookTime.get(Number(row['snapshot_id'])) ?? '',
-      })),
-      looks,
-    )) {
-      pulled.set(id, at);
-    }
-    for (const { row, asOf } of newest.values()) {
-      if (String(row['consensus_method'] ?? '') === 'none') continue;
-      const pid = String(row['player_id']);
-      const prop = toProp(pid, {
-        ...row,
-        snapshot_fetched_at: asOf.fetchedAt,
-        snapshot_total: asOf.total,
-        snapshot_spread: asOf.spread,
-        snapshot_spread_team: asOf.spreadTeam,
-      });
-      const list = out.get(pid);
-      if (list) list.push(prop);
-      else out.set(pid, [prop]);
-    }
-    return { lines: out, pulled };
+    return { rows, snaps };
   }
 
   /**
@@ -774,4 +749,69 @@ function addSnapshotRefs(out: Map<string, SnapshotRef[]>, results: Record<string
 function sortSnapshotRefs(out: Map<string, SnapshotRef[]>): Map<string, SnapshotRef[]> {
   for (const list of out.values()) list.sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt) || b.id - a.id);
   return out;
+}
+
+/**
+ * The newest line per player, game and market, as of the newest look
+ * (`previous` false) or the look before it (`previous` true), from rows
+ * already read. See {@link PropsRepo.linesAsOf}. Pure: neither the rows nor the
+ * looks are changed, so one read can answer both questions.
+ */
+function linesFrom(
+  rows: readonly Record<string, unknown>[],
+  snaps: ReadonlyMap<string, SnapshotRef[]>,
+  previous: boolean,
+): { lines: Map<string, PlayerProp[]>; pulled: Map<string, string> } {
+  const out = new Map<string, PlayerProp[]>();
+  const pulled = new Map<string, string>();
+  const newest = new Map<string, { row: Record<string, unknown>; asOf: SnapshotRef }>();
+  const plan = new Map<string, { asOf: SnapshotRef; order: Map<number, number> } | null>();
+  for (const r of rows) {
+    const eventId = String(r['snapshot_event_id']);
+    if (!plan.has(eventId)) {
+      const eligible = eligibleSnapshots(snaps.get(eventId) ?? [], previous);
+      plan.set(eventId, eligible.length === 0 ? null : { asOf: eligible[0]!, order: new Map(eligible.map((s, i) => [s.id, i])) });
+    }
+    const p = plan.get(eventId);
+    if (!p || !p.order.has(Number(r['snapshot_id']))) continue;
+    const k = `${String(r['player_id'])}|${eventId}|${String(r['market'])}`;
+    const held = newest.get(k);
+    if (!held || isNewer(r, held.row, p.order)) newest.set(k, { row: r, asOf: p.asOf });
+  }
+  /*
+   * Round 33: whose lines are all gone at this look. The gone markers were
+   * already in hand (read, then left out below), so this costs no read.
+   */
+  const lookTime = new Map<number, string>();
+  const looks = new Map<string, { fetchedAt: string; lines: number | null }[]>();
+  for (const [eventId, list] of snaps) {
+    for (const s of list) lookTime.set(s.id, s.fetchedAt);
+    looks.set(eventId, list.map((s) => ({ fetchedAt: s.fetchedAt, lines: s.lines })));
+  }
+  for (const [id, at] of pulledPlayers(
+    [...newest.values()].map(({ row }) => ({
+      playerId: String(row['player_id']),
+      eventId: String(row['snapshot_event_id']),
+      gone: String(row['consensus_method'] ?? '') === 'none',
+      fetchedAt: lookTime.get(Number(row['snapshot_id'])) ?? '',
+    })),
+    looks,
+  )) {
+    pulled.set(id, at);
+  }
+  for (const { row, asOf } of newest.values()) {
+    if (String(row['consensus_method'] ?? '') === 'none') continue;
+    const pid = String(row['player_id']);
+    const prop = toProp(pid, {
+      ...row,
+      snapshot_fetched_at: asOf.fetchedAt,
+      snapshot_total: asOf.total,
+      snapshot_spread: asOf.spread,
+      snapshot_spread_team: asOf.spreadTeam,
+    });
+    const list = out.get(pid);
+    if (list) list.push(prop);
+    else out.set(pid, [prop]);
+  }
+  return { lines: out, pulled };
 }

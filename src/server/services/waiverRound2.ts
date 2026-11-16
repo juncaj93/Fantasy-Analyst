@@ -80,10 +80,16 @@ export async function readWaiverRound2(
       voided: c.voided,
       at: c.at,
     }));
+    /* Built once per week and shared: it is asked once per manager and run of weeks (Round 34). */
+    const byWeek = new Map<number, Map<string, number> | null>();
     const pointsOf = (week: number): Map<string, number> | null => {
-      if (!season || week < 1 || week > season.through) return null;
-      const out = new Map<string, number>();
-      for (const [id, weeks] of Object.entries(season.points)) if (weeks[week - 1]) out.set(id, weeks[week - 1]!);
+      if (byWeek.has(week)) return byWeek.get(week)!;
+      let out: Map<string, number> | null = null;
+      if (season && week >= 1 && week <= season.through) {
+        out = new Map<string, number>();
+        for (const [id, weeks] of Object.entries(season.points)) if (weeks[week - 1]) out.set(id, weeks[week - 1]!);
+      }
+      byWeek.set(week, out);
       return out;
     };
     const current = buildRivalSeasonAggregates({

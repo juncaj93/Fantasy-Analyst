@@ -75,8 +75,11 @@ function tuesdayAfter(kickoff: number): number {
 
 const WEEKDAYS: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
+/* One formatter, built on first use: building one is most of what a call cost (Round 34). */
+let EASTERN: Intl.DateTimeFormat | null = null;
+
 function easternDate(at: number): { year: number; month: number; day: number; weekday: number; hour: number } {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  EASTERN ??= new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: 'numeric',
@@ -84,7 +87,8 @@ function easternDate(at: number): { year: number; month: number; day: number; we
     weekday: 'short',
     hour: 'numeric',
     hour12: false,
-  }).formatToParts(new Date(at));
+  });
+  const parts = EASTERN.formatToParts(new Date(at));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return {
     year: Number(get('year')),
