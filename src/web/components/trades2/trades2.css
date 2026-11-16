@@ -21,6 +21,53 @@
   cursor: pointer;
 }
 
+/* Round 32: the card with "Check this offer" under it; the offer itself is then a plain button inside. */
+.t2-offer-card > .t2-offer {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+button.t2-check-this {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: var(--sp-2);
+  border: 0;
+  border-top: 1px solid var(--separator-soft);
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+/* Round 32: the quiet deadline chip beside the title, until trades close. */
+.t2-deadline {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+/* Round 32: Check's name field, and its clear button, at the full tap height. */
+[data-testid='t2-check'] .search input {
+  min-height: var(--tap);
+}
+
+[data-testid='t2-check'] .search-clear {
+  width: var(--tap);
+  height: var(--tap);
+  right: 0;
+}
+
 .t2-offer-head {
   display: flex;
   align-items: center;

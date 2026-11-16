@@ -18,6 +18,7 @@ import type { Database } from '../db.ts';
 import { LeagueRepo } from '../repos/league.ts';
 import { TradeFinderService } from './tradeFinderService.ts';
 import { TradeCheckError, TradeValueService } from './tradeValueService.ts';
+import { lastKickoffOf } from './appWeek.ts';
 
 const POSITION_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
 const byPosition = <T extends { position: string; name: string }>(a: T, b: T) =>
@@ -45,8 +46,22 @@ export class TradeScreensService {
       status: run.result.status,
       note: run.result.note,
       offers: run.result.offers,
-      deadline: run.prepared ? { week: run.prepared.horizon.deadlineWeek, weeksLeft: run.prepared.horizon.weeksToDeadline } : null,
+      deadline: run.prepared ? await this.deadline(run.prepared.league.season, run.prepared.horizon) : null,
     };
+  }
+
+  /**
+   * The deadline, and (Round 32) when the deadline week's last game kicks off,
+   * for the "Deadline Mon Nov 23" chip. Only while trades are open; read from
+   * the stored schedule through the app week's own cached lookup (one keyed
+   * statement, held three hours), so it costs nothing on most loads.
+   */
+  private async deadline(season: string, horizon: { deadlineWeek: number | null; weeksToDeadline: number | null }): Promise<NonNullable<ScreensOffers['deadline']>> {
+    const week = horizon.deadlineWeek;
+    const weeksLeft = horizon.weeksToDeadline;
+    const open = week != null && weeksLeft != null && weeksLeft > 0;
+    const closes = open ? await lastKickoffOf(this.db, season, week).catch(() => null) : null;
+    return { week, weeksLeft, closes };
   }
 
   async teams(): Promise<ScreensTeams> {

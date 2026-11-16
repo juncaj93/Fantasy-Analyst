@@ -12,7 +12,11 @@ export interface ScreensOffers {
   status: FinderResult['status'];
   note: string | null;
   offers: FoundOffer[];
-  deadline: { week: number | null; weeksLeft: number | null } | null;
+  /**
+   * `closes` (Round 32): the deadline week's last kickoff (ISO), while trades
+   * are open; absent or null otherwise. Drawn as the "Deadline Mon Nov 23" chip.
+   */
+  deadline: { week: number | null; weeksLeft: number | null; closes?: string | null } | null;
 }
 
 export interface ScreensTeams {
