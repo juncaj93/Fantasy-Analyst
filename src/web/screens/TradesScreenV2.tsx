@@ -19,6 +19,7 @@ import { CheckTab, focusCheckSearch } from '../components/trades2/checkTab.tsx';
 import { checkFromOffer, type CheckState } from '../components/trades2/checkSearch.ts';
 import { deadlineChip } from '../components/trades2/deadline.ts';
 import { unwindOne } from '../tabReset.ts';
+import { useRevamp } from '../revamp.ts';
 import '../components/trades2/trades2.css';
 
 type TradesTabId = 'offers' | 'build' | 'check';
@@ -32,6 +33,7 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
   /* Round 32: an offer card's "Check this offer" opens Check with both sides filled. */
   const [checkStart, setCheckStart] = useState<{ state: CheckState; n: number } | null>(null);
   const suffix = query ? `?${query}` : '';
+  const revamp = useRevamp();
 
   useEffect(() => {
     if (resetNonce === 0) return;
@@ -60,13 +62,13 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
     if (tab === 'offers' || teams) return;
     let live = true;
     api
-      .get<ScreensTeams>(`/api/trades/screens/teams${suffix}`)
+      .get<ScreensTeams>(`/api/trades/screens/teams${suffix}`, revamp ? { onFresh: setTeams } : {})
       .then((t) => live && setTeams(t))
       .catch(() => live && setTeams({ league: null, teams: [], reason: 'Could not read the rosters right now.' }));
     return () => {
       live = false;
     };
-  }, [tab, teams, suffix]);
+  }, [tab, teams, suffix, revamp]);
 
   const checkOffer = (offer: FoundOffer) => {
     setOpen(null);
@@ -138,8 +140,9 @@ export function TradesScreenV2({ resetNonce, query = '' }: { resetNonce: number;
           {offers && offers.offers.length > 0 ? (
             <>
               {offers.status === 'close' && offers.note ? (
-                <div className="t2-note" data-testid="t2-offers-close">
-                  {offers.note}
+                /* Round 36: the sentence becomes a label in the new look. */
+                <div className={revamp ? 'section-title' : 't2-note'} data-testid="t2-offers-close">
+                  {revamp ? 'Closest to fair' : offers.note}
                 </div>
               ) : null}
               {offers.offers.map((o) => (

@@ -10065,3 +10065,67 @@ div.matchup-result {
 [data-ui='revamp'] .cmp2-col-score {
   font-size: 1.9rem;
 }
+
+/*
+ * ========================================== Round 36: the UI revamp, part 2
+ *
+ * Waivers, Trades, Players and Setup on Part 1's pieces (docs/ui/
+ * DESIGN_RULES.md). Same tokens, same rows, cards and labels. Trades and
+ * Players keep their rules in their own lazily loaded sheets.
+ */
+
+/* Explanatory sentences are gone in the new look. Labels, numbers, chips and reasons stay. */
+[data-ui='revamp'] :is(.blurb, .draft-only) {
+  display: none;
+}
+
+/* An empty answer: a quiet card where the rows would be, not a floating line. */
+[data-ui='revamp'] .empty {
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* Waivers: a clean card, the bid on the right, one line under the name. */
+[data-ui='revamp'] .wcard-bid {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+[data-ui='revamp'] .wcard-bid[data-tone='tag-take'] {
+  background: var(--pos-tint);
+  color: var(--pos);
+}
+[data-ui='revamp'] .wcard-why {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  margin-top: 2px;
+  padding-left: calc(32px + var(--sp-1) + 16px);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  color: var(--text-dim);
+}
+[data-ui='revamp'] .wcard-why > * + *::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+[data-ui='revamp'] .wcard-why strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+/* The waiver sheet's bid reason wraps instead of being cut off (audit S7). */
+[data-ui='revamp'] [data-testid='wsheet-bid'] {
+  white-space: normal;
+}

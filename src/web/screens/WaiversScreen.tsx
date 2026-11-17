@@ -275,6 +275,7 @@ export function WaiversScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
               <TierSections
                 tiers={tiers}
                 onOpen={setOpenTier}
+                onCompare={setCompare}
                 afterConsider={
                   dstConsider.length > 0
                     ? dstConsider.map((row) => <WaiverRow key={row.playerId} row={row} onOpen={() => setOpen(row)} />)

@@ -12,7 +12,8 @@ import { useState } from 'react';
 import type { TierRow, WaiverTiersView } from '../../core/waivers/tierPlan.ts';
 import { PlayerIdentity } from './common.tsx';
 import { FoldedGroup, WaiverCard } from './waiverCard.tsx';
-import { byGain, extraLine, extraTitle, roomLine, tierCard } from '../waiverCard.ts';
+import { byGain, extraCard, extraLine, extraSheet, extraTitle, roomLine, tierCard, type WaiverSheetModel } from '../waiverCard.ts';
+import { useRevamp } from '../revamp.ts';
 
 /** `+22.3 pts`, or `IR stash` for a stash, whose value is past the window (`Return unknown` when nobody knows when). */
 export function tierBadge(row: Pick<TierRow, 'gain' | 'reasonCode'> & { stashLabel?: string | null }): string {
@@ -65,7 +66,15 @@ export function DropReadyRows({ tiers }: { tiers: WaiverTiersView }) {
  * pick and one reason, with the spot it uses under it. Nothing to tap: the
  * line is the whole answer, and nothing here adds, drops or bids.
  */
-export function ExtraLines({ tiers }: { tiers: Pick<WaiverTiersView, 'upsideStash' | 'block' | 'cover'> }) {
+export function ExtraLines({
+  tiers,
+  onCompare,
+}: {
+  tiers: Pick<WaiverTiersView, 'upsideStash' | 'block' | 'cover'>;
+  /** Round 36 (UI_REVAMP): each line is a card that opens Compare. */
+  onCompare?: (model: WaiverSheetModel) => void;
+}) {
+  const cards = useRevamp() && onCompare != null;
   const rows = [
     ...(tiers.upsideStash ? [{ kind: 'stash' as const, line: tiers.upsideStash }] : []),
     /* Round 26: cover pickups for the next three weeks, earliest first. */
@@ -79,7 +88,18 @@ export function ExtraLines({ tiers }: { tiers: Pick<WaiverTiersView, 'upsideStas
         {extraTitle(rows.map((r) => r.kind))}
       </div>
       <section className="slot-group" data-testid="tier-extra">
-        {rows.map(({ kind, line }) => (
+        {cards
+          ? rows.map(({ kind, line }) => (
+              <WaiverCard
+                key={`${kind}-${line.playerId}`}
+                model={extraCard(kind, line)}
+                onOpen={() => onCompare(extraSheet(line))}
+                testId={`waiver-${kind}-line`}
+                gainTestId="extra-kind"
+                reasonTestId="extra-reason"
+              />
+            ))
+          : rows.map(({ kind, line }) => (
           <div key={`${kind}-${line.playerId}`} className="player-row" data-testid={`waiver-${kind}-line`} data-player-id={line.playerId}>
             <div className="player-row-top">
               <span className="player-identity">
@@ -90,7 +110,7 @@ export function ExtraLines({ tiers }: { tiers: Pick<WaiverTiersView, 'upsideStas
             </div>
             <div className="verdict-line faint">{roomLine(line.room)}</div>
           </div>
-        ))}
+            ))}
       </section>
     </>
   );
@@ -104,10 +124,13 @@ export function ExtraLines({ tiers }: { tiers: Pick<WaiverTiersView, 'upsideStas
 export function TierSections({
   tiers,
   onOpen,
+  onCompare,
   afterConsider,
 }: {
   tiers: WaiverTiersView;
   onOpen: (row: TierRow) => void;
+  /** Round 36: a stash, cover or block card's comparison. */
+  onCompare?: (model: WaiverSheetModel) => void;
   /** Rows the defense planner named, drawn with the considered moves. */
   afterConsider?: React.ReactNode;
 }) {
@@ -135,7 +158,7 @@ export function TierSections({
           </section>
         </>
       ) : null}
-      <ExtraLines tiers={tiers} />
+      <ExtraLines tiers={tiers} {...(onCompare ? { onCompare } : {})} />
       <FoldedGroup label="Watch list" count={tiers.watch.length} testId="tier-watch">
         <section data-testid="tier-watch">
           {byGain(tiers.watch).map((row) => (

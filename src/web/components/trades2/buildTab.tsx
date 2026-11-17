@@ -9,6 +9,7 @@ import { api } from '../../api.ts';
 import type { FoundOffer, ScreensOffers, ScreensTeams } from '../../../core/trades/screensWire.ts';
 import { ListGroup, ListRow, SearchField, SkeletonRows } from '../native.tsx';
 import { OfferCard } from './offerCard.tsx';
+import { useRevamp } from '../../revamp.ts';
 
 interface Pick {
   playerId: string;
@@ -36,6 +37,7 @@ export function BuildTab({
   const [picked, setPicked] = useState<Pick | null>(null);
   const [result, setResult] = useState<ScreensOffers | null>(null);
   const [failed, setFailed] = useState(false);
+  const revamp = useRevamp();
 
   const everyone = useMemo<Pick[]>(
     () =>
@@ -118,8 +120,9 @@ export function BuildTab({
         ) : (
           <>
             {result.status === 'close' && result.note ? (
-              <div className="t2-note" data-testid="t2-build-close">
-                {result.note}
+              /* Round 36: the sentence becomes a label in the new look, as on Offers. */
+              <div className={revamp ? 'section-title' : 't2-note'} data-testid="t2-build-close">
+                {revamp ? 'Closest to fair' : result.note}
               </div>
             ) : null}
             <div data-testid="t2-build-offers">

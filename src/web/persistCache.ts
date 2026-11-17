@@ -29,7 +29,9 @@ const MAX_CHARS = 400_000;
 const KEPT = [
   /^\/api\/(overview|leagues|auth\/status)$/,
   /^\/api\/leagues\/[^/?]+\/(roster|lineup|matchup|waivers)$/,
-  /^\/api\/trades\/screens\/offers$/,
+  /^\/api\/trades\/screens\/(offers|teams)$/,
+  /* Round 36: Setup's one read. */
+  /^\/api\/setup\/status$/,
   /* Compare's first list: My team, every position, nothing typed. */
   /^\/api\/leagues\/[^/?]+\/compare-pool\?tab=mine&position=ALL&q=(&mode=\w+)?$/,
   /^\/api\/players\/season(\?leagueId=[^&]+)?$/,

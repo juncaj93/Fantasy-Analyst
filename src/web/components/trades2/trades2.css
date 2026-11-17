@@ -336,3 +336,93 @@ button.t2-add-btn:disabled {
   color: var(--text-faint);
   cursor: default;
 }
+
+/*
+  Round 36 (UI_REVAMP): Trades in the new look (docs/ui/DESIGN_RULES.md).
+  The pick, one reason, the numbers as sunken tiles; uppercase labels; the
+  verdict word leads the Check result. Draws only with data-ui="revamp".
+*/
+[data-ui='revamp'] .t2-offer-card,
+[data-ui='revamp'] .t2-result {
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+}
+[data-ui='revamp'] .t2r .t2-line {
+  font-size: 0.97rem;
+  font-weight: 620;
+}
+[data-ui='revamp'] :is(.t2-side, .t2-sub, .t2r-tile-label, .t2-facts dt) {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+[data-ui='revamp'] .t2r .t2-reason {
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+.t2r-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.t2r-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: var(--sp-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-variant-numeric: tabular-nums;
+}
+.t2r-tile-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-ui='revamp'] .t2-verdict-word {
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+[data-ui='revamp'] .t2-verdict-reason {
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text);
+}
+[data-ui='revamp'] .t2-compare {
+  font-variant-numeric: tabular-nums;
+}
+[data-ui='revamp'] .t2-compare td {
+  font-weight: 700;
+}
+[data-ui='revamp'] .t2-picker-foot .btn {
+  min-height: var(--tap);
+}
+[data-ui='revamp'] .t2-empty {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+/* Loading: card-sized placeholders where the offers land, so nothing jumps. */
+[data-ui='revamp'] [data-testid='t2-offers-loading'] {
+  background: none;
+  box-shadow: none;
+}
+[data-ui='revamp'] [data-testid='t2-offers-loading'] .skeleton-row {
+  height: 196px;
+  padding: 0;
+  background-clip: border-box;
+  margin-bottom: var(--sp-3);
+  border-radius: var(--radius);
+  border: 0;
+}

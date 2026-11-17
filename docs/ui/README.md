@@ -58,3 +58,54 @@ first visit): Players board 1.3 s, Trades offers 1.3 s, Waivers 1.2 s
 (already read by Team, so Waivers itself is instant), Matchup 0.4 s, Team's
 lineup 0.5 s. Team's later launch is 1.1 s of the phone loading the app
 itself (code check and start-up on a slow CPU), not the server.
+
+# UI revamp, part 2 (Round 36)
+
+Waivers, Trades, Players and Setup on Part 1's pieces, behind the same
+`UI_REVAMP` switch (still off on the live site). Rules added to
+[DESIGN_RULES.md](./DESIGN_RULES.md) under "Part 2".
+
+- Preview: the "ui" mode of the Preview workflow (PIN 739514) now covers every
+  screen. Waivers shows the made-up picks in
+  `scripts/ui-preview-fixtures.mjs` (Do this, Worth considering, Stash, Cover,
+  Block, Watch list, Drop-ready); Trades and the Players board come from the
+  made-up preview league (the same names as the Round 19 and Round 24
+  previews). Recaptured with `scripts/capture-ui-preview.mjs`.
+- Draft mode: while a draft is ahead the app draws today's look whatever the
+  switch says (`setDraftSeason` in `web/revamp.ts`), so the Draft board, ADP
+  and the draft Players list render exactly as before. The new look starts
+  once the draft is done.
+
+## Before and after (iPhone Air width, 420 points)
+
+Each picture: before and after in light, then before and after in dark.
+
+| Screen | Top | Second view | Third view |
+| --- | --- | --- | --- |
+| Waivers | [the picks](./shots/waivers-top.jpg) | [a pick's comparison](./shots/waivers-sheet.jpg) | [stash, cover, block](./shots/waivers-extra.jpg) |
+| Trades | [offers](./shots/trades-offers.jpg) | [an offer's comparison](./shots/trades-sheet.jpg) | [Check this offer](./shots/trades-check.jpg) |
+| Players | [the board](./shots/players-board.jpg) | [a player's card](./shots/players-card.jpg) | [trade targets](./shots/players-targets.jpg) |
+| Setup | [sections](./shots/setup-top.jpg) | [further down](./shots/setup-more.jpg) | [Data health](./shots/setup-health.jpg) |
+
+Made with `scripts/ui-screenshots-2.mjs` against three local servers (the
+seeded league, PREVIEW=trades, PREVIEW=players).
+
+## Speed: time to first useful paint (Part 2 screens)
+
+`scripts/measure-first-paint.mjs` as in Part 1 (phone profile, production read
+times), now with Setup and the preview world (`--trades`, `--players`). Median
+of 3 runs. Setup's read has no production timing on file, so it is held 600 ms
+in both columns. "Useful" for Setup is its first row (before: the Data fold).
+
+| Screen | Before, first launch | Before, later launches | After, first launch | After, later launches |
+| --- | --- | --- | --- | --- |
+| Waivers | 0.04 s | 0.02 s | 0.03 s | 0.02 s |
+| Trades | 1.71 s | 1.70 s | 1.35 s | 0.11 s |
+| Players | 1.66 s | 1.63 s | 1.45 s | 0.10 s |
+| Setup | 0.84 s | 0.81 s | 0.89 s | 0.08 s |
+
+What Part 2 added: Setup's read and the Trades rosters (Check and Build) are
+kept like the other first reads; a finger on the gear starts Setup's read; the
+idle moment after the first screen also fetches Setup's code. Trades and
+Players use Part 1's kept answers. Waivers is instant either way because Team
+already read it. No new server reads.

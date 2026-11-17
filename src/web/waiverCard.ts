@@ -437,6 +437,37 @@ function extraBid(bid: UpsideStashLine['bid']): string | null {
   return bid.low === bid.high ? `bid $${bid.low}` : `bid $${bid.low} to $${bid.high}`;
 }
 
+/**
+ * Round 36 (UI_REVAMP): a stash, cover or block line as a card. The kind
+ * where a move's gain sits, the bid on the right (`Waivers $1–3`, the same
+ * band as the line), the room as a chip, the line's one reason.
+ */
+export function extraCard(kind: 'stash' | 'block' | 'cover', line: UpsideStashLine | BlockLine | CoverLine): WaiverCardModel {
+  const word = kind === 'stash' ? 'Stash' : kind === 'cover' ? 'Cover' : 'Block';
+  const b = line.bid;
+  const chips: CardChip[] = [];
+  if (b.kind === 'free') chips.push({ key: 'free', label: 'Free agent' });
+  else if (b.kind === 'claim') chips.push({ key: 'waivers', label: `Waivers $${b.low === b.high ? b.low : `${b.low}–${b.high}`}` });
+  const room = line.room;
+  chips.push(room.kind === 'drop' ? { key: 'drop', label: `Drop: ${surname(room.name)}` } : room.kind === 'reserve' ? { key: 'ir', label: 'IR slot' } : { key: 'open', label: 'Open spot' });
+  return { playerId: line.playerId, name: line.name, position: line.position, team: line.team, gain: word, gainSpoken: word, gainTone: '', chips, overflow: [], reason: line.reason, fullReason: line.reason };
+}
+
+/** What a stash, cover or block card opens: him against the player he would replace, or him alone with the list open. */
+export function extraSheet(line: UpsideStashLine | BlockLine | CoverLine): WaiverSheetModel {
+  const room = line.room;
+  return {
+    playerId: line.playerId,
+    name: line.name,
+    position: line.position,
+    team: line.team,
+    chips: [],
+    partner: room.kind === 'drop' ? { playerId: room.playerId, name: room.name } : null,
+    period: 'this',
+    drops: [],
+  };
+}
+
 /** Where he goes: `Drop Antonio Williams (drop-ready)`, `Open bench spot`, `Open IR slot`. */
 export function roomLine(room: UpsideStashLine['room'] | BlockLine['room'] | CoverLine['room']): string {
   if (room.kind === 'reserve') return 'Open IR slot';

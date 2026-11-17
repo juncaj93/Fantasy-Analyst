@@ -5,7 +5,7 @@
  * passphrase, and that prompt lives inside Setup.
  */
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { api, prefetch, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { ScreenLoadBoundary } from './components/screenLoad.tsx';
@@ -30,7 +30,7 @@ import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 import { type TabSource as SeasonTabSource, fromOverview, recallSeasonTabs, rememberSeasonTabs, resolveSeasonTabs } from './seasonTabs.ts';
 import { currentWorld, LIVE_WORLD } from './world.ts';
-import { applyRevamp, revampOn, useRevamp } from './revamp.ts';
+import { applyRevamp, revampOn, setDraftSeason, useRevamp } from './revamp.ts';
 import { ShellContext, type Shell } from './shellContext.ts';
 
 /*
@@ -291,6 +291,8 @@ export function App() {
   const remembered = useMemo(() => recallSeasonTabs(world), [world]);
   const seasonTabs = resolveSeasonTabs({ overview, failed: error != null, remembered });
   const { draftVisible, matchupVisible } = seasonTabs;
+  /* Round 36: draft mode keeps today's look (see `setDraftSeason`). Before paint, so nothing flickers. */
+  useLayoutEffect(() => setDraftSeason(draftVisible), [draftVisible]);
   /*
    * The seasonal slots, decided in one place.
    *
@@ -375,6 +377,8 @@ export function App() {
     const warm = () => {
       void import('./screens/TradesScreenV2.tsx').catch(() => {});
       void import('./screens/PlayersSeasonScreen.tsx').catch(() => {});
+      /* Round 36: and Setup's, so the gear opens it at once. */
+      void loadSetupScreen().catch(() => {});
     };
     const idle = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
     if (idle) {

@@ -29,6 +29,7 @@ import { SeasonCardBlock } from '../components/players2/seasonCard.tsx';
 import { CompareSheet } from '../components/compareSheet.tsx';
 import { pageScrollTop } from '../overlay.ts';
 import { unwindOne } from '../tabReset.ts';
+import { useRevamp } from '../revamp.ts';
 import '../components/players2/players2.css';
 
 type View = 'all' | 'trade' | 'injured';
@@ -115,6 +116,8 @@ export function PlayersSeasonScreen({
   const [openId, setOpenId] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const restoreScroll = useRef<number | null>(null);
+  /* Round 36 (UI_REVAMP): the value is the row's one bold number, on the right. */
+  const revamp = useRevamp();
 
   const selected = leagues.find((l) => l.isSelected) ?? null;
   const leagueId = selected?.id ?? null;
@@ -363,9 +366,10 @@ export function PlayersSeasonScreen({
         <>
           <div className="list-head" data-testid="players-rank-head">
             <span className="list-head-rank">Rank</span>
-            <span className="list-head-note">{sort === 'value' ? 'Rest of season, points over a free agent' : 'Draft order, moved by your research'}</span>
+            <span className="list-head-note blurb">{sort === 'value' ? 'Rest of season, points over a free agent' : 'Draft order, moved by your research'}</span>
+            {revamp ? <span className="p2r-head">Value</span> : null}
           </div>
-          <div className="dense-group" role="list" aria-label={`Players, by ${SORT_LABEL[sort].toLowerCase()}`} data-testid="players-list">
+          <div className={revamp ? 'dense-group p2r-board' : 'dense-group'} role="list" aria-label={`Players, by ${SORT_LABEL[sort].toLowerCase()}`} data-testid="players-list">
             {rows.slice(0, shown).map((r, i) => (
               <div role="listitem" key={r.id}>
                 <CompactPlayerRow
@@ -376,12 +380,12 @@ export function PlayersSeasonScreen({
                   status={r.status}
                   tally={r.lifetime}
                   rank={sort === 'value' ? i + 1 : r.adjustedRank == null ? '—' : Math.round(r.adjustedRank)}
-                  trailing={pill(r)}
+                  trailing={revamp ? <BoardValue row={r} /> : pill(r)}
                   onOpen={() => setOpenId(r.id)}
                   testId="player-search-row"
                   cluster
                   metrics={[
-                    { label: 'Value', testId: 'p2-value', value: r.overFreeAgent == null ? <span className="faint">—</span> : r.overFreeAgent.toFixed(1) },
+                    ...(revamp ? [] : [{ label: 'Value', testId: 'p2-value', value: r.overFreeAgent == null ? <span className="faint">—</span> : r.overFreeAgent.toFixed(1) }]),
                     { label: '7d', value: <SignedValue net={r.last7} /> },
                     { label: '30d', value: <SignedValue net={r.last30} /> },
                     {
@@ -395,10 +399,12 @@ export function PlayersSeasonScreen({
                     },
                   ]}
                   {...(view === 'trade' && r.trade
-                    ? { trailingBelow: <WillingnessTag word={r.trade.willingness} /> }
+                    ? { trailingBelow: revamp ? <>{pill(r)}<WillingnessTag word={r.trade.willingness} /></> : <WillingnessTag word={r.trade.willingness} /> }
                     : view === 'injured' && r.injury
-                      ? { trailingBelow: <BackTag backWeek={r.injury.backWeek} /> }
-                      : {})}
+                      ? { trailingBelow: revamp ? <>{pill(r)}<BackTag backWeek={r.injury.backWeek} /></> : <BackTag backWeek={r.injury.backWeek} /> }
+                      : revamp
+                        ? { trailingBelow: pill(r) }
+                        : {})}
                 />
               </div>
             ))}
@@ -438,6 +444,15 @@ export function PlayersSeasonScreen({
       )}
       {compareSheet}
     </div>
+  );
+}
+
+/** Round 36: the rest-of-season value, the board row's one number. */
+function BoardValue({ row }: { row: SeasonRow }) {
+  return (
+    <span className="p2r-value" data-testid="p2-value">
+      {row.overFreeAgent == null ? '—' : row.overFreeAgent.toFixed(1)}
+    </span>
   );
 }
 

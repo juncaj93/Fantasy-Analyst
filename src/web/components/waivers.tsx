@@ -97,7 +97,7 @@ export function WaiverPlanCard({ plan }: { plan: WaiverClaimPlan | null | undefi
       ) : null}
 
       {plan.note ? (
-        <div className="faint claim-plan-note" data-testid="waiver-plan-note">
+        <div className="faint claim-plan-note blurb" data-testid="waiver-plan-note">
           {plan.note}
         </div>
       ) : null}

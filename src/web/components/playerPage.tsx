@@ -753,11 +753,11 @@ function Overview({
       */}
       {onGo ? (
         <ListGroup header="More on him" testId="player-page-more">
-          <ListRow label="Season outlook" detail="What is expected of him, in his provider's words" chevron onClick={() => onGo('outlook')} testId="player-page-go-outlook" />
-          <ListRow label="Market" detail="Draft order, movement and cached prop lines" chevron onClick={() => onGo('market')} testId="player-page-go-market" />
+          <ListRow label="Season outlook" detail={<span className="blurb">What is expected of him, in his provider&rsquo;s words</span>} chevron onClick={() => onGo('outlook')} testId="player-page-go-outlook" />
+          <ListRow label="Market" detail={<span className="blurb">Draft order, movement and cached prop lines</span>} chevron onClick={() => onGo('market')} testId="player-page-go-market" />
           <ListRow
             label="Evidence"
-            detail="Every item behind the tally, with its own words"
+            detail={<span className="blurb">Every item behind the tally, with its own words</span>}
             {...(evidenceCount == null ? {} : { value: evidenceCount })}
             chevron
             onClick={() => onGo('evidence')}
