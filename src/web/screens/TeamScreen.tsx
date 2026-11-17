@@ -74,6 +74,7 @@ import { availabilityWarning } from '../../core/startsit/availabilityChip.ts';
 import { CHECK_STATUS_LABEL } from '../../core/startsit/checkStatus.ts';
 import { CompareSheet, PillChip } from '../components/compareSheet.tsx';
 import { weekPointsBeforeStatus, weekPointsOf, type WeekPoints } from '../../core/startsit/weekPoints.ts';
+import { useRevamp } from '../revamp.ts';
 
 export function TeamScreen({
   leagues,
@@ -86,6 +87,8 @@ export function TeamScreen({
   resetNonce: number;
 }) {
   const selected = leagues.find((l) => l.isSelected) ?? null;
+  /* Round 35 (UI_REVAMP): the bar names the screen, and the league goes under it. */
+  const revamp = useRevamp();
   const [roster, setRoster] = useState<RosterResponse | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [lineup, setLineup] = useState<LineupRecommendation | null>(null);
@@ -364,10 +367,18 @@ export function TeamScreen({
       {selected ? (
         <NavBar
           testId="league-card"
-          title={selected.name}
+          title={revamp ? 'Team' : selected.name}
           {...(serverRefresh.finishedAt && !roster?.live
-            ? { subtitle: <span data-testid="team-updated">Updated {formatUpdated(serverRefresh.finishedAt)}</span> }
-            : {})}
+            ? {
+                subtitle: (
+                  <span data-testid="team-updated">
+                    {revamp ? `${selected.name} · ` : ''}Updated {formatUpdated(serverRefresh.finishedAt)}
+                  </span>
+                ),
+              }
+            : revamp
+              ? { subtitle: selected.name }
+              : {})}
           trailing={
             roster?.live ? null : (
               <span className="nav-actions-group" data-testid="team-controls">

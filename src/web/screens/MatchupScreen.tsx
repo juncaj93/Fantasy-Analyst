@@ -33,7 +33,10 @@ import {
 import { WeeklyCardSheet } from '../components/weekly.tsx';
 import { unwindOne } from '../tabReset.ts';
 import { useServerRefresh } from '../serverRefresh.ts';
-import { teamCardFor, type RosterResponse } from '../teamCard.ts';
+import { rosterById, teamCardFor, type RosterResponse } from '../teamCard.ts';
+import { CompareSheet } from '../components/compareSheet.tsx';
+import { CompareIcon } from '../components/icons.tsx';
+import { useRevamp } from '../revamp.ts';
 
 /**
  * How often the scoreboard is re-read while games are running.
@@ -57,6 +60,14 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   const [error, setError] = useState<string | null>(null);
   const [openPlayer, setOpenPlayer] = useState<string | null>(null);
   const [oddsOpen, setOddsOpen] = useState(false);
+  /*
+   * Round 35 (UI_REVAMP): Compare from this screen, on Team's lineup (so its
+   * numbers and mode are Team's), seeded with a player when it was opened
+   * from his card.
+   */
+  const revamp = useRevamp();
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareSeed, setCompareSeed] = useState<string[]>([]);
   /*
    * Team's roster and lineup, read only when one of Alex's own players is
    * tapped (Round 31). His card here is Team's card: the app's pick and the
@@ -83,6 +94,7 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
   useEffect(() => {
     if (resetNonce === 0) return;
     unwindOne([
+      { when: compareOpen, undo: () => setCompareOpen(false) },
       { when: openPlayer != null, undo: () => setOpenPlayer(null) },
       { when: oddsOpen, undo: () => setOddsOpen(false) },
     ]);
@@ -233,8 +245,32 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
     <PullToRefresh onRefresh={pull} label="Matchup" testId="matchup-pull" live={data?.gameWindow?.live ?? false}>
       <NavBar
         testId="matchup-nav"
-        title={data ? `Week ${data.week} Matchup` : 'Matchup'}
-        {...(forecast ? { trailing: <MatchupStatus phase={forecast.phase} /> } : {})}
+        title={revamp ? 'Matchup' : data ? `Week ${data.week} Matchup` : 'Matchup'}
+        {...(revamp && data ? { subtitle: `Week ${data.week}` } : {})}
+        {...(forecast || revamp
+          ? {
+              trailing: (
+                <>
+                  {forecast ? <MatchupStatus phase={forecast.phase} /> : null}
+                  {/* Round 35 (UI_REVAMP): Compare from Matchup too, one tap. */}
+                  {revamp && selected ? (
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      data-testid="matchup-compare-open"
+                      aria-label="Compare players"
+                      onClick={() => {
+                        void loadTeam();
+                        setCompareOpen(true);
+                      }}
+                    >
+                      <CompareIcon />
+                    </button>
+                  ) : null}
+                </>
+              ),
+            }
+          : {})}
       />
 
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -296,7 +332,30 @@ export function MatchupScreen({ leagues, resetNonce }: { leagues: LeagueSummary[
            * comparison can actually change something. From here the useful
            * next step is simply back to the matchup, so the control closes it.
            */
-          onCompare={() => setOpenPlayer(null)}
+          onCompare={() => {
+            /* Round 35 (UI_REVAMP): one of yours opens Compare with him in it. */
+            if (revamp && openIsMine && openPlayer) {
+              void loadTeam();
+              setCompareSeed([openPlayer]);
+              setCompareOpen(true);
+            }
+            setOpenPlayer(null);
+          }}
+        />
+      ) : null}
+
+      {compareOpen && selected && (team || teamFailed) ? (
+        <CompareSheet
+          leagueId={selected.id}
+          rosterPositions={selected.rosterPositions}
+          slot={null}
+          seed={compareSeed}
+          nameOf={(id) => rosterById(team?.roster).get(id)?.name ?? players.get(id)?.name ?? id}
+          mode={team?.lineup.found ? (team.lineup.mode ?? null) : null}
+          onClose={() => {
+            setCompareOpen(false);
+            setCompareSeed([]);
+          }}
         />
       ) : null}
 

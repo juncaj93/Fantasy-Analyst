@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
+import { useRevamp } from '../revamp.ts';
 /* What Sleeper says about a player's availability right now. Never a ranking input. */
 import { injuryStatusTag } from '../../core/draft/injury.ts';
 /* The 32 clubs and their marks. Presentation metadata; never a ranking input. */
@@ -773,6 +774,17 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 export function Loading({ what }: { what: string }) {
+  /* Round 35 (UI_REVAMP): rows at the shape of what is coming, not a line of text. */
+  if (useRevamp()) {
+    return (
+      <div className="skeleton-rows" data-testid="loading-skeleton" role="status">
+        <span className="sr-only">Loading {what}</span>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div className="skeleton skeleton-row" key={i} aria-hidden="true" />
+        ))}
+      </div>
+    );
+  }
   return <div className="spinner">Loading {what}…</div>;
 }
 

@@ -41,6 +41,7 @@ import { SLEEPER_SPOKEN, sleeperClass, weekIsSleeper } from '../sleeperFallback.
 import { NO_LINE_YET, liveCheckStatus, noLineYet } from '../rowFigure.ts';
 import { CHECK_STATUS_LABEL, checkStatusReason } from '../../core/startsit/checkStatus.ts';
 import { pairFor, swapOptions } from '../comparePair.ts';
+import { useRevamp } from '../revamp.ts';
 
 /** Up to four fit a 360px phone side by side. Matched by the server. */
 export const MAX_COMPARE = 4;
@@ -120,6 +121,7 @@ export function CompareSheet({
   pairWith?: string | null;
   onClose: () => void;
 }) {
+  const revamp = useRevamp();
   const [ids, setIds] = useState<string[]>(() => [...new Set(seed)].slice(0, MAX_COMPARE));
   const [names, setNames] = useState<Record<string, string>>(() => Object.fromEntries(seed.map((id) => [id, nameOf(id)])));
   const [pickerOpen, setPickerOpen] = useState(() => !pairWith && new Set(seed).size < 2);
@@ -151,17 +153,21 @@ export function CompareSheet({
     const handle = window.setTimeout(async () => {
       try {
         const q = new URLSearchParams({ tab, position, q: query, ...(mode ? { mode } : {}) });
-        const res = await api.get<{ rows: PoolRow[] }>(`/api/leagues/${leagueId}/compare-pool?${q.toString()}`);
+        /* Round 35 (UI_REVAMP): the list as last seen, then the server's. */
+        const res = await api.get<{ rows: PoolRow[] }>(
+          `/api/leagues/${leagueId}/compare-pool?${q.toString()}`,
+          revamp ? { onFresh: (fresh) => !cancelled && setRows(fresh.rows) } : {},
+        );
         if (!cancelled) setRows(res.rows);
       } catch {
         if (!cancelled) setRows([]);
       }
-    }, 180);
+    }, revamp && !query ? 0 : 180); /* Round 35 (UI_REVAMP): only typing waits. */
     return () => {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [leagueId, tab, position, query, mode]);
+  }, [leagueId, tab, position, query, mode, revamp]);
 
   /* Round 33: the first My team list picks his partner; with nobody at his position, the list opens. */
   useEffect(() => {
@@ -219,6 +225,12 @@ export function CompareSheet({
     if (ids.length >= MAX_COMPARE) return;
     setNames((n) => ({ ...n, [row.id]: row.name }));
     setIds((current) => [...current, row.id]);
+    /*
+     * Round 35 (UI_REVAMP): the second pick shows the answer. The verdict is
+     * already being asked for; the list stepping aside saves the Compare tap.
+     * "+ Add" brings it back for a third or fourth.
+     */
+    if (revamp && ids.length === 1) setPickerOpen(false);
   };
 
   const remove = (id: string) => {

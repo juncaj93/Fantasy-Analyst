@@ -123,6 +123,12 @@ export interface WorkerEnv {
    */
   WAIVERS_LOOKAHEAD?: string;
   /**
+   * Round 35: the UI revamp. `"on"` draws the new look (navigation, speed,
+   * Team, Matchup and Compare); anything else, or nothing, keeps today's.
+   * Off on the live site until Alex approves.
+   */
+  UI_REVAMP?: string;
+  /**
    * Set only on the preview upload (`preview.yml`): `trades` (Round 19) or
    * `players` (Round 24). That tab answers from a made-up league, behind a
    * PIN. Never set on the live site.
@@ -193,6 +199,7 @@ function toAppEnv(env: WorkerEnv, fetchImpl?: FetchLike, ctx?: { waitUntil(task:
     releaseSha: env.RELEASE_SHA ?? null,
     preview: env.PREVIEW === 'trades' ? 'trades' : env.PREVIEW === 'players' ? 'players' : null,
     waiversLookahead: env.WAIVERS_LOOKAHEAD === 'on',
+    uiRevamp: env.UI_REVAMP === 'on',
   };
 }
 

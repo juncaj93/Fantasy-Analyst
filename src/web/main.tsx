@@ -2,7 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { restoreDemo } from './demo/session.ts';
+import { bootRevamp } from './revamp.ts';
 import './styles.css';
+
+/* Round 35: the look the server last asked for, on the page before the first frame. */
+bootRevamp();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root element is missing');
@@ -33,7 +37,19 @@ const render = () =>
  * shell for that one tab drawn. On the live build this branch is removed at
  * build time, chunk and all.
  */
-if (import.meta.env.VITE_PREVIEW === 'trades' || import.meta.env.VITE_PREVIEW === 'players' || import.meta.env.VITE_PREVIEW === 'waivers') {
+if (import.meta.env.VITE_PREVIEW === 'ui') {
+  /*
+   * Round 35: the UI revamp preview. The whole app, switch on, behind the PIN,
+   * answered in the browser from the made-up league's captured answers.
+   */
+  void import('./preview/uiPreview.tsx').then(({ UiPreview }) =>
+    createRoot(container).render(
+      <StrictMode>
+        <UiPreview />
+      </StrictMode>,
+    ),
+  );
+} else if (import.meta.env.VITE_PREVIEW === 'trades' || import.meta.env.VITE_PREVIEW === 'players' || import.meta.env.VITE_PREVIEW === 'waivers') {
   const mode = import.meta.env.VITE_PREVIEW;
   void import('./preview/PreviewApp.tsx').then(({ PreviewApp }) =>
     createRoot(container).render(

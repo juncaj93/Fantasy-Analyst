@@ -71,10 +71,10 @@ describe('switches', () => {
     expect(workflow).not.toMatch(/text\.replace\(\/\^(TRADES_SCREENS|PLAYERS_INSEASON)/);
   });
 
-  it('the status read sends only the preview flag', async () => {
+  it('the status read sends only the preview flag and (Round 35) the UI revamp switch', async () => {
     const res = await createApp()(new Request('http://x/api/auth/status'), envFor(await createTestDb(), forbiddenSleeper().client));
     const body = (await res.json()) as { features: Record<string, unknown> };
-    expect(body.features).toEqual({ preview: null });
+    expect(body.features).toEqual({ preview: null, uiRevamp: false });
   });
 });
 

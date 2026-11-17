@@ -72,6 +72,11 @@ TRIM_OLD_ROWS = "on"
 # and deploy.
 WAIVERS_LOOKAHEAD = "on"
 
+# Round 35: the UI revamp (new navigation, faster screens, Team, Matchup and
+# Compare in the new look). "on" draws it; anything else keeps today's look.
+# Off until Alex approves parts 1 and 2 together.
+UI_REVAMP = "off"
+
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool
 #   SESSION_SECRET   random 32+ byte string used to sign session cookies

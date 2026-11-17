@@ -19,7 +19,7 @@ import { ApiError, networkFailure, readJson } from './apiResponse.ts';
 import { demoSession } from './demo/session.ts';
 import { assertMockAllows } from './mock/session.ts';
 import type { MockDraftState } from '../core/draft/mockDraft.ts';
-import { cached, clearSessionCache, type CacheOptions } from './sessionCache.ts';
+import { cached, clearSessionCache, isKnownOrPending, type CacheOptions } from './sessionCache.ts';
 /*
  * Which data source is in force, as part of the identity of a cached response.
  *
@@ -53,6 +53,13 @@ export type { ApiFailure, FailureKind, ResponseKind } from './apiResponse.ts';
  * does. That is the refusal below the UI; the server adds another for requests
  * that never came through here at all.
  */
+type PreviewAnswer = (method: string, path: string, body: unknown) => Promise<{ status: number; body: unknown }>;
+let previewAnswer: PreviewAnswer | null = null;
+/** Round 35: the UI preview's answers (`preview/uiPreview.tsx`). Only the preview build calls this. */
+export function answerFromPreview(answer: PreviewAnswer): void {
+  previewAnswer = answer;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET';
   /*
@@ -71,6 +78,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
    * real league. See `web/mock/session.ts`.
    */
   assertMockAllows(method, path);
+  /* Round 35: the UI preview answers in the browser. Removed from the live build at build time. */
+  if (import.meta.env.VITE_PREVIEW === 'ui' && previewAnswer) {
+    const res = await previewAnswer(method, path, parseBody(init.body));
+    if (res.status >= 400) {
+      const message = (res.body as { error?: string } | null)?.error ?? `request failed (${res.status})`;
+      throw new ApiError(message, res.status, { method, endpoint: path, kind: 'json' });
+    }
+    return res.body as T;
+  }
   const session = demoSession();
   if (session) {
     const res = await session.runtime.request(method, path, parseBody(init.body));
@@ -176,6 +192,17 @@ export const api = {
     }
   },
 };
+
+/**
+ * Round 35 (UI_REVAMP): start a screen's first read while a finger is still on
+ * its tab. Nothing is asked twice: a read already known or on its way is left
+ * alone, and the screen that opens joins this one. The answer is the server's,
+ * exactly as the screen would have asked for it.
+ */
+export function prefetch(path: string): void {
+  if (isKnownOrPending(path)) return;
+  void api.get(path).catch(() => {});
+}
 
 // ------------------------------------------------------------------- types
 export interface Overview {

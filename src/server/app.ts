@@ -217,6 +217,11 @@ export interface AppEnv extends AuthEnv {
   preview?: 'trades' | 'players' | null;
   /** Round 26: Waivers looks ahead (Opportunity, cover, named block). Absent or false: today's lines. */
   waiversLookahead?: boolean;
+  /**
+   * Round 35: the UI revamp (UI_REVAMP). Only tells the phone which look to
+   * draw; no read, number or verdict depends on it. Absent or false: today's look.
+   */
+  uiRevamp?: boolean;
 }
 
 /**
@@ -397,7 +402,7 @@ export function createApp(): (request: Request, env: AppEnv) => Promise<Response
       readOnly: !unlocked,
       authDisabled: !!ctx.env.disableAuth,
       /* Only the preview upload sets this; the screen switches were removed in Round 34. */
-      features: { preview: ctx.env.preview ?? null },
+      features: { preview: ctx.env.preview ?? null, uiRevamp: ctx.env.uiRevamp === true },
     });
   });
 

@@ -301,8 +301,20 @@ export interface SeedSummary {
   seasonMarkets: number;
 }
 
+/**
+ * Round 35: the preview's fuller roster. The default seed keeps its four-man
+ * roster (half the suite is about it); `FA_SEED_FULL=1` gives "You" the
+ * matchup's nine (sleeperMock.ts) plus the defence, so Team, Matchup and
+ * Compare can be looked at with a whole lineup. Screenshots and the UI
+ * preview's capture only.
+ */
+const FULL_ROSTERS = {
+  mine: { playerIds: ['1003', '1001', '1008', '1002', '1005', '1004', '1012', '1030', '1009', '1014'], starterIds: ['1003', '1001', '1008', '1002', '1005', '1004', '1012', '1030'] },
+  rival: { playerIds: ['1010', '1006', '1007', '1011', '1017', '1019', '1013', '1018'], starterIds: ['1010', '1006', '1007', '1011', '1017', '1019'] },
+};
+
 /** Populate a fresh database with the demo dataset. */
-export async function seedDemoData(db: Database): Promise<SeedSummary> {
+export async function seedDemoData(db: Database, options: { fullRoster?: boolean } = {}): Promise<SeedSummary> {
   const now = new Date().toISOString();
 
   // --- players ---
@@ -387,7 +399,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       rosterId: 1,
       ownerId: 'demo-user',
       ownerName: 'You',
-      playerIds: ['1001', '1004', '1009', '1011', '1030'],
+      playerIds: options.fullRoster ? FULL_ROSTERS.mine.playerIds : ['1001', '1004', '1009', '1011', '1030'],
       /*
        * Kowalski is in this lineup and is on injured reserve.
        *
@@ -398,7 +410,7 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
        * here against a third screen in Sleeper. Without him in here the demo
        * never produces a recommend-bench at all.
        */
-      starterIds: ['1001', '1004', '1030', '1009'],
+      starterIds: options.fullRoster ? FULL_ROSTERS.mine.starterIds : ['1001', '1004', '1030', '1009'],
       reserveIds: [],
       isMine: true,
       settings: { waiver_budget_used: 35 },
@@ -408,8 +420,8 @@ export async function seedDemoData(db: Database): Promise<SeedSummary> {
       rosterId: 2,
       ownerId: 'rival',
       ownerName: 'Rival',
-      playerIds: ['1002'],
-      starterIds: ['1002'],
+      playerIds: options.fullRoster ? FULL_ROSTERS.rival.playerIds : ['1002'],
+      starterIds: options.fullRoster ? FULL_ROSTERS.rival.starterIds : ['1002'],
       reserveIds: [],
       isMine: false,
       settings: { waiver_budget_used: 12 },

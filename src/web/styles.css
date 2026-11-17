@@ -9877,3 +9877,191 @@ div.matchup-result {
 .proj-was[data-check], .weekly-line[data-line="check-status"] { color: var(--warn); font-weight: 600; }
 .check-chip { min-height: 44px; margin: 0 auto; padding: 0 8px; border: 0; background: none; color: var(--warn); font: inherit; font-size: 12px; font-weight: 600; }
 .cmp2-swaps { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/*
+ * ================================================== Round 35: the UI revamp
+ *
+ * Everything below draws only with UI_REVAMP on (`data-ui="revamp"` on the
+ * page, set by web/revamp.ts). The rules are docs/ui/DESIGN_RULES.md, taken
+ * from the Players card: the same colours and fonts, tighter type, a quiet
+ * uppercase label over every section, one bold number per row, sunken tiles
+ * for small figures, every target at least 44px. Part 2 (Waivers, Trades,
+ * Players, Setup) reuses these same pieces.
+ */
+:root[data-ui='revamp'] {
+  --tab-w: 62px;
+}
+
+/* Bars: the screen's name, a step up, the same height on every screen. */
+[data-ui='revamp'] .nav-bar {
+  min-height: var(--tap);
+}
+[data-ui='revamp'] .nav-title {
+  font-size: 1.18rem;
+  font-weight: 720;
+  letter-spacing: -0.024em;
+}
+[data-ui='revamp'] .nav-subtitle {
+  font-size: 0.76rem;
+}
+[data-ui='revamp'] .nav-gear {
+  position: relative;
+  color: var(--text-dim);
+}
+[data-ui='revamp'] .nav-gear :is(.tab-attention, .tab-lock) {
+  top: 9px;
+  left: auto;
+  right: 8px;
+  transform: none;
+}
+
+/* The tab bar: five game-day jobs, the current one on a crisp pill. */
+[data-ui='revamp'] .tabbar .tab-glyph {
+  width: 52px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  transition: background-color var(--dur-fast) ease;
+}
+[data-ui='revamp'] .tabbar button[aria-current='page'] .tab-glyph {
+  background: var(--accent-tint);
+}
+
+/* Section labels, the Players card's: small, bold, uppercase, quiet. */
+[data-ui='revamp'] :is(.section-title, .matchup-best-move-label, .matchup-team-name) {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+[data-ui='revamp'] .section-title {
+  margin: var(--sp-4) var(--sp-1) var(--sp-2);
+}
+
+/* Cards and grouped rows: one radius, one gap. */
+[data-ui='revamp'] :is(.card, .slot-group, .matchup-rows, .matchup-score, .bench) {
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-3);
+}
+[data-ui='revamp'] .matchup-best-move-names {
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+/* Every lineup row is a 44px target, an empty slot's too (it opens Compare). */
+[data-ui='revamp'] .slot-group > .player-row {
+  min-height: var(--tap);
+}
+
+/* One bold number per row. */
+[data-ui='revamp'] .player-name {
+  font-size: 0.97rem;
+}
+[data-ui='revamp'] .proj {
+  font-size: 0.97rem;
+  font-weight: 700;
+}
+
+/* Matchup: the Players card's big number, and 44px targets on every name. */
+[data-ui='revamp'] .matchup-team-name {
+  background: none;
+  padding: 0;
+}
+[data-ui='revamp'] .matchup-team-score {
+  font-size: 1.9rem;
+}
+[data-ui='revamp'] .matchup-row {
+  padding: 0 var(--sp-2);
+}
+[data-ui='revamp'] .matchup-half {
+  min-height: var(--tap);
+}
+[data-ui='revamp'] .matchup-name {
+  font-size: 0.88rem;
+}
+
+/* A player's week: the figures as sunken tiles, label over number. */
+[data-ui='revamp'] .weekly-props {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  font-size: 0.7rem;
+}
+[data-ui='revamp'] .weekly-props .metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  text-align: center;
+}
+[data-ui='revamp'] .weekly-props strong {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+[data-ui='revamp'] .btn:not(.btn-sm) {
+  min-height: var(--tap);
+}
+
+/* Loading: rows the height of the rows that replace them, in their card. */
+[data-ui='revamp'] .skeleton-rows {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-3);
+}
+[data-ui='revamp'] .skeleton-rows .skeleton-row {
+  height: 44px;
+  margin: 0;
+  padding: 15px var(--sp-3);
+  background-clip: content-box;
+  border-bottom: 1px solid var(--separator-soft);
+}
+
+/* The bar's actions: glyphs, not grey boxes. */
+[data-ui='revamp'] .nav-bar .btn-icon {
+  background: none;
+  color: var(--accent-text);
+}
+[data-ui='revamp'] .nav-bar .nav-gear {
+  color: var(--text-dim);
+}
+
+/* A player's week opens on his number, as the Players card does. */
+[data-ui='revamp'] .weekly-head {
+  justify-content: space-between;
+}
+[data-ui='revamp'] .weekly-head .metric {
+  order: -1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-faint);
+}
+[data-ui='revamp'] .weekly-head .metric strong {
+  margin-left: var(--sp-1);
+  font-size: 1.9rem;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+[data-ui='revamp'] .weekly-line dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Compare: the number leads, the face is a mark. */
+[data-ui='revamp'] .cmp2-col :is(.cmp2-face, .cmp2-face .player-face) {
+  width: 56px;
+  height: 56px;
+  font-size: 1.1rem;
+}
+[data-ui='revamp'] .cmp2-col-score {
+  font-size: 1.9rem;
+}

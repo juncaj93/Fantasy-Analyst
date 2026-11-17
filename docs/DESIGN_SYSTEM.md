@@ -11,6 +11,10 @@ where nothing else will do. It uses iOS's *principles*. It ships no Apple font,
 icon, asset or branding — every glyph in the app is drawn in
 [`components/icons.tsx`](../src/web/components/icons.tsx).
 
+Round 35: the UI revamp (behind `UI_REVAMP`) tightens how these pieces are
+used, following the Players card. Its rules are one page:
+[docs/ui/DESIGN_RULES.md](./ui/DESIGN_RULES.md).
+
 ## Rules
 
 1. **A component names a role, never a colour.** `var(--text-dim)`, not a hex.
