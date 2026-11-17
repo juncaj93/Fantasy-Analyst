@@ -11,13 +11,14 @@
  * may not fetch, compute, rank or decide — it arranges what it is handed.
  */
 
-import { useRef, type ReactNode } from 'react';
+import { useContext, useRef, type ReactNode } from 'react';
+import { ShellContext } from '../shellContext.ts';
 import { createPortal } from 'react-dom';
 import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
 import { useOverlay } from '../overlay.ts';
 import { HANDLE_ATTRIBUTE, useSheetDrag } from '../sheetDrag.ts';
 import { useKeyboardInset } from '../viewport.ts';
-import { BackChevronIcon, ChevronIcon, CloseIcon, DisclosureChevronIcon } from './icons.tsx';
+import { BackChevronIcon, ChevronIcon, CloseIcon, DisclosureChevronIcon, GearIcon } from './icons.tsx';
 
 /* ---------------------------------------------------------- navigation bar */
 
@@ -52,17 +53,48 @@ export function NavBar({
   content?: ReactNode;
   testId?: string;
 }) {
+  /*
+   * Round 35 (UI_REVAMP): a screen's own bar (no Back of its own) carries the
+   * gear to Setup on the trailing edge, and Setup's carries Back on the
+   * leading edge. A pushed page brings its own Back and gets neither.
+   */
+  const shell = useContext(ShellContext);
+  const back = !leading && shell?.back ? <BackButton label={shell.back.label} onClick={shell.back.onBack} /> : null;
+  const gear = !leading && !shell?.back && shell?.openSetup ? <SetupGear onOpen={shell.openSetup} /> : null;
   return (
     <div className="nav-bar" data-testid={testId ?? 'nav-bar'}>
-      {leading}
+      {leading ?? back}
       {content ?? (
         <div className="nav-title-wrap">
           <div className="nav-title">{title}</div>
           {subtitle ? <div className="nav-subtitle">{subtitle}</div> : null}
         </div>
       )}
-      {trailing ? <div className="nav-actions">{trailing}</div> : null}
+      {trailing || gear ? (
+        <div className="nav-actions">
+          {trailing}
+          {gear}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** Setup, from any game-day screen: the gear, with the marks the Setup tab used to carry. */
+function SetupGear({ onOpen }: { onOpen: () => void }) {
+  const shell = useContext(ShellContext);
+  return (
+    <button
+      type="button"
+      className="btn btn-icon nav-gear"
+      data-testid="nav-setup"
+      aria-label={shell && shell.notes.length > 0 ? `Setup, ${shell.notes.join(', ')}` : 'Setup'}
+      onClick={onOpen}
+    >
+      <GearIcon size={22} />
+      {shell?.attention ? <span className="tab-attention" data-testid="review-attention" aria-hidden="true" /> : null}
+      {shell?.locked ? <span className="tab-lock" data-testid="view-only" aria-hidden="true" /> : null}
+    </button>
   );
 }
 
@@ -800,7 +832,7 @@ export function Fold({
  */
 export function SkeletonRows({ rows = 6, testId }: { rows?: number; testId?: string }) {
   return (
-    <div data-testid={testId ?? 'skeleton'} aria-hidden="true">
+    <div className="skeleton-rows" data-testid={testId ?? 'skeleton'} aria-hidden="true">
       {Array.from({ length: rows }, (_, i) => (
         <div className="skeleton skeleton-row" key={i} />
       ))}

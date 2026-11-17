@@ -81,6 +81,7 @@
  */
 
 import { currentWorld, noteWorld, subscribeToWorld } from './world.ts';
+import { persistenceOn, readPersisted, writePersisted } from './persistCache.ts';
 
 /** One remembered response. */
 interface Entry {
@@ -101,6 +102,9 @@ interface Entry {
  * than overwriting old ones, and this is what stops that growing forever.
  */
 const MAX_ENTRIES = 48;
+
+/** Round 35: how recent an answer is still "just asked" (see `revalidate`). */
+const JUST_CONFIRMED_MS = 3000;
 
 const entries = new Map<string, Entry>();
 
@@ -246,6 +250,14 @@ export function cached<T>(
   const startGeneration = generation;
   const id = scoped(startWorld, key);
 
+  /*
+   * Round 35 (UI_REVAMP): nothing in memory yet, but the phone kept this
+   * answer from a launch in the last twelve hours. Served exactly like a
+   * memory hit, so the caller's `onFresh` replaces it when the server answers.
+   * Only for a caller that takes `onFresh`: anyone else waits for the server.
+   */
+  const kept = options.fresh || !options.onFresh || entries.has(id) ? null : readPersisted(key, startWorld);
+  if (kept) entries.set(id, kept);
   const entry = options.fresh ? undefined : entries.get(id);
   if (entry) {
     revalidate(id, startWorld, startGeneration, fetcher, options, entry);
@@ -265,7 +277,7 @@ export function cached<T>(
 
   const run = fetcher()
     .then((value) => {
-      if (options.store !== false && stillCurrent(startWorld, startGeneration)) store(id, value);
+      if (options.store !== false && stillCurrent(startWorld, startGeneration)) store(id, value, key, startWorld);
       return value;
     })
     .finally(() => {
@@ -324,7 +336,31 @@ function revalidate<T>(
   options: CacheOptions<T>,
   served: Entry,
 ): void {
-  if (inFlight.has(id)) return;
+  /*
+   * Round 35 (UI_REVAMP): an answer the server gave this second (a tab touched
+   * and then opened) is not asked for again. Without this, touching a tab
+   * would cost the server two reads instead of one.
+   */
+  if (persistenceOn() && Date.now() - served.at < JUST_CONFIRMED_MS) return;
+  const pending = inFlight.get(id);
+  if (pending) {
+    /*
+     * Round 35 (UI_REVAMP): a read already on its way (a tab touched before it
+     * was opened, or a kept answer served at launch) still brings this caller
+     * its newer answer. Before the switch, the second caller was left with
+     * what it was served.
+     */
+    if (persistenceOn()) {
+      void pending.then(
+        (value) => {
+          if (value === undefined || !stillCurrent(startWorld, startGeneration)) return;
+          if (JSON.stringify(value ?? null) !== served.serialised) options.onFresh?.(value as T);
+        },
+        () => {},
+      );
+    }
+    return;
+  }
 
   const run = fetcher()
     .then((value) => {
@@ -338,7 +374,7 @@ function revalidate<T>(
        * being in, and for a world that has ended neither is even wanted.
        */
       if (!stillCurrent(startWorld, startGeneration)) return undefined as T;
-      const serialised = store(id, value);
+      const serialised = store(id, value, id.slice(startWorld.length + 1), startWorld);
       if (serialised !== served.serialised) options.onFresh?.(value);
       return value;
     })
@@ -369,8 +405,9 @@ function revalidate<T>(
  * no point in this module where a world-qualified key could be reconstructed
  * from a different world than the one the request started in.
  */
-function store(id: string, value: unknown): string {
+function store(id: string, value: unknown, key: string, world: string): string {
   const serialised = JSON.stringify(value ?? null);
+  writePersisted(key, world, serialised);
   entries.delete(id);
   entries.set(id, { value, serialised, at: Date.now() });
   // Map iterates in insertion order, and the delete above re-inserts on every
@@ -420,4 +457,10 @@ export function cachedAt(key: string): number | null {
 /** How many responses are held. For tests and diagnostics. */
 export function sessionCacheSize(): number {
   return entries.size;
+}
+
+/** Round 35: whether a read is already known in memory or on its way, in the world in force. */
+export function isKnownOrPending(key: string): boolean {
+  const id = scoped(currentWorld(), key);
+  return entries.has(id) || inFlight.has(id);
 }

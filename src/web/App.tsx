@@ -6,7 +6,7 @@
  */
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
-import { api, type LeagueSummary, type Overview } from './api.ts';
+import { api, prefetch, type LeagueSummary, type Overview } from './api.ts';
 import { Loading, Notice } from './components/common.tsx';
 import { ScreenLoadBoundary } from './components/screenLoad.tsx';
 import {
@@ -29,7 +29,9 @@ import { TradesTab } from './screens/TradesTab.tsx';
 import { TeamScreen } from './screens/TeamScreen.tsx';
 import { WaiversScreen } from './screens/WaiversScreen.tsx';
 import { type TabSource as SeasonTabSource, fromOverview, recallSeasonTabs, rememberSeasonTabs, resolveSeasonTabs } from './seasonTabs.ts';
-import { currentWorld } from './world.ts';
+import { currentWorld, LIVE_WORLD } from './world.ts';
+import { applyRevamp, revampOn, useRevamp } from './revamp.ts';
+import { ShellContext, type Shell } from './shellContext.ts';
 
 /*
  * The Draft screen is fetched only when it is actually drawn.
@@ -102,12 +104,45 @@ const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[]
   { id: 'setup', label: 'Setup', Icon: GearIcon },
 ];
 
+/** What a status read says, as far as the shell needs it. */
+interface AuthStatus {
+  unlocked: boolean;
+  canUnlock: boolean;
+  features?: { uiRevamp?: boolean };
+}
+
+/*
+ * Round 35 (UI_REVAMP): the reads each destination starts with, so a finger on
+ * its tab can start them (see `prefetch` in api.ts). The same paths the
+ * screens ask for, so the screen joins the read instead of asking again.
+ */
+function firstReads(tab: Tab, leagueId: string | null): string[] {
+  if (!leagueId) return [];
+  const league = `/api/leagues/${leagueId}`;
+  if (tab === 'team') return [`${league}/roster`, `${league}/lineup`, `${league}/waivers`];
+  if (tab === 'matchup') return [`${league}/matchup`];
+  if (tab === 'waivers') return [`${league}/waivers`];
+  if (tab === 'trades') return ['/api/trades/screens/offers'];
+  if (tab === 'players') return [`/api/players/season?leagueId=${encodeURIComponent(leagueId)}`];
+  return [];
+}
+
 export function App() {
+  /** Round 35: the new look and its faster loading, when UI_REVAMP is on. */
+  const revamp = useRevamp();
   /** Whether changes are allowed. Reading never requires this. */
   const [unlocked, setUnlocked] = useState(false);
   const [canUnlock, setCanUnlock] = useState(true);
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState<Tab>('draft');
+  /*
+   * Round 35: with the revamp, a phone that last saw the season under way opens
+   * straight on Team instead of passing through Draft's loading state.
+   */
+  const [tab, setTab] = useState<Tab>(() =>
+    revampOn() && recallSeasonTabs(currentWorld())?.draftVisible === false ? 'team' : 'draft',
+  );
+  /** Round 35: where Setup's Back goes (Setup is opened from the gear, not a tab). */
+  const backFromSetup = useRef<Tab>('team');
   /*
    * Tapping the tab you are already on.
    *
@@ -190,7 +225,7 @@ export function App() {
    */
   const refresh = useCallback(async () => {
     const world = currentWorld();
-    const overviewRead = api.get<Overview>('/api/overview').then((ov) => {
+    const applyOverview = (ov: Overview) => {
       setOverview(ov);
       // Only a real answer, and only for the world it was asked in.
       if (currentWorld() === world) rememberSeasonTabs(world, fromOverview(ov));
@@ -198,8 +233,14 @@ export function App() {
         if (!already && !ov.selectedLeague) setTab('setup');
         return true;
       });
-    });
-    const leaguesRead = api.get<{ leagues: LeagueSummary[] }>('/api/leagues').then((lg) => setLeagues(lg.leagues));
+    };
+    const applyLeagues = (lg: { leagues: LeagueSummary[] }) => setLeagues(lg.leagues);
+    /* Round 35 (UI_REVAMP): the last good answer first, the server's behind it. */
+    const swr = revampOn();
+    const overviewRead = api.get<Overview>('/api/overview', swr ? { onFresh: applyOverview } : {}).then(applyOverview);
+    const leaguesRead = api
+      .get<{ leagues: LeagueSummary[] }>('/api/leagues', swr ? { onFresh: applyLeagues } : {})
+      .then(applyLeagues);
     try {
       await Promise.all([overviewRead, leaguesRead]);
       setError(null);
@@ -209,10 +250,14 @@ export function App() {
   }, []);
 
   const checkLock = useCallback(async () => {
-    try {
-      const status = await api.get<{ unlocked: boolean; canUnlock: boolean }>('/api/auth/status');
+    const apply = (status: AuthStatus) => {
       setUnlocked(status.unlocked);
       setCanUnlock(status.canUnlock);
+      /* Round 35: the live league's answer decides the look; a demo's says nothing about it. */
+      if (currentWorld() === LIVE_WORLD) applyRevamp(status.features?.uiRevamp === true);
+    };
+    try {
+      apply(await api.get<AuthStatus>('/api/auth/status', revampOn() ? { onFresh: apply } : {}));
     } catch {
       setUnlocked(false);
     } finally {
@@ -257,7 +302,10 @@ export function App() {
    */
   const seasonPending = seasonTabs.source === 'pending';
   const tabs = TABS.filter((t) =>
-    t.id === 'draft'
+    /* Round 35: Setup is the gear on every screen's bar, not a destination. */
+    revamp && t.id === 'setup'
+      ? false
+      : t.id === 'draft'
       ? draftVisible
       : t.id === 'waivers'
         ? !draftVisible && !seasonPending
@@ -316,7 +364,65 @@ export function App() {
     return () => clearTimeout(timer);
   }, [ready]);
 
-  if (!ready) return <Loading what="Fantasy Analyst" />;
+  /*
+   * Round 35 (UI_REVAMP): the idle moment after the first screen is up fetches
+   * the code for Trades and the in-season Players tab (static files, no server
+   * reads), so a first tap on either draws at once.
+   */
+  const warmCode = revamp && ready && !draftVisible && !seasonPending;
+  useEffect(() => {
+    if (!warmCode) return;
+    const warm = () => {
+      void import('./screens/TradesScreenV2.tsx').catch(() => {});
+      void import('./screens/PlayersSeasonScreen.tsx').catch(() => {});
+    };
+    const idle = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+    if (idle) {
+      const handle = idle(warm, { timeout: 3000 });
+      return () => (window as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback?.(handle);
+    }
+    const timer = window.setTimeout(warm, SETUP_PREFETCH_MS);
+    return () => window.clearTimeout(timer);
+  }, [warmCode]);
+
+  const selectedId = leagues.find((l) => l.isSelected)?.id ?? null;
+
+  /*
+   * Round 35: the gear and Setup's Back, for every screen's bar (see
+   * `shellContext.ts`). Built before the early return below so the hook order
+   * never changes.
+   */
+  const shell = useMemo<Shell | null>(() => {
+    if (!revamp) return null;
+    const pending = overview ? overview.pendingEvidence + overview.pendingIdentity : 0;
+    const papers = overview?.pendingNewsletters ?? 0;
+    const locked = !unlocked && canUnlock;
+    const notes = [
+      pending > 0 ? `${pending} ${pending === 1 ? 'item needs' : 'items need'} review` : null,
+      papers > 0 ? `${papers} ${papers === 1 ? 'newsletter needs' : 'newsletters need'} scoring` : null,
+      locked ? 'view only, unlock to make changes' : null,
+    ].filter((n): n is string => n != null);
+    const base = { attention: pending + papers > 0, locked, notes };
+    if (tab === 'setup') {
+      const to = backFromSetup.current;
+      return { ...base, back: { label: TABS.find((t) => t.id === to)?.label ?? 'Back', onBack: () => setTab(to) } };
+    }
+    return {
+      ...base,
+      openSetup: () => {
+        chosen.current = true;
+        backFromSetup.current = tab;
+        setTab('setup');
+      },
+    };
+  }, [revamp, overview, unlocked, canUnlock, tab]);
+
+  /*
+   * Round 35 (UI_REVAMP): the shell no longer waits for the status read. It
+   * only says whether changes are allowed, which nothing on the first screen
+   * needs; the bar and the screen draw at once and the lock arrives behind.
+   */
+  if (!ready && !revamp) return <Loading what="Fantasy Analyst" />;
 
   /*
    * No banner.
@@ -357,6 +463,7 @@ export function App() {
   const newslettersPending = overview?.pendingNewsletters ?? 0;
 
   return (
+    <ShellContext.Provider value={shell}>
     <div className="app">
       {/*
         Unmistakable, on every screen, for as long as a scenario is running.
@@ -468,8 +575,10 @@ export function App() {
         newslettersPending={newslettersPending}
         viewOnly={viewOnly}
         seasonSource={seasonTabs.source}
+        {...(revamp ? { onTouch: (id: Tab) => firstReads(id, selectedId).forEach(prefetch) } : {})}
       />
     </div>
+    </ShellContext.Provider>
   );
 }
 
@@ -498,7 +607,10 @@ function FloatingToolbar({
   newslettersPending,
   viewOnly,
   seasonSource,
+  onTouch,
 }: {
+  /** Round 35 (UI_REVAMP): a finger is on this destination; start its reads. */
+  onTouch?: (id: Tab) => void;
   tabs: typeof TABS;
   active: Tab;
   onSelect: (id: Tab) => void;
@@ -589,6 +701,7 @@ function FloatingToolbar({
             key={t.id}
             type="button"
             onClick={() => onSelect(t.id)}
+            {...(onTouch && active !== t.id ? { onPointerDown: () => onTouch(t.id) } : {})}
             aria-current={active === t.id ? 'page' : undefined}
             aria-label={notes.length > 0 ? `${t.label} — ${notes.join(', ')}` : undefined}
             data-testid={`tab-${t.id}`}

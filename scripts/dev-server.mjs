@@ -19,6 +19,8 @@
  */
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { readFile, readdir } from 'node:fs/promises';
 import { existsSync, writeFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
@@ -113,7 +115,7 @@ for (const file of (await readdir(join(root, 'migrations'))).filter((f) => f.end
 }
 
 if (seed) {
-  const summary = await seedDemoData(db);
+  const summary = await seedDemoData(db, { fullRoster: process.env.FA_SEED_FULL === '1' });
   console.log(`[dev] seeded ${JSON.stringify(summary)}`);
 }
 
@@ -139,6 +141,8 @@ const env = {
   // Round 19: the preview's made-up league, as the Worker reads it.
   preview: process.env.PREVIEW === 'trades' ? 'trades' : process.env.PREVIEW === 'players' ? 'players' : null,
   waiversLookahead: process.env.WAIVERS_LOOKAHEAD === 'on',
+  // Round 35: the UI revamp's switch, as the Worker reads it.
+  uiRevamp: process.env.UI_REVAMP === 'on',
   APP_PASSPHRASE: process.env.APP_PASSPHRASE ?? 'devpass',
   SESSION_SECRET: process.env.SESSION_SECRET ?? 'dev-session-secret-not-for-production',
   disableAuth,
@@ -162,7 +166,12 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-const distDir = join(root, 'dist/web');
+const distDir = process.env.FA_WEB_DIR ?? join(root, 'dist/web');
+/*
+ * Round 35: static files the way Cloudflare serves them (gzip, ETag, 304 on a
+ * match), for scripts/measure-first-paint.mjs. Off unless asked for.
+ */
+const prodLike = process.env.FA_PROD_LIKE === '1';
 
 const server = createServer(async (req, res) => {
   try {
@@ -202,6 +211,23 @@ const server = createServer(async (req, res) => {
       return;
     }
     const content = await readFile(filePath);
+    if (prodLike) {
+      const etag = `"${createHash('sha1').update(content).digest('hex')}"`;
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { etag });
+        res.end();
+        return;
+      }
+      const zipped = /gzip/.test(String(req.headers['accept-encoding'] ?? ''));
+      res.writeHead(200, {
+        'content-type': MIME[extname(filePath)] ?? 'application/octet-stream',
+        'cache-control': 'public, max-age=0, must-revalidate',
+        etag,
+        ...(zipped ? { 'content-encoding': 'gzip' } : {}),
+      });
+      res.end(zipped ? gzipSync(content) : content);
+      return;
+    }
     res.writeHead(200, { 'content-type': MIME[extname(filePath)] ?? 'application/octet-stream' });
     res.end(content);
   } catch (err) {

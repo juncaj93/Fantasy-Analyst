@@ -45,7 +45,7 @@ on:
         type: string
         default: 'claude/new-session-54mfpx'
       mode:
-        description: 'Leave empty for the whole app on the real league. "trades": the rebuilt Trades screens only, on the made-up preview league, behind a PIN (Round 19). "players": the in-season Players tab only, the same way (Round 24). "waivers": the Waivers look-ahead lines, the same way (Round 26).'
+        description: 'Leave empty for the whole app on the real league. "trades": the rebuilt Trades screens only, on the made-up preview league, behind a PIN (Round 19). "players": the in-season Players tab only, the same way (Round 24). "waivers": the Waivers look-ahead lines, the same way (Round 26). "ui": the whole app in the new look (UI_REVAMP on), answered in the browser from the made-up league, behind the same PIN (Round 35).'
         required: false
         type: string
         default: ''
@@ -237,6 +237,26 @@ jobs:
           "
           grep -E '^(WAIVERS_LOOKAHEAD|PREVIEW|TRIM_OLD_ROWS|VEGAS_PROVIDER) =' wrangler.toml
 
+      # Round 35: the UI revamp preview. The browser answers every read from
+      # the made-up league's captured answers (src/web/preview/uiResponses.json),
+      # so this upload reads nothing from the database. UI_REVAMP is set on so
+      # the Worker says what the page draws; every other var stays exactly as
+      # wrangler.toml has it, so every switch that is on for the live site is
+      # on here too.
+      - name: Set the UI revamp preview mode
+        if: ${{ inputs.mode == 'ui' }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'wrangler.toml';
+            let text = fs.readFileSync(file, 'utf8');
+            if (!/^UI_REVAMP = \"[^\"]*\"$/m.test(text)) { console.error('::error::wrangler.toml has no UI_REVAMP line.'); process.exit(1); }
+            text = text.replace(/^UI_REVAMP = \"[^\"]*\"$/m, 'UI_REVAMP = \"on\"');
+            fs.writeFileSync(file, text);
+          "
+          grep -E '^(UI_REVAMP|WAIVERS_LOOKAHEAD|TRIM_OLD_ROWS|VEGAS_PROVIDER) =' wrangler.toml
+
       - name: Build the site
         env:
           VITE_PREVIEW: ${{ inputs.mode }}
@@ -288,6 +308,10 @@ jobs:
             if [ "${{ inputs.mode }}" = "players" ]; then
               echo
               echo "**Mode:** Players preview: the in-season Players tab only, on a made-up league, behind a PIN. Nothing here reads the real league."
+            fi
+            if [ "${{ inputs.mode }}" = "ui" ]; then
+              echo
+              echo "**Mode:** UI revamp preview (Round 35): the whole app in the new look, on a made-up league, behind a PIN. Every answer comes from the browser; nothing here reads the real league or the database."
             fi
             if [ "${{ inputs.mode }}" = "waivers" ]; then
               echo
