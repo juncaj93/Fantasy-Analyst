@@ -95,11 +95,8 @@ line.
   be. Loading draws placeholders the size of what lands (offer cards on
   Trades, 44px rows elsewhere).
 - **Draft mode** keeps today's look while a draft is ahead.
-<<<<<<< HEAD
 - **Choosing players (Compare).** Picking never moves the list: a pick is a
   check on the row, and nothing above the list appears or grows. The one
   action is a bar fixed at the bottom: Compare, grey until two are picked,
   then green. The answer shows only on that tap; the X cancels and clears.
   (Alex's preview review, 17 November 2026.)
-=======
->>>>>>> 61f28894ce878b45558e412b4e6bdaa5a9036609
