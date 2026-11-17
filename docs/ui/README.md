@@ -109,6 +109,7 @@ kept like the other first reads; a finger on the gear starts Setup's read; the
 idle moment after the first screen also fetches Setup's code. Trades and
 Players use Part 1's kept answers. Waivers is instant either way because Team
 already read it. No new server reads.
+<<<<<<< HEAD
 
 ## Live (Round 36, after Alex's review)
 
@@ -120,3 +121,5 @@ green); the second pick no longer opens the answer by itself. Covered by
 wrangler.toml. To turn it off: set it to "off" and deploy. The live smoke
 suite (`e2e-production/smoke.spec.ts`) reads the switch from the status read
 and checks whichever look is live.
+=======
+>>>>>>> 61f28894ce878b45558e412b4e6bdaa5a9036609
