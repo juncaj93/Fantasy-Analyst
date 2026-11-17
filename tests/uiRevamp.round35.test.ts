@@ -51,8 +51,9 @@ afterEach(() => {
 });
 
 describe('the UI_REVAMP switch', () => {
-  it('is off in wrangler.toml and read as "on" only', () => {
-    expect(read('wrangler.toml')).toMatch(/^UI_REVAMP = "off"$/m);
+  /* On for the live site since Round 36 (Alex approved the preview). */
+  it('is on in wrangler.toml and read as "on" only', () => {
+    expect(read('wrangler.toml')).toMatch(/^UI_REVAMP = "on"$/m);
     expect(read('src/worker/index.ts')).toContain("uiRevamp: env.UI_REVAMP === 'on'");
   });
 

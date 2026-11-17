@@ -10129,3 +10129,35 @@ div.matchup-result {
 [data-ui='revamp'] [data-testid='wsheet-bid'] {
   white-space: normal;
 }
+
+/*
+ * Round 36 (UI_REVAMP, Alex's review): Compare's list. While choosing, the
+ * chosen-players strip is not drawn (it pushed the list down), a pick is the
+ * row's check, and the one action sits in a bar fixed at the bottom of the
+ * sheet: grey until two are picked, then green, like the Trades picker.
+ */
+[data-ui='revamp'] .cmp2-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--sp-4));
+  padding: var(--sp-2) var(--sp-4) var(--sp-1);
+  background: var(--paper-bg);
+  border-top: 1px solid var(--paper-line);
+  /* Covers the sheet's bottom padding too, so no row shows under the bar. */
+  box-shadow: 0 24px 0 var(--paper-bg);
+}
+[data-ui='revamp'] .cmp2-go {
+  width: 100%;
+  min-height: var(--tap);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--pos);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 700;
+}
+[data-ui='revamp'] .cmp2-go:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-faint);
+}
