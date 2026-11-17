@@ -70,3 +70,28 @@ current), no emoji, no brand marks beyond club logos.
 Skeleton rows the height of the rows that replace them (44px), inside the
 same card, so nothing jumps when data lands. No spinners, no "Loading..."
 line.
+
+## Part 2 (Round 36)
+
+- **Waivers.** A pick is a card: pill, club, name, and the bid on the right
+  in a tinted chip (`Waivers $9`, `Free agent`; green on Do this). One line
+  under it: the gain in bold, the spot (`Drop: Priestley`, `Open spot`), one
+  short reason. Stash, Cover and Block are the same card with the kind where
+  the gain sits, and a tap opens Compare.
+- **Trades.** An offer card: verdict and edge, Give and Get, one reason, then
+  three sunken tiles (your week, your season, theirs). The Check result leads
+  with the verdict word at the big-number size.
+- **Players.** The board row's one number is the rest-of-season value, on the
+  right; 7d, 30d and Pick under the name, who holds him at the end of that
+  line. The column says "Value".
+- **Setup.** Labelled sections instead of folds: League, News and lines,
+  Health, App. Draft-only rows are not drawn (the new look draws only in
+  season).
+- **No explanatory sentences.** A help paragraph carries `blurb` (and a
+  draft-only control `draft-only`); one rule hides both with the switch on.
+  Labels, numbers, chips, tap reasons and errors stay. A sentence Alex needs
+  becomes a label ("Closest to fair").
+- **Empty and loading.** An empty answer is a quiet card where the rows would
+  be. Loading draws placeholders the size of what lands (offer cards on
+  Trades, 44px rows elsewhere).
+- **Draft mode** keeps today's look while a draft is ahead.

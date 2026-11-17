@@ -888,9 +888,9 @@ function SupportSnapshotRow({ leagues }: { leagues: LeagueSummary[] }) {
         icon={<TargetIcon />}
         label="Current context"
         detail={
-          chosen == null
-            ? 'Not known — Setup was opened directly rather than from a recommendation.'
-            : `The last recommendation you looked at.`
+          <span className="blurb">
+            {chosen == null ? 'Not known — Setup was opened directly rather than from a recommendation.' : 'The last recommendation you looked at.'}
+          </span>
         }
         value={chosen == null ? 'Choose' : CONTEXT_LABELS[chosen]}
         onClick={() => setPicking((open) => !open)}

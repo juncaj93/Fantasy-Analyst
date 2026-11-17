@@ -193,7 +193,7 @@ export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onB
           <Empty>Nothing has been applied yet.</Empty>
         ) : (
           <>
-            <div className="faint" style={{ margin: '0 2px 6px' }}>
+            <div className="faint blurb" style={{ margin: '0 2px 6px' }}>
               These were clear enough to apply automatically. You can still change any of them.
             </div>
             {applied.map((item) => (
@@ -220,7 +220,7 @@ export function ReviewScreen({ onChanged, onBack }: { onChanged: () => void; onB
         <Empty>No unrecognized names.</Empty>
       ) : (
         <>
-          <div className="faint" style={{ margin: '0 2px 6px' }}>
+          <div className="faint blurb" style={{ margin: '0 2px 6px' }}>
             These names could not be matched to exactly one player, so nothing was counted for them.
             Pick the right player and the app remembers the name for next time.
           </div>
@@ -312,7 +312,7 @@ function EvidenceReviewCard({
 
       <Disclose open={expanded}>
         <div className="explain">
-          <div className="faint" style={{ marginBottom: 4 }}>
+          <div className="faint blurb" style={{ marginBottom: 4 }}>
             Your correction wins from now on, even if this newsletter is read again.
           </div>
           <div className="btn-row">

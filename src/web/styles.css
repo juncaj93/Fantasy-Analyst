@@ -10125,3 +10125,7 @@ div.matchup-result {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+/* The waiver sheet's bid reason wraps instead of being cut off (audit S7). */
+[data-ui='revamp'] [data-testid='wsheet-bid'] {
+  white-space: normal;
+}

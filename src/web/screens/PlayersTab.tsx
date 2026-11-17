@@ -17,7 +17,8 @@ export function PlayersTab({ leagues, resetNonce, draftAhead }: { leagues: Leagu
   if (draftAhead) return <PlayersScreen leagues={leagues} resetNonce={resetNonce} />;
   return (
     <Suspense fallback={<SkeletonRows rows={8} testId="players-skeleton" />}>
-      <PlayersSeasonScreen leagues={leagues} resetNonce={resetNonce} />
+      {/* The UI preview's made-up players have no news or outlook: the card is the in-season part only, as the Players preview drew it. */}
+      <PlayersSeasonScreen leagues={leagues} resetNonce={resetNonce} {...(import.meta.env.VITE_PREVIEW === 'ui' ? { dossier: false, searchBeyond: false } : {})} />
     </Suspense>
   );
 }

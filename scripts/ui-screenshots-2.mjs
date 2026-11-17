@@ -10,12 +10,15 @@
  *   (the same with PREVIEW=trades on 8792 and PREVIEW=players on 8793)
  *   node scripts/ui-screenshots-2.mjs --label before --out docs/ui/shots
  *   node scripts/ui-screenshots-2.mjs --label after --revamp --out docs/ui/shots
- *   node scripts/ui-screenshots.mjs --pair docs/ui/shots --out docs/ui/shots --views 2
+ *   node scripts/ui-screenshots-2.mjs --pair /tmp/shots --out docs/ui/shots
+ *
+ * `--pair` writes one picture per view: before and after in light, then
+ * before and after in dark.
  */
 
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { previewWorld } from './ui-preview-fixtures.mjs';
 
 const args = process.argv.slice(2);
@@ -29,6 +32,7 @@ const PLAYERS = arg('--players', 'http://127.0.0.1:8793');
 const LABEL = arg('--label', 'before');
 const OUT = arg('--out', 'docs/ui/shots');
 const REVAMP = args.includes('--revamp');
+const PAIR = arg('--pair', null);
 const launch = process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {};
 
 export const VIEWS_2 = [
@@ -111,6 +115,25 @@ async function show(page, screen, view) {
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch(launch);
+if (PAIR) {
+  const page = await browser.newPage({ viewport: { width: 1740, height: 990 }, deviceScaleFactor: 1 });
+  for (const [screen, view] of VIEWS_2) {
+    const src = (label, theme) => {
+      const file = resolve(join(PAIR, `${screen}-${view}-${theme}-${label}.png`));
+      return existsSync(file) ? `data:image/png;base64,${readFileSync(file).toString('base64')}` : '';
+    };
+    const cell = (label, theme) => `<figure><figcaption>${label}, ${theme}</figcaption><img src="${src(label, theme)}"></figure>`;
+    await page.setContent(`<!doctype html><style>
+      body{margin:0;background:#888;font:600 28px system-ui;color:#fff}
+      main{display:grid;grid-template-columns:repeat(4,420px);gap:12px;padding:12px}
+      figure{margin:0}figcaption{padding:4px 0 8px}img{width:420px;height:912px;display:block;border-radius:10px}
+    </style><main>${cell('before', 'light')}${cell('after', 'light')}${cell('before', 'dark')}${cell('after', 'dark')}</main>`);
+    await page.setViewportSize({ width: 4 * 420 + 5 * 12, height: 912 + 70 });
+    await page.screenshot({ path: join(OUT, `${screen}-${view}.jpg`), type: 'jpeg', quality: 72 });
+  }
+  await browser.close();
+  process.exit(0);
+}
 for (const theme of ['light', 'dark']) {
   const context = await browser.newContext({ viewport: { width: 420, height: 912 }, deviceScaleFactor: 1, colorScheme: theme, hasTouch: true });
   await previewWorld(context, { trades: TRADES, players: PLAYERS, revamp: REVAMP });
