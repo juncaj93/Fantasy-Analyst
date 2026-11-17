@@ -139,6 +139,11 @@ type Tab = (typeof TABS)[number] | (typeof IN_SEASON)[number] | 'matchup';
  * opening one does not shut another.
  */
 async function openSetupGroup(page: Page, group: 'data' | 'behavior' | 'support') {
+  /* Round 36: the new look draws Setup as open sections, so there is no group to open. */
+  if (await newLook(page)) {
+    await expect(page.getByTestId('setup-sections')).toBeVisible({ timeout: 20_000 });
+    return;
+  }
   const toggle = page.getByTestId(`setup-group-${group}-toggle`);
   await expect(toggle, `Settings has no ${group} group`).toBeVisible();
   const body = page.getByTestId(`setup-group-${group}-body`);
@@ -165,6 +170,15 @@ async function openSetupGroup(page: Page, group: 'data' | 'behavior' | 'support'
 }
 
 async function open(page: Page, tab: Tab) {
+  /*
+   * Round 36: with UI_REVAMP on (and no draft ahead) Setup is the gear on
+   * every screen's bar, not a destination. It has Back instead of a lit tab.
+   */
+  if (tab === 'setup' && (await newLook(page))) {
+    await page.getByTestId('nav-setup').first().click();
+    await expect(page.getByTestId('setup-sections'), 'Setup drew no sections').toBeVisible({ timeout: 20_000 });
+    return;
+  }
   await page.getByTestId(`tab-${tab}`).click();
   await expect(page.getByTestId(`tab-${tab}`), `${tab} did not become the current destination`).toHaveAttribute(
     'aria-current',
@@ -258,13 +272,37 @@ async function expectedTabs(page: Page): Promise<readonly Tab[]> {
     season?: { draftVisible?: boolean };
     lifecycle?: { matchupVisible?: boolean };
   }>(page, '/api/overview');
-  const base = overview?.season?.draftVisible === false ? IN_SEASON : TABS;
+  const season = overview?.season?.draftVisible === false ? IN_SEASON : TABS;
+  /* Round 36: in the new look Setup is the gear, not a destination. */
+  const base = (await newLook(page)) ? season.filter((t) => t !== 'setup') : season;
   // Matchup sits immediately after Team, which is the screen it belongs beside.
   // A deployment that predates the field says nothing and gets no Matchup tab,
   // which is what the app itself does with the same absence.
   if (overview?.lifecycle?.matchupVisible !== true) return base;
   const at = base.indexOf('team') + 1;
   return [...base.slice(0, at), 'matchup' as const, ...base.slice(at)];
+}
+
+/**
+ * Round 36: whether the deployed site draws the new look on this page.
+ *
+ * True when the server says UI_REVAMP is on and no draft is ahead (draft
+ * season keeps today's look; see `setDraftSeason` in web/revamp.ts). When it
+ * is, the page is waited on until it has applied the switch, because a first
+ * launch draws today's look until the status read lands.
+ */
+const looks = new WeakMap<Page, boolean>();
+async function newLook(page: Page): Promise<boolean> {
+  const known = looks.get(page);
+  if (known !== undefined) return known;
+  const [status, overview] = await Promise.all([
+    apiJson<{ features?: { uiRevamp?: boolean } }>(page, '/api/auth/status'),
+    apiJson<{ season?: { draftVisible?: boolean } }>(page, '/api/overview'),
+  ]);
+  const on = status?.features?.uiRevamp === true && overview?.season?.draftVisible === false;
+  looks.set(page, on);
+  if (on) await expect(page.locator('html'), 'the new look did not apply').toHaveAttribute('data-ui', 'revamp', { timeout: 20_000 });
+  return on;
 }
 
 /**
@@ -547,8 +585,10 @@ test.describe('the deployed app', () => {
     await openSetupGroup(page, 'data');
     await page.getByTestId('setup-step-vegas').click();
     await expect(page.getByTestId('panel-vegas')).toBeVisible();
-    await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
-    expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    if (!(await newLook(page))) {
+      await expect(page.getByTestId('tab-setup')).toHaveAttribute('aria-current', 'page');
+      expect(await page.locator('.tabbar button[aria-current="page"]').count()).toBe(1);
+    }
     await page.getByTestId('back-button').click();
   });
 
@@ -1191,6 +1231,16 @@ test.describe('the deployed app', () => {
     await page.goto('/');
     await open(page, 'setup');
 
+    /* Round 36: the new look is labelled sections with every row a full target, and Data health kept. */
+    if (await newLook(page)) {
+      for (const row of await page.locator('[data-testid="setup-sections"] .list-row:not(.list-row-static)').all()) {
+        expect((await row.boundingBox())!.height, 'a Setup row is under the 44px floor').toBeGreaterThanOrEqual(44);
+      }
+      await expect(page.getByTestId('setup-data-health')).toBeVisible();
+      await expect(page.getByTestId('appearance')).toBeVisible();
+      return;
+    }
+
     for (const group of ['data', 'behavior', 'support']) {
       const toggle = page.getByTestId(`setup-group-${group}-toggle`);
       await expect(toggle, `the ${group} group is missing`).toBeVisible();
@@ -1209,7 +1259,9 @@ test.describe('the deployed app', () => {
     await open(page, 'setup');
     await openSetupGroup(page, 'data');
 
-    for (const id of ['sleeper', 'league', 'adp', 'newsletter', 'vegas']) {
+    /* Round 36: the new look leaves draft-only rows out in season. */
+    const areas = (await newLook(page)) ? ['sleeper', 'league', 'newsletter', 'vegas'] : ['sleeper', 'league', 'adp', 'newsletter', 'vegas'];
+    for (const id of areas) {
       const row = page.getByTestId(`setup-step-${id}`);
       await expect(row, `${id} is missing`).toBeVisible();
       expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -2902,7 +2954,7 @@ test.describe('the API boundary', () => {
     page.on('pageerror', (err) => pageErrors.push(String(err)));
 
     await page.goto('/');
-    await expect(page.getByTestId('tab-setup')).toBeVisible();
+    await expect(page.getByTestId((await newLook(page)) ? 'nav-setup' : 'tab-setup').first()).toBeVisible();
 
     const text = await page.locator('body').innerText();
     for (const forbidden of ['Unrecognized token', 'Unexpected token', 'is not valid JSON', 'DOCTYPE']) {

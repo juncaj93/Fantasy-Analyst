@@ -101,11 +101,14 @@ test.describe('navigation', () => {
 test.describe('shortcuts', () => {
   test.beforeEach(async ({ page }) => season(page));
 
-  test('Compare shows the answer after the second pick (one tap fewer)', async ({ page }) => {
+  /* Round 36 (Alex's review): the answer shows on the Compare tap, never on the second pick by itself. */
+  test('Compare shows the answer on the Compare tap after two picks', async ({ page }) => {
     await openTeam(page);
     await page.getByTestId('compare-open').click();
     await page.getByTestId('compare-candidate').nth(0).click();
     await page.getByTestId('compare-candidate').nth(1).click();
+    await expect(page.getByTestId('compare-picker')).toBeVisible();
+    await page.getByTestId('compare-go').click();
     await expect(page.getByTestId('comparison')).toBeVisible();
     await expect(page.getByTestId('compare-picker')).toHaveCount(0);
   });

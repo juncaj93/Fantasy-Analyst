@@ -226,12 +226,18 @@ export function CompareSheet({
     setNames((n) => ({ ...n, [row.id]: row.name }));
     setIds((current) => [...current, row.id]);
     /*
-     * Round 35 (UI_REVAMP): the second pick shows the answer. The verdict is
-     * already being asked for; the list stepping aside saves the Compare tap.
-     * "+ Add" brings it back for a third or fourth.
+     * Round 36 (UI_REVAMP, Alex's review): a pick never opens the answer by
+     * itself. The verdict is asked for in the background; it shows when the
+     * Compare button in the bottom bar is tapped.
      */
-    if (revamp && ids.length === 1) setPickerOpen(false);
   };
+
+  /*
+   * Round 36 (UI_REVAMP): while choosing, nothing above the list changes size.
+   * Picks are a check on the row, and the one action is the fixed bar at the
+   * bottom: Compare, grey until two are picked, then green. The X cancels.
+   */
+  const picking = revamp && pickerOpen;
 
   const remove = (id: string) => {
     setIds((current) => current.filter((x) => x !== id));
@@ -306,10 +312,10 @@ export function CompareSheet({
       className="sheet-compare"
       onClose={onClose}
       testId="compare-sheet"
-      headerAction={action}
+      headerAction={picking ? undefined : action}
     >
       {/* 1. The strip: pinned to the top of the sheet's scroll. Up to four chips share its width. */}
-      <div className="cmp2-strip" data-testid="compare-strip" hidden={ids.length === 0}>
+      <div className="cmp2-strip" data-testid="compare-strip" hidden={ids.length === 0 || picking}>
         <ul
           className={ids.length >= 3 ? 'cmp2-chips cmp2-chips-tight' : 'cmp2-chips'}
           aria-label="Players being compared"
@@ -363,7 +369,7 @@ export function CompareSheet({
             </p>
           ))
         : null}
-      {error ? (
+      {error && !picking ? (
         <p className="cmp2-notice" role="alert">
           {error}
         </p>
@@ -394,6 +400,20 @@ export function CompareSheet({
       ) : (
         <p className="cmp2-empty">Comparing…</p>
       )}
+      {picking ? (
+        <div className="cmp2-foot" data-testid="compare-foot">
+          <button
+            type="button"
+            className="cmp2-go"
+            data-testid="compare-go"
+            data-ready={ids.length >= 2 ? 'yes' : 'no'}
+            disabled={ids.length < 2}
+            onClick={() => setPickerOpen(false)}
+          >
+            {ids.length < 2 ? 'Compare' : `Compare ${ids.length} players`}
+          </button>
+        </div>
+      ) : null}
     </Sheet>
   );
 }

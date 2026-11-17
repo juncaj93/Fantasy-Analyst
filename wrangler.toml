@@ -72,10 +72,12 @@ TRIM_OLD_ROWS = "on"
 # and deploy.
 WAIVERS_LOOKAHEAD = "on"
 
-# Round 35: the UI revamp (new navigation, faster screens, Team, Matchup and
-# Compare in the new look). "on" draws it; anything else keeps today's look.
-# Off until Alex approves parts 1 and 2 together.
-UI_REVAMP = "off"
+# Round 35 and 36: the UI revamp (new navigation, faster screens, every
+# in-season screen in the new look). "on" draws it; anything else keeps the
+# old look. On since Alex approved the preview, 17 November 2026. While a draft
+# is ahead the app keeps the old look whatever this says. To turn it off, set
+# this to "off" and deploy.
+UI_REVAMP = "on"
 
 # Secrets — set with `wrangler secret put <NAME>`, never in this file:
 #   APP_PASSPHRASE   login passphrase for the private tool

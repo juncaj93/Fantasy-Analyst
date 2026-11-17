@@ -109,3 +109,14 @@ kept like the other first reads; a finger on the gear starts Setup's read; the
 idle moment after the first screen also fetches Setup's code. Trades and
 Players use Part 1's kept answers. Waivers is instant either way because Team
 already read it. No new server reads.
+
+## Live (Round 36, after Alex's review)
+
+Alex reviewed the whole preview and asked for one change, on Matchup's
+Compare list: selecting a player must not move the list, picks show as a
+check, and a fixed bottom bar holds Compare (grey until two picks, then
+green); the second pick no longer opens the answer by itself. Covered by
+`e2e/compare-picker.round36.spec.ts`. Then `UI_REVAMP = "on"` in
+wrangler.toml. To turn it off: set it to "off" and deploy. The live smoke
+suite (`e2e-production/smoke.spec.ts`) reads the switch from the status read
+and checks whichever look is live.

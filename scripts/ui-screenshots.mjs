@@ -90,15 +90,16 @@ async function show(page, screen, view) {
     if (view !== 'picker') {
       await page.getByTestId('compare-candidate').nth(0).click();
       await page.getByTestId('compare-candidate').nth(1).click();
-      // The new look shows the answer after the second pick; the old one needs "Compare".
-      const shown = await page.getByTestId('comparison').waitFor({ timeout: 2500 }).then(() => true, () => false);
-      if (!shown) await page.getByTestId('compare-add').click();
+      // The new look has a Compare button in its bottom bar (Round 36); the old one's is in the header.
+      const go = page.getByTestId('compare-go');
+      await ((await go.count()) ? go : page.getByTestId('compare-add')).click();
       await page.getByTestId('comparison').waitFor();
       if (view === 'detail') {
         // Three players: "+ Add", a third, then back to the answer.
         await page.getByTestId('compare-add').click();
         await page.getByTestId('compare-candidate').nth(2).click();
-        await page.getByTestId('compare-add').click();
+        const again = page.getByTestId('compare-go');
+        await ((await again.count()) ? again : page.getByTestId('compare-add')).click();
         await page.getByTestId('comparison').waitFor();
       }
     }
