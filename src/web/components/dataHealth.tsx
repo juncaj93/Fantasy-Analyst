@@ -269,7 +269,7 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
               <ListRow
                 testId="data-health-run-none"
                 label="No scheduled refresh recorded yet"
-                detail="Nothing has been written down since this version was deployed. The five-minute injury check records itself against the injury source instead."
+                detail={<span className="blurb">Nothing has been written down since this version was deployed. The five-minute injury check records itself against the injury source instead.</span>}
               />
             ) : (
               <ListRow
@@ -296,7 +296,7 @@ export function DataHealthScreen({ onBack }: { onBack: () => void }) {
             <ListRow
               testId="data-health-technical-toggle"
               label="Technical details"
-              detail="Exact times, source outcome codes, refresh budget and the running revision."
+              detail={<span className="blurb">Exact times, source outcome codes, refresh budget and the running revision.</span>}
               value={technical ? 'Hide' : 'Show'}
               expanded={technical}
               onClick={() => setTechnical((open) => !open)}

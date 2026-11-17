@@ -28,6 +28,14 @@ function stored(): boolean {
   }
 }
 
+/** What the server (or the preview) asked for. */
+let wanted = false;
+/**
+ * Round 36: while a draft is ahead the app draws exactly today's look, so
+ * draft mode (the board, ADP, the draft Players list) is untouched. The new
+ * look starts once the draft is done.
+ */
+let drafting = false;
 let on = false;
 const listeners = new Set<() => void>();
 
@@ -39,7 +47,8 @@ function paint(): void {
 
 /** Before the first render: the remembered answer, on the page and in force. */
 export function bootRevamp(): boolean {
-  on = FORCED || (typeof window !== 'undefined' && stored());
+  wanted = FORCED || (typeof window !== 'undefined' && stored());
+  on = wanted && !drafting;
   setPersistence(on);
   paint();
   return on;
@@ -58,6 +67,18 @@ export function applyRevamp(next: boolean): void {
   } catch {
     /* remembered for this page only */
   }
+  wanted = value;
+  settle();
+}
+
+/** Round 36: whether a draft is ahead. While one is, the app keeps today's look. */
+export function setDraftSeason(next: boolean): void {
+  drafting = next;
+  settle();
+}
+
+function settle(): void {
+  const value = wanted && !drafting;
   if (value === on) return;
   on = value;
   setPersistence(on);

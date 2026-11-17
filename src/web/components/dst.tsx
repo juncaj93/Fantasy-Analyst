@@ -163,7 +163,7 @@ export function DstSheet({ plan, onClose }: { plan: DstPlan; onClose: () => void
         ) : null}
 
         {plan.notes.length > 0 ? (
-          <div className="faint" data-testid="dst-notes" style={{ marginTop: 8 }}>
+          <div className="faint blurb" data-testid="dst-notes" style={{ marginTop: 8 }}>
             {plan.notes.join(' · ')}
           </div>
         ) : null}

@@ -96,11 +96,11 @@ export function InstallPanel() {
         Install on iPhone
       </summary>
       <div className="list-details-body">
-        <div className="faint" style={{ marginTop: 8 }}>
+        <div className="faint blurb" style={{ marginTop: 8 }}>
           In a normal Safari tab the address field and the row of browser buttons sit below the page.
           They belong to Safari, not to Fantasy Analyst, and no setting in this app can remove them.
         </div>
-        <div className="faint" style={{ marginTop: 6 }}>
+        <div className="faint blurb" style={{ marginTop: 6 }}>
           Adding the app to your Home Screen and opening it from that icon launches it as a standalone
           app: no address field, no browser buttons, just the app and iOS&rsquo;s own status bar and home
           indicator. The swipe-from-the-edge back gesture is enabled there too, for the same reason:
@@ -150,7 +150,7 @@ function LayoutDiagnostics() {
           </tbody>
         </table>
       ) : null}
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         &ldquo;Below the tab bar&rdquo; counts pixels this app is holding. Anything Safari draws under the
         page is not included, because the page cannot see it.
       </div>

@@ -25,6 +25,7 @@ import { useState, type ReactNode } from 'react';
 import { DisclosureChevronIcon } from './icons.tsx';
 import type { CardChip, WaiverCardModel } from '../waiverCard.ts';
 import { PlayerIdentity, positionAccentClass } from './common.tsx';
+import { useRevamp } from '../revamp.ts';
 
 /** The chips that sit on the first line, after the name, like Team's matchup pill. */
 const INLINE: ReadonlySet<CardChip['key']> = new Set(['free', 'waivers', 'bid', 'injury']);
@@ -59,6 +60,57 @@ export function WaiverCard({
   const inline = model.chips.filter((chip) => INLINE.has(chip.key));
   const spot = model.chips.filter((chip) => !INLINE.has(chip.key));
   const sub = spot.length > 0 || model.reason != null;
+  /*
+   * Round 36 (UI_REVAMP): a clean card. The bid on the right (the same chip,
+   * "Waivers $9" or "Free agent"), then one line: the gain, the spot, one
+   * short reason. The same words and numbers; only where they sit.
+   */
+  if (useRevamp()) {
+    const bid = inline.find((chip) => chip.key !== 'injury');
+    const injury = inline.find((chip) => chip.key === 'injury');
+    return (
+      <button
+        type="button"
+        className={positionAccentClass(pos, 'player-row waiver-row wcard')}
+        data-testid={testId}
+        data-player-id={model.playerId}
+        data-position={pos}
+        aria-label={[model.name, bid?.label, model.gainSpoken, model.fullReason].filter(Boolean).join(', ')}
+        onClick={onOpen}
+        {...data}
+      >
+        <span className="player-row-top">
+          <PlayerIdentity position={model.position} team={model.team} />
+          <span className="player-name">{model.name}</span>
+          {injury ? (
+            <span className="fixture-chip" data-rating="tough" data-testid="wcard-chip" data-chip="injury">
+              {injury.label}
+            </span>
+          ) : null}
+          {bid ? (
+            <span className="wcard-bid" data-testid="wcard-chip" data-chip={bid.key} data-tone={model.gainTone}>
+              {bid.label}
+            </span>
+          ) : null}
+        </span>
+        <span className="wcard-why" data-testid="wcard-sub">
+          <strong className={model.stash ? 'proj-out' : undefined} data-testid={gainTestId} data-label={model.gain}>
+            {model.gain}
+          </strong>
+          {spot.map((chip) => (
+            <span key={chip.key} data-testid="wcard-chip" data-chip={chip.key}>
+              {chip.label}
+            </span>
+          ))}
+          {model.reason ? (
+            <span className={reasonWarn ? 'waiver-notes-warn' : undefined} data-testid={reasonTestId}>
+              {model.reason}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"

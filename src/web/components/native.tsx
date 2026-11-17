@@ -12,6 +12,7 @@
  */
 
 import { useContext, useRef, type ReactNode } from 'react';
+import { prefetch } from '../api.ts';
 import { ShellContext } from '../shellContext.ts';
 import { createPortal } from 'react-dom';
 import { useEdgeSwipeBack, usePullToRefresh, useStandaloneMode } from '../gestures.ts';
@@ -80,6 +81,9 @@ export function NavBar({
   );
 }
 
+/** The one read Setup opens with. */
+export const SETUP_READ = '/api/setup/status';
+
 /** Setup, from any game-day screen: the gear, with the marks the Setup tab used to carry. */
 function SetupGear({ onOpen }: { onOpen: () => void }) {
   const shell = useContext(ShellContext);
@@ -89,6 +93,8 @@ function SetupGear({ onOpen }: { onOpen: () => void }) {
       className="btn btn-icon nav-gear"
       data-testid="nav-setup"
       aria-label={shell && shell.notes.length > 0 ? `Setup, ${shell.notes.join(', ')}` : 'Setup'}
+      /* Round 36: a finger on the gear starts Setup's read; Setup joins it. */
+      onPointerDown={() => prefetch(SETUP_READ)}
       onClick={onOpen}
     >
       <GearIcon size={22} />

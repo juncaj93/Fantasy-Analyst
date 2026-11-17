@@ -171,7 +171,7 @@ export function WeeklyCardSheet({
           and rendered from its own sentences when it does.
         */}
         {card.changes.length > 0 ? (
-          <div className="weekly-changes" data-testid="weekly-changes">
+          <div className="weekly-changes blurb" data-testid="weekly-changes">
             <div className="detail-label">What would change this</div>
             <ul className="reason-list">
               {card.changes.map((change) => (

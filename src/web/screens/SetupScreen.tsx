@@ -63,6 +63,7 @@ import { DataHealthRow, DataHealthScreen } from '../components/dataHealth.tsx';
 import { PlayerPicker, ReviewScreen } from './ReviewScreen.tsx';
 import { UnlockCard } from '../App.tsx';
 import { unwindOne } from '../tabReset.ts';
+import { revampOn, useRevamp } from '../revamp.ts';
 import { demoSession } from '../demo/session.ts';
 import {
   CONTEXT_LABELS,
@@ -285,6 +286,8 @@ export function SetupScreen({
    * deciding it is important enough to start open. On an ordinary load, with no
    * demo running, this is the empty set like everything else.
    */
+  /* Round 36 (UI_REVAMP): sections instead of folds, draft-only rows hidden (the new look draws only in season). */
+  const revamp = useRevamp();
   const [openGroups, setOpenGroups] = useState<ReadonlySet<SettingsGroup>>(
     () => new Set<SettingsGroup>(demoSession() == null ? [] : ['behavior']),
   );
@@ -326,7 +329,8 @@ export function SetupScreen({
 
   const load = useCallback(async () => {
     try {
-      setStatus(await api.get<SetupStatus>('/api/setup/status'));
+      /* Round 36 (UI_REVAMP): the last good answer at once, the server's behind it. */
+      setStatus(await api.get<SetupStatus>('/api/setup/status', revampOn() ? { onFresh: setStatus } : {}));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -442,6 +446,105 @@ export function SetupScreen({
     );
   }
 
+  /* One connection step, and the newsletter's two controls under it while an issue waits. */
+  const stepRow = (step: SetupStatus['steps'][number]) => (
+      <Fragment key={step.id}>
+        <ListRow
+          testId={`setup-step-${step.id}`}
+          dataState={step.state}
+          icon={<StepGlyph id={step.id} />}
+          mark={<StateMark state={step.state} />}
+          label={step.title}
+          detail={
+            <>
+              {step.summary}
+              {step.action ? <div className="blurb">{step.action}</div> : null}
+            </>
+          }
+          chevron
+          onClick={() => setOpen(step.id as Panel)}
+        />
+        {/*
+          The week's one job, where the week's one job is announced.
+
+          Copying an issue for ChatGPT and pasting the tally back used to
+          be four taps in — Setup, Newsletter, the issue, Copy — which is
+          a lot of navigation for the only thing anybody does with a
+          newsletter. So while an issue is waiting, the two controls are
+          drawn directly under the row that says it is waiting, and the
+          Newsletter panel stays exactly where it is for everything else.
+
+          They are workflow, not furniture: they exist only while there is
+          an unscored issue and they are gone the moment it is scored. If
+          this ever becomes a permanent pair of buttons on Setup,
+          something has gone wrong with the state behind it rather than
+          with the layout. Never in the taskbar — §16.
+
+          That an unscored issue is now a fold deep is why the Data fold's
+          summary counts it: the shut screen still says there is a job.
+        */}
+        {step.id === 'newsletter' && status.newsletter.pendingTally ? (
+          <PendingTallyRow
+            pending={status.newsletter.pendingTally}
+            unlocked={unlocked}
+            onDone={(detail) => {
+              setScored(detail);
+              refreshAll();
+            }}
+          />
+        ) : null}
+        {step.id === 'newsletter' && scored ? (
+          <div className="list-row-actions" data-testid="setup-tally-applied">
+            <Notice tone="ok">{scored}</Notice>
+          </div>
+        ) : null}
+      </Fragment>
+  );
+  const steps = (...ids: string[]) => status.steps.filter((step) => ids.includes(step.id)).map(stepRow);
+  const reviewRow = (
+    <ListRow
+      testId="setup-review"
+      dataState={reviewPending > 0 ? 'warn' : 'ok'}
+      icon={<ChecklistIcon />}
+      mark={<StateMark state={reviewPending > 0 ? 'warn' : 'ok'} />}
+      label="Review"
+      detail={reviewPending > 0 ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} attention` : 'Nothing waiting for you'}
+      chevron
+      onClick={() => setOpen('review')}
+    />
+  );
+
+  if (revamp) {
+    return (
+      <>
+        <NavBar title="Setup" trailing={<AppearanceToggle />} />
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {unlocked ? null : canUnlock ? <UnlockCard onUnlocked={onUnlocked} /> : <Notice>View-only: no passphrase set.</Notice>}
+        <div data-testid="setup-sections">
+          <ListGroup header="League" testId="setup-section-league">
+            {steps('sleeper', 'league')}
+          </ListGroup>
+          <ListGroup header="News and lines" testId="setup-section-sources">
+            {steps('newsletter', 'vegas')}
+            {reviewRow}
+            <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
+            <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
+          </ListGroup>
+          <ListGroup header="Health" testId="setup-section-health">
+            <DataHealthRow onOpen={() => setOpen('data-health')} />
+          </ListGroup>
+          <ListGroup header="App" testId="setup-section-app">
+            <InstallPanel />
+            <SupportSnapshotRow leagues={leagues} />
+          </ListGroup>
+          <Suspense fallback={null}>
+            <DemoPanel />
+          </Suspense>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       {/*
@@ -495,59 +598,7 @@ export function SetupScreen({
         testId="setup-group-data"
       >
         <ListGroup>
-          {status.steps.map((step) => (
-            <Fragment key={step.id}>
-              <ListRow
-                testId={`setup-step-${step.id}`}
-                dataState={step.state}
-                icon={<StepGlyph id={step.id} />}
-                mark={<StateMark state={step.state} />}
-                label={step.title}
-                detail={
-                  <>
-                    {step.summary}
-                    {step.action ? <div>{step.action}</div> : null}
-                  </>
-                }
-                chevron
-                onClick={() => setOpen(step.id as Panel)}
-              />
-              {/*
-                The week's one job, where the week's one job is announced.
-
-                Copying an issue for ChatGPT and pasting the tally back used to
-                be four taps in — Setup, Newsletter, the issue, Copy — which is
-                a lot of navigation for the only thing anybody does with a
-                newsletter. So while an issue is waiting, the two controls are
-                drawn directly under the row that says it is waiting, and the
-                Newsletter panel stays exactly where it is for everything else.
-
-                They are workflow, not furniture: they exist only while there is
-                an unscored issue and they are gone the moment it is scored. If
-                this ever becomes a permanent pair of buttons on Setup,
-                something has gone wrong with the state behind it rather than
-                with the layout. Never in the taskbar — §16.
-
-                That an unscored issue is now a fold deep is why the Data fold's
-                summary counts it: the shut screen still says there is a job.
-              */}
-              {step.id === 'newsletter' && status.newsletter.pendingTally ? (
-                <PendingTallyRow
-                  pending={status.newsletter.pendingTally}
-                  unlocked={unlocked}
-                  onDone={(detail) => {
-                    setScored(detail);
-                    refreshAll();
-                  }}
-                />
-              ) : null}
-              {step.id === 'newsletter' && scored ? (
-                <div className="list-row-actions" data-testid="setup-tally-applied">
-                  <Notice tone="ok">{scored}</Notice>
-                </div>
-              ) : null}
-            </Fragment>
-          ))}
+          {status.steps.map(stepRow)}
           <PlayerDetailPanel status={status} unlocked={unlocked} onDone={refreshAll} />
           <PreseasonProjectionPanel unlocked={unlocked} onDone={refreshAll} />
           {/*
@@ -568,20 +619,7 @@ export function SetupScreen({
             This is not a Review dashboard and must not become one: what is in
             the queue, and what to do about it, is the screen behind this row.
           */}
-          <ListRow
-            testId="setup-review"
-            dataState={reviewPending > 0 ? 'warn' : 'ok'}
-            icon={<ChecklistIcon />}
-            mark={<StateMark state={reviewPending > 0 ? 'warn' : 'ok'} />}
-            label="Review"
-            detail={
-              reviewPending > 0
-                ? `${reviewPending} ${reviewPending === 1 ? 'item needs' : 'items need'} attention`
-                : 'Nothing waiting for you'
-            }
-            chevron
-            onClick={() => setOpen('review')}
-          />
+          {reviewRow}
           <HelpMyScores open={false} onOpen={() => setOpen('repair')} onClose={() => setOpen(null)} onChanged={refreshAll} />
           {/*
             Data health, last in the group that is about data.
@@ -1157,7 +1195,7 @@ function DraftBalanceCard({ current, unlocked }: { current: SignalBalance; unloc
           <span>Market consensus</span>
           <span>My own research</span>
         </div>
-        <div className="faint" style={{ marginTop: 10 }}>
+        <div className="faint blurb" style={{ marginTop: 10 }}>
           {BALANCE_NOTES[balance]}
           {unlocked ? null : ' Unlock with your passphrase to change this.'}
         </div>
@@ -1529,7 +1567,7 @@ function HelpMyScores({
   return (
     <PushScreen title="Help my scores" backLabel="Setup" onBack={onClose} testId="setup-detail-repair">
       {message ? <Notice tone="ok">{message}</Notice> : null}
-      <div className="faint" style={{ margin: '0 4px 10px' }}>
+      <div className="faint blurb" style={{ margin: '0 4px 10px' }}>
         These names appeared in your newsletters but could not be matched to a Sleeper player, so their news is
         not counting for anyone. Pick who each one is.
       </div>
@@ -1665,8 +1703,10 @@ function SleeperPanel({ status, onDone }: { status: SetupStatus; onDone: () => v
         </button>
       </div>
       <div className="faint" style={{ marginTop: 6 }}>
-        The player list is how Fantasy Analyst recognizes names in your newsletter. Update it once
-        before your draft, and occasionally during the season.
+        <span className="blurb">
+          The player list is how Fantasy Analyst recognizes names in your newsletter. Update it once
+          before your draft, and occasionally during the season.
+        </span>
         {status.sleeper.playersSynced > 0 ? ` Currently ${status.sleeper.playersSynced} players.` : ''}
       </div>
     </div>
@@ -1710,7 +1750,11 @@ function LeaguePanel({ leagues, onDone }: { leagues: LeagueSummary[]; onDone: ()
               actually in use, because it is a question about the people in it
               and nobody wants to answer it four times.
             */}
-            {l.isSelected ? <LocalTeamsField league={l} busy={busy != null} run={run} onDone={onDone} /> : null}
+            {l.isSelected ? (
+              <div className="draft-only">
+                <LocalTeamsField league={l} busy={busy != null} run={run} onDone={onDone} />
+              </div>
+            ) : null}
           </div>
         ))
       )}
@@ -1791,7 +1835,7 @@ function LocalTeamsField({
           Save
         </button>
       </div>
-      <div className="faint">
+      <div className="faint blurb">
         Comma-separated NFL codes. This lowers <strong>Next%</strong> for those players — the room is likelier to
         take them — and changes nothing about Score, Val or tiers.
       </div>
@@ -1832,11 +1876,11 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
     <div className="card" data-testid="panel-adp">
       <div className="card card-tight" data-testid="adp-source">
         <strong>{status.adp.imported ? `Using ${status.adp.label}` : 'No rankings imported yet'}</strong>
-        <div className="faint">
+        <div className="faint blurb">
           Sleeper does not publish average draft position, so the draft order has to come from a
           rankings file you import here.
         </div>
-        <div className="faint" style={{ marginTop: 4 }}>
+        <div className="faint blurb" style={{ marginTop: 4 }}>
           Without one, the draft board still ranks by news and roster need — it just cannot tell you
           whether a player is likely to last until your next pick.
         </div>
@@ -1867,7 +1911,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
       */}
       <details style={{ marginTop: 10 }}>
         <summary className="muted">Import rankings</summary>
-        <div className="faint" style={{ margin: '6px 0' }}>
+        <div className="faint blurb" style={{ margin: '6px 0' }}>
           A CSV with player names and a rank or ADP column. The newest import is the one used.
         </div>
 
@@ -1934,7 +1978,7 @@ function AdpPanel({ status, onDone }: { status: SetupStatus; onDone: () => void 
               {result.skipped.length > 5 ? '…' : ''}
             </div>
           ) : null}
-          <div className="faint" style={{ marginTop: 6 }}>
+          <div className="faint blurb" style={{ marginTop: 6 }}>
             Unrecognized players are kept, not thrown away — they simply have no ranking until you
             match them.
           </div>
@@ -1996,7 +2040,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
               {copied ? '✓ Copied' : 'Copy address'}
             </button>
           </div>
-          <div className="faint" style={{ marginTop: 6 }}>
+          <div className="faint blurb" style={{ marginTop: 6 }}>
             Subscribe your FF Newsletter to this address. Every future issue is read automatically —
             you never need to forward anything.
           </div>
@@ -2014,7 +2058,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
 
       {/* --- which sender to trust -------------------------------------- */}
       <div className="section-title">Which newsletter to accept</div>
-      <div className="faint" style={{ marginBottom: 6 }}>
+      <div className="faint blurb" style={{ marginBottom: 6 }}>
         Only mail from this sender is read. Anything else that arrives is ignored and never affects
         your players.
       </div>
@@ -2045,7 +2089,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
           >
             Accept mail from this sender
           </button>
-          <div className="faint" style={{ marginTop: 4 }}>
+          <div className="faint blurb" style={{ marginTop: 4 }}>
             Only do this if you recognize it as your newsletter. The issue that was ignored is not
             read retrospectively; the next one will be.
           </div>
@@ -2057,7 +2101,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
         unpublished, so taking whatever arrives is both true and safer than a
         filter that can drop a week of evidence without saying anything.
       */}
-      <div className="faint" style={{ marginBottom: 6 }}>
+      <div className="faint blurb" style={{ marginBottom: 6 }}>
         Nothing else uses this address, so anything arriving here is your newsletter. A sender filter can miss
         issues silently — Substack sends from a different address for every subscriber.
       </div>
@@ -2115,7 +2159,7 @@ function NewsletterPanel({ onDone }: { onDone: () => void }) {
       {/* --- manual address override ------------------------------------ */}
       <details style={{ marginTop: 10 }}>
         <summary className="muted">Set the address manually</summary>
-        <div className="faint" style={{ margin: '6px 0' }}>
+        <div className="faint blurb" style={{ margin: '6px 0' }}>
           Only needed if you finished the email setup with a different address than the one shown.
         </div>
         <div className="field">
@@ -2337,7 +2381,7 @@ function NewsletterHistory() {
                         <>
                           <div className="section-title">Names not in the player list</div>
                           <div className="faint">{(c.unknownNames ?? []).join(', ')}</div>
-                          <div className="faint" style={{ marginTop: 4 }}>
+                          <div className="faint blurb" style={{ marginTop: 4 }}>
                             Mostly coaches and reporters. If a real player is listed here, update the
                             player list on the Sleeper step.
                           </div>
@@ -2546,7 +2590,7 @@ function ChatTallyPanel({
           Paste AI tally
         </button>
       </div>
-      <div className="faint" style={{ marginTop: 4 }}>
+      <div className="faint blurb" style={{ marginTop: 4 }}>
         Paste the issue into your weekly ChatGPT thread, then bring its tally back here.
       </div>
 
@@ -2832,7 +2876,7 @@ function PlayerDetailPanel({
           <>Nothing stored yet. The nightly Sleeper sync fills this in; cards say nothing until it does.</>
         )}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         Source: {detail.stats.source}. The positional finish is half-PPR — {detail.stats.scoring} — and it is that
         rather than your league&rsquo;s own scoring, which is what you asked for and is a different number in a
         league with custom rules. It is worked out here from the points, over the players who actually scored, so
@@ -2868,15 +2912,15 @@ function PlayerDetailPanel({
         {detail.outlook.stored} stored, {detail.outlook.noneAvailable} players confirmed to have none.
         {detail.outlook.newestAt ? ` Newest fetched ${formatAge(detail.outlook.newestAt)}.` : ''}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         Source: {detail.outlook.source}. Fetched one player at a time, only when you open his card, and then kept —
         including the players who have none, so opening those cards asks nobody anything.
       </div>
 
-      <div className="section-title" style={{ marginTop: 10 }}>
+      <div className="section-title blurb" style={{ marginTop: 10 }}>
         Roster percentage
       </div>
-      <div className="faint" data-testid="roster-percent-health">
+      <div className="faint blurb" data-testid="roster-percent-health">
         {detail.rosterPercent.note}
       </div>
 
@@ -2937,7 +2981,7 @@ function UsageSourceHealth({
       <div className="faint" data-testid="usage-health">
         {usage.summary}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         Targets, carries, receptions and target share come from <strong>{usage.source}</strong>&rsquo;s published weekly
         player stats — a free public file, no account and no key. It is what lets Start/Sit say whether a player&rsquo;s
         role is actually changing instead of only how the market prices him.
@@ -2980,7 +3024,7 @@ function UsageSourceHealth({
         much so far, out of {usage.players} with any usage at all. Below it the card says so rather than guessing from
         a short run.
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         It is checked <strong>once a day</strong>, not every five minutes like the injury report. A game&rsquo;s target
         count is settled the moment the game ends, so checking more often would learn nothing and write a bookkeeping
         row each time to prove it.
@@ -3058,7 +3102,7 @@ function InjurySourceHealth({
       <div className="faint" data-testid="injury-health">
         {injury.summary}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         Designation comes from <strong>{injury.statusSource}</strong>, which is the league host and the authority on
         whether a player is Questionable. The body part and the practice week come from{' '}
         <strong>{injury.reportSource}</strong>&rsquo;s published injury report — a free public file, no account and no
@@ -3121,14 +3165,14 @@ function InjurySourceHealth({
           <>{injury.history.season} history: not read yet.</>
         )}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         It is checked <strong>every five minutes, all day</strong>, because a player is ruled out ninety minutes before
         kickoff and kickoff is 9:30am for a London game, Thursday night, or Friday on a holiday. The check is a
         conditional request: when nothing has changed the answer carries no data and nothing is written, so the cost
         of asking constantly is close to nothing.
         {injury.writesToday > 0 ? ` ${injury.writesToday} of ${injury.writeCeiling} daily writes used.` : ''}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         The report carries one practice status per <em>week</em>, not one per practice day, so the app compares weeks
         and does not claim a Wednesday-to-Friday sequence it cannot see.
       </div>
@@ -3181,7 +3225,7 @@ function VegasPanel({ status }: { status: SetupStatus }) {
       <div className="faint" style={{ marginTop: 8 }}>
         {status.vegas.note}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         Nothing to do here yet. Real betting lines are switched on later, once a free source has been
         confirmed. Until then, start/sit advice uses your news signal and clearly says when a line is
         missing rather than guessing.
@@ -3214,7 +3258,7 @@ function VegasPanel({ status }: { status: SetupStatus }) {
           <>Nothing stored. {status.vegas.season.reason}</>
         )}
       </div>
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         When a season line exists for a player, the draft shows it on his card and lets it nudge the ranking
         a little. When it does not, the card says nothing rather than guessing.
       </div>
@@ -3254,7 +3298,7 @@ function VegasPanel({ status }: { status: SetupStatus }) {
           .
         </div>
       ) : null}
-      <div className="faint" style={{ marginTop: 6 }}>
+      <div className="faint blurb" style={{ marginTop: 6 }}>
         A refresh asks only about the games your own players are in, and stops entirely before the free
         allowance runs out — at which point the last lines it fetched stay on screen, marked as old.
       </div>

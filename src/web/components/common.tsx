@@ -668,7 +668,8 @@ export function Badge({
  * any colour.
  */
 export function Confidence({ level, compact = false }: { level: string; compact?: boolean }) {
-  const cls = level === 'low' ? 'badge badge-confidence badge-confidence-low' : 'badge badge-confidence';
+  /* Round 36: in the new look only low confidence is drawn; it is the one level that changes what Alex does. */
+  const cls = level === 'low' ? 'badge badge-confidence badge-confidence-low' : 'badge badge-confidence blurb';
   if (!compact) return <span className={cls}>{level} confidence</span>;
   /*
    * The word alone, where a sentence would be a third of the row.

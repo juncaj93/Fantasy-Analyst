@@ -165,3 +165,24 @@
 .p2-out {
   color: var(--neg);
 }
+
+/* Round 36 (UI_REVAMP): the value is the row's one bold number, on the right; who holds him under it. */
+.p2r-head {
+  margin-left: auto;
+  padding-right: 28px;
+}
+.p2r-value {
+  font-size: 0.97rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.p2r-board .dense-metrics-aside {
+  display: flex;
+  gap: var(--sp-1);
+}
+[data-ui='revamp'] .list-head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}

@@ -6,6 +6,7 @@
 
 import type { FoundOffer } from '../../../core/trades/screensWire.ts';
 import { Sheet } from '../native.tsx';
+import { useRevamp } from '../../revamp.ts';
 
 export function signed(n: number, digits = 0): string {
   const v = digits === 0 ? Math.round(n) : Math.round(n * 10 ** digits) / 10 ** digits;
@@ -38,6 +39,48 @@ export function OfferCard({ offer, onOpen, onCheck }: { offer: FoundOffer; onOpe
 }
 
 function OfferButton({ offer, onOpen, className }: { offer: FoundOffer; onOpen: () => void; className: string }) {
+  /*
+   * Round 36 (UI_REVAMP): the pick (give, get), its one reason, then your
+   * gain this week and this season and theirs this season as sunken tiles.
+   * The same numbers; their week is on the sheet.
+   */
+  if (useRevamp()) {
+    return (
+      <button type="button" className={`${className} t2r`} data-testid="t2-offer" data-kind={offer.kind} onClick={onOpen}>
+        <span className="t2-offer-head">
+          <span className="t2-chips">
+            <span className="t2-label" data-testid="t2-label" data-kind={offer.kind} data-verdict={offer.verdict}>
+              {offer.label}
+            </span>
+            {offer.opponent ? (
+              <span className="t2-label" data-kind="opponent" data-testid="t2-opponent">
+                This week&rsquo;s opponent
+              </span>
+            ) : null}
+          </span>
+          <span className="t2-edge" data-testid="t2-edge">
+            {edgeText(offer.edgePercent)}
+          </span>
+        </span>
+        <span className="t2-line" data-testid="t2-give">
+          <span className="t2-side">Give</span>
+          <span className="t2-names">{names(offer.give)}</span>
+        </span>
+        <span className="t2-line" data-testid="t2-get">
+          <span className="t2-side">Get</span>
+          <span className="t2-names">{names(offer.get)}</span>
+        </span>
+        <span className="t2-reason" data-testid="t2-reason">
+          {offer.reason}
+        </span>
+        <span className="t2r-tiles" data-testid="t2-numbers">
+          <Tile label="This week" value={signed(offer.you.thisWeek, 1)} />
+          <Tile label="Season" value={signed(offer.you.restOfSeason)} />
+          <Tile label={offer.partner.label} value={signed(offer.them.restOfSeason)} />
+        </span>
+      </button>
+    );
+  }
   return (
     <button type="button" className={className} data-testid="t2-offer" data-kind={offer.kind} onClick={onOpen}>
       <span className="t2-offer-head">
@@ -77,6 +120,16 @@ function OfferButton({ offer, onOpen, className }: { offer: FoundOffer; onOpen: 
         {offer.reason}
       </span>
     </button>
+  );
+}
+
+/** A sunken tile, label over number (docs/ui/DESIGN_RULES.md). */
+function Tile({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="t2r-tile">
+      <span className="t2r-tile-label">{label}</span>
+      <strong>{value}</strong>
+    </span>
   );
 }
 
